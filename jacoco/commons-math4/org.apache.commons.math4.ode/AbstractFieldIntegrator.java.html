@@ -1,0 +1,468 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractFieldIntegrator.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ode</a> &gt; <span class="el_source">AbstractFieldIntegrator.java</span></div><h1>AbstractFieldIntegrator.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ode;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
+
+import org.apache.commons.math4.Field;
+import org.apache.commons.math4.RealFieldElement;
+import org.apache.commons.math4.analysis.solvers.BracketedRealFieldUnivariateSolver;
+import org.apache.commons.math4.analysis.solvers.FieldBracketingNthOrderBrentSolver;
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.MaxCountExceededException;
+import org.apache.commons.math4.exception.NoBracketingException;
+import org.apache.commons.math4.exception.NumberIsTooSmallException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.ode.events.FieldEventHandler;
+import org.apache.commons.math4.ode.events.FieldEventState;
+import org.apache.commons.math4.ode.sampling.AbstractFieldStepInterpolator;
+import org.apache.commons.math4.ode.sampling.FieldStepHandler;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.IntegerSequence;
+
+/**
+ * Base class managing common boilerplate for all integrators.
+ * @param &lt;T&gt; the type of the field elements
+ * @since 3.6
+ */
+public abstract class AbstractFieldIntegrator&lt;T extends RealFieldElement&lt;T&gt;&gt; implements FirstOrderFieldIntegrator&lt;T&gt; {
+
+    /** Default relative accuracy. */
+    private static final double DEFAULT_RELATIVE_ACCURACY = 1e-14;
+
+    /** Default function value accuracy. */
+    private static final double DEFAULT_FUNCTION_VALUE_ACCURACY = 1e-15;
+
+    /** Step handler. */
+    private Collection&lt;FieldStepHandler&lt;T&gt;&gt; stepHandlers;
+
+    /** Current step start. */
+    private FieldODEStateAndDerivative&lt;T&gt; stepStart;
+
+    /** Current stepsize. */
+    private T stepSize;
+
+    /** Indicator for last step. */
+    private boolean isLastStep;
+
+    /** Indicator that a state or derivative reset was triggered by some event. */
+    private boolean resetOccurred;
+
+    /** Field to which the time and state vector elements belong. */
+    private final Field&lt;T&gt; field;
+
+    /** Events states. */
+    private Collection&lt;FieldEventState&lt;T&gt;&gt; eventsStates;
+
+    /** Initialization indicator of events states. */
+    private boolean statesInitialized;
+
+    /** Name of the method. */
+    private final String name;
+
+    /** Counter for number of evaluations. */
+    private IntegerSequence.Incrementor evaluations;
+
+    /** Differential equations to integrate. */
+    private transient FieldExpandableODE&lt;T&gt; equations;
+
+    /** Build an instance.
+     * @param field field to which the time and state vector elements belong
+     * @param name name of the method
+     */
+<span class="fc" id="L95">    protected AbstractFieldIntegrator(final Field&lt;T&gt; field, final String name) {</span>
+<span class="fc" id="L96">        this.field        = field;</span>
+<span class="fc" id="L97">        this.name         = name;</span>
+<span class="fc" id="L98">        stepHandlers      = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L99">        stepStart         = null;</span>
+<span class="fc" id="L100">        stepSize          = null;</span>
+<span class="fc" id="L101">        eventsStates      = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L102">        statesInitialized = false;</span>
+<span class="fc" id="L103">        evaluations       = IntegerSequence.Incrementor.create().withMaximalCount(Integer.MAX_VALUE);</span>
+<span class="fc" id="L104">    }</span>
+
+    /** Get the field to which state vector elements belong.
+     * @return field to which state vector elements belong
+     */
+    public Field&lt;T&gt; getField() {
+<span class="fc" id="L110">        return field;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String getName() {
+<span class="fc" id="L116">        return name;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void addStepHandler(final FieldStepHandler&lt;T&gt; handler) {
+<span class="fc" id="L122">        stepHandlers.add(handler);</span>
+<span class="fc" id="L123">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public Collection&lt;FieldStepHandler&lt;T&gt;&gt; getStepHandlers() {
+<span class="fc" id="L128">        return Collections.unmodifiableCollection(stepHandlers);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void clearStepHandlers() {
+<span class="fc" id="L134">        stepHandlers.clear();</span>
+<span class="fc" id="L135">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public void addEventHandler(final FieldEventHandler&lt;T&gt; handler,
+                                final double maxCheckInterval,
+                                final double convergence,
+                                final int maxIterationCount) {
+<span class="fc" id="L143">        addEventHandler(handler, maxCheckInterval, convergence,</span>
+                        maxIterationCount,
+<span class="fc" id="L145">                        new FieldBracketingNthOrderBrentSolver&lt;&gt;(field.getZero().add(DEFAULT_RELATIVE_ACCURACY),</span>
+<span class="fc" id="L146">                                                                  field.getZero().add(convergence),</span>
+<span class="fc" id="L147">                                                                  field.getZero().add(DEFAULT_FUNCTION_VALUE_ACCURACY),</span>
+                                                                  5));
+<span class="fc" id="L149">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public void addEventHandler(final FieldEventHandler&lt;T&gt; handler,
+                                final double maxCheckInterval,
+                                final double convergence,
+                                final int maxIterationCount,
+                                final BracketedRealFieldUnivariateSolver&lt;T&gt; solver) {
+<span class="fc" id="L158">        eventsStates.add(new FieldEventState&lt;&gt;(handler, maxCheckInterval, field.getZero().add(convergence),</span>
+                                                maxIterationCount, solver));
+<span class="fc" id="L160">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public Collection&lt;FieldEventHandler&lt;T&gt;&gt; getEventHandlers() {
+<span class="fc" id="L165">        final List&lt;FieldEventHandler&lt;T&gt;&gt; list = new ArrayList&lt;&gt;(eventsStates.size());</span>
+<span class="fc bfc" id="L166" title="All 2 branches covered.">        for (FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc" id="L167">            list.add(state.getEventHandler());</span>
+<span class="fc" id="L168">        }</span>
+<span class="fc" id="L169">        return Collections.unmodifiableCollection(list);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void clearEventHandlers() {
+<span class="fc" id="L175">        eventsStates.clear();</span>
+<span class="fc" id="L176">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public FieldODEStateAndDerivative&lt;T&gt; getCurrentStepStart() {
+<span class="fc" id="L181">        return stepStart;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public T getCurrentSignedStepsize() {
+<span class="fc" id="L187">        return stepSize;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setMaxEvaluations(int maxEvaluations) {
+<span class="pc bpc" id="L193" title="1 of 2 branches missed.">        evaluations = evaluations.withMaximalCount((maxEvaluations &lt; 0) ? Integer.MAX_VALUE : maxEvaluations);</span>
+<span class="fc" id="L194">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public int getMaxEvaluations() {
+<span class="nc" id="L199">        return evaluations.getMaximalCount();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public int getEvaluations() {
+<span class="fc" id="L205">        return evaluations.getCount();</span>
+    }
+
+    /** Prepare the start of an integration.
+     * @param eqn equations to integrate
+     * @param t0 start value of the independent &lt;i&gt;time&lt;/i&gt; variable
+     * @param y0 array containing the start value of the state vector
+     * @param t target time for the integration
+     * @return initial state with derivatives added
+     */
+    protected FieldODEStateAndDerivative&lt;T&gt; initIntegration(final FieldExpandableODE&lt;T&gt; eqn,
+                                                            final T t0, final T[] y0, final T t) {
+
+<span class="fc" id="L218">        this.equations = eqn;</span>
+<span class="fc" id="L219">        evaluations    = evaluations.withStart(0);</span>
+
+        // initialize ODE
+<span class="fc" id="L222">        eqn.init(t0, y0, t);</span>
+
+        // set up derivatives of initial state
+<span class="fc" id="L225">        final T[] y0Dot = computeDerivatives(t0, y0);</span>
+<span class="fc" id="L226">        final FieldODEStateAndDerivative&lt;T&gt; state0 = new FieldODEStateAndDerivative&lt;&gt;(t0, y0, y0Dot);</span>
+
+        // initialize event handlers
+<span class="fc bfc" id="L229" title="All 2 branches covered.">        for (final FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc" id="L230">            state.getEventHandler().init(state0, t);</span>
+<span class="fc" id="L231">        }</span>
+
+        // initialize step handlers
+<span class="fc bfc" id="L234" title="All 2 branches covered.">        for (FieldStepHandler&lt;T&gt; handler : stepHandlers) {</span>
+<span class="fc" id="L235">            handler.init(state0, t);</span>
+<span class="fc" id="L236">        }</span>
+
+<span class="fc" id="L238">        setStateInitialized(false);</span>
+
+<span class="fc" id="L240">        return state0;</span>
+
+    }
+
+    /** Get the differential equations to integrate.
+     * @return differential equations to integrate
+     */
+    protected FieldExpandableODE&lt;T&gt; getEquations() {
+<span class="nc" id="L248">        return equations;</span>
+    }
+
+    /** Get the evaluations counter.
+     * @return evaluations counter
+     */
+    protected IntegerSequence.Incrementor getEvaluationsCounter() {
+<span class="fc" id="L255">        return evaluations;</span>
+    }
+
+    /** Compute the derivatives and check the number of evaluations.
+     * @param t current value of the independent &lt;I&gt;time&lt;/I&gt; variable
+     * @param y array containing the current value of the state vector
+     * @return state completed with derivatives
+     * @exception DimensionMismatchException if arrays dimensions do not match equations settings
+     * @exception MaxCountExceededException if the number of functions evaluations is exceeded
+     * @exception NullPointerException if the ODE equations have not been set (i.e. if this method
+     * is called outside of a call to {@link #integrate(FieldExpandableODE, FieldODEState,
+     * RealFieldElement) integrate}
+     */
+    public T[] computeDerivatives(final T t, final T[] y)
+        throws DimensionMismatchException, MaxCountExceededException, NullPointerException {
+<span class="fc" id="L270">        evaluations.increment();</span>
+<span class="fc" id="L271">        return equations.computeDerivatives(t, y);</span>
+    }
+
+    /** Set the stateInitialized flag.
+     * &lt;p&gt;This method must be called by integrators with the value
+     * {@code false} before they start integration, so a proper lazy
+     * initialization is done automatically on the first step.&lt;/p&gt;
+     * @param stateInitialized new value for the flag
+     */
+    protected void setStateInitialized(final boolean stateInitialized) {
+<span class="fc" id="L281">        this.statesInitialized = stateInitialized;</span>
+<span class="fc" id="L282">    }</span>
+
+    /** Accept a step, triggering events and step handlers.
+     * @param interpolator step interpolator
+     * @param tEnd final integration time
+     * @return state at end of step
+     * @exception MaxCountExceededException if the interpolator throws one because
+     * the number of functions evaluations is exceeded
+     * @exception NoBracketingException if the location of an event cannot be bracketed
+     * @exception DimensionMismatchException if arrays dimensions do not match equations settings
+     */
+    protected FieldODEStateAndDerivative&lt;T&gt; acceptStep(final AbstractFieldStepInterpolator&lt;T&gt; interpolator,
+                                                       final T tEnd)
+        throws MaxCountExceededException, DimensionMismatchException, NoBracketingException {
+
+<span class="fc" id="L297">            FieldODEStateAndDerivative&lt;T&gt; previousState = interpolator.getGlobalPreviousState();</span>
+<span class="fc" id="L298">            final FieldODEStateAndDerivative&lt;T&gt; currentState = interpolator.getGlobalCurrentState();</span>
+
+            // initialize the events states if needed
+<span class="fc bfc" id="L301" title="All 2 branches covered.">            if (! statesInitialized) {</span>
+<span class="fc bfc" id="L302" title="All 2 branches covered.">                for (FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc" id="L303">                    state.reinitializeBegin(interpolator);</span>
+<span class="fc" id="L304">                }</span>
+<span class="fc" id="L305">                statesInitialized = true;</span>
+            }
+
+            // search for next events that may occur during the step
+<span class="fc bfc" id="L309" title="All 2 branches covered.">            final int orderingSign = interpolator.isForward() ? +1 : -1;</span>
+<span class="fc" id="L310">            SortedSet&lt;FieldEventState&lt;T&gt;&gt; occurringEvents = new TreeSet&lt;&gt;(new Comparator&lt;FieldEventState&lt;T&gt;&gt;() {</span>
+
+                /** {@inheritDoc} */
+                @Override
+                public int compare(FieldEventState&lt;T&gt; es0, FieldEventState&lt;T&gt; es1) {
+<span class="fc" id="L315">                    return orderingSign * Double.compare(es0.getEventTime().getReal(), es1.getEventTime().getReal());</span>
+                }
+
+            });
+
+<span class="fc bfc" id="L320" title="All 2 branches covered.">            for (final FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">                if (state.evaluateStep(interpolator)) {</span>
+                    // the event occurs during the current step
+<span class="fc" id="L323">                    occurringEvents.add(state);</span>
+                }
+<span class="fc" id="L325">            }</span>
+
+<span class="fc" id="L327">            AbstractFieldStepInterpolator&lt;T&gt; restricted = interpolator;</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">            while (!occurringEvents.isEmpty()) {</span>
+
+                // handle the chronologically first event
+<span class="fc" id="L331">                final Iterator&lt;FieldEventState&lt;T&gt;&gt; iterator = occurringEvents.iterator();</span>
+<span class="fc" id="L332">                final FieldEventState&lt;T&gt; currentEvent = iterator.next();</span>
+<span class="fc" id="L333">                iterator.remove();</span>
+
+                // get state at event time
+<span class="fc" id="L336">                final FieldODEStateAndDerivative&lt;T&gt; eventState = restricted.getInterpolatedState(currentEvent.getEventTime());</span>
+
+                // restrict the interpolator to the first part of the step, up to the event
+<span class="fc" id="L339">                restricted = restricted.restrictStep(previousState, eventState);</span>
+
+                // advance all event states to current time
+<span class="fc bfc" id="L342" title="All 2 branches covered.">                for (final FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc" id="L343">                    state.stepAccepted(eventState);</span>
+<span class="pc bpc" id="L344" title="1 of 4 branches missed.">                    isLastStep = isLastStep || state.stop();</span>
+<span class="fc" id="L345">                }</span>
+
+                // handle the first part of the step, up to the event
+<span class="fc bfc" id="L348" title="All 2 branches covered.">                for (final FieldStepHandler&lt;T&gt; handler : stepHandlers) {</span>
+<span class="fc" id="L349">                    handler.handleStep(restricted, isLastStep);</span>
+<span class="fc" id="L350">                }</span>
+
+<span class="fc bfc" id="L352" title="All 2 branches covered.">                if (isLastStep) {</span>
+                    // the event asked to stop integration
+<span class="fc" id="L354">                    return eventState;</span>
+                }
+
+<span class="fc" id="L357">                FieldODEState&lt;T&gt; newState = null;</span>
+<span class="fc" id="L358">                resetOccurred = false;</span>
+<span class="fc bfc" id="L359" title="All 2 branches covered.">                for (final FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc" id="L360">                    newState = state.reset(eventState);</span>
+<span class="fc bfc" id="L361" title="All 2 branches covered.">                    if (newState != null) {</span>
+                        // some event handler has triggered changes that
+                        // invalidate the derivatives, we need to recompute them
+<span class="fc" id="L364">                        final T[] y    = equations.getMapper().mapState(newState);</span>
+<span class="fc" id="L365">                        final T[] yDot = computeDerivatives(newState.getTime(), y);</span>
+<span class="fc" id="L366">                        resetOccurred = true;</span>
+<span class="fc" id="L367">                        return equations.getMapper().mapStateAndDerivative(newState.getTime(), y, yDot);</span>
+                    }
+<span class="fc" id="L369">                }</span>
+
+                // prepare handling of the remaining part of the step
+<span class="fc" id="L372">                previousState = eventState;</span>
+<span class="fc" id="L373">                restricted = restricted.restrictStep(eventState, currentState);</span>
+
+                // check if the same event occurs again in the remaining part of the step
+<span class="pc bpc" id="L376" title="1 of 2 branches missed.">                if (currentEvent.evaluateStep(restricted)) {</span>
+                    // the event occurs during the current step
+<span class="nc" id="L378">                    occurringEvents.add(currentEvent);</span>
+                }
+
+<span class="fc" id="L381">            }</span>
+
+            // last part of the step, after the last event
+<span class="fc bfc" id="L384" title="All 2 branches covered.">            for (final FieldEventState&lt;T&gt; state : eventsStates) {</span>
+<span class="fc" id="L385">                state.stepAccepted(currentState);</span>
+<span class="pc bpc" id="L386" title="2 of 4 branches missed.">                isLastStep = isLastStep || state.stop();</span>
+<span class="fc" id="L387">            }</span>
+<span class="pc bpc" id="L388" title="1 of 4 branches missed.">            isLastStep = isLastStep || currentState.getTime().subtract(tEnd).abs().getReal() &lt;= FastMath.ulp(tEnd.getReal());</span>
+
+            // handle the remaining part of the step, after all events if any
+<span class="fc bfc" id="L391" title="All 2 branches covered.">            for (FieldStepHandler&lt;T&gt; handler : stepHandlers) {</span>
+<span class="fc" id="L392">                handler.handleStep(restricted, isLastStep);</span>
+<span class="fc" id="L393">            }</span>
+
+<span class="fc" id="L395">            return currentState;</span>
+
+    }
+
+    /** Check the integration span.
+     * @param eqn set of differential equations
+     * @param t target time for the integration
+     * @exception NumberIsTooSmallException if integration span is too small
+     * @exception DimensionMismatchException if adaptive step size integrators
+     * tolerance arrays dimensions are not compatible with equations settings
+     */
+    protected void sanityChecks(final FieldODEState&lt;T&gt; eqn, final T t)
+        throws NumberIsTooSmallException, DimensionMismatchException {
+
+<span class="fc" id="L409">        final double threshold = 1000 * FastMath.ulp(FastMath.max(FastMath.abs(eqn.getTime().getReal()),</span>
+<span class="fc" id="L410">                                                                  FastMath.abs(t.getReal())));</span>
+<span class="fc" id="L411">        final double dt = eqn.getTime().subtract(t).abs().getReal();</span>
+<span class="fc bfc" id="L412" title="All 2 branches covered.">        if (dt &lt;= threshold) {</span>
+<span class="fc" id="L413">            throw new NumberIsTooSmallException(LocalizedFormats.TOO_SMALL_INTEGRATION_INTERVAL,</span>
+<span class="fc" id="L414">                                                dt, threshold, false);</span>
+        }
+
+<span class="fc" id="L417">    }</span>
+
+    /** Check if a reset occurred while last step was accepted.
+     * @return true if a reset occurred while last step was accepted
+     */
+    protected boolean resetOccurred() {
+<span class="fc" id="L423">        return resetOccurred;</span>
+    }
+
+    /** Set the current step size.
+     * @param stepSize step size to set
+     */
+    protected void setStepSize(final T stepSize) {
+<span class="fc" id="L430">        this.stepSize = stepSize;</span>
+<span class="fc" id="L431">    }</span>
+
+    /** Get the current step size.
+     * @return current step size
+     */
+    protected T getStepSize() {
+<span class="fc" id="L437">        return stepSize;</span>
+    }
+    /** Set current step start.
+     * @param stepStart step start
+     */
+    protected void setStepStart(final FieldODEStateAndDerivative&lt;T&gt; stepStart) {
+<span class="fc" id="L443">        this.stepStart = stepStart;</span>
+<span class="fc" id="L444">    }</span>
+
+    /** Getcurrent step start.
+     * @return current step start
+     */
+    protected FieldODEStateAndDerivative&lt;T&gt; getStepStart() {
+<span class="fc" id="L450">        return stepStart;</span>
+    }
+
+    /** Set the last state flag.
+     * @param isLastStep if true, this step is the last one
+     */
+    protected void setIsLastStep(final boolean isLastStep) {
+<span class="fc" id="L457">        this.isLastStep = isLastStep;</span>
+<span class="fc" id="L458">    }</span>
+
+    /** Check if this step is the last one.
+     * @return true if this step is the last one
+     */
+    protected boolean isLastStep() {
+<span class="fc" id="L464">        return isLastStep;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,728 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DateTimeColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">DateTimeColumn.java</span></div><h1>DateTimeColumn.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongArrays;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import java.nio.ByteBuffer;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+import tech.tablesaw.columns.AbstractColumn;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.datetimes.DateTimeColumnFormatter;
+import tech.tablesaw.columns.datetimes.DateTimeColumnType;
+import tech.tablesaw.columns.datetimes.DateTimeFilters;
+import tech.tablesaw.columns.datetimes.DateTimeMapFunctions;
+import tech.tablesaw.columns.datetimes.PackedLocalDateTime;
+import tech.tablesaw.columns.temporal.TemporalFillers;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.sorting.comparators.DescendingLongComparator;
+
+/** A column in a table that contains long-integer encoded (packed) local date-time values */
+public class DateTimeColumn extends AbstractColumn&lt;DateTimeColumn, LocalDateTime&gt;
+    implements DateTimeMapFunctions,
+        DateTimeFilters,
+        TemporalFillers&lt;LocalDateTime, DateTimeColumn&gt;,
+        CategoricalColumn&lt;LocalDateTime&gt; {
+
+<span class="fc" id="L61">  private final LongComparator reverseLongComparator = DescendingLongComparator.instance();</span>
+
+  private LongArrayList data;
+
+<span class="fc" id="L65">  private final IntComparator comparator =</span>
+      (r1, r2) -&gt; {
+<span class="nc" id="L67">        long f1 = getPackedDateTime(r1);</span>
+<span class="nc" id="L68">        long f2 = getPackedDateTime(r2);</span>
+<span class="nc" id="L69">        return Long.compare(f1, f2);</span>
+      };
+
+<span class="fc" id="L72">  private DateTimeColumnFormatter printFormatter = new DateTimeColumnFormatter();</span>
+
+  private DateTimeColumn(String name, LongArrayList data) {
+<span class="fc" id="L75">    super(DateTimeColumnType.instance(), name);</span>
+<span class="fc" id="L76">    this.data = data;</span>
+<span class="fc" id="L77">  }</span>
+
+  public static DateTimeColumn create(String name) {
+<span class="fc" id="L80">    return new DateTimeColumn(name, new LongArrayList(DEFAULT_ARRAY_SIZE));</span>
+  }
+
+  public static DateTimeColumn create(String name, int initialSize) {
+<span class="fc" id="L84">    DateTimeColumn column = new DateTimeColumn(name, new LongArrayList(initialSize));</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    for (int i = 0; i &lt; initialSize; i++) {</span>
+<span class="fc" id="L86">      column.appendMissing();</span>
+    }
+<span class="fc" id="L88">    return column;</span>
+  }
+
+  public static DateTimeColumn create(String name, List&lt;LocalDateTime&gt; data) {
+<span class="nc" id="L92">    DateTimeColumn column = new DateTimeColumn(name, new LongArrayList(data.size()));</span>
+<span class="nc bnc" id="L93" title="All 2 branches missed.">    for (LocalDateTime date : data) {</span>
+<span class="nc" id="L94">      column.append(date);</span>
+<span class="nc" id="L95">    }</span>
+<span class="nc" id="L96">    return column;</span>
+  }
+
+  public static DateTimeColumn create(String name, Stream&lt;LocalDateTime&gt; stream) {
+<span class="nc" id="L100">    DateTimeColumn column = create(name);</span>
+<span class="nc" id="L101">    stream.forEach(val -&gt; column.append(val));</span>
+<span class="nc" id="L102">    return column;</span>
+  }
+
+  @Override
+  public DateTimeColumn plus(long amountToAdd, ChronoUnit unit) {
+<span class="nc" id="L107">    DateTimeColumn newColumn = emptyCopy();</span>
+<span class="nc" id="L108">    newColumn.setName(temporalColumnName(this, amountToAdd, unit));</span>
+<span class="nc" id="L109">    DateTimeColumn column1 = this;</span>
+
+<span class="nc bnc" id="L111" title="All 2 branches missed.">    for (int r = 0; r &lt; column1.size(); r++) {</span>
+<span class="nc" id="L112">      long packedDateTime = column1.getLongInternal(r);</span>
+<span class="nc bnc" id="L113" title="All 2 branches missed.">      if (packedDateTime == DateTimeColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L114">        newColumn.appendMissing();</span>
+      } else {
+<span class="nc" id="L116">        newColumn.appendInternal(PackedLocalDateTime.plus(packedDateTime, amountToAdd, unit));</span>
+      }
+    }
+<span class="nc" id="L119">    return newColumn;</span>
+  }
+
+  public static DateTimeColumn create(String name, LocalDateTime[] data) {
+<span class="fc" id="L123">    DateTimeColumn column = new DateTimeColumn(name, new LongArrayList(data.length));</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">    for (LocalDateTime date : data) {</span>
+<span class="fc" id="L125">      column.append(date);</span>
+    }
+<span class="fc" id="L127">    return column;</span>
+  }
+
+  public static boolean valueIsMissing(long value) {
+<span class="fc" id="L131">    return DateTimeColumnType.valueIsMissing(value);</span>
+  }
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="fc" id="L136">    return valueIsMissing(getLongInternal(rowNumber));</span>
+  }
+
+  @Override
+  public DateTimeColumn subset(final int[] rows) {
+<span class="fc" id="L141">    final DateTimeColumn c = this.emptyCopy();</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">    for (final int row : rows) {</span>
+<span class="fc" id="L143">      c.appendInternal(getLongInternal(row));</span>
+    }
+<span class="fc" id="L145">    return c;</span>
+  }
+
+  @Override
+  public DateTimeColumn removeMissing() {
+<span class="nc" id="L150">    DateTimeColumn noMissing = emptyCopy();</span>
+<span class="nc" id="L151">    LongIterator iterator = longIterator();</span>
+<span class="nc bnc" id="L152" title="All 2 branches missed.">    while (iterator.hasNext()) {</span>
+<span class="nc" id="L153">      long i = iterator.nextLong();</span>
+<span class="nc bnc" id="L154" title="All 2 branches missed.">      if (!valueIsMissing(i)) {</span>
+<span class="nc" id="L155">        noMissing.appendInternal(i);</span>
+      }
+<span class="nc" id="L157">    }</span>
+<span class="nc" id="L158">    return noMissing;</span>
+  }
+
+  public boolean contains(LocalDateTime dateTime) {
+<span class="nc" id="L162">    long dt = PackedLocalDateTime.pack(dateTime);</span>
+<span class="nc" id="L163">    return data.contains(dt);</span>
+  }
+
+  @Override
+  public Column&lt;LocalDateTime&gt; setMissing(int i) {
+<span class="nc" id="L168">    return set(i, DateTimeColumnType.missingValueIndicator());</span>
+  }
+
+  public DateTimeColumn where(Selection selection) {
+<span class="nc" id="L172">    return subset(selection.toArray());</span>
+  }
+
+  public void setPrintFormatter(DateTimeFormatter dateTimeFormatter, String missingValueString) {
+<span class="fc" id="L176">    Preconditions.checkNotNull(dateTimeFormatter);</span>
+<span class="fc" id="L177">    Preconditions.checkNotNull(missingValueString);</span>
+<span class="fc" id="L178">    this.printFormatter = new DateTimeColumnFormatter(dateTimeFormatter, missingValueString);</span>
+<span class="fc" id="L179">  }</span>
+
+  public void setPrintFormatter(DateTimeFormatter dateTimeFormatter) {
+<span class="nc" id="L182">    Preconditions.checkNotNull(dateTimeFormatter);</span>
+<span class="nc" id="L183">    this.printFormatter = new DateTimeColumnFormatter(dateTimeFormatter);</span>
+<span class="nc" id="L184">  }</span>
+
+  public void setPrintFormatter(DateTimeColumnFormatter formatter) {
+<span class="fc" id="L187">    Preconditions.checkNotNull(formatter);</span>
+<span class="fc" id="L188">    this.printFormatter = formatter;</span>
+<span class="fc" id="L189">  }</span>
+
+  @Override
+  public DateTimeColumn lag(int n) {
+<span class="fc bfc" id="L193" title="All 2 branches covered.">    int srcPos = n &gt;= 0 ? 0 : 0 - n;</span>
+<span class="fc" id="L194">    long[] dest = new long[size()];</span>
+<span class="fc bfc" id="L195" title="All 2 branches covered.">    int destPos = n &lt;= 0 ? 0 : n;</span>
+<span class="fc bfc" id="L196" title="All 2 branches covered.">    int length = n &gt;= 0 ? size() - n : size() + n;</span>
+
+<span class="fc bfc" id="L198" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L199">      dest[i] = DateTimeColumnType.missingValueIndicator();</span>
+    }
+
+<span class="fc" id="L202">    System.arraycopy(data.toLongArray(), srcPos, dest, destPos, length);</span>
+
+<span class="fc" id="L204">    DateTimeColumn copy = emptyCopy(size());</span>
+<span class="fc" id="L205">    copy.data = new LongArrayList(dest);</span>
+<span class="fc" id="L206">    copy.setName(name() + &quot; lag(&quot; + n + &quot;)&quot;);</span>
+<span class="fc" id="L207">    return copy;</span>
+  }
+
+  @Override
+  public DateTimeColumn appendCell(String stringValue) {
+<span class="fc" id="L212">    return appendInternal(</span>
+<span class="fc" id="L213">        PackedLocalDateTime.pack(DateTimeColumnType.DEFAULT_PARSER.parse(stringValue)));</span>
+  }
+
+  @Override
+  public DateTimeColumn appendCell(String stringValue, AbstractColumnParser&lt;?&gt; parser) {
+<span class="fc" id="L218">    return appendObj(parser.parse(stringValue));</span>
+  }
+
+  public DateTimeColumn append(LocalDateTime dateTime) {
+<span class="fc bfc" id="L222" title="All 2 branches covered.">    if (dateTime != null) {</span>
+<span class="fc" id="L223">      final long dt = PackedLocalDateTime.pack(dateTime);</span>
+<span class="fc" id="L224">      appendInternal(dt);</span>
+<span class="fc" id="L225">    } else {</span>
+<span class="fc" id="L226">      appendInternal(DateTimeColumnType.missingValueIndicator());</span>
+    }
+<span class="fc" id="L228">    return this;</span>
+  }
+
+  @Override
+  public DateTimeColumn appendObj(Object obj) {
+<span class="pc bpc" id="L233" title="1 of 2 branches missed.">    if (obj == null) {</span>
+<span class="nc" id="L234">      return appendMissing();</span>
+    }
+<span class="pc bpc" id="L236" title="1 of 2 branches missed.">    if (obj instanceof LocalDateTime) {</span>
+<span class="fc" id="L237">      return append((LocalDateTime) obj);</span>
+    }
+<span class="nc bnc" id="L239" title="All 2 branches missed.">    if (obj instanceof Timestamp) {</span>
+<span class="nc" id="L240">      Timestamp timestamp = (Timestamp) obj;</span>
+<span class="nc" id="L241">      return append(timestamp.toLocalDateTime());</span>
+    }
+<span class="nc" id="L243">    throw new IllegalArgumentException(</span>
+<span class="nc" id="L244">        &quot;Cannot append &quot; + obj.getClass().getName() + &quot; to DateTimeColumn&quot;);</span>
+  }
+
+  public int size() {
+<span class="fc" id="L248">    return data.size();</span>
+  }
+
+  /** @deprecated Please use the longIterator() or getLongInternal() methods */
+  @Deprecated
+  public LongArrayList data() {
+<span class="nc" id="L254">    return data;</span>
+  }
+
+  public DateTimeColumn appendInternal(long dateTime) {
+<span class="fc" id="L258">    data.add(dateTime);</span>
+<span class="fc" id="L259">    return this;</span>
+  }
+
+  @Override
+  public String getString(int row) {
+<span class="fc" id="L264">    return printFormatter.format(getPackedDateTime(row));</span>
+  }
+
+  @Override
+  public String getUnformattedString(int row) {
+<span class="fc" id="L269">    return PackedLocalDateTime.toString(getPackedDateTime(row));</span>
+  }
+
+  @Override
+  public DateTimeColumn emptyCopy() {
+<span class="fc" id="L274">    DateTimeColumn empty = create(name());</span>
+<span class="fc" id="L275">    empty.printFormatter = printFormatter;</span>
+<span class="fc" id="L276">    return empty;</span>
+  }
+
+  @Override
+  public DateTimeColumn emptyCopy(int rowSize) {
+<span class="fc" id="L281">    DateTimeColumn column = create(name(), rowSize);</span>
+<span class="fc" id="L282">    column.setPrintFormatter(printFormatter);</span>
+<span class="fc" id="L283">    return column;</span>
+  }
+
+  @Override
+  public DateTimeColumn copy() {
+<span class="nc" id="L288">    DateTimeColumn column = emptyCopy(data.size());</span>
+<span class="nc" id="L289">    column.data = data.clone();</span>
+<span class="nc" id="L290">    return column;</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="nc" id="L295">    data.clear();</span>
+<span class="nc" id="L296">  }</span>
+
+  @Override
+  public void sortAscending() {
+<span class="nc" id="L300">    Arrays.parallelSort(data.elements());</span>
+<span class="nc" id="L301">  }</span>
+
+  @Override
+  public void sortDescending() {
+<span class="nc" id="L305">    LongArrays.parallelQuickSort(data.elements(), reverseLongComparator);</span>
+<span class="nc" id="L306">  }</span>
+
+  @Override
+  public Table summary() {
+<span class="nc" id="L310">    Table table = Table.create(&quot;Column: &quot; + name());</span>
+<span class="nc" id="L311">    StringColumn measure = StringColumn.create(&quot;Measure&quot;);</span>
+<span class="nc" id="L312">    StringColumn value = StringColumn.create(&quot;Value&quot;);</span>
+<span class="nc" id="L313">    table.addColumns(measure);</span>
+<span class="nc" id="L314">    table.addColumns(value);</span>
+
+<span class="nc" id="L316">    measure.append(&quot;Count&quot;);</span>
+<span class="nc" id="L317">    value.append(String.valueOf(size()));</span>
+
+<span class="nc" id="L319">    measure.append(&quot;Missing&quot;);</span>
+<span class="nc" id="L320">    value.append(String.valueOf(countMissing()));</span>
+
+<span class="nc" id="L322">    measure.append(&quot;Earliest&quot;);</span>
+<span class="nc" id="L323">    value.append(String.valueOf(min()));</span>
+
+<span class="nc" id="L325">    measure.append(&quot;Latest&quot;);</span>
+<span class="nc" id="L326">    value.append(String.valueOf(max()));</span>
+
+<span class="nc" id="L328">    return table;</span>
+  }
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L333">    LongSet ints = new LongOpenHashSet(data.size());</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">    for (long i : data) {</span>
+<span class="fc" id="L335">      ints.add(i);</span>
+<span class="fc" id="L336">    }</span>
+<span class="fc" id="L337">    return ints.size();</span>
+  }
+
+  @Override
+  public DateTimeColumn unique() {
+<span class="nc" id="L342">    LongSet ints = new LongOpenHashSet(data.size());</span>
+<span class="nc bnc" id="L343" title="All 2 branches missed.">    for (long i : data) {</span>
+<span class="nc" id="L344">      ints.add(i);</span>
+<span class="nc" id="L345">    }</span>
+<span class="nc" id="L346">    DateTimeColumn column = emptyCopy(ints.size());</span>
+<span class="nc" id="L347">    column.setName(name() + &quot; Unique values&quot;);</span>
+<span class="nc" id="L348">    column.data = LongArrayList.wrap(ints.toLongArray());</span>
+<span class="nc" id="L349">    return column;</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="fc" id="L354">    return data.isEmpty();</span>
+  }
+
+  public long getLongInternal(int index) {
+<span class="fc" id="L358">    return data.getLong(index);</span>
+  }
+
+  protected long getPackedDateTime(int index) {
+<span class="fc" id="L362">    return getLongInternal(index);</span>
+  }
+
+  public LocalDateTime get(int index) {
+<span class="fc" id="L366">    return PackedLocalDateTime.asLocalDateTime(getPackedDateTime(index));</span>
+  }
+
+  @Override
+  public IntComparator rowComparator() {
+<span class="nc" id="L371">    return comparator;</span>
+  }
+
+  /**
+   * Conditionally update this column, replacing current values with newValue for all rows where the
+   * current value matches the selection criteria
+   *
+   * &lt;p&gt;Example: myColumn.set(myColumn.valueIsMissing(), LocalDateTime.now()); // no more missing
+   * values
+   */
+  public DateTimeColumn set(Selection rowSelection, LocalDateTime newValue) {
+<span class="nc bnc" id="L382" title="All 2 branches missed.">    for (int row : rowSelection) {</span>
+<span class="nc" id="L383">      set(row, newValue);</span>
+<span class="nc" id="L384">    }</span>
+<span class="nc" id="L385">    return this;</span>
+  }
+
+  /** Returns the count of missing values in this column */
+  @Override
+  public int countMissing() {
+<span class="fc" id="L391">    int count = 0;</span>
+<span class="fc bfc" id="L392" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L393" title="All 2 branches covered.">      if (getPackedDateTime(i) == DateTimeColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L394">        count++;</span>
+      }
+    }
+<span class="fc" id="L397">    return count;</span>
+  }
+
+  /**
+   * Returns an array where each entry is the difference, measured in seconds, between the
+   * LocalDateTime and midnight, January 1, 1970 UTC.
+   *
+   * &lt;p&gt;If a value is missing, DateTimeColumnType.missingValueIndicator() is used
+   */
+  public long[] asEpochSecondArray() {
+<span class="nc" id="L407">    return asEpochSecondArray(ZoneOffset.UTC);</span>
+  }
+
+  /**
+   * Returns the seconds from epoch for each value as an array based on the given offset
+   *
+   * &lt;p&gt;If a value is missing, DateTimeColumnType.missingValueIndicator() is used
+   */
+  public long[] asEpochSecondArray(ZoneOffset offset) {
+<span class="nc" id="L416">    long[] output = new long[data.size()];</span>
+<span class="nc bnc" id="L417" title="All 2 branches missed.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="nc" id="L418">      LocalDateTime dateTime = PackedLocalDateTime.asLocalDateTime(data.getLong(i));</span>
+<span class="nc bnc" id="L419" title="All 2 branches missed.">      if (dateTime == null) {</span>
+<span class="nc" id="L420">        output[i] = DateTimeColumnType.missingValueIndicator();</span>
+      } else {
+<span class="nc" id="L422">        output[i] = dateTime.toEpochSecond(offset);</span>
+      }
+    }
+<span class="nc" id="L425">    return output;</span>
+  }
+
+  /**
+   * Returns an array where each entry is the difference, measured in milliseconds, between the
+   * LocalDateTime and midnight, January 1, 1970 UTC.
+   *
+   * &lt;p&gt;If a missing value is encountered, DateTimeColumnType.missingValueIndicator() is inserted in
+   * the array
+   */
+  public long[] asEpochMillisArray() {
+<span class="fc" id="L436">    return asEpochMillisArray(ZoneOffset.UTC);</span>
+  }
+
+  /**
+   * Returns an array where each entry is the difference, measured in milliseconds, between the
+   * LocalDateTime and midnight, January 1, 1970 UTC.
+   *
+   * &lt;p&gt;If a missing value is encountered, DateTimeColumnType.missingValueIndicator() is inserted in
+   * the array
+   */
+  public long[] asEpochMillisArray(ZoneOffset offset) {
+<span class="fc" id="L447">    long[] output = new long[data.size()];</span>
+<span class="fc bfc" id="L448" title="All 2 branches covered.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="fc" id="L449">      LocalDateTime dateTime = PackedLocalDateTime.asLocalDateTime(data.getLong(i));</span>
+<span class="pc bpc" id="L450" title="1 of 2 branches missed.">      if (dateTime == null) {</span>
+<span class="nc" id="L451">        output[i] = DateTimeColumnType.missingValueIndicator();</span>
+      } else {
+<span class="fc" id="L453">        output[i] = dateTime.toInstant(offset).toEpochMilli();</span>
+      }
+    }
+<span class="fc" id="L456">    return output;</span>
+  }
+
+  public InstantColumn asInstantColumn() {
+<span class="nc" id="L460">    return asInstantColumn(ZoneOffset.UTC);</span>
+  }
+
+  public InstantColumn asInstantColumn(ZoneId zone) {
+<span class="nc" id="L464">    Instant[] output = new Instant[data.size()];</span>
+<span class="nc bnc" id="L465" title="All 2 branches missed.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="nc" id="L466">      LocalDateTime dateTime = PackedLocalDateTime.asLocalDateTime(data.getLong(i));</span>
+<span class="nc bnc" id="L467" title="All 2 branches missed.">      if (dateTime == null) {</span>
+<span class="nc" id="L468">        output[i] = null;</span>
+      } else {
+<span class="nc" id="L470">        output[i] = dateTime.atZone(zone).toInstant();</span>
+      }
+    }
+<span class="nc" id="L473">    return InstantColumn.create(name(), output);</span>
+  }
+
+  @Override
+  public DateTimeColumn append(Column&lt;LocalDateTime&gt; column) {
+<span class="pc bpc" id="L478" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L479">    DateTimeColumn dateTimeColumn = (DateTimeColumn) column;</span>
+<span class="fc" id="L480">    final int size = dateTimeColumn.size();</span>
+<span class="fc bfc" id="L481" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L482">      append(dateTimeColumn.get(i));</span>
+    }
+<span class="fc" id="L484">    return this;</span>
+  }
+
+  @Override
+  public DateTimeColumn append(Column&lt;LocalDateTime&gt; column, int row) {
+<span class="pc bpc" id="L489" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L490">    return appendInternal(((DateTimeColumn) column).getLongInternal(row));</span>
+  }
+
+  @Override
+  public DateTimeColumn set(int row, Column&lt;LocalDateTime&gt; column, int sourceRow) {
+<span class="pc bpc" id="L495" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L496">    return set(row, ((DateTimeColumn) column).getLongInternal(sourceRow));</span>
+  }
+
+  public LocalDateTime max() {
+    long max;
+<span class="pc bpc" id="L501" title="1 of 2 branches missed.">    if (!isEmpty()) {</span>
+<span class="fc" id="L502">      max = getPackedDateTime(0);</span>
+    } else {
+<span class="nc" id="L504">      return null;</span>
+    }
+<span class="fc bfc" id="L506" title="All 2 branches covered.">    for (long aData : data) {</span>
+<span class="pc bpc" id="L507" title="1 of 2 branches missed.">      if (DateTimeColumnType.missingValueIndicator() != aData) {</span>
+<span class="pc bpc" id="L508" title="1 of 2 branches missed.">        max = (max &gt; aData) ? max : aData;</span>
+      }
+<span class="fc" id="L510">    }</span>
+
+<span class="pc bpc" id="L512" title="1 of 2 branches missed.">    if (DateTimeColumnType.missingValueIndicator() == max) {</span>
+<span class="nc" id="L513">      return null;</span>
+    }
+<span class="fc" id="L515">    return PackedLocalDateTime.asLocalDateTime(max);</span>
+  }
+
+  @Override
+  public DateTimeColumn appendMissing() {
+<span class="fc" id="L520">    appendInternal(DateTimeColumnType.missingValueIndicator());</span>
+<span class="fc" id="L521">    return this;</span>
+  }
+
+  @Override
+  public LocalDateTime min() {
+    long min;
+
+<span class="pc bpc" id="L528" title="1 of 2 branches missed.">    if (!isEmpty()) {</span>
+<span class="fc" id="L529">      min = getPackedDateTime(0);</span>
+    } else {
+<span class="nc" id="L531">      return null;</span>
+    }
+<span class="fc bfc" id="L533" title="All 2 branches covered.">    for (long aData : data) {</span>
+<span class="pc bpc" id="L534" title="1 of 2 branches missed.">      if (DateTimeColumnType.missingValueIndicator() != aData) {</span>
+<span class="fc bfc" id="L535" title="All 2 branches covered.">        min = (min &lt; aData) ? min : aData;</span>
+      }
+<span class="fc" id="L537">    }</span>
+<span class="pc bpc" id="L538" title="1 of 2 branches missed.">    if (Integer.MIN_VALUE == min) {</span>
+<span class="nc" id="L539">      return null;</span>
+    }
+<span class="fc" id="L541">    return PackedLocalDateTime.asLocalDateTime(min);</span>
+  }
+
+  public DateTimeColumn set(int index, long value) {
+<span class="fc" id="L545">    data.set(index, value);</span>
+<span class="fc" id="L546">    return this;</span>
+  }
+
+  @Override
+  public DateTimeColumn set(int index, LocalDateTime value) {
+<span class="fc" id="L551">    data.set(index, PackedLocalDateTime.pack(value));</span>
+<span class="fc" id="L552">    return this;</span>
+  }
+
+  /**
+   * Returns the largest (&quot;top&quot;) n values in the column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the largest observations
+   */
+  public List&lt;LocalDateTime&gt; top(int n) {
+<span class="nc" id="L563">    List&lt;LocalDateTime&gt; top = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L564">    long[] values = data.toLongArray();</span>
+<span class="nc" id="L565">    LongArrays.parallelQuickSort(values, DescendingLongComparator.instance());</span>
+<span class="nc bnc" id="L566" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L567">      top.add(PackedLocalDateTime.asLocalDateTime(values[i]));</span>
+    }
+<span class="nc" id="L569">    return top;</span>
+  }
+
+  /**
+   * Returns the smallest (&quot;bottom&quot;) n values in the column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the smallest n observations
+   */
+  public List&lt;LocalDateTime&gt; bottom(int n) {
+<span class="nc" id="L580">    List&lt;LocalDateTime&gt; bottom = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L581">    long[] values = data.toLongArray();</span>
+<span class="nc" id="L582">    LongArrays.parallelQuickSort(values);</span>
+<span class="nc bnc" id="L583" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L584">      bottom.add(PackedLocalDateTime.asLocalDateTime(values[i]));</span>
+    }
+<span class="nc" id="L586">    return bottom;</span>
+  }
+
+  public LongIterator longIterator() {
+<span class="fc" id="L590">    return data.iterator();</span>
+  }
+
+  public Set&lt;LocalDateTime&gt; asSet() {
+<span class="nc" id="L594">    Set&lt;LocalDateTime&gt; times = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L595">    DateTimeColumn unique = unique();</span>
+<span class="nc bnc" id="L596" title="All 2 branches missed.">    for (LocalDateTime localDateTime : unique) {</span>
+<span class="nc" id="L597">      times.add(localDateTime);</span>
+<span class="nc" id="L598">    }</span>
+<span class="nc" id="L599">    return times;</span>
+  }
+
+  public int byteSize() {
+<span class="nc" id="L603">    return type().byteSize();</span>
+  }
+
+  /** Returns the contents of the cell at rowNumber as a byte[] */
+  @Override
+  public byte[] asBytes(int rowNumber) {
+<span class="nc" id="L609">    return ByteBuffer.allocate(byteSize()).putLong(getPackedDateTime(rowNumber)).array();</span>
+  }
+
+  public double getDouble(int i) {
+<span class="nc" id="L613">    return getPackedDateTime(i);</span>
+  }
+
+  public double[] asDoubleArray() {
+<span class="nc" id="L617">    double[] doubles = new double[size()];</span>
+<span class="nc" id="L618">    long[] millis = asEpochSecondArray();</span>
+<span class="nc bnc" id="L619" title="All 2 branches missed.">    for (int i = 0; i &lt; millis.length; i++) {</span>
+<span class="nc" id="L620">      doubles[i] = millis[i];</span>
+    }
+<span class="nc" id="L622">    return doubles;</span>
+  }
+
+  public DoubleColumn asDoubleColumn() {
+<span class="nc" id="L626">    return DoubleColumn.create(name(), asEpochSecondArray());</span>
+  }
+
+  /**
+   * Returns an iterator over elements of type {@code T}.
+   *
+   * @return an Iterator.
+   */
+  @Override
+  public Iterator&lt;LocalDateTime&gt; iterator() {
+
+<span class="fc" id="L637">    return new Iterator&lt;LocalDateTime&gt;() {</span>
+
+<span class="fc" id="L639">      final LongIterator longIterator = longIterator();</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L643">        return longIterator.hasNext();</span>
+      }
+
+      @Override
+      public LocalDateTime next() {
+<span class="fc" id="L648">        return PackedLocalDateTime.asLocalDateTime(longIterator.nextLong());</span>
+      }
+    };
+  }
+
+  // fillWith methods
+
+  private DateTimeColumn fillWith(
+      int count, Iterator&lt;LocalDateTime&gt; iterator, Consumer&lt;LocalDateTime&gt; acceptor) {
+<span class="nc bnc" id="L657" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="nc bnc" id="L658" title="All 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L659">        break;</span>
+      }
+<span class="nc" id="L661">      acceptor.accept(iterator.next());</span>
+    }
+<span class="nc" id="L663">    return this;</span>
+  }
+
+  @Override
+  public DateTimeColumn fillWith(Iterator&lt;LocalDateTime&gt; iterator) {
+<span class="nc" id="L668">    int[] r = new int[1];</span>
+<span class="nc" id="L669">    fillWith(size(), iterator, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L670">    return this;</span>
+  }
+
+  private DateTimeColumn fillWith(
+      int count, Iterable&lt;LocalDateTime&gt; iterable, Consumer&lt;LocalDateTime&gt; acceptor) {
+<span class="fc" id="L675">    Iterator&lt;LocalDateTime&gt; iterator = iterable.iterator();</span>
+<span class="fc bfc" id="L676" title="All 2 branches covered.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="pc bpc" id="L677" title="1 of 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L678">        iterator = iterable.iterator();</span>
+<span class="nc bnc" id="L679" title="All 2 branches missed.">        if (!iterator.hasNext()) {</span>
+<span class="nc" id="L680">          break;</span>
+        }
+      }
+<span class="fc" id="L683">      acceptor.accept(iterator.next());</span>
+    }
+<span class="fc" id="L685">    return this;</span>
+  }
+
+  @Override
+  public DateTimeColumn fillWith(Iterable&lt;LocalDateTime&gt; iterable) {
+<span class="fc" id="L690">    int[] r = new int[1];</span>
+<span class="fc" id="L691">    fillWith(size(), iterable, date -&gt; set(r[0]++, date));</span>
+<span class="fc" id="L692">    return this;</span>
+  }
+
+  private DateTimeColumn fillWith(
+      int count, Supplier&lt;LocalDateTime&gt; supplier, Consumer&lt;LocalDateTime&gt; acceptor) {
+<span class="nc bnc" id="L697" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+      try {
+<span class="nc" id="L699">        acceptor.accept(supplier.get());</span>
+<span class="nc" id="L700">      } catch (Exception e) {</span>
+<span class="nc" id="L701">        break;</span>
+<span class="nc" id="L702">      }</span>
+    }
+<span class="nc" id="L704">    return this;</span>
+  }
+
+  @Override
+  public DateTimeColumn fillWith(Supplier&lt;LocalDateTime&gt; supplier) {
+<span class="nc" id="L709">    int[] r = new int[1];</span>
+<span class="nc" id="L710">    fillWith(size(), supplier, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L711">    return this;</span>
+  }
+
+  @Override
+  public LocalDateTime[] asObjectArray() {
+<span class="fc" id="L716">    final LocalDateTime[] output = new LocalDateTime[data.size()];</span>
+<span class="fc bfc" id="L717" title="All 2 branches covered.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="fc" id="L718">      output[i] = get(i);</span>
+    }
+<span class="fc" id="L720">    return output;</span>
+  }
+
+  @Override
+  public int compare(LocalDateTime o1, LocalDateTime o2) {
+<span class="nc" id="L725">    return o1.compareTo(o2);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

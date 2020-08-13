@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SliceBugTests.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.table</a> &gt; <span class="el_source">SliceBugTests.java</span></div><h1>SliceBugTests.java</h1><pre class="source lang-java linenums">package tech.tablesaw.table;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import org.junit.jupiter.api.Test;
+import tech.tablesaw.api.DateTimeColumn;
+import tech.tablesaw.api.DoubleColumn;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+
+<span class="fc" id="L20">public class SliceBugTests {</span>
+
+<span class="fc" id="L22">  private final Integer[] observations = new Integer[] {10, 11, 12, 13, 14, 15, 16, 17, 18, 19};</span>
+
+<span class="fc" id="L24">  private final LocalDateTime[] timestamps =</span>
+      new LocalDateTime[] {
+<span class="fc" id="L26">        LocalDateTime.of(2018, 1, 1, 13, 1, 1),</span>
+<span class="fc" id="L27">        LocalDateTime.of(2018, 1, 1, 13, 1, 2),</span>
+<span class="fc" id="L28">        LocalDateTime.of(2018, 1, 1, 13, 1, 2),</span>
+<span class="fc" id="L29">        LocalDateTime.of(2018, 1, 1, 13, 1, 3),</span>
+<span class="fc" id="L30">        LocalDateTime.of(2018, 1, 1, 13, 1, 3),</span>
+<span class="fc" id="L31">        LocalDateTime.of(2018, 1, 1, 13, 1, 4),</span>
+<span class="fc" id="L32">        LocalDateTime.of(2018, 1, 1, 13, 1, 5),</span>
+<span class="fc" id="L33">        LocalDateTime.of(2018, 1, 1, 13, 1, 6),</span>
+<span class="fc" id="L34">        LocalDateTime.of(2018, 1, 1, 13, 1, 6),</span>
+<span class="fc" id="L35">        LocalDateTime.of(2018, 1, 1, 13, 1, 7)</span>
+      };
+
+<span class="fc" id="L38">  private final String[] categories =</span>
+      new String[] {
+        &quot;Australia&quot;,
+        &quot;Australia&quot;,
+        &quot;Australia&quot;,
+        &quot;Germany&quot;,
+        &quot;USA&quot;,
+        &quot;Finland&quot;,
+        &quot;Finland&quot;,
+        &quot;Japan&quot;,
+        &quot;Japan&quot;,
+        &quot;Chile&quot;
+      };
+
+  @Test
+  public void sliceColumnIsSameWhenRetrievedWithNameOrIndex() {
+<span class="fc" id="L54">    Table table = constructTableFromArrays();</span>
+
+<span class="fc" id="L56">    TableSliceGroup countrySplit = table.splitOn(&quot;countries&quot;);</span>
+
+<span class="fc bfc" id="L58" title="All 2 branches covered.">    for (TableSlice slice : countrySplit) {</span>
+<span class="fc" id="L59">      DoubleColumn priceColFromIndex = slice.doubleColumn(2);</span>
+<span class="fc" id="L60">      DoubleColumn priceColFromName = slice.doubleColumn(&quot;price&quot;);</span>
+
+<span class="fc" id="L62">      assertTrue(</span>
+<span class="fc" id="L63">          Arrays.equals(priceColFromName.asDoubleArray(), priceColFromIndex.asDoubleArray()),</span>
+          &quot;Columns should have same data&quot;);
+<span class="fc" id="L65">    }</span>
+<span class="fc" id="L66">  }</span>
+
+  @Test
+  public void sliceAsTableUsingDatesAfterFilteringDBLoadedTable() throws SQLException {
+<span class="fc" id="L70">    Table salesTable = loadTableFromDB();</span>
+
+<span class="fc" id="L72">    Table filteredTable =</span>
+        salesTable
+<span class="fc" id="L74">            .select(salesTable.columnNames().toArray(new String[0]))</span>
+<span class="fc" id="L75">            .where(</span>
+                salesTable
+<span class="fc" id="L77">                    .instantColumn(&quot;sale_timestamp&quot;)</span>
+<span class="fc" id="L78">                    .asLocalDateTimeColumn()</span>
+<span class="fc" id="L79">                    .isAfter(LocalDateTime.of(2018, 1, 1, 13, 1, 3)));</span>
+<span class="fc" id="L80">    filteredTable.setName(&quot;filteredTable&quot;);</span>
+
+    // work around
+<span class="fc" id="L83">    TableSliceGroup slices = filteredTable.splitOn(&quot;countries&quot;);</span>
+<span class="fc" id="L84">    slices.forEach(</span>
+        slice -&gt; {
+<span class="fc" id="L86">          assertFalse(slice.isEmpty());</span>
+<span class="fc" id="L87">        });</span>
+<span class="fc" id="L88">  }</span>
+
+  private Table loadTableFromDB() throws SQLException {
+<span class="fc" id="L91">    Connection connection = DriverManager.getConnection(&quot;jdbc:h2:mem:myDb;DB_CLOSE_DELAY=-1&quot;);</span>
+<span class="fc" id="L92">    String create =</span>
+        &quot;CREATE TABLE country_sales (&quot;
+            + &quot;countries VARCHAR(255),&quot;
+            + &quot;sale_timestamp TIMESTAMP,&quot;
+            + &quot;price INTEGER&quot;
+            + &quot;);&quot;;
+<span class="fc" id="L98">    Statement statement = connection.createStatement();</span>
+<span class="fc" id="L99">    statement.executeUpdate(create);</span>
+
+<span class="fc" id="L101">    PreparedStatement preparedStatement =</span>
+<span class="fc" id="L102">        connection.prepareStatement(</span>
+            &quot;INSERT INTO country_sales (countries, sale_timestamp, price) VALUES (?, ?, ?);&quot;);
+
+<span class="fc bfc" id="L105" title="All 2 branches covered.">    for (int i = 0; i &lt; categories.length; i++) {</span>
+<span class="fc" id="L106">      preparedStatement.setString(1, categories[i]);</span>
+<span class="fc" id="L107">      preparedStatement.setObject(2, timestamps[i]);</span>
+<span class="fc" id="L108">      preparedStatement.setInt(3, observations[i]);</span>
+<span class="fc" id="L109">      preparedStatement.executeUpdate();</span>
+    }
+<span class="fc" id="L111">    ResultSet resultSet = connection.createStatement().executeQuery(&quot;SELECT * FROM country_sales&quot;);</span>
+
+<span class="fc" id="L113">    return Table.read().db(resultSet, &quot;sales_from_db&quot;);</span>
+  }
+
+  private Table constructTableFromArrays() {
+<span class="fc" id="L117">    StringColumn countries = StringColumn.create(&quot;countries&quot;, categories);</span>
+<span class="fc" id="L118">    DateTimeColumn timestamp = DateTimeColumn.create(&quot;sale_timestamp&quot;, timestamps);</span>
+<span class="fc" id="L119">    DoubleColumn values = DoubleColumn.create(&quot;price&quot;, observations);</span>
+
+<span class="fc" id="L121">    return Table.create(&quot;table_from_arrays&quot;, countries, timestamp, values);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

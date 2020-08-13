@@ -1,0 +1,743 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CheckstyleAntTaskTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.ant</a> &gt; <span class="el_source">CheckstyleAntTaskTest.java</span></div><h1>CheckstyleAntTaskTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.ant;
+
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.File;
+import java.io.IOException;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.tools.ant.AntClassLoader;
+import org.apache.tools.ant.BuildException;
+import org.apache.tools.ant.Project;
+import org.apache.tools.ant.types.FileSet;
+import org.apache.tools.ant.types.Path;
+import org.apache.tools.ant.types.Reference;
+import org.apache.tools.ant.types.resources.FileResource;
+import org.junit.Test;
+import org.powermock.reflect.Whitebox;
+
+import com.puppycrawl.tools.checkstyle.AbstractPathTestSupport;
+import com.puppycrawl.tools.checkstyle.DefaultLogger;
+import com.puppycrawl.tools.checkstyle.Definitions;
+import com.puppycrawl.tools.checkstyle.XMLLogger;
+import com.puppycrawl.tools.checkstyle.api.LocalizedMessage;
+import com.puppycrawl.tools.checkstyle.internal.testmodules.CheckerStub;
+import com.puppycrawl.tools.checkstyle.internal.testmodules.TestRootModuleChecker;
+
+<span class="fc" id="L57">public class CheckstyleAntTaskTest extends AbstractPathTestSupport {</span>
+
+    private static final String FLAWLESS_INPUT =
+            &quot;InputCheckstyleAntTaskFlawless.java&quot;;
+    private static final String VIOLATED_INPUT =
+            &quot;InputCheckstyleAntTaskError.java&quot;;
+    private static final String WARNING_INPUT =
+            &quot;InputCheckstyleAntTaskWarning.java&quot;;
+    private static final String CONFIG_FILE =
+            &quot;InputCheckstyleAntTaskTestChecks.xml&quot;;
+    private static final String CUSTOM_ROOT_CONFIG_FILE =
+            &quot;InputCheckstyleAntTaskConfigCustomRootModule.xml&quot;;
+    private static final String NOT_EXISTING_FILE = &quot;target/not_existing.xml&quot;;
+    private static final String FAILURE_PROPERTY_VALUE = &quot;myValue&quot;;
+
+    @Override
+    protected String getPackageLocation() {
+<span class="fc" id="L74">        return &quot;com/puppycrawl/tools/checkstyle/ant/checkstyleanttask/&quot;;</span>
+    }
+
+    private CheckstyleAntTask getCheckstyleAntTask() throws IOException {
+<span class="fc" id="L78">        return getCheckstyleAntTask(CONFIG_FILE);</span>
+    }
+
+    private CheckstyleAntTask getCheckstyleAntTask(String configFile) throws IOException {
+<span class="fc" id="L82">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L83">        antTask.setConfig(getPath(configFile));</span>
+<span class="fc" id="L84">        antTask.setProject(new Project());</span>
+<span class="fc" id="L85">        return antTask;</span>
+    }
+
+    @Test
+    public final void testDefaultFlawless() throws IOException {
+<span class="fc" id="L90">        TestRootModuleChecker.reset();</span>
+<span class="fc" id="L91">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L92">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L93">        antTask.execute();</span>
+
+<span class="fc" id="L95">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L96">            TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L97">    }</span>
+
+    @Test
+    public final void testPathsOneFile() throws IOException {
+        // given
+<span class="fc" id="L102">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L104">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L105">        final FileSet examinationFileSet = new FileSet();</span>
+<span class="fc" id="L106">        examinationFileSet.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L107">        final Path sourcePath = new Path(antTask.getProject());</span>
+<span class="fc" id="L108">        sourcePath.addFileset(examinationFileSet);</span>
+<span class="fc" id="L109">        antTask.addPath(sourcePath);</span>
+
+        // when
+<span class="fc" id="L112">        antTask.execute();</span>
+
+        // then
+<span class="fc" id="L115">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L116">                TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L117">        final List&lt;File&gt; filesToCheck = TestRootModuleChecker.getFilesToCheck();</span>
+<span class="fc" id="L118">        assertThat(&quot;There are more files to check than expected&quot;,</span>
+<span class="fc" id="L119">                filesToCheck.size(), is(1));</span>
+<span class="fc" id="L120">        assertThat(&quot;The path of file differs from expected&quot;,</span>
+<span class="fc" id="L121">                filesToCheck.get(0).getAbsolutePath(), is(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L122">    }</span>
+
+    @Test
+    public final void testPathsFileWithLogVerification() throws IOException {
+        // given
+<span class="fc" id="L127">        TestRootModuleChecker.reset();</span>
+<span class="fc" id="L128">        final CheckstyleAntTaskLogStub antTask = new CheckstyleAntTaskLogStub();</span>
+<span class="fc" id="L129">        antTask.setConfig(getPath(CUSTOM_ROOT_CONFIG_FILE));</span>
+<span class="fc" id="L130">        antTask.setProject(new Project());</span>
+<span class="fc" id="L131">        final FileSet examinationFileSet = new FileSet();</span>
+<span class="fc" id="L132">        examinationFileSet.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L133">        final Path sourcePath = new Path(antTask.getProject());</span>
+<span class="fc" id="L134">        sourcePath.addFileset(examinationFileSet);</span>
+<span class="fc" id="L135">        antTask.addPath(sourcePath);</span>
+<span class="fc" id="L136">        antTask.addPath(new Path(new Project()));</span>
+
+        // when
+<span class="fc" id="L139">        antTask.execute();</span>
+
+        // then
+<span class="fc" id="L142">        final List&lt;String&gt; loggedMessages = antTask.getLoggedMessages();</span>
+
+<span class="fc" id="L144">        assertEquals(&quot;Scanning path was not logged&quot;, 1, loggedMessages.stream().filter(</span>
+<span class="fc" id="L145">            msg -&gt; msg.startsWith(&quot;1) Scanning path&quot;)).count());</span>
+
+<span class="fc" id="L147">        assertEquals(&quot;Scanning path was not logged&quot;, 1, loggedMessages.stream().filter(</span>
+<span class="fc" id="L148">            msg -&gt; msg.startsWith(&quot;1) Adding 1 files from path&quot;)).count());</span>
+
+<span class="fc" id="L150">        assertEquals(&quot;Scanning empty was logged&quot;, 0, loggedMessages.stream().filter(</span>
+<span class="fc" id="L151">            msg -&gt; msg.startsWith(&quot;2) Adding 0 files from path &quot;)).count());</span>
+
+<span class="fc" id="L153">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L154">                TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L155">        final List&lt;File&gt; filesToCheck = TestRootModuleChecker.getFilesToCheck();</span>
+<span class="fc" id="L156">        assertThat(&quot;There are more files to check than expected&quot;,</span>
+<span class="fc" id="L157">                filesToCheck.size(), is(1));</span>
+<span class="fc" id="L158">        assertThat(&quot;The path of file differs from expected&quot;,</span>
+<span class="fc" id="L159">                filesToCheck.get(0).getAbsolutePath(), is(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L160">    }</span>
+
+    @Test
+    public final void testPathsDirectoryWithNestedFile() throws IOException {
+        // given
+<span class="fc" id="L165">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L167">        final CheckstyleAntTaskLogStub antTask = new CheckstyleAntTaskLogStub();</span>
+<span class="fc" id="L168">        antTask.setConfig(getPath(CUSTOM_ROOT_CONFIG_FILE));</span>
+<span class="fc" id="L169">        antTask.setProject(new Project());</span>
+
+<span class="fc" id="L171">        final FileResource fileResource = new FileResource(</span>
+<span class="fc" id="L172">            antTask.getProject(), getPath(&quot;&quot;));</span>
+<span class="fc" id="L173">        final Path sourcePath = new Path(antTask.getProject());</span>
+<span class="fc" id="L174">        sourcePath.add(fileResource);</span>
+<span class="fc" id="L175">        antTask.addPath(sourcePath);</span>
+
+        // when
+<span class="fc" id="L178">        antTask.execute();</span>
+
+        // then
+<span class="fc" id="L181">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L182">                TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L183">        final List&lt;File&gt; filesToCheck = TestRootModuleChecker.getFilesToCheck();</span>
+<span class="fc" id="L184">        assertThat(&quot;There are more files to check than expected&quot;,</span>
+<span class="fc" id="L185">                filesToCheck.size(), is(9));</span>
+<span class="fc" id="L186">        assertThat(&quot;The path of file differs from expected&quot;,</span>
+<span class="fc" id="L187">                filesToCheck.get(6).getAbsolutePath(), is(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L188">        assertEquals(&quot;Amount of logged messages in unexpected&quot;,</span>
+<span class="fc" id="L189">                8, antTask.getLoggedMessages().size());</span>
+<span class="fc" id="L190">    }</span>
+
+    @Test
+    public final void testCustomRootModule() throws IOException {
+<span class="fc" id="L194">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L196">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L197">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L198">        antTask.execute();</span>
+
+<span class="fc" id="L200">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L201">                TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L202">    }</span>
+
+    @Test
+    public final void testFileSet() throws IOException {
+<span class="fc" id="L206">        TestRootModuleChecker.reset();</span>
+<span class="fc" id="L207">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L208">        final FileSet examinationFileSet = new FileSet();</span>
+<span class="fc" id="L209">        examinationFileSet.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L210">        antTask.addFileset(examinationFileSet);</span>
+<span class="fc" id="L211">        antTask.execute();</span>
+
+<span class="fc" id="L213">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L214">            TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L215">        final List&lt;File&gt; filesToCheck = TestRootModuleChecker.getFilesToCheck();</span>
+<span class="fc" id="L216">        assertThat(&quot;There are more files to check than expected&quot;,</span>
+<span class="fc" id="L217">            filesToCheck.size(), is(1));</span>
+<span class="fc" id="L218">        assertThat(&quot;The path of file differs from expected&quot;,</span>
+<span class="fc" id="L219">            filesToCheck.get(0).getAbsolutePath(), is(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L220">    }</span>
+
+    @Test
+    public final void testNoConfigFile() throws IOException {
+<span class="fc" id="L224">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L225">        antTask.setProject(new Project());</span>
+<span class="fc" id="L226">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+        try {
+<span class="nc" id="L228">            antTask.execute();</span>
+<span class="nc" id="L229">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L231">        catch (BuildException ex) {</span>
+<span class="fc" id="L232">            assertEquals(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L233">                    &quot;Must specify 'config'.&quot;, ex.getMessage());</span>
+<span class="nc" id="L234">        }</span>
+<span class="fc" id="L235">    }</span>
+
+    @Test
+    public final void testNonExistentConfig() throws IOException {
+<span class="fc" id="L239">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L240">        antTask.setConfig(getPath(NOT_EXISTING_FILE));</span>
+<span class="fc" id="L241">        antTask.setProject(new Project());</span>
+<span class="fc" id="L242">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+        try {
+<span class="nc" id="L244">            antTask.execute();</span>
+<span class="nc" id="L245">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L247">        catch (BuildException ex) {</span>
+<span class="fc" id="L248">            assertTrue(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L249">                    ex.getMessage().startsWith(&quot;Unable to create Root Module: config&quot;));</span>
+<span class="nc" id="L250">        }</span>
+<span class="fc" id="L251">    }</span>
+
+    @Test
+    public final void testEmptyConfigFile() throws IOException {
+<span class="fc" id="L255">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L256">        antTask.setConfig(getPath(&quot;InputCheckstyleAntTaskEmptyConfig.xml&quot;));</span>
+<span class="fc" id="L257">        antTask.setProject(new Project());</span>
+<span class="fc" id="L258">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+        try {
+<span class="nc" id="L260">            antTask.execute();</span>
+<span class="nc" id="L261">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L263">        catch (BuildException ex) {</span>
+<span class="fc" id="L264">            assertTrue(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L265">                    ex.getMessage().startsWith(&quot;Unable to create Root Module: config&quot;));</span>
+<span class="nc" id="L266">        }</span>
+<span class="fc" id="L267">    }</span>
+
+    @Test
+    public final void testNoFile() throws IOException {
+<span class="fc" id="L271">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+        try {
+<span class="nc" id="L273">            antTask.execute();</span>
+<span class="nc" id="L274">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L276">        catch (BuildException ex) {</span>
+<span class="fc" id="L277">            assertEquals(&quot;Error message is unexpected&quot;,</span>
+                    &quot;Must specify at least one of 'file' or nested 'fileset' or 'path'.&quot;,
+<span class="fc" id="L279">                ex.getMessage());</span>
+<span class="nc" id="L280">        }</span>
+<span class="fc" id="L281">    }</span>
+
+    @Test
+    public final void testMaxWarningExceeded() throws IOException {
+<span class="fc" id="L285">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+<span class="fc" id="L286">        antTask.setFile(new File(getPath(WARNING_INPUT)));</span>
+<span class="fc" id="L287">        antTask.setMaxWarnings(0);</span>
+        try {
+<span class="nc" id="L289">            antTask.execute();</span>
+<span class="nc" id="L290">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L292">        catch (BuildException ex) {</span>
+<span class="fc" id="L293">            assertEquals(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L294">                    &quot;Got 0 errors and 1 warnings.&quot;, ex.getMessage());</span>
+<span class="nc" id="L295">        }</span>
+<span class="fc" id="L296">    }</span>
+
+    @Test
+    public final void testMaxErrors() throws IOException {
+<span class="fc" id="L300">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L302">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L303">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L304">        antTask.setMaxErrors(2);</span>
+<span class="fc" id="L305">        antTask.execute();</span>
+
+<span class="fc" id="L307">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L308">            TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L309">    }</span>
+
+    @Test
+    public final void testFailureProperty() throws IOException {
+<span class="fc" id="L313">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L314">        antTask.setConfig(getPath(CONFIG_FILE));</span>
+<span class="fc" id="L315">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+
+<span class="fc" id="L317">        final Project project = new Project();</span>
+<span class="fc" id="L318">        final String failurePropertyName = &quot;myProperty&quot;;</span>
+<span class="fc" id="L319">        project.setProperty(failurePropertyName, FAILURE_PROPERTY_VALUE);</span>
+
+<span class="fc" id="L321">        antTask.setProject(project);</span>
+<span class="fc" id="L322">        antTask.setFailureProperty(failurePropertyName);</span>
+        try {
+<span class="nc" id="L324">            antTask.execute();</span>
+<span class="nc" id="L325">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L327">        catch (BuildException ignored) {</span>
+<span class="fc" id="L328">            final Map&lt;String, Object&gt; hashtable = project.getProperties();</span>
+<span class="fc" id="L329">            final Object propertyValue = hashtable.get(failurePropertyName);</span>
+<span class="fc" id="L330">            assertEquals(&quot;Number of errors is unexpected&quot;,</span>
+                    &quot;Got 2 errors and 0 warnings.&quot;, propertyValue);
+<span class="nc" id="L332">        }</span>
+<span class="fc" id="L333">    }</span>
+
+    @Test
+    public final void testOverrideProperty() throws IOException {
+<span class="fc" id="L337">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L339">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L340">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L341">        final CheckstyleAntTask.Property property = new CheckstyleAntTask.Property();</span>
+<span class="fc" id="L342">        property.setKey(&quot;lineLength.severity&quot;);</span>
+<span class="fc" id="L343">        property.setValue(&quot;ignore&quot;);</span>
+<span class="fc" id="L344">        antTask.addProperty(property);</span>
+<span class="fc" id="L345">        antTask.execute();</span>
+
+<span class="fc" id="L347">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L348">            TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L349">    }</span>
+
+    @Test
+    public final void testExecuteIgnoredModules() throws IOException {
+<span class="fc" id="L353">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+<span class="fc" id="L354">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L355">        antTask.setFailOnViolation(false);</span>
+<span class="fc" id="L356">        antTask.setExecuteIgnoredModules(true);</span>
+
+<span class="fc" id="L358">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L359">        final File outputFile = new File(&quot;target/ant_task_plain_output.txt&quot;);</span>
+<span class="fc" id="L360">        formatter.setTofile(outputFile);</span>
+<span class="fc" id="L361">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L362">        formatterType.setValue(&quot;plain&quot;);</span>
+<span class="fc" id="L363">        formatter.setType(formatterType);</span>
+<span class="fc" id="L364">        formatter.createListener(null);</span>
+
+<span class="fc" id="L366">        antTask.addFormatter(formatter);</span>
+<span class="fc" id="L367">        antTask.execute();</span>
+
+<span class="fc" id="L369">        final LocalizedMessage auditStartedMessage = new LocalizedMessage(1,</span>
+                Definitions.CHECKSTYLE_BUNDLE, &quot;DefaultLogger.auditStarted&quot;,
+                null, null,
+<span class="fc" id="L372">                getClass(), null);</span>
+<span class="fc" id="L373">        final LocalizedMessage auditFinishedMessage = new LocalizedMessage(1,</span>
+                Definitions.CHECKSTYLE_BUNDLE, &quot;DefaultLogger.auditFinished&quot;,
+                null, null,
+<span class="fc" id="L376">                getClass(), null);</span>
+
+<span class="fc" id="L378">        final List&lt;String&gt; output = FileUtils.readLines(outputFile, StandardCharsets.UTF_8);</span>
+<span class="fc" id="L379">        final String errorMessage = &quot;Content of file with violations differs from expected&quot;;</span>
+<span class="fc" id="L380">        assertEquals(errorMessage, auditStartedMessage.getMessage(), output.get(0));</span>
+<span class="fc" id="L381">        assertTrue(errorMessage, output.get(1).startsWith(&quot;[WARN]&quot;));</span>
+<span class="fc" id="L382">        assertTrue(errorMessage, output.get(1).endsWith(&quot;InputCheckstyleAntTaskError.java:4: &quot;</span>
+                + &quot;@incomplete=Some javadoc [WriteTag]&quot;));
+<span class="fc" id="L384">        assertTrue(errorMessage, output.get(2).startsWith(&quot;[ERROR]&quot;));</span>
+<span class="fc" id="L385">        assertTrue(errorMessage, output.get(2).endsWith(&quot;InputCheckstyleAntTaskError.java:7: &quot;</span>
+                + &quot;Line is longer than 70 characters (found 80). [LineLength]&quot;));
+<span class="fc" id="L387">        assertTrue(errorMessage, output.get(3).startsWith(&quot;[ERROR]&quot;));</span>
+<span class="fc" id="L388">        assertTrue(errorMessage, output.get(3).endsWith(&quot;InputCheckstyleAntTaskError.java:9: &quot;</span>
+                + &quot;Line is longer than 70 characters (found 81). [LineLength]&quot;));
+<span class="fc" id="L390">        assertEquals(errorMessage, auditFinishedMessage.getMessage(), output.get(4));</span>
+<span class="fc" id="L391">    }</span>
+
+    @Test
+    public final void testConfigurationByUrl() throws IOException {
+<span class="fc" id="L395">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L396">        antTask.setProject(new Project());</span>
+<span class="fc" id="L397">        final URL url = new File(getPath(CONFIG_FILE)).toURI().toURL();</span>
+<span class="fc" id="L398">        antTask.setConfig(url.toString());</span>
+<span class="fc" id="L399">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+
+<span class="fc" id="L401">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L402">        final File outputFile = new File(&quot;target/ant_task_config_by_url.txt&quot;);</span>
+<span class="fc" id="L403">        formatter.setTofile(outputFile);</span>
+<span class="fc" id="L404">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L405">        formatterType.setValue(&quot;plain&quot;);</span>
+<span class="fc" id="L406">        formatter.setType(formatterType);</span>
+<span class="fc" id="L407">        formatter.createListener(null);</span>
+<span class="fc" id="L408">        antTask.addFormatter(formatter);</span>
+
+<span class="fc" id="L410">        antTask.execute();</span>
+
+<span class="fc" id="L412">        final List&lt;String&gt; output = FileUtils.readLines(outputFile, StandardCharsets.UTF_8);</span>
+<span class="fc" id="L413">        final int sizeOfOutputWithNoViolations = 2;</span>
+<span class="fc" id="L414">        assertEquals(&quot;No violations expected&quot;, sizeOfOutputWithNoViolations, output.size());</span>
+<span class="fc" id="L415">    }</span>
+
+    @Test
+    public final void testConfigurationByResource() throws IOException {
+<span class="fc" id="L419">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L420">        antTask.setProject(new Project());</span>
+<span class="fc" id="L421">        antTask.setConfig(getPath(CONFIG_FILE));</span>
+<span class="fc" id="L422">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+
+<span class="fc" id="L424">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L425">        final File outputFile = new File(&quot;target/ant_task_config_by_url.txt&quot;);</span>
+<span class="fc" id="L426">        formatter.setTofile(outputFile);</span>
+<span class="fc" id="L427">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L428">        formatterType.setValue(&quot;plain&quot;);</span>
+<span class="fc" id="L429">        formatter.setType(formatterType);</span>
+<span class="fc" id="L430">        formatter.createListener(null);</span>
+<span class="fc" id="L431">        antTask.addFormatter(formatter);</span>
+
+<span class="fc" id="L433">        antTask.execute();</span>
+
+<span class="fc" id="L435">        final List&lt;String&gt; output = FileUtils.readLines(outputFile, StandardCharsets.UTF_8);</span>
+<span class="fc" id="L436">        final int sizeOfOutputWithNoViolations = 2;</span>
+<span class="fc" id="L437">        assertEquals(&quot;No violations expected&quot;, sizeOfOutputWithNoViolations, output.size());</span>
+<span class="fc" id="L438">    }</span>
+
+    @Test
+    public final void testSimultaneousConfiguration() throws IOException {
+<span class="fc" id="L442">        final File file = new File(getPath(CONFIG_FILE));</span>
+<span class="fc" id="L443">        final URL url = file.toURI().toURL();</span>
+<span class="fc" id="L444">        final String expected = &quot;Attribute 'config' has already been set&quot;;</span>
+        try {
+<span class="fc" id="L446">            final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L447">            antTask.setConfig(url.toString());</span>
+<span class="nc" id="L448">            antTask.setConfig(file.toString());</span>
+<span class="nc" id="L449">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L451">        catch (BuildException ex) {</span>
+<span class="fc" id="L452">            assertEquals(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L453">                    expected, ex.getMessage());</span>
+<span class="nc" id="L454">        }</span>
+<span class="fc" id="L455">    }</span>
+
+    @Test
+    public final void testSetPropertiesFile() throws IOException {
+<span class="fc" id="L459">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L461">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L462">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L463">        antTask.setProperties(new File(getPath(</span>
+                &quot;InputCheckstyleAntTaskCheckstyleAntTest.properties&quot;)));
+<span class="fc" id="L465">        antTask.execute();</span>
+
+<span class="fc" id="L467">        assertEquals(&quot;Property is not set&quot;,</span>
+<span class="fc" id="L468">                &quot;ignore&quot;, TestRootModuleChecker.getProperty());</span>
+<span class="fc" id="L469">    }</span>
+
+    @Test
+    public final void testSetPropertiesNonExistentFile() throws IOException {
+<span class="fc" id="L473">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+<span class="fc" id="L474">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L475">        antTask.setProperties(new File(getPath(NOT_EXISTING_FILE)));</span>
+        try {
+<span class="nc" id="L477">            antTask.execute();</span>
+<span class="nc" id="L478">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L480">        catch (BuildException ex) {</span>
+<span class="fc" id="L481">            assertTrue(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L482">                    ex.getMessage().startsWith(&quot;Error loading Properties file&quot;));</span>
+<span class="nc" id="L483">        }</span>
+<span class="fc" id="L484">    }</span>
+
+    @Test
+    public final void testXmlOutput() throws IOException {
+<span class="fc" id="L488">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+<span class="fc" id="L489">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L490">        antTask.setFailOnViolation(false);</span>
+<span class="fc" id="L491">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L492">        final File outputFile = new File(&quot;target/log.xml&quot;);</span>
+<span class="fc" id="L493">        formatter.setTofile(outputFile);</span>
+<span class="fc" id="L494">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L495">        formatterType.setValue(&quot;xml&quot;);</span>
+<span class="fc" id="L496">        formatter.setType(formatterType);</span>
+<span class="fc" id="L497">        antTask.addFormatter(formatter);</span>
+<span class="fc" id="L498">        antTask.execute();</span>
+
+<span class="fc" id="L500">        final List&lt;String&gt; expected = FileUtils.readLines(</span>
+<span class="fc" id="L501">                new File(getPath(&quot;ExpectedCheckstyleAntTaskXmlOutput.xml&quot;)),</span>
+                        StandardCharsets.UTF_8);
+<span class="fc" id="L503">        final List&lt;String&gt; actual = FileUtils.readLines(outputFile, StandardCharsets.UTF_8);</span>
+<span class="fc bfc" id="L504" title="All 2 branches covered.">        for (int i = 0; i &lt; expected.size(); i++) {</span>
+<span class="fc" id="L505">            final String line = expected.get(i);</span>
+<span class="fc bfc" id="L506" title="All 4 branches covered.">            if (!line.startsWith(&quot;&lt;checkstyle version&quot;) &amp;&amp; !line.startsWith(&quot;&lt;file&quot;)) {</span>
+<span class="fc" id="L507">                assertEquals(&quot;Content of file with violations differs from expected&quot;,</span>
+<span class="fc" id="L508">                        line, actual.get(i));</span>
+            }
+        }
+<span class="fc" id="L511">    }</span>
+
+    @Test
+    public final void testCreateListenerException() throws IOException {
+<span class="fc" id="L515">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+<span class="fc" id="L516">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L517">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L518">        final File outputFile = new File(&quot;target/&quot;);</span>
+<span class="fc" id="L519">        formatter.setTofile(outputFile);</span>
+<span class="fc" id="L520">        antTask.addFormatter(formatter);</span>
+        try {
+<span class="nc" id="L522">            antTask.execute();</span>
+<span class="nc" id="L523">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L525">        catch (BuildException ex) {</span>
+<span class="fc" id="L526">            assertTrue(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L527">                    ex.getMessage().startsWith(&quot;Unable to create listeners: formatters&quot;));</span>
+<span class="nc" id="L528">        }</span>
+<span class="fc" id="L529">    }</span>
+
+    @Test
+    public final void testCreateListenerExceptionWithXmlLogger() throws IOException {
+<span class="fc" id="L533">        final CheckstyleAntTask antTask = getCheckstyleAntTask();</span>
+<span class="fc" id="L534">        antTask.setFile(new File(getPath(FLAWLESS_INPUT)));</span>
+<span class="fc" id="L535">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L536">        final File outputFile = new File(&quot;target/&quot;);</span>
+<span class="fc" id="L537">        formatter.setTofile(outputFile);</span>
+<span class="fc" id="L538">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L539">        formatterType.setValue(&quot;xml&quot;);</span>
+<span class="fc" id="L540">        formatter.setType(formatterType);</span>
+<span class="fc" id="L541">        antTask.addFormatter(formatter);</span>
+        try {
+<span class="nc" id="L543">            antTask.execute();</span>
+<span class="nc" id="L544">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L546">        catch (BuildException ex) {</span>
+<span class="fc" id="L547">            assertTrue(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L548">                    ex.getMessage().startsWith(&quot;Unable to create listeners: formatters&quot;));</span>
+<span class="nc" id="L549">        }</span>
+<span class="fc" id="L550">    }</span>
+
+    @Test
+    public void testSetInvalidType() {
+<span class="fc" id="L554">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+        try {
+<span class="nc" id="L556">            formatterType.setValue(&quot;foo&quot;);</span>
+<span class="nc" id="L557">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L559">        catch (BuildException ex) {</span>
+<span class="fc" id="L560">            assertEquals(&quot;Error message is unexpected&quot;,</span>
+<span class="fc" id="L561">                    &quot;foo is not a legal value for this attribute&quot;, ex.getMessage());</span>
+<span class="nc" id="L562">        }</span>
+<span class="fc" id="L563">    }</span>
+
+    @Test
+    public void testSetClassName() {
+<span class="fc" id="L567">        final String customName = &quot;customName&quot;;</span>
+<span class="fc" id="L568">        final CheckstyleAntTask.Listener listener = new CheckstyleAntTask.Listener();</span>
+<span class="fc" id="L569">        listener.setClassname(customName);</span>
+<span class="fc" id="L570">        assertEquals(&quot;Class name is unexpected&quot;,</span>
+<span class="fc" id="L571">                customName, listener.getClassname());</span>
+<span class="fc" id="L572">    }</span>
+
+    @Test
+    public void testSetFileValueByFile() throws IOException {
+<span class="fc" id="L576">        final String filename = getPath(&quot;InputCheckstyleAntTaskCheckstyleAntTest.properties&quot;);</span>
+<span class="fc" id="L577">        final CheckstyleAntTask.Property property = new CheckstyleAntTask.Property();</span>
+<span class="fc" id="L578">        property.setFile(new File(filename));</span>
+<span class="fc" id="L579">        assertEquals(&quot;File path is unexpected&quot;,</span>
+<span class="fc" id="L580">                property.getValue(), new File(filename).getAbsolutePath());</span>
+<span class="fc" id="L581">    }</span>
+
+    @Test
+    public void testDefaultLoggerListener() throws IOException {
+<span class="fc" id="L585">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L586">        formatter.setUseFile(false);</span>
+<span class="fc" id="L587">        assertTrue(&quot;Listener instance has unexpected type&quot;,</span>
+<span class="fc" id="L588">                formatter.createListener(null) instanceof DefaultLogger);</span>
+<span class="fc" id="L589">    }</span>
+
+    @Test
+    public void testDefaultLoggerListenerWithToFile() throws IOException {
+<span class="fc" id="L593">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L594">        formatter.setUseFile(false);</span>
+<span class="fc" id="L595">        formatter.setTofile(new File(&quot;target/&quot;));</span>
+<span class="fc" id="L596">        assertTrue(&quot;Listener instance has unexpected type&quot;,</span>
+<span class="fc" id="L597">                formatter.createListener(null) instanceof DefaultLogger);</span>
+<span class="fc" id="L598">    }</span>
+
+    @Test
+    public void testXmlLoggerListener() throws IOException {
+<span class="fc" id="L602">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L603">        formatterType.setValue(&quot;xml&quot;);</span>
+<span class="fc" id="L604">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L605">        formatter.setType(formatterType);</span>
+<span class="fc" id="L606">        formatter.setUseFile(false);</span>
+<span class="fc" id="L607">        assertTrue(&quot;Listener instance has unexpected type&quot;,</span>
+<span class="fc" id="L608">                formatter.createListener(null) instanceof XMLLogger);</span>
+<span class="fc" id="L609">    }</span>
+
+    @Test
+    public void testXmlLoggerListenerWithToFile() throws IOException {
+<span class="fc" id="L613">        final CheckstyleAntTask.FormatterType formatterType = new CheckstyleAntTask.FormatterType();</span>
+<span class="fc" id="L614">        formatterType.setValue(&quot;xml&quot;);</span>
+<span class="fc" id="L615">        final CheckstyleAntTask.Formatter formatter = new CheckstyleAntTask.Formatter();</span>
+<span class="fc" id="L616">        formatter.setType(formatterType);</span>
+<span class="fc" id="L617">        formatter.setUseFile(false);</span>
+<span class="fc" id="L618">        formatter.setTofile(new File(&quot;target/&quot;));</span>
+<span class="fc" id="L619">        assertTrue(&quot;Listener instance has unexpected type&quot;,</span>
+<span class="fc" id="L620">                formatter.createListener(null) instanceof XMLLogger);</span>
+<span class="fc" id="L621">    }</span>
+
+    @Test
+    public void testSetClasspath() {
+<span class="fc" id="L625">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L626">        final Project project = new Project();</span>
+<span class="fc" id="L627">        final String path1 = &quot;firstPath&quot;;</span>
+<span class="fc" id="L628">        final String path2 = &quot;secondPath&quot;;</span>
+<span class="fc" id="L629">        antTask.setClasspath(new Path(project, path1));</span>
+<span class="fc" id="L630">        antTask.setClasspath(new Path(project, path2));</span>
+
+<span class="fc" id="L632">        final Path classpath = Whitebox.getInternalState(antTask, &quot;classpath&quot;);</span>
+<span class="fc" id="L633">        assertNotNull(&quot;Classpath should not be null&quot;, classpath);</span>
+<span class="fc" id="L634">        assertTrue(&quot;Classpath contain provided path&quot;, classpath.toString().contains(path1));</span>
+<span class="fc" id="L635">        assertTrue(&quot;Classpath contain provided path&quot;, classpath.toString().contains(path2));</span>
+<span class="fc" id="L636">    }</span>
+
+    @Test
+    public void testSetClasspathRef() {
+<span class="fc" id="L640">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L641">        antTask.setClasspathRef(new Reference(new Project(), &quot;id&quot;));</span>
+
+<span class="fc" id="L643">        assertNotNull(&quot;Classpath should not be null&quot;,</span>
+<span class="fc" id="L644">            Whitebox.getInternalState(antTask, &quot;classpath&quot;));</span>
+<span class="fc" id="L645">    }</span>
+
+    /** This test is created to satisfy pitest, it is hard to emulate Reference by Id. */
+    @Test
+    public void testSetClasspathRef1() {
+<span class="fc" id="L650">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+<span class="fc" id="L651">        final Project project = new Project();</span>
+<span class="fc" id="L652">        antTask.setClasspath(new Path(project, &quot;firstPath&quot;));</span>
+<span class="fc" id="L653">        antTask.setClasspathRef(new Reference(project, &quot;idXX&quot;));</span>
+
+        try {
+<span class="fc" id="L656">            assertNotNull(&quot;Classpath should not be null&quot;,</span>
+<span class="fc" id="L657">                    Whitebox.getInternalState(antTask, &quot;classpath&quot;));</span>
+<span class="fc" id="L658">            final Path classpath = Whitebox.getInternalState(antTask, &quot;classpath&quot;);</span>
+<span class="nc" id="L659">            classpath.list();</span>
+<span class="nc" id="L660">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L662">        catch (BuildException ex) {</span>
+<span class="fc" id="L663">            assertEquals(&quot;unexpected exception message&quot;,</span>
+<span class="fc" id="L664">                    &quot;Reference idXX not found.&quot;, ex.getMessage());</span>
+<span class="nc" id="L665">        }</span>
+<span class="fc" id="L666">    }</span>
+
+    @Test
+    public void testCreateClasspath() {
+<span class="fc" id="L670">        final CheckstyleAntTask antTask = new CheckstyleAntTask();</span>
+
+<span class="fc" id="L672">        assertEquals(&quot;Invalid classpath&quot;, &quot;&quot;, antTask.createClasspath().toString());</span>
+
+<span class="fc" id="L674">        antTask.setClasspath(new Path(new Project(), &quot;/path&quot;));</span>
+
+<span class="fc" id="L676">        assertEquals(&quot;Invalid classpath&quot;, &quot;&quot;, antTask.createClasspath().toString());</span>
+<span class="fc" id="L677">    }</span>
+
+    @Test
+    public void testDestroyed() throws IOException {
+<span class="fc" id="L681">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L683">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L684">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L685">        antTask.setMaxWarnings(0);</span>
+<span class="fc" id="L686">        antTask.execute();</span>
+
+<span class="fc" id="L688">        assertTrue(&quot;Checker is not destroyed&quot;,</span>
+<span class="fc" id="L689">                TestRootModuleChecker.isDestroyed());</span>
+<span class="fc" id="L690">    }</span>
+
+    @Test
+    public void testMaxWarnings() throws IOException {
+<span class="fc" id="L694">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L696">        final CheckstyleAntTask antTask = getCheckstyleAntTask(CUSTOM_ROOT_CONFIG_FILE);</span>
+<span class="fc" id="L697">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+<span class="fc" id="L698">        antTask.setMaxWarnings(0);</span>
+<span class="fc" id="L699">        antTask.execute();</span>
+
+<span class="fc" id="L701">        assertTrue(&quot;Checker is not processed&quot;,</span>
+<span class="fc" id="L702">                TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L703">    }</span>
+
+    @Test
+    public void testClassloaderInRootModule() throws IOException {
+<span class="fc" id="L707">        TestRootModuleChecker.reset();</span>
+<span class="fc" id="L708">        CheckerStub.reset();</span>
+
+<span class="fc" id="L710">        final CheckstyleAntTask antTask =</span>
+<span class="fc" id="L711">                getCheckstyleAntTask(</span>
+                        &quot;InputCheckstyleAntTaskConfigCustomCheckerRootModule.xml&quot;);
+<span class="fc" id="L713">        antTask.setFile(new File(getPath(VIOLATED_INPUT)));</span>
+
+<span class="fc" id="L715">        antTask.execute();</span>
+
+<span class="fc" id="L717">        final ClassLoader classLoader = CheckerStub.getClassLoader();</span>
+<span class="fc" id="L718">        assertTrue(&quot;Classloader is not set or has invalid type&quot;,</span>
+                classLoader instanceof AntClassLoader);
+<span class="fc" id="L720">    }</span>
+
+<span class="fc" id="L722">    private static class CheckstyleAntTaskLogStub extends CheckstyleAntTask {</span>
+
+<span class="fc" id="L724">        private final List&lt;String&gt; loggedMessages = new ArrayList&lt;&gt;();</span>
+
+        @Override
+        public void log(String msg, int msgLevel) {
+<span class="fc" id="L728">            loggedMessages.add(msg);</span>
+<span class="fc" id="L729">        }</span>
+
+        @Override
+        public void log(String msg, Throwable t, int msgLevel) {
+<span class="nc" id="L733">            loggedMessages.add(msg);</span>
+<span class="nc" id="L734">        }</span>
+
+        public List&lt;String&gt; getLoggedMessages() {
+<span class="fc" id="L737">            return Collections.unmodifiableList(loggedMessages);</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

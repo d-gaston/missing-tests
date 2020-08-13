@@ -1,0 +1,489 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>NumericColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">NumericColumn.java</span></div><h1>NumericColumn.java</h1><pre class="source lang-java linenums">package tech.tablesaw.api;
+
+import static tech.tablesaw.aggregate.AggregateFunctions.*;
+import static tech.tablesaw.columns.numbers.NumberPredicates.*;
+
+import it.unimi.dsi.fastutil.doubles.DoubleComparator;
+import it.unimi.dsi.fastutil.doubles.DoubleRBTreeSet;
+import java.text.NumberFormat;
+import java.util.Arrays;
+import java.util.Optional;
+import java.util.function.BiPredicate;
+import java.util.function.DoubleBinaryOperator;
+import java.util.function.DoubleFunction;
+import java.util.function.DoublePredicate;
+import org.apache.commons.math3.exception.NotANumberException;
+import org.apache.commons.math3.stat.correlation.KendallsCorrelation;
+import org.apache.commons.math3.stat.correlation.PearsonsCorrelation;
+import org.apache.commons.math3.stat.correlation.SpearmansCorrelation;
+import tech.tablesaw.aggregate.AggregateFunctions;
+import tech.tablesaw.aggregate.NumericAggregateFunction;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.numbers.NumberColumnFormatter;
+import tech.tablesaw.columns.numbers.NumberFilters;
+import tech.tablesaw.columns.numbers.NumberInterpolator;
+import tech.tablesaw.columns.numbers.NumberMapFunctions;
+import tech.tablesaw.columns.numbers.NumberRollingColumn;
+import tech.tablesaw.columns.numbers.Stats;
+import tech.tablesaw.selection.BitmapBackedSelection;
+import tech.tablesaw.selection.Selection;
+
+public interface NumericColumn&lt;T extends Number&gt;
+    extends Column&lt;T&gt;, NumberMapFunctions, NumberFilters {
+
+  @Override
+  default boolean isEmpty() {
+<span class="fc bfc" id="L36" title="All 2 branches covered.">    return size() == 0;</span>
+  }
+
+  @Override
+  default double[] asDoubleArray() {
+<span class="fc" id="L41">    final double[] output = new double[size()];</span>
+<span class="fc bfc" id="L42" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L43">      output[i] = getDouble(i);</span>
+    }
+<span class="fc" id="L45">    return output;</span>
+  }
+
+  @Override
+  default Selection eval(final DoublePredicate predicate) {
+<span class="fc" id="L50">    final Selection bitmap = new BitmapBackedSelection();</span>
+<span class="fc bfc" id="L51" title="All 2 branches covered.">    for (int idx = 0; idx &lt; size(); idx++) {</span>
+<span class="fc" id="L52">      final double next = getDouble(idx);</span>
+<span class="fc bfc" id="L53" title="All 2 branches covered.">      if (predicate.test(next)) {</span>
+<span class="fc" id="L54">        bitmap.add(idx);</span>
+      }
+    }
+<span class="fc" id="L57">    return bitmap;</span>
+  }
+
+  @Override
+  default Selection eval(final BiPredicate&lt;Number, Number&gt; predicate, final Number number) {
+<span class="nc" id="L62">    final double value = number.doubleValue();</span>
+<span class="nc" id="L63">    final Selection bitmap = new BitmapBackedSelection();</span>
+<span class="nc bnc" id="L64" title="All 2 branches missed.">    for (int idx = 0; idx &lt; size(); idx++) {</span>
+<span class="nc" id="L65">      final double next = getDouble(idx);</span>
+<span class="nc bnc" id="L66" title="All 2 branches missed.">      if (predicate.test(next, value)) {</span>
+<span class="nc" id="L67">        bitmap.add(idx);</span>
+      }
+    }
+<span class="nc" id="L70">    return bitmap;</span>
+  }
+
+  @Override
+  default Selection isIn(final Number... numbers) {
+<span class="nc" id="L75">    return isIn(Arrays.stream(numbers).mapToDouble(Number::doubleValue).toArray());</span>
+  }
+
+  @Override
+  default Selection isIn(final double... doubles) {
+<span class="fc" id="L80">    final Selection results = new BitmapBackedSelection();</span>
+<span class="fc" id="L81">    final DoubleRBTreeSet doubleSet = new DoubleRBTreeSet(doubles);</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L83" title="All 2 branches covered.">      if (doubleSet.contains(getDouble(i))) {</span>
+<span class="fc" id="L84">        results.add(i);</span>
+      }
+    }
+<span class="fc" id="L87">    return results;</span>
+  }
+
+  @Override
+  default Selection isNotIn(final Number... numbers) {
+<span class="nc" id="L92">    final Selection results = new BitmapBackedSelection();</span>
+<span class="nc" id="L93">    results.addRange(0, size());</span>
+<span class="nc" id="L94">    results.andNot(isIn(numbers));</span>
+<span class="nc" id="L95">    return results;</span>
+  }
+
+  @Override
+  default Selection isNotIn(final double... doubles) {
+<span class="fc" id="L100">    final Selection results = new BitmapBackedSelection();</span>
+<span class="fc" id="L101">    results.addRange(0, size());</span>
+<span class="fc" id="L102">    results.andNot(isIn(doubles));</span>
+<span class="fc" id="L103">    return results;</span>
+  }
+
+  @Override
+  default Selection isMissing() {
+<span class="fc" id="L108">    return eval(isMissing);</span>
+  }
+
+  @Override
+  default Selection isNotMissing() {
+<span class="fc" id="L113">    return eval(isNotMissing);</span>
+  }
+
+  /**
+   * Counts the number of rows satisfying predicate
+   *
+   * @param test the predicate
+   * @return the number of rows satisfying the predicate
+   */
+  default int count(DoublePredicate test) {
+<span class="fc" id="L123">    return count(test, size());</span>
+  }
+
+  /**
+   * Counts the number of rows satisfying predicate, but only upto the max value
+   *
+   * @param test the predicate
+   * @param max the maximum number of rows to count
+   * @return the number of rows satisfying the predicate
+   */
+  default int count(DoublePredicate test, int max) {
+<span class="fc" id="L134">    int count = 0;</span>
+<span class="fc bfc" id="L135" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L136" title="All 2 branches covered.">      if (test.test(getDouble(i))) {</span>
+<span class="fc" id="L137">        count++;</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">        if (count &gt;= max) {</span>
+<span class="fc" id="L139">          return count;</span>
+        }
+      }
+    }
+<span class="fc" id="L143">    return count;</span>
+  }
+
+  /**
+   * Returns true if all rows satisfy the predicate, false otherwise
+   *
+   * @param test the predicate
+   * @return true if all rows satisfy the predicate, false otherwise
+   */
+  default boolean allMatch(DoublePredicate test) {
+<span class="fc bfc" id="L153" title="All 2 branches covered.">    return count(test.negate(), 1) == 0;</span>
+  }
+
+  /**
+   * Returns true if any row satisfies the predicate, false otherwise
+   *
+   * @param test the predicate
+   * @return true if any rows satisfies the predicate, false otherwise
+   */
+  default boolean anyMatch(DoublePredicate test) {
+<span class="fc bfc" id="L163" title="All 2 branches covered.">    return count(test, 1) &gt; 0;</span>
+  }
+
+  /**
+   * Returns true if no row satisfies the predicate, false otherwise
+   *
+   * @param test the predicate
+   * @return true if no row satisfies the predicate, false otherwise
+   */
+  default boolean noneMatch(DoublePredicate test) {
+<span class="fc bfc" id="L173" title="All 2 branches covered.">    return count(test, 1) == 0;</span>
+  }
+
+  /**
+   * Returns the maximum row according to the provided Comparator
+   *
+   * @param comp
+   * @return the maximum row
+   */
+  default Optional&lt;Double&gt; max(DoubleComparator comp) {
+<span class="fc" id="L183">    boolean first = true;</span>
+<span class="fc" id="L184">    double d1 = 0.0;</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L186">      double d2 = getDouble(i);</span>
+<span class="fc bfc" id="L187" title="All 2 branches covered.">      if (first) {</span>
+<span class="fc" id="L188">        d1 = d2;</span>
+<span class="fc" id="L189">        first = false;</span>
+<span class="pc bpc" id="L190" title="1 of 2 branches missed.">      } else if (comp.compare(d1, d2) &lt; 0) {</span>
+<span class="fc" id="L191">        d1 = d2;</span>
+      }
+    }
+<span class="fc bfc" id="L194" title="All 2 branches covered.">    return (first ? Optional.&lt;Double&gt;empty() : Optional.&lt;Double&gt;of(d1));</span>
+  }
+
+  /**
+   * Returns the minimum row according to the provided Comparator
+   *
+   * @param comp
+   * @return the minimum row
+   */
+  default Optional&lt;Double&gt; min(DoubleComparator comp) {
+<span class="fc" id="L204">    boolean first = true;</span>
+<span class="fc" id="L205">    double d1 = 0.0;</span>
+<span class="fc bfc" id="L206" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L207">      double d2 = getDouble(i);</span>
+<span class="fc bfc" id="L208" title="All 2 branches covered.">      if (first) {</span>
+<span class="fc" id="L209">        d1 = d2;</span>
+<span class="fc" id="L210">        first = false;</span>
+<span class="pc bpc" id="L211" title="1 of 2 branches missed.">      } else if (comp.compare(d1, d2) &gt; 0) {</span>
+<span class="nc" id="L212">        d1 = d2;</span>
+      }
+    }
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    return (first ? Optional.&lt;Double&gt;empty() : Optional.&lt;Double&gt;of(d1));</span>
+  }
+
+  void setPrintFormatter(final NumberFormat format, final String missingValueString);
+
+  void setPrintFormatter(final NumberColumnFormatter formatter);
+
+  /**
+   * Reduction with binary operator and initial value
+   *
+   * @param initial initial value
+   * @param op the operator
+   * @return the result of reducing initial value and all rows with operator
+   */
+  default double reduce(double initial, DoubleBinaryOperator op) {
+<span class="fc" id="L230">    double acc = initial;</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L232">      acc = op.applyAsDouble(acc, getDouble(i));</span>
+    }
+<span class="fc" id="L234">    return acc;</span>
+  }
+
+  /**
+   * Reduction with binary operator
+   *
+   * @param op the operator
+   * @return Optional with the result of reducing all rows with operator
+   */
+  default Optional&lt;Double&gt; reduce(DoubleBinaryOperator op) {
+<span class="fc" id="L244">    boolean first = true;</span>
+<span class="fc" id="L245">    double acc = 0.0;</span>
+<span class="fc bfc" id="L246" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L247">      double d = getDouble(i);</span>
+<span class="fc bfc" id="L248" title="All 2 branches covered.">      if (first) {</span>
+<span class="fc" id="L249">        acc = d;</span>
+<span class="fc" id="L250">        first = false;</span>
+      } else {
+<span class="fc" id="L252">        acc = op.applyAsDouble(acc, d);</span>
+      }
+    }
+<span class="fc bfc" id="L255" title="All 2 branches covered.">    return (first ? Optional.&lt;Double&gt;empty() : Optional.&lt;Double&gt;of(acc));</span>
+  }
+
+  /**
+   * Maps the function across all rows, appending the results to the provided Column
+   *
+   * @param fun function to map
+   * @param into Column to which results are appended
+   * @return the provided Column, to which results are appended
+   */
+  default &lt;R extends Column&lt;RT&gt;, RT&gt; R mapInto(DoubleFunction&lt;? extends RT&gt; fun, R into) {
+<span class="fc bfc" id="L266" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+      try {
+<span class="fc" id="L268">        into.append(fun.apply(getDouble(i)));</span>
+<span class="nc" id="L269">      } catch (Exception e) {</span>
+<span class="nc" id="L270">        into.appendMissing();</span>
+<span class="fc" id="L271">      }</span>
+    }
+<span class="fc" id="L273">    return into;</span>
+  }
+
+  @Override
+  default NumericColumn&lt;T&gt; where(final Selection selection) {
+<span class="fc" id="L278">    return (NumericColumn&lt;T&gt;) subset(selection.toArray());</span>
+  }
+
+  @Override
+  default NumberInterpolator&lt;T&gt; interpolate() {
+<span class="fc" id="L283">    return new NumberInterpolator&lt;T&gt;(this);</span>
+  }
+
+  /**
+   * Summarizes the data in this column for all rows where the current value matches the selection
+   * criteria
+   *
+   * &lt;p&gt;Example: myColumn.summarize(myColumn.isLessThan(100), AggregateFunctions.count);
+   */
+  default Double summarize(Selection selection, NumericAggregateFunction function) {
+<span class="nc" id="L293">    NumericColumn&lt;T&gt; column = where(selection);</span>
+<span class="nc" id="L294">    return function.summarize(column);</span>
+  }
+
+  // Reduce functions applied to the whole column
+  default double sum() {
+<span class="fc" id="L299">    return sum.summarize(this);</span>
+  }
+
+  default double product() {
+<span class="fc" id="L303">    return product.summarize(this);</span>
+  }
+
+  default double mean() {
+<span class="fc" id="L307">    return mean.summarize(this);</span>
+  }
+
+  default double median() {
+<span class="fc" id="L311">    return median.summarize(this);</span>
+  }
+
+  default double quartile1() {
+<span class="fc" id="L315">    return quartile1.summarize(this);</span>
+  }
+
+  default double quartile3() {
+<span class="fc" id="L319">    return quartile3.summarize(this);</span>
+  }
+
+  default double percentile(double percentile) {
+<span class="fc" id="L323">    return AggregateFunctions.percentile(this, percentile);</span>
+  }
+
+  default double range() {
+<span class="nc" id="L327">    return range.summarize(this);</span>
+  }
+
+  default double max() {
+<span class="fc" id="L331">    return max.summarize(this);</span>
+  }
+
+  default double min() {
+<span class="fc" id="L335">    return min.summarize(this);</span>
+  }
+
+  default double variance() {
+<span class="fc" id="L339">    return variance.summarize(this);</span>
+  }
+
+  default double populationVariance() {
+<span class="fc" id="L343">    return populationVariance.summarize(this);</span>
+  }
+
+  default double standardDeviation() {
+<span class="fc" id="L347">    return stdDev.summarize(this);</span>
+  }
+
+  default double sumOfLogs() {
+<span class="fc" id="L351">    return sumOfLogs.summarize(this);</span>
+  }
+
+  default double sumOfSquares() {
+<span class="fc" id="L355">    return sumOfSquares.summarize(this);</span>
+  }
+
+  default double geometricMean() {
+<span class="fc" id="L359">    return geometricMean.summarize(this);</span>
+  }
+
+  /** Returns the quadraticMean, aka the root-mean-square, for all values in this column */
+  default double quadraticMean() {
+<span class="fc" id="L364">    return quadraticMean.summarize(this);</span>
+  }
+
+  default double kurtosis() {
+<span class="fc" id="L368">    return kurtosis.summarize(this);</span>
+  }
+
+  default double skewness() {
+<span class="fc" id="L372">    return skewness.summarize(this);</span>
+  }
+
+  /** Returns the pearson's correlation between the receiver and the otherColumn */
+  default double pearsons(NumericColumn&lt;?&gt; otherColumn) {
+<span class="fc" id="L377">    double[] x = asDoubleArray();</span>
+<span class="fc" id="L378">    double[] y = otherColumn.asDoubleArray();</span>
+<span class="fc" id="L379">    return new PearsonsCorrelation().correlation(x, y);</span>
+  }
+
+  /**
+   * Returns the Spearman's Rank correlation between the receiver and the otherColumn
+   *
+   * @param otherColumn A NumberColumn with no missing values
+   * @throws NotANumberException if either column contains any missing values
+   */
+  default double spearmans(NumericColumn&lt;?&gt; otherColumn) {
+<span class="fc" id="L389">    double[] x = asDoubleArray();</span>
+<span class="fc" id="L390">    double[] y = otherColumn.asDoubleArray();</span>
+<span class="fc" id="L391">    return new SpearmansCorrelation().correlation(x, y);</span>
+  }
+
+  /** Returns the Kendall's Tau Rank correlation between the receiver and the otherColumn */
+  default double kendalls(NumericColumn&lt;?&gt; otherColumn) {
+<span class="fc" id="L396">    double[] x = asDoubleArray();</span>
+<span class="fc" id="L397">    double[] y = otherColumn.asDoubleArray();</span>
+<span class="fc" id="L398">    return new KendallsCorrelation().correlation(x, y);</span>
+  }
+
+  default Table summary() {
+<span class="fc" id="L402">    return stats().asTable();</span>
+  }
+
+  default Stats stats() {
+<span class="fc" id="L406">    return Stats.create(this);</span>
+  }
+
+  default NumberRollingColumn rolling(final int windowSize) {
+<span class="fc" id="L410">    return new NumberRollingColumn(this, windowSize);</span>
+  }
+
+  default DoubleColumn pctChange(int periods) {
+<span class="fc" id="L414">    return (DoubleColumn)</span>
+<span class="fc" id="L415">        rolling(periods + 1)</span>
+<span class="fc" id="L416">            .calc(AggregateFunctions.pctChange)</span>
+<span class="fc" id="L417">            .setName(</span>
+<span class="fc" id="L418">                name() + &quot; &quot; + periods + &quot;-period &quot; + AggregateFunctions.pctChange.functionName());</span>
+  }
+
+  @Override
+  default NumericColumn&lt;T&gt; lead(final int n) {
+<span class="fc" id="L423">    final NumericColumn&lt;T&gt; numberColumn = lag(-n);</span>
+<span class="fc" id="L424">    numberColumn.setName(name() + &quot; lead(&quot; + n + &quot;)&quot;);</span>
+<span class="fc" id="L425">    return numberColumn;</span>
+  }
+
+  NumericColumn&lt;T&gt; lag(final int n);
+
+  double getDouble(int index);
+
+  /**
+   * Returns a new LongColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;The exact behavior when overridden depends on the type of the receiver (LongColumn,
+   * FloatColumn, etc.)
+   *
+   * &lt;p&gt;In this version, the result is a copy of the original
+   */
+  default LongColumn asLongColumn() {
+<span class="nc" id="L441">    return (LongColumn) this.copy();</span>
+  }
+
+  /**
+   * Returns a new IntColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;The exact behavior when overridden depends on the type of the receiver (LongColumn,
+   * FloatColumn, etc.)
+   *
+   * &lt;p&gt;In this version, the result is a copy of the original
+   */
+  default IntColumn asIntColumn() {
+<span class="nc" id="L453">    return (IntColumn) this.copy();</span>
+  }
+
+  /**
+   * Returns a new FloatColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;The exact behavior when overridden depends on the type of the receiver (LongColumn,
+   * FloatColumn, etc.)
+   *
+   * &lt;p&gt;In this version, the result is a copy of the original
+   */
+  default FloatColumn asFloatColumn() {
+<span class="nc" id="L465">    return (FloatColumn) this.copy();</span>
+  }
+
+  /**
+   * Returns a new DoubleColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;The exact behavior when overridden depends on the type of the receiver (LongColumn,
+   * FloatColumn, etc.)
+   *
+   * &lt;p&gt;In this version, the result is a copy of the original
+   */
+  default DoubleColumn asDoubleColumn() {
+<span class="fc" id="L477">    return (DoubleColumn) this.copy();</span>
+  }
+
+  default ShortColumn asShortColumn() {
+<span class="nc" id="L481">    return (ShortColumn) this.copy();</span>
+  }
+
+  @Override
+  NumericColumn&lt;T&gt; copy();
+
+  StringColumn asStringColumn();
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

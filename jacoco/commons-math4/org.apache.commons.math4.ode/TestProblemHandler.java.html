@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TestProblemHandler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ode</a> &gt; <span class="el_source">TestProblemHandler.java</span></div><h1>TestProblemHandler.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ode;
+
+import org.apache.commons.math4.exception.MaxCountExceededException;
+import org.apache.commons.math4.ode.ODEIntegrator;
+import org.apache.commons.math4.ode.sampling.StepHandler;
+import org.apache.commons.math4.ode.sampling.StepInterpolator;
+import org.apache.commons.math4.util.FastMath;
+
+/**
+ * This class is used to handle steps for the test problems
+ * integrated during the junit tests for the ODE integrators.
+ */
+public class TestProblemHandler
+  implements StepHandler {
+
+  /** Associated problem. */
+  private TestProblemAbstract problem;
+
+  /** Maximal errors encountered during the integration. */
+  private double maxValueError;
+  private double maxTimeError;
+
+  /** Error at the end of the integration. */
+  private double lastError;
+
+  /** Time at the end of integration. */
+  private double lastTime;
+
+  /** ODE solver used. */
+  private ODEIntegrator integrator;
+
+  /** Expected start for step. */
+  private double expectedStepStart;
+
+  /**
+   * Simple constructor.
+   * @param problem problem for which steps should be handled
+   * @param integrator ODE solver used
+   */
+<span class="fc" id="L57">  public TestProblemHandler(TestProblemAbstract problem, ODEIntegrator integrator) {</span>
+<span class="fc" id="L58">    this.problem = problem;</span>
+<span class="fc" id="L59">    this.integrator = integrator;</span>
+<span class="fc" id="L60">    maxValueError = 0;</span>
+<span class="fc" id="L61">    maxTimeError  = 0;</span>
+<span class="fc" id="L62">    lastError     = 0;</span>
+<span class="fc" id="L63">    expectedStepStart = Double.NaN;</span>
+<span class="fc" id="L64">  }</span>
+
+  @Override
+public void init(double t0, double[] y0, double t) {
+<span class="fc" id="L68">    maxValueError = 0;</span>
+<span class="fc" id="L69">    maxTimeError  = 0;</span>
+<span class="fc" id="L70">    lastError     = 0;</span>
+<span class="fc" id="L71">    expectedStepStart = Double.NaN;</span>
+<span class="fc" id="L72">  }</span>
+
+  @Override
+public void handleStep(StepInterpolator interpolator, boolean isLast) throws MaxCountExceededException {
+
+<span class="fc" id="L77">    double start = integrator.getCurrentStepStart();</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    if (FastMath.abs((start - problem.getInitialTime()) / integrator.getCurrentSignedStepsize()) &gt; 0.001) {</span>
+        // multistep integrators do not handle the first steps themselves
+        // so we have to make sure the integrator we look at has really started its work
+<span class="fc bfc" id="L81" title="All 2 branches covered.">        if (!Double.isNaN(expectedStepStart)) {</span>
+            // the step should either start at the end of the integrator step
+            // or at an event if the step is split into several substeps
+<span class="fc" id="L84">            double stepError = FastMath.max(maxTimeError, FastMath.abs(start - expectedStepStart));</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">            for (double eventTime : problem.getTheoreticalEventsTimes()) {</span>
+<span class="fc" id="L86">                stepError = FastMath.min(stepError, FastMath.abs(start - eventTime));</span>
+            }
+<span class="fc" id="L88">            maxTimeError = FastMath.max(maxTimeError, stepError);</span>
+        }
+<span class="fc" id="L90">        expectedStepStart = start + integrator.getCurrentSignedStepsize();</span>
+    }
+
+
+<span class="fc" id="L94">    double pT = interpolator.getPreviousTime();</span>
+<span class="fc" id="L95">    double cT = interpolator.getCurrentTime();</span>
+<span class="fc" id="L96">    double[] errorScale = problem.getErrorScale();</span>
+
+    // store the error at the last step
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    if (isLast) {</span>
+<span class="fc" id="L100">        double[] interpolatedY = interpolator.getInterpolatedState();</span>
+<span class="fc" id="L101">        double[] theoreticalY  = problem.computeTheoreticalState(cT);</span>
+<span class="fc bfc" id="L102" title="All 2 branches covered.">        for (int i = 0; i &lt; interpolatedY.length; ++i) {</span>
+<span class="fc" id="L103">            double error = FastMath.abs(interpolatedY[i] - theoreticalY[i]);</span>
+<span class="fc" id="L104">            lastError = FastMath.max(error, lastError);</span>
+        }
+<span class="fc" id="L106">        lastTime = cT;</span>
+    }
+    // walk through the step
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    for (int k = 0; k &lt;= 20; ++k) {</span>
+
+<span class="fc" id="L111">        double time = pT + (k * (cT - pT)) / 20;</span>
+<span class="fc" id="L112">        interpolator.setInterpolatedTime(time);</span>
+<span class="fc" id="L113">        double[] interpolatedY = interpolator.getInterpolatedState();</span>
+<span class="fc" id="L114">        double[] theoreticalY  = problem.computeTheoreticalState(interpolator.getInterpolatedTime());</span>
+
+        // update the errors
+<span class="fc bfc" id="L117" title="All 2 branches covered.">        for (int i = 0; i &lt; interpolatedY.length; ++i) {</span>
+<span class="fc" id="L118">            double error = errorScale[i] * FastMath.abs(interpolatedY[i] - theoreticalY[i]);</span>
+<span class="fc" id="L119">            maxValueError = FastMath.max(error, maxValueError);</span>
+        }
+    }
+
+<span class="fc" id="L123">  }</span>
+
+  /**
+   * Get the maximal value error encountered during integration.
+   * @return maximal value error
+   */
+  public double getMaximalValueError() {
+<span class="fc" id="L130">    return maxValueError;</span>
+  }
+
+  /**
+   * Get the maximal time error encountered during integration.
+   * @return maximal time error
+   */
+  public double getMaximalTimeError() {
+<span class="fc" id="L138">    return maxTimeError;</span>
+  }
+
+
+  public int getCalls() {
+<span class="nc" id="L143">      return problem.getCalls();</span>
+  }
+
+  /**
+   * Get the error at the end of the integration.
+   * @return error at the end of the integration
+   */
+  public double getLastError() {
+<span class="fc" id="L151">    return lastError;</span>
+  }
+
+  /**
+   * Get the time at the end of the integration.
+   * @return time at the end of the integration.
+   */
+  public double getLastTime() {
+<span class="fc" id="L159">    return lastTime;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

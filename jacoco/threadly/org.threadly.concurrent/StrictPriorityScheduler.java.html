@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>StrictPriorityScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">StrictPriorityScheduler.java</span></div><h1>StrictPriorityScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ThreadFactory;
+
+import org.threadly.concurrent.collections.ConcurrentArrayList;
+
+/**
+ * In order to avoid a performance hit by verifying state which would indicate a programmer 
+ * error at runtime.  This class functions to verify those little things during unit tests.  
+ * For that reason this class extends {@link PriorityScheduler} to do additional 
+ * functions, but calls into the super functions to verify the actual behavior. 
+ * 
+ * @author jent - Mike Jensen
+ */
+public class StrictPriorityScheduler extends PriorityScheduler {
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.  It also  defaults to all newly created 
+   * threads being daemon threads.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   */
+  public StrictPriorityScheduler(int poolSize) {
+<span class="fc" id="L26">    this(poolSize, null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, DEFAULT_NEW_THREADS_DAEMON);</span>
+<span class="fc" id="L27">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   */
+  public StrictPriorityScheduler(int poolSize, boolean useDaemonThreads) {
+<span class="nc" id="L38">    this(poolSize, null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, useDaemonThreads);</span>
+<span class="nc" id="L39">  }</span>
+
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   */
+  public StrictPriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                                 long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L54">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, DEFAULT_NEW_THREADS_DAEMON);</span>
+<span class="fc" id="L55">  }</span>
+
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   */
+  public StrictPriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                                 long maxWaitForLowPriorityInMs, 
+                                 boolean useDaemonThreads) {
+<span class="fc" id="L72">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, </span>
+<span class="fc" id="L73">         new ConfigurableThreadFactory(PriorityScheduler.class.getSimpleName() + &quot;-&quot;, </span>
+                                       true, useDaemonThreads, Thread.NORM_PRIORITY, null, null));
+<span class="fc" id="L75">  }</span>
+
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param threadFactory thread factory for producing new threads within executor
+   */
+  public StrictPriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                                 long maxWaitForLowPriorityInMs, ThreadFactory threadFactory) {
+<span class="fc" id="L91">    super(new WorkerPool(threadFactory, poolSize), defaultPriority, maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L92">  }</span>
+  
+  private static void verifyOneTimeTaskQueueSet(QueueSet queueSet, OneTimeTaskWrapper task) {
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    if (task.taskQueue instanceof ConcurrentLinkedQueue) {</span>
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">      if (queueSet.executeQueue != task.taskQueue) {</span>
+<span class="nc" id="L97">        throw new IllegalStateException(&quot;Queue missmatch&quot;);</span>
+      }
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    } else if (task.taskQueue instanceof ConcurrentArrayList) {</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">      if (queueSet.scheduleQueue != task.taskQueue) {</span>
+<span class="nc" id="L101">        throw new IllegalStateException(&quot;Queue missmatch&quot;);</span>
+      }
+<span class="pc bpc" id="L103" title="1 of 2 branches missed.">    } else if (task.taskQueue != null) {</span>
+<span class="nc" id="L104">      throw new UnsupportedOperationException(&quot;Unhandled queue type&quot;);</span>
+    }
+<span class="fc" id="L106">  }</span>
+  
+  @Override
+  protected void addToExecuteQueue(QueueSet queueSet, OneTimeTaskWrapper task) {
+<span class="fc" id="L110">    verifyOneTimeTaskQueueSet(queueSet, task);</span>
+    
+<span class="fc" id="L112">    super.addToExecuteQueue(queueSet, task);</span>
+<span class="fc" id="L113">  }</span>
+  
+  @Override
+  protected void addToScheduleQueue(QueueSet queueSet, TaskWrapper task) {
+<span class="fc bfc" id="L117" title="All 2 branches covered.">    if (task instanceof OneTimeTaskWrapper) {</span>
+<span class="fc" id="L118">      verifyOneTimeTaskQueueSet(queueSet, (OneTimeTaskWrapper)task);</span>
+<span class="pc bpc" id="L119" title="1 of 2 branches missed.">    } else if (task instanceof RecurringTaskWrapper) {</span>
+<span class="fc" id="L120">      RecurringTaskWrapper recurringTask = (RecurringTaskWrapper)task;</span>
+<span class="pc bpc" id="L121" title="1 of 2 branches missed.">      if (queueSet != recurringTask.queueSet) {</span>
+<span class="nc" id="L122">        throw new IllegalStateException(&quot;QueueSet mismatch&quot;);</span>
+      }
+<span class="fc bfc" id="L124" title="All 2 branches covered.">      if (task instanceof RecurringDelayTaskWrapper) {</span>
+<span class="fc" id="L125">        task = new StrictRecurringDelayTaskWrapper(task.task, recurringTask.queueSet, </span>
+                                                   recurringTask.nextRunTime, 
+                                                   ((RecurringDelayTaskWrapper)recurringTask).recurringDelay);
+      } else {
+<span class="fc" id="L129">        task = new StrictRecurringRateTaskWrapper(task.task, recurringTask.queueSet, </span>
+                                                  recurringTask.nextRunTime, 
+                                                  ((RecurringRateTaskWrapper)recurringTask).period);
+      }
+<span class="fc" id="L133">    } else {</span>
+<span class="nc" id="L134">      throw new UnsupportedOperationException(&quot;Unhandled task type&quot;);</span>
+    }
+    
+<span class="fc" id="L137">    super.addToScheduleQueue(queueSet, task);</span>
+<span class="fc" id="L138">  }</span>
+
+  protected static class StrictRecurringDelayTaskWrapper extends RecurringDelayTaskWrapper {
+    protected StrictRecurringDelayTaskWrapper(Runnable task, QueueSet queueSet, long firstRunTime,
+                                              long recurringDelay) {
+<span class="fc" id="L143">      super(task, queueSet, firstRunTime, recurringDelay);</span>
+<span class="fc" id="L144">    }</span>
+
+    @Override
+    public boolean canExecute(short executeReference) {
+<span class="fc" id="L148">      synchronized (queueSet.scheduleQueue.getModificationLock()) {</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">        if (super.canExecute(executeReference)) {</span>
+<span class="fc" id="L150">          int index = queueSet.scheduleQueue.lastIndexOf(this);</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">          if (index != queueSet.scheduleQueue.size() - 1) {</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">            for (int i = index + 1; i &lt; queueSet.scheduleQueue.size(); i++) {</span>
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">              if (queueSet.scheduleQueue.get(i).getRunTime() != Long.MAX_VALUE) {</span>
+<span class="nc" id="L154">                IllegalStateException e = </span>
+                    new IllegalStateException(&quot;Invalid queue state: &quot; + queueSet.scheduleQueue);
+<span class="nc" id="L156">                e.printStackTrace();</span>
+<span class="nc" id="L157">                throw e;</span>
+              }
+            }
+          }
+<span class="fc" id="L161">          return true;</span>
+        } else {
+<span class="fc" id="L163">          return false;</span>
+        }
+      }
+    }
+  }
+
+  protected static class StrictRecurringRateTaskWrapper extends RecurringRateTaskWrapper {
+    protected StrictRecurringRateTaskWrapper(Runnable task, QueueSet queueSet, long firstRunTime,
+                                             long period) {
+<span class="fc" id="L172">      super(task, queueSet, firstRunTime, period);</span>
+<span class="fc" id="L173">    }</span>
+
+    @Override
+    public boolean canExecute(short executeReference) {
+<span class="fc" id="L177">      synchronized (queueSet.scheduleQueue.getModificationLock()) {</span>
+<span class="fc bfc" id="L178" title="All 2 branches covered.">        if (super.canExecute(executeReference)) {</span>
+<span class="fc" id="L179">          int index = queueSet.scheduleQueue.lastIndexOf(this);</span>
+<span class="fc bfc" id="L180" title="All 2 branches covered.">          if (index != queueSet.scheduleQueue.size() - 1) {</span>
+<span class="fc bfc" id="L181" title="All 2 branches covered.">            for (int i = index + 1; i &lt; queueSet.scheduleQueue.size(); i++) {</span>
+<span class="pc bpc" id="L182" title="1 of 2 branches missed.">              if (queueSet.scheduleQueue.get(i).getRunTime() != Long.MAX_VALUE) {</span>
+<span class="nc" id="L183">                IllegalStateException e = </span>
+                    new IllegalStateException(&quot;Invalid queue state: &quot; + queueSet.scheduleQueue);
+<span class="nc" id="L185">                e.printStackTrace();</span>
+<span class="nc" id="L186">                throw e;</span>
+              }
+            }
+          }
+<span class="fc" id="L190">          return true;</span>
+        } else {
+<span class="fc" id="L192">          return false;</span>
+        }
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

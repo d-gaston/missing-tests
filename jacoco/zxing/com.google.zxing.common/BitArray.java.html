@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BitArray.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common</a> &gt; <span class="el_source">BitArray.java</span></div><h1>BitArray.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common;
+
+import java.util.Arrays;
+
+/**
+ * &lt;p&gt;A simple, fast array of bits, represented compactly by an array of ints internally.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+public final class BitArray implements Cloneable {
+
+  private int[] bits;
+  private int size;
+
+<span class="fc" id="L31">  public BitArray() {</span>
+<span class="fc" id="L32">    this.size = 0;</span>
+<span class="fc" id="L33">    this.bits = new int[1];</span>
+<span class="fc" id="L34">  }</span>
+
+<span class="fc" id="L36">  public BitArray(int size) {</span>
+<span class="fc" id="L37">    this.size = size;</span>
+<span class="fc" id="L38">    this.bits = makeArray(size);</span>
+<span class="fc" id="L39">  }</span>
+
+  // For testing only
+<span class="fc" id="L42">  BitArray(int[] bits, int size) {</span>
+<span class="fc" id="L43">    this.bits = bits;</span>
+<span class="fc" id="L44">    this.size = size;</span>
+<span class="fc" id="L45">  }</span>
+
+  public int getSize() {
+<span class="fc" id="L48">    return size;</span>
+  }
+
+  public int getSizeInBytes() {
+<span class="fc" id="L52">    return (size + 7) / 8;</span>
+  }
+
+  private void ensureCapacity(int size) {
+<span class="fc bfc" id="L56" title="All 2 branches covered.">    if (size &gt; bits.length * 32) {</span>
+<span class="fc" id="L57">      int[] newBits = makeArray(size);</span>
+<span class="fc" id="L58">      System.arraycopy(bits, 0, newBits, 0, bits.length);</span>
+<span class="fc" id="L59">      this.bits = newBits;</span>
+    }
+<span class="fc" id="L61">  }</span>
+
+  /**
+   * @param i bit to get
+   * @return true iff bit i is set
+   */
+  public boolean get(int i) {
+<span class="fc bfc" id="L68" title="All 2 branches covered.">    return (bits[i / 32] &amp; (1 &lt;&lt; (i &amp; 0x1F))) != 0;</span>
+  }
+
+  /**
+   * Sets bit i.
+   *
+   * @param i bit to set
+   */
+  public void set(int i) {
+<span class="fc" id="L77">    bits[i / 32] |= 1 &lt;&lt; (i &amp; 0x1F);</span>
+<span class="fc" id="L78">  }</span>
+
+  /**
+   * Flips bit i.
+   *
+   * @param i bit to set
+   */
+  public void flip(int i) {
+<span class="fc" id="L86">    bits[i / 32] ^= 1 &lt;&lt; (i &amp; 0x1F);</span>
+<span class="fc" id="L87">  }</span>
+
+  /**
+   * @param from first bit to check
+   * @return index of first bit that is set, starting from the given index, or size if none are set
+   *  at or beyond this given index
+   * @see #getNextUnset(int)
+   */
+  public int getNextSet(int from) {
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (from &gt;= size) {</span>
+<span class="fc" id="L97">      return size;</span>
+    }
+<span class="fc" id="L99">    int bitsOffset = from / 32;</span>
+<span class="fc" id="L100">    int currentBits = bits[bitsOffset];</span>
+    // mask off lesser bits first
+<span class="fc" id="L102">    currentBits &amp;= -(1 &lt;&lt; (from &amp; 0x1F));</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    while (currentBits == 0) {</span>
+<span class="fc bfc" id="L104" title="All 2 branches covered.">      if (++bitsOffset == bits.length) {</span>
+<span class="fc" id="L105">        return size;</span>
+      }
+<span class="fc" id="L107">      currentBits = bits[bitsOffset];</span>
+    }
+<span class="fc" id="L109">    int result = (bitsOffset * 32) + Integer.numberOfTrailingZeros(currentBits);</span>
+<span class="pc bpc" id="L110" title="1 of 2 branches missed.">    return result &gt; size ? size : result;</span>
+  }
+
+  /**
+   * @param from index to start looking for unset bit
+   * @return index of next unset bit, or {@code size} if none are unset until the end
+   * @see #getNextSet(int)
+   */
+  public int getNextUnset(int from) {
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    if (from &gt;= size) {</span>
+<span class="fc" id="L120">      return size;</span>
+    }
+<span class="fc" id="L122">    int bitsOffset = from / 32;</span>
+<span class="fc" id="L123">    int currentBits = ~bits[bitsOffset];</span>
+    // mask off lesser bits first
+<span class="fc" id="L125">    currentBits &amp;= -(1 &lt;&lt; (from &amp; 0x1F));</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">    while (currentBits == 0) {</span>
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">      if (++bitsOffset == bits.length) {</span>
+<span class="nc" id="L128">        return size;</span>
+      }
+<span class="fc" id="L130">      currentBits = ~bits[bitsOffset];</span>
+    }
+<span class="fc" id="L132">    int result = (bitsOffset * 32) + Integer.numberOfTrailingZeros(currentBits);</span>
+<span class="pc bpc" id="L133" title="1 of 2 branches missed.">    return result &gt; size ? size : result;</span>
+  }
+
+  /**
+   * Sets a block of 32 bits, starting at bit i.
+   *
+   * @param i first bit to set
+   * @param newBits the new value of the next 32 bits. Note again that the least-significant bit
+   * corresponds to bit i, the next-least-significant to i+1, and so on.
+   */
+  public void setBulk(int i, int newBits) {
+<span class="fc" id="L144">    bits[i / 32] = newBits;</span>
+<span class="fc" id="L145">  }</span>
+
+  /**
+   * Sets a range of bits.
+   *
+   * @param start start of range, inclusive.
+   * @param end end of range, exclusive
+   */
+  public void setRange(int start, int end) {
+<span class="pc bpc" id="L154" title="3 of 6 branches missed.">    if (end &lt; start || start &lt; 0 || end &gt; size) {</span>
+<span class="nc" id="L155">      throw new IllegalArgumentException();</span>
+    }
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">    if (end == start) {</span>
+<span class="nc" id="L158">      return;</span>
+    }
+<span class="fc" id="L160">    end--; // will be easier to treat this as the last actually set bit -- inclusive</span>
+<span class="fc" id="L161">    int firstInt = start / 32;</span>
+<span class="fc" id="L162">    int lastInt = end / 32;</span>
+<span class="fc bfc" id="L163" title="All 2 branches covered.">    for (int i = firstInt; i &lt;= lastInt; i++) {</span>
+<span class="fc bfc" id="L164" title="All 2 branches covered.">      int firstBit = i &gt; firstInt ? 0 : start &amp; 0x1F;</span>
+<span class="fc bfc" id="L165" title="All 2 branches covered.">      int lastBit = i &lt; lastInt ? 31 : end &amp; 0x1F;</span>
+      // Ones from firstBit to lastBit, inclusive
+<span class="fc" id="L167">      int mask = (2 &lt;&lt; lastBit) - (1 &lt;&lt; firstBit);</span>
+<span class="fc" id="L168">      bits[i] |= mask;</span>
+    }
+<span class="fc" id="L170">  }</span>
+
+  /**
+   * Clears all bits (sets to false).
+   */
+  public void clear() {
+<span class="fc" id="L176">    int max = bits.length;</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">    for (int i = 0; i &lt; max; i++) {</span>
+<span class="fc" id="L178">      bits[i] = 0;</span>
+    }
+<span class="fc" id="L180">  }</span>
+
+  /**
+   * Efficient method to check if a range of bits is set, or not set.
+   *
+   * @param start start of range, inclusive.
+   * @param end end of range, exclusive
+   * @param value if true, checks that bits in range are set, otherwise checks that they are not set
+   * @return true iff all bits are set or not set in range, according to value argument
+   * @throws IllegalArgumentException if end is less than start or the range is not contained in the array
+   */
+  public boolean isRange(int start, int end, boolean value) {
+<span class="pc bpc" id="L192" title="3 of 6 branches missed.">    if (end &lt; start || start &lt; 0 || end &gt; size) {</span>
+<span class="nc" id="L193">      throw new IllegalArgumentException();</span>
+    }
+<span class="pc bpc" id="L195" title="1 of 2 branches missed.">    if (end == start) {</span>
+<span class="nc" id="L196">      return true; // empty range matches</span>
+    }
+<span class="fc" id="L198">    end--; // will be easier to treat this as the last actually set bit -- inclusive</span>
+<span class="fc" id="L199">    int firstInt = start / 32;</span>
+<span class="fc" id="L200">    int lastInt = end / 32;</span>
+<span class="fc bfc" id="L201" title="All 2 branches covered.">    for (int i = firstInt; i &lt;= lastInt; i++) {</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">      int firstBit = i &gt; firstInt ? 0 : start &amp; 0x1F;</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">      int lastBit = i &lt; lastInt ? 31 : end &amp; 0x1F;</span>
+      // Ones from firstBit to lastBit, inclusive
+<span class="fc" id="L205">      int mask = (2 &lt;&lt; lastBit) - (1 &lt;&lt; firstBit);</span>
+
+      // Return false if we're looking for 1s and the masked bits[i] isn't all 1s (that is,
+      // equals the mask, or we're looking for 0s and the masked portion is not all 0s
+<span class="fc bfc" id="L209" title="All 4 branches covered.">      if ((bits[i] &amp; mask) != (value ? mask : 0)) {</span>
+<span class="fc" id="L210">        return false;</span>
+      }
+    }
+<span class="fc" id="L213">    return true;</span>
+  }
+
+  public void appendBit(boolean bit) {
+<span class="fc" id="L217">    ensureCapacity(size + 1);</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">    if (bit) {</span>
+<span class="fc" id="L219">      bits[size / 32] |= 1 &lt;&lt; (size &amp; 0x1F);</span>
+    }
+<span class="fc" id="L221">    size++;</span>
+<span class="fc" id="L222">  }</span>
+
+  /**
+   * Appends the least-significant bits, from value, in order from most-significant to
+   * least-significant. For example, appending 6 bits from 0x000001E will append the bits
+   * 0, 1, 1, 1, 1, 0 in that order.
+   *
+   * @param value {@code int} containing bits to append
+   * @param numBits bits from value to append
+   */
+  public void appendBits(int value, int numBits) {
+<span class="pc bpc" id="L233" title="2 of 4 branches missed.">    if (numBits &lt; 0 || numBits &gt; 32) {</span>
+<span class="nc" id="L234">      throw new IllegalArgumentException(&quot;Num bits must be between 0 and 32&quot;);</span>
+    }
+<span class="fc" id="L236">    ensureCapacity(size + numBits);</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">    for (int numBitsLeft = numBits; numBitsLeft &gt; 0; numBitsLeft--) {</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">      appendBit(((value &gt;&gt; (numBitsLeft - 1)) &amp; 0x01) == 1);</span>
+    }
+<span class="fc" id="L240">  }</span>
+
+  public void appendBitArray(BitArray other) {
+<span class="fc" id="L243">    int otherSize = other.size;</span>
+<span class="fc" id="L244">    ensureCapacity(size + otherSize);</span>
+<span class="fc bfc" id="L245" title="All 2 branches covered.">    for (int i = 0; i &lt; otherSize; i++) {</span>
+<span class="fc" id="L246">      appendBit(other.get(i));</span>
+    }
+<span class="fc" id="L248">  }</span>
+
+  public void xor(BitArray other) {
+<span class="pc bpc" id="L251" title="1 of 2 branches missed.">    if (size != other.size) {</span>
+<span class="nc" id="L252">      throw new IllegalArgumentException(&quot;Sizes don't match&quot;);</span>
+    }
+<span class="fc bfc" id="L254" title="All 2 branches covered.">    for (int i = 0; i &lt; bits.length; i++) {</span>
+      // The last int could be incomplete (i.e. not have 32 bits in
+      // it) but there is no problem since 0 XOR 0 == 0.
+<span class="fc" id="L257">      bits[i] ^= other.bits[i];</span>
+    }
+<span class="fc" id="L259">  }</span>
+
+  /**
+   *
+   * @param bitOffset first bit to start writing
+   * @param array array to write into. Bytes are written most-significant byte first. This is the opposite
+   *  of the internal representation, which is exposed by {@link #getBitArray()}
+   * @param offset position in array to start writing
+   * @param numBytes how many bytes to write
+   */
+  public void toBytes(int bitOffset, byte[] array, int offset, int numBytes) {
+<span class="fc bfc" id="L270" title="All 2 branches covered.">    for (int i = 0; i &lt; numBytes; i++) {</span>
+<span class="fc" id="L271">      int theByte = 0;</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">      for (int j = 0; j &lt; 8; j++) {</span>
+<span class="fc bfc" id="L273" title="All 2 branches covered.">        if (get(bitOffset)) {</span>
+<span class="fc" id="L274">          theByte |= 1 &lt;&lt; (7 - j);</span>
+        }
+<span class="fc" id="L276">        bitOffset++;</span>
+      }
+<span class="fc" id="L278">      array[offset + i] = (byte) theByte;</span>
+    }
+<span class="fc" id="L280">  }</span>
+
+  /**
+   * @return underlying array of ints. The first element holds the first 32 bits, and the least
+   *         significant bit is bit 0.
+   */
+  public int[] getBitArray() {
+<span class="fc" id="L287">    return bits;</span>
+  }
+
+  /**
+   * Reverses all bits in the array.
+   */
+  public void reverse() {
+<span class="fc" id="L294">    int[] newBits = new int[bits.length];</span>
+    // reverse all int's first
+<span class="fc" id="L296">    int len = (size - 1) / 32;</span>
+<span class="fc" id="L297">    int oldBitsLen = len + 1;</span>
+<span class="fc bfc" id="L298" title="All 2 branches covered.">    for (int i = 0; i &lt; oldBitsLen; i++) {</span>
+<span class="fc" id="L299">      long x = bits[i];</span>
+<span class="fc" id="L300">      x = ((x &gt;&gt;  1) &amp; 0x55555555L) | ((x &amp; 0x55555555L) &lt;&lt;  1);</span>
+<span class="fc" id="L301">      x = ((x &gt;&gt;  2) &amp; 0x33333333L) | ((x &amp; 0x33333333L) &lt;&lt;  2);</span>
+<span class="fc" id="L302">      x = ((x &gt;&gt;  4) &amp; 0x0f0f0f0fL) | ((x &amp; 0x0f0f0f0fL) &lt;&lt;  4);</span>
+<span class="fc" id="L303">      x = ((x &gt;&gt;  8) &amp; 0x00ff00ffL) | ((x &amp; 0x00ff00ffL) &lt;&lt;  8);</span>
+<span class="fc" id="L304">      x = ((x &gt;&gt; 16) &amp; 0x0000ffffL) | ((x &amp; 0x0000ffffL) &lt;&lt; 16);</span>
+<span class="fc" id="L305">      newBits[len - i] = (int) x;</span>
+    }
+    // now correct the int's if the bit size isn't a multiple of 32
+<span class="fc bfc" id="L308" title="All 2 branches covered.">    if (size != oldBitsLen * 32) {</span>
+<span class="fc" id="L309">      int leftOffset = oldBitsLen * 32 - size;</span>
+<span class="fc" id="L310">      int currentInt = newBits[0] &gt;&gt;&gt; leftOffset;</span>
+<span class="fc bfc" id="L311" title="All 2 branches covered.">      for (int i = 1; i &lt; oldBitsLen; i++) {</span>
+<span class="fc" id="L312">        int nextInt = newBits[i];</span>
+<span class="fc" id="L313">        currentInt |= nextInt &lt;&lt; (32 - leftOffset);</span>
+<span class="fc" id="L314">        newBits[i - 1] = currentInt;</span>
+<span class="fc" id="L315">        currentInt = nextInt &gt;&gt;&gt; leftOffset;</span>
+      }
+<span class="fc" id="L317">      newBits[oldBitsLen - 1] = currentInt;</span>
+    }
+<span class="fc" id="L319">    bits = newBits;</span>
+<span class="fc" id="L320">  }</span>
+
+  private static int[] makeArray(int size) {
+<span class="fc" id="L323">    return new int[(size + 31) / 32];</span>
+  }
+
+  @Override
+  public boolean equals(Object o) {
+<span class="pc bpc" id="L328" title="1 of 2 branches missed.">    if (!(o instanceof BitArray)) {</span>
+<span class="nc" id="L329">      return false;</span>
+    }
+<span class="fc" id="L331">    BitArray other = (BitArray) o;</span>
+<span class="fc bfc" id="L332" title="All 4 branches covered.">    return size == other.size &amp;&amp; Arrays.equals(bits, other.bits);</span>
+  }
+
+  @Override
+  public int hashCode() {
+<span class="fc" id="L337">    return 31 * size + Arrays.hashCode(bits);</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="fc" id="L342">    StringBuilder result = new StringBuilder(size + (size / 8) + 1);</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc bfc" id="L344" title="All 2 branches covered.">      if ((i &amp; 0x07) == 0) {</span>
+<span class="fc" id="L345">        result.append(' ');</span>
+      }
+<span class="fc bfc" id="L347" title="All 2 branches covered.">      result.append(get(i) ? 'X' : '.');</span>
+    }
+<span class="fc" id="L349">    return result.toString();</span>
+  }
+
+  @Override
+  public BitArray clone() {
+<span class="fc" id="L354">    return new BitArray(bits.clone(), size);</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

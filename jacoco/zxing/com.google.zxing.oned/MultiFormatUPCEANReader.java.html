@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MultiFormatUPCEANReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">MultiFormatUPCEANReader.java</span></div><h1>MultiFormatUPCEANReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Reader;
+import com.google.zxing.ReaderException;
+import com.google.zxing.Result;
+import com.google.zxing.common.BitArray;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
+
+/**
+ * &lt;p&gt;A reader that can read all available UPC/EAN formats. If a caller wants to try to
+ * read all such formats, it is most efficient to use this implementation rather than invoke
+ * individual readers.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+public final class MultiFormatUPCEANReader extends OneDReader {
+
+<span class="fc" id="L40">  private static final UPCEANReader[] EMPTY_READER_ARRAY = new UPCEANReader[0];</span>
+
+  private final UPCEANReader[] readers;
+
+<span class="fc" id="L44">  public MultiFormatUPCEANReader(Map&lt;DecodeHintType,?&gt; hints) {</span>
+    @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc bfc" id="L46" title="All 2 branches covered.">    Collection&lt;BarcodeFormat&gt; possibleFormats = hints == null ? null :</span>
+<span class="fc" id="L47">        (Collection&lt;BarcodeFormat&gt;) hints.get(DecodeHintType.POSSIBLE_FORMATS);</span>
+<span class="fc" id="L48">    Collection&lt;UPCEANReader&gt; readers = new ArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L49" title="1 of 2 branches missed.">    if (possibleFormats != null) {</span>
+<span class="nc bnc" id="L50" title="All 2 branches missed.">      if (possibleFormats.contains(BarcodeFormat.EAN_13)) {</span>
+<span class="nc" id="L51">        readers.add(new EAN13Reader());</span>
+<span class="nc bnc" id="L52" title="All 2 branches missed.">      } else if (possibleFormats.contains(BarcodeFormat.UPC_A)) {</span>
+<span class="nc" id="L53">        readers.add(new UPCAReader());</span>
+      }
+<span class="nc bnc" id="L55" title="All 2 branches missed.">      if (possibleFormats.contains(BarcodeFormat.EAN_8)) {</span>
+<span class="nc" id="L56">        readers.add(new EAN8Reader());</span>
+      }
+<span class="nc bnc" id="L58" title="All 2 branches missed.">      if (possibleFormats.contains(BarcodeFormat.UPC_E)) {</span>
+<span class="nc" id="L59">        readers.add(new UPCEReader());</span>
+      }
+    }
+<span class="pc bpc" id="L62" title="1 of 2 branches missed.">    if (readers.isEmpty()) {</span>
+<span class="fc" id="L63">      readers.add(new EAN13Reader());</span>
+      // UPC-A is covered by EAN-13
+<span class="fc" id="L65">      readers.add(new EAN8Reader());</span>
+<span class="fc" id="L66">      readers.add(new UPCEReader());</span>
+    }
+<span class="fc" id="L68">    this.readers = readers.toArray(EMPTY_READER_ARRAY);</span>
+<span class="fc" id="L69">  }</span>
+
+  @Override
+  public Result decodeRow(int rowNumber,
+                          BitArray row,
+                          Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException {
+    // Compute this location once and reuse it on multiple implementations
+<span class="fc" id="L76">    int[] startGuardPattern = UPCEANReader.findStartGuardPattern(row);</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">    for (UPCEANReader reader : readers) {</span>
+      try {
+<span class="fc" id="L79">        Result result = reader.decodeRow(rowNumber, row, startGuardPattern, hints);</span>
+        // Special case: a 12-digit code encoded in UPC-A is identical to a &quot;0&quot;
+        // followed by those 12 digits encoded as EAN-13. Each will recognize such a code,
+        // UPC-A as a 12-digit string and EAN-13 as a 13-digit string starting with &quot;0&quot;.
+        // Individually these are correct and their readers will both read such a code
+        // and correctly call it EAN-13, or UPC-A, respectively.
+        //
+        // In this case, if we've been looking for both types, we'd like to call it
+        // a UPC-A code. But for efficiency we only run the EAN-13 decoder to also read
+        // UPC-A. So we special case it here, and convert an EAN-13 result to a UPC-A
+        // result if appropriate.
+        //
+        // But, don't return UPC-A if UPC-A was not a requested format!
+<span class="fc" id="L92">        boolean ean13MayBeUPCA =</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">            result.getBarcodeFormat() == BarcodeFormat.EAN_13 &amp;&amp;</span>
+<span class="fc bfc" id="L94" title="All 2 branches covered.">                result.getText().charAt(0) == '0';</span>
+        @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc bfc" id="L96" title="All 2 branches covered.">        Collection&lt;BarcodeFormat&gt; possibleFormats =</span>
+<span class="fc" id="L97">            hints == null ? null : (Collection&lt;BarcodeFormat&gt;) hints.get(DecodeHintType.POSSIBLE_FORMATS);</span>
+<span class="pc bpc" id="L98" title="3 of 4 branches missed.">        boolean canReturnUPCA = possibleFormats == null || possibleFormats.contains(BarcodeFormat.UPC_A);</span>
+  
+<span class="pc bpc" id="L100" title="1 of 4 branches missed.">        if (ean13MayBeUPCA &amp;&amp; canReturnUPCA) {</span>
+          // Transfer the metdata across
+<span class="fc" id="L102">          Result resultUPCA = new Result(result.getText().substring(1),</span>
+<span class="fc" id="L103">                                         result.getRawBytes(),</span>
+<span class="fc" id="L104">                                         result.getResultPoints(),</span>
+                                         BarcodeFormat.UPC_A);
+<span class="fc" id="L106">          resultUPCA.putAllMetadata(result.getResultMetadata());</span>
+<span class="fc" id="L107">          return resultUPCA;</span>
+        }
+<span class="fc" id="L109">        return result;</span>
+<span class="fc" id="L110">      } catch (ReaderException ignored) {</span>
+        // continue
+      }
+    }
+
+<span class="fc" id="L115">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  @Override
+  public void reset() {
+<span class="nc bnc" id="L120" title="All 2 branches missed.">    for (Reader reader : readers) {</span>
+<span class="nc" id="L121">      reader.reset();</span>
+    }
+<span class="nc" id="L123">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

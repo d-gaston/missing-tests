@@ -1,0 +1,415 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PackedLocalDateTime.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.columns.datetimes</a> &gt; <span class="el_source">PackedLocalDateTime.java</span></div><h1>PackedLocalDateTime.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.columns.datetimes;
+
+import static tech.tablesaw.columns.datetimes.DateTimeColumnType.missingValueIndicator;
+
+import com.google.common.base.Strings;
+import com.google.common.primitives.Ints;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.Month;
+import java.time.chrono.IsoChronology;
+import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalField;
+import java.time.temporal.WeekFields;
+import java.util.Locale;
+import tech.tablesaw.columns.dates.PackedLocalDate;
+import tech.tablesaw.columns.instant.PackedInstant;
+import tech.tablesaw.columns.times.PackedLocalTime;
+
+/*
+ * TODO(lwhite): Extend missing-value handling on predicates to DateColumn and TimeColumn
+ *
+ * TODO(lwhite): Handle missing values on non-boolean (predicate) methods
+ */
+
+/**
+ * A short localdatetime packed into a single long value. The long is comprised of an int for the
+ * date and an int for the time
+ *
+ * &lt;p&gt;The bytes are packed into the date int as: First two bytes: short (year) next byte (month of
+ * year) last byte (day of month)
+ *
+ * &lt;p&gt;The bytes are packed into the time int as First byte: hourOfDay next byte: minuteOfHour last
+ * two bytes (short): millisecond of minute
+ *
+ * &lt;p&gt;Storing the millisecond of minute in an short requires that we treat the short as if it were
+ * unsigned. Unfortunately, Neither Java nor Guava provide unsigned short support so we use char,
+ * which is a 16-bit unsigned int to store values of up to 60,000 milliseconds (60 secs * 1000)
+ */
+public class PackedLocalDateTime extends PackedInstant {
+
+  private PackedLocalDateTime() {}
+
+  public static byte getDayOfMonth(long date) {
+<span class="fc" id="L60">    return (byte) date(date); // last byte</span>
+  }
+
+  public static short getYear(long dateTime) {
+<span class="fc" id="L64">    return PackedLocalDate.getYear(date(dateTime));</span>
+  }
+
+  public static LocalDateTime asLocalDateTime(long dateTime) {
+<span class="fc bfc" id="L68" title="All 2 branches covered.">    if (dateTime == missingValueIndicator()) {</span>
+<span class="fc" id="L69">      return null;</span>
+    }
+<span class="fc" id="L71">    int date = date(dateTime);</span>
+<span class="fc" id="L72">    int time = time(dateTime);</span>
+<span class="fc" id="L73">    LocalDate d = PackedLocalDate.asLocalDate(date);</span>
+<span class="fc" id="L74">    LocalTime t = PackedLocalTime.asLocalTime(time);</span>
+<span class="pc bpc" id="L75" title="2 of 4 branches missed.">    if (d == null || t == null) {</span>
+<span class="nc" id="L76">      return null;</span>
+    }
+<span class="fc" id="L78">    return LocalDateTime.of(d, t);</span>
+  }
+
+  public static byte getMonthValue(long dateTime) {
+<span class="fc" id="L82">    int date = date(dateTime);</span>
+<span class="fc" id="L83">    return (byte) (date &gt;&gt; 8);</span>
+  }
+
+  public static long pack(LocalDate date, LocalTime time) {
+<span class="pc bpc" id="L87" title="2 of 4 branches missed.">    if (date == null || time == null) {</span>
+<span class="nc" id="L88">      return missingValueIndicator();</span>
+    }
+<span class="fc" id="L90">    int d = PackedLocalDate.pack(date);</span>
+<span class="fc" id="L91">    int t = PackedLocalTime.pack(time);</span>
+<span class="fc" id="L92">    return (((long) d) &lt;&lt; 32) | (t &amp; 0xffffffffL);</span>
+  }
+
+  public static long pack(LocalDateTime dateTime) {
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (dateTime == null) {</span>
+<span class="fc" id="L97">      return missingValueIndicator();</span>
+    }
+<span class="fc" id="L99">    LocalDate date = dateTime.toLocalDate();</span>
+<span class="fc" id="L100">    LocalTime time = dateTime.toLocalTime();</span>
+<span class="fc" id="L101">    return (pack(date, time));</span>
+  }
+
+  public static long pack(short yr, byte m, byte d, byte hr, byte min, byte s, byte n) {
+<span class="nc" id="L105">    int date = PackedLocalDate.pack(yr, m, d);</span>
+
+<span class="nc" id="L107">    int time = Ints.fromBytes(hr, min, s, n);</span>
+
+<span class="nc" id="L109">    return (((long) date) &lt;&lt; 32) | (time &amp; 0xffffffffL);</span>
+  }
+
+  public static int date(long packedDateTIme) {
+<span class="fc" id="L113">    return (int) (packedDateTIme &gt;&gt; 32);</span>
+  }
+
+  public static int time(long packedDateTIme) {
+<span class="fc" id="L117">    return (int) packedDateTIme;</span>
+  }
+
+  public static String toString(long dateTime) {
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    if (dateTime == Long.MIN_VALUE) {</span>
+<span class="fc" id="L122">      return &quot;&quot;;</span>
+    }
+<span class="fc" id="L124">    int date = date(dateTime);</span>
+<span class="fc" id="L125">    int time = time(dateTime);</span>
+
+<span class="fc" id="L127">    return &quot;&quot;</span>
+<span class="fc" id="L128">        + PackedLocalDate.getYear(date)</span>
+        + &quot;-&quot;
+<span class="fc" id="L130">        + Strings.padStart(Byte.toString(PackedLocalDate.getMonthValue(date)), 2, '0')</span>
+        + &quot;-&quot;
+<span class="fc" id="L132">        + Strings.padStart(Byte.toString(PackedLocalDate.getDayOfMonth(date)), 2, '0')</span>
+        + &quot;T&quot;
+<span class="fc" id="L134">        + Strings.padStart(Byte.toString(PackedLocalTime.getHour(time)), 2, '0')</span>
+        + &quot;:&quot;
+<span class="fc" id="L136">        + Strings.padStart(Byte.toString(PackedLocalTime.getMinute(time)), 2, '0')</span>
+        + &quot;:&quot;
+<span class="fc" id="L138">        + Strings.padStart(Byte.toString(PackedLocalTime.getSecond(time)), 2, '0')</span>
+        + &quot;.&quot;
+<span class="fc" id="L140">        + Strings.padStart(String.valueOf(PackedLocalTime.getMilliseconds(time)), 3, '0');</span>
+  }
+
+  public static int getDayOfYear(long packedDateTime) {
+<span class="fc" id="L144">    return getMonth(packedDateTime).firstDayOfYear(isLeapYear(packedDateTime))</span>
+<span class="fc" id="L145">        + getDayOfMonth(packedDateTime)</span>
+        - 1;
+  }
+
+  public static int getWeekOfYear(long packedDateTime) {
+<span class="fc" id="L150">    LocalDateTime date = asLocalDateTime(packedDateTime);</span>
+<span class="fc" id="L151">    TemporalField woy = WeekFields.of(Locale.getDefault()).weekOfWeekBasedYear();</span>
+<span class="fc" id="L152">    return date.get(woy);</span>
+  }
+
+  public static boolean isLeapYear(long packedDateTime) {
+<span class="pc bpc" id="L156" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L157">    return IsoChronology.INSTANCE.isLeapYear(getYear(packedDateTime));</span>
+  }
+
+  public static Month getMonth(long packedDateTime) {
+<span class="fc" id="L161">    return Month.of(getMonthValue(packedDateTime));</span>
+  }
+
+  public static int lengthOfMonth(long packedDateTime) {
+<span class="fc bfc" id="L165" title="All 3 branches covered.">    switch (getMonthValue(packedDateTime)) {</span>
+      case 2:
+<span class="pc bpc" id="L167" title="1 of 2 branches missed.">        return (isLeapYear(packedDateTime) ? 29 : 28);</span>
+      case 4:
+      case 6:
+      case 9:
+      case 11:
+<span class="fc" id="L172">        return 30;</span>
+      default:
+<span class="fc" id="L174">        return 31;</span>
+    }
+  }
+
+  public static DayOfWeek getDayOfWeek(long packedDateTime) {
+<span class="fc" id="L179">    int date = PackedLocalDateTime.date(packedDateTime);</span>
+<span class="fc" id="L180">    return PackedLocalDate.getDayOfWeek(date);</span>
+  }
+
+  /**
+   * Returns the quarter of the year of the given date as an int from 1 to 4, or -1, if the argument
+   * is the missingValueIndicator() for DateTimeColumn
+   */
+  public static int getQuarter(long packedDate) {
+<span class="pc bpc" id="L188" title="1 of 2 branches missed.">    if (packedDate == missingValueIndicator()) {</span>
+<span class="nc" id="L189">      return -1;</span>
+    }
+<span class="fc" id="L191">    return PackedLocalDate.getQuarter(date(packedDate));</span>
+  }
+
+  public static boolean isInQ1(long packedDateTime) {
+<span class="pc bpc" id="L195" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L196">    Month month = getMonth(packedDateTime);</span>
+<span class="fc bfc" id="L197" title="All 6 branches covered.">    return month == Month.JANUARY || month == Month.FEBRUARY || month == Month.MARCH;</span>
+  }
+
+  public static boolean isInQ2(long packedDateTime) {
+<span class="pc bpc" id="L201" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L202">    Month month = getMonth(packedDateTime);</span>
+<span class="fc bfc" id="L203" title="All 6 branches covered.">    return month == Month.APRIL || month == Month.MAY || month == Month.JUNE;</span>
+  }
+
+  public static boolean isInQ3(long packedDateTime) {
+<span class="pc bpc" id="L207" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L208">    Month month = getMonth(packedDateTime);</span>
+<span class="fc bfc" id="L209" title="All 6 branches covered.">    return month == Month.JULY || month == Month.AUGUST || month == Month.SEPTEMBER;</span>
+  }
+
+  public static boolean isInQ4(long packedDateTime) {
+<span class="pc bpc" id="L213" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L214">    Month month = getMonth(packedDateTime);</span>
+<span class="fc bfc" id="L215" title="All 6 branches covered.">    return month == Month.OCTOBER || month == Month.NOVEMBER || month == Month.DECEMBER;</span>
+  }
+
+  public static boolean isAfter(long packedDateTime, long value) {
+<span class="nc bnc" id="L219" title="All 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; packedDateTime &gt; value;</span>
+  }
+
+  public static boolean isBefore(long packedDateTime, long value) {
+<span class="nc bnc" id="L223" title="All 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; packedDateTime &lt; value;</span>
+  }
+
+  public static boolean isSunday(long packedDateTime) {
+<span class="pc bpc" id="L227" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L228">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.SUNDAY;</span>
+  }
+
+  public static boolean isMonday(long packedDateTime) {
+<span class="pc bpc" id="L233" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L234">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.MONDAY;</span>
+  }
+
+  public static boolean isTuesday(long packedDateTime) {
+<span class="pc bpc" id="L239" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L240">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L241" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.TUESDAY;</span>
+  }
+
+  public static boolean isWednesday(long packedDateTime) {
+<span class="pc bpc" id="L245" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L246">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L247" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.WEDNESDAY;</span>
+  }
+
+  public static boolean isThursday(long packedDateTime) {
+<span class="pc bpc" id="L251" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L252">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L253" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.THURSDAY;</span>
+  }
+
+  public static boolean isFriday(long packedDateTime) {
+<span class="pc bpc" id="L257" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L258">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L259" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.FRIDAY;</span>
+  }
+
+  public static boolean isSaturday(long packedDateTime) {
+<span class="pc bpc" id="L263" title="1 of 2 branches missed.">    if (packedDateTime == missingValueIndicator()) return false;</span>
+<span class="fc" id="L264">    DayOfWeek dayOfWeek = getDayOfWeek(packedDateTime);</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">    return dayOfWeek == DayOfWeek.SATURDAY;</span>
+  }
+
+  public static boolean isFirstDayOfMonth(long packedDateTime) {
+<span class="pc bpc" id="L269" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getDayOfMonth(packedDateTime) == 1;</span>
+  }
+
+  public static boolean isInJanuary(long packedDateTime) {
+<span class="pc bpc" id="L273" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.JANUARY;</span>
+  }
+
+  public static boolean isInFebruary(long packedDateTime) {
+<span class="pc bpc" id="L277" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L278" title="All 2 branches covered.">        &amp;&amp; getMonth(packedDateTime) == Month.FEBRUARY;</span>
+  }
+
+  public static boolean isInMarch(long packedDateTime) {
+<span class="pc bpc" id="L282" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.MARCH;</span>
+  }
+
+  public static boolean isInApril(long packedDateTime) {
+<span class="pc bpc" id="L286" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.APRIL;</span>
+  }
+
+  public static boolean isInMay(long packedDateTime) {
+<span class="pc bpc" id="L290" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.MAY;</span>
+  }
+
+  public static boolean isInJune(long packedDateTime) {
+<span class="pc bpc" id="L294" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.JUNE;</span>
+  }
+
+  public static boolean isInJuly(long packedDateTime) {
+<span class="pc bpc" id="L298" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.JULY;</span>
+  }
+
+  public static boolean isInAugust(long packedDateTime) {
+<span class="pc bpc" id="L302" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.AUGUST;</span>
+  }
+
+  public static boolean isInSeptember(long packedDateTime) {
+<span class="pc bpc" id="L306" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L307" title="All 2 branches covered.">        &amp;&amp; getMonth(packedDateTime) == Month.SEPTEMBER;</span>
+  }
+
+  public static boolean isInOctober(long packedDateTime) {
+<span class="pc bpc" id="L311" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getMonth(packedDateTime) == Month.OCTOBER;</span>
+  }
+
+  public static boolean isInNovember(long packedDateTime) {
+<span class="pc bpc" id="L315" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L316" title="All 2 branches covered.">        &amp;&amp; getMonth(packedDateTime) == Month.NOVEMBER;</span>
+  }
+
+  public static boolean isInDecember(long packedDateTime) {
+<span class="pc bpc" id="L320" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">        &amp;&amp; getMonth(packedDateTime) == Month.DECEMBER;</span>
+  }
+
+  public static boolean isLastDayOfMonth(long packedDateTime) {
+<span class="pc bpc" id="L325" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L326" title="All 2 branches covered.">        &amp;&amp; getDayOfMonth(packedDateTime) == lengthOfMonth(packedDateTime);</span>
+  }
+
+  public static boolean isInYear(long packedDateTime, int year) {
+<span class="pc bpc" id="L330" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; getYear(packedDateTime) == year;</span>
+  }
+
+  public static boolean isMidnight(long packedDateTime) {
+<span class="pc bpc" id="L334" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L335" title="All 2 branches covered.">        &amp;&amp; PackedLocalTime.isMidnight(time(packedDateTime));</span>
+  }
+
+  public static boolean isNoon(long packedDateTime) {
+<span class="pc bpc" id="L339" title="1 of 2 branches missed.">    return (packedDateTime != missingValueIndicator())</span>
+<span class="fc bfc" id="L340" title="All 2 branches covered.">        &amp;&amp; PackedLocalTime.isNoon(time(packedDateTime));</span>
+  }
+
+  /**
+   * Returns true if the time is in the AM or &quot;before noon&quot;. Note: we follow the convention that
+   * 12:00 NOON is PM and 12 MIDNIGHT is AM
+   */
+  public static boolean AM(long packedDateTime) {
+<span class="pc bpc" id="L348" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; PackedLocalTime.AM(time(packedDateTime));</span>
+  }
+
+  /**
+   * Returns true if the time is in the PM or &quot;after noon&quot;. Note: we follow the convention that
+   * 12:00 NOON is PM and 12 MIDNIGHT is AM
+   */
+  public static boolean PM(long packedDateTime) {
+<span class="pc bpc" id="L356" title="1 of 4 branches missed.">    return (packedDateTime != missingValueIndicator()) &amp;&amp; PackedLocalTime.PM(time(packedDateTime));</span>
+  }
+
+  public static int getMinuteOfDay(long packedLocalDateTime) {
+<span class="fc" id="L360">    return getHour(packedLocalDateTime) * 60 + getMinute(packedLocalDateTime);</span>
+  }
+
+  public static byte getSecond(int packedLocalDateTime) {
+<span class="nc" id="L364">    return (byte) (getMillisecondOfMinute(packedLocalDateTime) / 1000);</span>
+  }
+
+  public static byte getHour(long packedLocalDateTime) {
+<span class="fc" id="L368">    return PackedLocalTime.getHour(time(packedLocalDateTime));</span>
+  }
+
+  public static byte getMinute(long packedLocalDateTime) {
+<span class="fc" id="L372">    return PackedLocalTime.getMinute(time(packedLocalDateTime));</span>
+  }
+
+  public static byte getSecond(long packedLocalDateTime) {
+<span class="fc" id="L376">    return PackedLocalTime.getSecond(time(packedLocalDateTime));</span>
+  }
+
+  public static int getSecondOfDay(long packedLocalDateTime) {
+<span class="fc" id="L380">    return PackedLocalTime.getSecondOfDay(time(packedLocalDateTime));</span>
+  }
+
+  public static short getMillisecondOfMinute(long packedLocalDateTime) {
+<span class="nc" id="L384">    return (short) PackedLocalTime.getMillisecondOfMinute(time(packedLocalDateTime));</span>
+  }
+
+  public static long getMillisecondOfDay(long packedLocalDateTime) {
+<span class="fc" id="L388">    LocalDateTime localDateTime = PackedLocalDateTime.asLocalDateTime(packedLocalDateTime);</span>
+<span class="fc" id="L389">    long total = (long) localDateTime.get(ChronoField.MILLI_OF_SECOND);</span>
+<span class="fc" id="L390">    total += localDateTime.getSecond() * 1000;</span>
+<span class="fc" id="L391">    total += localDateTime.getMinute() * 60 * 1000;</span>
+<span class="fc" id="L392">    total += localDateTime.getHour() * 60 * 60 * 1000;</span>
+<span class="fc" id="L393">    return total;</span>
+  }
+
+  public static int lengthOfYear(long packedDateTime) {
+<span class="nc bnc" id="L397" title="All 2 branches missed.">    return (isLeapYear(packedDateTime) ? 366 : 365);</span>
+  }
+
+  public static int monthsUntil(long packedDateTimeEnd, long packedDateStart) {
+
+<span class="fc" id="L402">    int start = getMonthInternal(packedDateStart) * 32 + getDayOfMonth(packedDateStart);</span>
+<span class="fc" id="L403">    int end = getMonthInternal(packedDateTimeEnd) * 32 + getDayOfMonth(packedDateTimeEnd);</span>
+<span class="fc" id="L404">    return (end - start) / 32;</span>
+  }
+
+  public static int yearsUntil(long packedDateEnd, long packedDateStart) {
+<span class="fc" id="L408">    return monthsUntil(packedDateEnd, packedDateStart) / 12;</span>
+  }
+
+  private static int getMonthInternal(long packedDateTime) {
+<span class="fc" id="L412">    return (getYear(packedDateTime) * 12 + getMonthValue(packedDateTime) - 1);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

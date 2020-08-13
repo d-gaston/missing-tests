@@ -1,0 +1,925 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PriorityScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">PriorityScheduler.java</span></div><h1>PriorityScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.LockSupport;
+
+import org.threadly.util.AbstractService;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+
+/**
+ * Executor to run tasks, schedule tasks.  Unlike 
+ * {@link java.util.concurrent.ScheduledThreadPoolExecutor} this scheduled executor's pool size 
+ * can shrink if set with a lower value via {@link #setPoolSize(int)}.  It also has the benefit 
+ * that you can provide &quot;low priority&quot; tasks.
+ * &lt;p&gt;
+ * These low priority tasks will delay their execution if there are other high priority tasks 
+ * ready to run, as long as they have not exceeded their maximum wait time.  If they have exceeded 
+ * their maximum wait time, and high priority tasks delay time is less than the low priority delay 
+ * time, then those low priority tasks will be executed.  What this results in is a task which has 
+ * lower priority, but which wont be starved from execution.
+ * &lt;p&gt;
+ * Most tasks provided into this pool will likely want to be &quot;high priority&quot;, to more closely 
+ * match the behavior of other thread pools.  That is why unless specified by the constructor, the 
+ * default {@link TaskPriority} is High.
+ * &lt;p&gt;
+ * In all conditions, &quot;low priority&quot; tasks will never be starved.  This makes &quot;low priority&quot; tasks 
+ * ideal which do regular cleanup, or in general anything that must run, but cares little if there 
+ * is a 1, or 10 second gap in the execution time.  That amount of tolerance is adjustable by 
+ * setting the {@code maxWaitForLowPriorityInMs} either in the constructor, or at runtime via 
+ * {@link #setMaxWaitForLowPriority(long)}.
+ * 
+ * @since 2.2.0 (since 1.0.0 as PriorityScheduledExecutor)
+ */
+public class PriorityScheduler extends AbstractPriorityScheduler {
+  protected static final boolean DEFAULT_NEW_THREADS_DAEMON = true;
+  
+  protected final WorkerPool workerPool;
+  protected final QueueManager taskQueueManager;
+
+  /**
+   * Constructs a new thread pool, though threads will be lazily started as it has tasks ready to 
+   * run.  This constructs a default priority of high (which makes sense for most use cases).  It 
+   * also defaults low priority task wait as 500ms.  It also defaults to all newly created threads 
+   * to being daemon threads.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   */
+  public PriorityScheduler(int poolSize) {
+<span class="fc" id="L55">    this(poolSize, null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, DEFAULT_NEW_THREADS_DAEMON);</span>
+<span class="fc" id="L56">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though threads will be lazily started as it has tasks ready to 
+   * run.  This constructs a default priority of high (which makes sense for most use cases).  It 
+   * also defaults low priority task wait as 500ms.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   */
+  public PriorityScheduler(int poolSize, boolean useDaemonThreads) {
+<span class="nc" id="L67">    this(poolSize, null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, useDaemonThreads);</span>
+<span class="nc" id="L68">  }</span>
+
+  /**
+   * Constructs a new thread pool, though threads will be lazily started as it has tasks ready to 
+   * run.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  public PriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                           long maxWaitForLowPriorityInMs) {
+<span class="nc" id="L81">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, DEFAULT_NEW_THREADS_DAEMON);</span>
+<span class="nc" id="L82">  }</span>
+
+  /**
+   * Constructs a new thread pool, though threads will be lazily started as it has tasks ready to 
+   * run.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   */
+  public PriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                           long maxWaitForLowPriorityInMs, boolean useDaemonThreads) {
+<span class="fc" id="L96">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, </span>
+<span class="fc" id="L97">         new ConfigurableThreadFactory(PriorityScheduler.class.getSimpleName() + &quot;-&quot;, </span>
+                                       true, useDaemonThreads, Thread.NORM_PRIORITY, null, null));
+<span class="fc" id="L99">  }</span>
+
+  /**
+   * Constructs a new thread pool, though threads will be lazily started as it has tasks ready to 
+   * run.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param threadFactory thread factory for producing new threads within executor
+   */
+  public PriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                           long maxWaitForLowPriorityInMs, ThreadFactory threadFactory) {
+<span class="fc" id="L113">    this(new WorkerPool(threadFactory, poolSize), </span>
+         defaultPriority, maxWaitForLowPriorityInMs);
+<span class="fc" id="L115">  }</span>
+  
+  /**
+   * This constructor is designed for extending classes to be able to provide their own 
+   * implementation of {@link WorkerPool}.  Ultimately all constructors will defer to this one.
+   * 
+   * @param workerPool WorkerPool to handle accepting tasks and providing them to a worker for execution
+   * @param defaultPriority Default priority to store in case no priority is provided for tasks
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  protected PriorityScheduler(WorkerPool workerPool, TaskPriority defaultPriority, 
+                              long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L127">    super(defaultPriority);</span>
+    
+<span class="fc" id="L129">    this.workerPool = workerPool;</span>
+<span class="fc" id="L130">    taskQueueManager = new QueueManager(workerPool, maxWaitForLowPriorityInMs);</span>
+    
+<span class="fc" id="L132">    workerPool.start(taskQueueManager);</span>
+<span class="fc" id="L133">  }</span>
+  
+  /**
+   * Getter for the currently set max thread pool size.
+   * 
+   * @return current max pool size
+   */
+  public int getMaxPoolSize() {
+<span class="fc" id="L141">    return workerPool.getMaxPoolSize();</span>
+  }
+  
+  /**
+   * Getter for the current quantity of threads running in this pool (either active or idle).  
+   * This is different than the size returned from {@link #getMaxPoolSize()} in that we 
+   * lazily create threads.  This represents the amount of threads needed to be created so far, 
+   * where {@link #getMaxPoolSize()} represents the amount of threads the pool may grow to.
+   * 
+   * @return current thread count
+   */
+  public int getCurrentPoolSize() {
+<span class="fc" id="L153">    return workerPool.getCurrentPoolSize();</span>
+  }
+  
+  /**
+   * Change the set thread pool size.
+   * &lt;p&gt;
+   * If the value is less than the current running threads, as threads finish they will exit 
+   * rather than accept new tasks.  No currently running tasks will be interrupted, rather we 
+   * will just wait for them to finish before killing the thread.
+   * &lt;p&gt;
+   * If this is an increase in the pool size, threads will be lazily started as needed till the 
+   * new size is reached.  If there are tasks waiting for threads to run on, they immediately 
+   * will be started.
+   * 
+   * @param newPoolSize New core pool size, must be at least one
+   */
+  public void setPoolSize(int newPoolSize) {
+<span class="fc" id="L170">    workerPool.setPoolSize(newPoolSize);</span>
+<span class="fc" id="L171">  }</span>
+
+  /**
+   * Adjust the pools size by a given delta.  If the provided delta would result in a pool size 
+   * of zero or less, then a {@link IllegalStateException} will be thrown.
+   * 
+   * @param delta Delta to adjust the max pool size by
+   */
+  public void adjustPoolSize(int delta) {
+<span class="fc" id="L180">    workerPool.adjustPoolSize(delta);</span>
+<span class="fc" id="L181">  }</span>
+  
+  /**
+   * Call to check how many tasks are currently being executed in this thread pool.  Unlike 
+   * {@link #getCurrentPoolSize()}, this count will NOT include idle threads waiting to execute 
+   * tasks.
+   * 
+   * @return current number of running tasks
+   */
+  @Override
+  public int getActiveTaskCount() {
+<span class="fc" id="L192">    return workerPool.getActiveTaskCount();</span>
+  }
+
+  /**
+   * Ensures all threads have been started, it will create threads till the thread count matches 
+   * the set pool size (checked via {@link #getMaxPoolSize()}).  These new threads will remain 
+   * idle till there is tasks ready to execute.
+   */
+  public void prestartAllThreads() {
+<span class="fc" id="L201">    workerPool.prestartAllThreads();</span>
+<span class="fc" id="L202">  }</span>
+
+  @Override
+  public boolean isShutdown() {
+<span class="fc" id="L206">    return workerPool.isShutdownStarted();</span>
+  }
+
+  /**
+   * Stops any new tasks from being submitted to the pool.  But allows all tasks which are 
+   * submitted to execute, or scheduled (and have elapsed their delay time) to run.  If recurring 
+   * tasks are present they will also be unable to reschedule.  If {@code shutdown()} or 
+   * {@link #shutdownNow()} has already been called, this will have no effect.  
+   * &lt;p&gt;
+   * If you wish to not want to run any queued tasks you should use {@link #shutdownNow()}.
+   */
+  public void shutdown() {
+<span class="fc bfc" id="L218" title="All 2 branches covered.">    if (workerPool.startShutdown()) {</span>
+<span class="fc" id="L219">      ShutdownRunnable sr = new ShutdownRunnable(workerPool);</span>
+<span class="fc" id="L220">      taskQueueManager.lowPriorityQueueSet</span>
+<span class="fc" id="L221">                      .addExecute(new ImmediateTaskWrapper(sr, taskQueueManager.lowPriorityQueueSet.executeQueue));</span>
+    }
+<span class="fc" id="L223">  }</span>
+
+  /**
+   * Stops any new tasks from being able to be executed and removes workers from the pool.
+   * &lt;p&gt;
+   * This implementation refuses new submissions after this call.  And will NOT interrupt any 
+   * tasks which are currently running.  However any tasks which are waiting in queue to be run 
+   * (but have not started yet), will not be run.  Those waiting tasks will be removed, and as 
+   * workers finish with their current tasks the threads will be joined.
+   * 
+   * @return List of runnables which were waiting to execute
+   */
+  public List&lt;Runnable&gt; shutdownNow() {
+<span class="fc" id="L236">    workerPool.startShutdown();</span>
+<span class="fc" id="L237">    List&lt;Runnable&gt; awaitingTasks = taskQueueManager.clearQueue();</span>
+<span class="fc" id="L238">    workerPool.finishShutdown();</span>
+    
+<span class="fc" id="L240">    return awaitingTasks;</span>
+  }
+  
+  /**
+   * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+   * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block forever.
+   * 
+   * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+   */
+  public void awaitTermination() throws InterruptedException {
+<span class="fc" id="L250">    awaitTermination(Long.MAX_VALUE);</span>
+<span class="fc" id="L251">  }</span>
+
+  /**
+   * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+   * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block until the 
+   * timeout is reached.
+   * 
+   * @param timeoutMillis time to block and wait for thread pool to shutdown
+   * @return {@code true} if the pool has shutdown, false if timeout was reached
+   * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+   */
+  public boolean awaitTermination(long timeoutMillis) throws InterruptedException {
+<span class="fc" id="L263">    return workerPool.awaitTermination(timeoutMillis);</span>
+  }
+  
+  @Override
+  public int getQueuedTaskCount() {
+    // subtract one for hack task for spin issue
+<span class="fc" id="L269">    return super.getQueuedTaskCount() - 1;</span>
+  }
+  
+  @Override
+  public int getQueuedTaskCount(TaskPriority priority) {
+    // subtract one from starvable count for hack task for spin issue
+<span class="fc bfc" id="L275" title="All 2 branches covered.">    return super.getQueuedTaskCount(priority) - (priority == TaskPriority.Starvable ? 1 : 0);</span>
+  }
+
+  @Override
+  protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L280">    QueueSet queueSet = taskQueueManager.getQueueSet(priority);</span>
+    OneTimeTaskWrapper result;
+<span class="fc bfc" id="L282" title="All 2 branches covered.">    if (delayInMillis == 0) {</span>
+<span class="fc" id="L283">      addToExecuteQueue(queueSet, </span>
+                        (result = new ImmediateTaskWrapper(task, queueSet.executeQueue)));
+    } else {
+<span class="fc" id="L286">      addToScheduleQueue(queueSet, </span>
+                         (result = new OneTimeTaskWrapper(task, queueSet.scheduleQueue, 
+<span class="fc" id="L288">                                                          Clock.accurateForwardProgressingMillis() + </span>
+                                                            delayInMillis)));
+    }
+<span class="fc" id="L291">    return result;</span>
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, 
+                                     long recurringDelay, TaskPriority priority) {
+<span class="fc" id="L297">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L298">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+<span class="fc" id="L299">    ArgumentVerifier.assertNotNegative(recurringDelay, &quot;recurringDelay&quot;);</span>
+<span class="fc bfc" id="L300" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L301">      priority = defaultPriority;</span>
+    }
+
+<span class="fc" id="L304">    QueueSet queueSet = taskQueueManager.getQueueSet(priority);</span>
+<span class="fc" id="L305">    addToScheduleQueue(queueSet, </span>
+                       new RecurringDelayTaskWrapper(task, queueSet, 
+<span class="fc" id="L307">                                                     Clock.accurateForwardProgressingMillis() + </span>
+                                                       initialDelay, 
+                                                     recurringDelay));
+<span class="fc" id="L310">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period, 
+                                  TaskPriority priority) {
+<span class="fc" id="L315">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L316">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+<span class="fc" id="L317">    ArgumentVerifier.assertGreaterThanZero(period, &quot;period&quot;);</span>
+<span class="pc bpc" id="L318" title="1 of 2 branches missed.">    if (priority == null) {</span>
+<span class="fc" id="L319">      priority = defaultPriority;</span>
+    }
+
+<span class="fc" id="L322">    QueueSet queueSet = taskQueueManager.getQueueSet(priority);</span>
+<span class="fc" id="L323">    addToScheduleQueue(queueSet, </span>
+                       new RecurringRateTaskWrapper(task, queueSet, 
+<span class="fc" id="L325">                                                    Clock.accurateForwardProgressingMillis() + initialDelay, </span>
+                                                    period));
+<span class="fc" id="L327">  }</span>
+  
+  /**
+   * Adds the ready TaskWrapper to the correct execute queue.  Using the priority specified in the 
+   * task, we pick the correct queue and add it.
+   * &lt;p&gt;
+   * If this is a scheduled or recurring task use {@link #addToScheduleQueue(TaskWrapper)}.
+   * 
+   * @param task {@link TaskWrapper} to queue for the scheduler
+   */
+  protected void addToExecuteQueue(QueueSet queueSet, OneTimeTaskWrapper task) {
+<span class="fc bfc" id="L338" title="All 2 branches covered.">    if (workerPool.isShutdownStarted()) {</span>
+<span class="fc" id="L339">      throw new RejectedExecutionException(&quot;Thread pool shutdown&quot;);</span>
+    }
+    
+<span class="fc" id="L342">    queueSet.addExecute(task);</span>
+<span class="fc" id="L343">  }</span>
+  
+  /**
+   * Adds the ready TaskWrapper to the correct schedule queue.  Using the priority specified in the 
+   * task, we pick the correct queue and add it.
+   * &lt;p&gt;
+   * If this is just a single execution with no delay use {@link #addToExecuteQueue(OneTimeTaskWrapper)}.
+   * 
+   * @param task {@link TaskWrapper} to queue for the scheduler
+   */
+  protected void addToScheduleQueue(QueueSet queueSet, TaskWrapper task) {
+<span class="fc bfc" id="L354" title="All 2 branches covered.">    if (workerPool.isShutdownStarted()) {</span>
+<span class="fc" id="L355">      throw new RejectedExecutionException(&quot;Thread pool shutdown&quot;);</span>
+    }
+    
+<span class="fc" id="L358">    queueSet.addScheduled(task);</span>
+<span class="fc" id="L359">  }</span>
+  
+  @Override
+  protected void finalize() {
+    // shutdown the thread pool so we don't leak threads if garbage collected
+<span class="fc" id="L364">    shutdown();</span>
+<span class="fc" id="L365">  }</span>
+
+  @Override
+  protected QueueManager getQueueManager() {
+<span class="fc" id="L369">    return taskQueueManager;</span>
+  }
+  
+  /**
+   * Class to manage the pool of worker threads.  This class handles creating workers, storing 
+   * them, and killing them once they are ready to expire.  It also handles finding the 
+   * appropriate worker when a task is ready to be executed.
+   * 
+   * @since 3.5.0
+   */
+  protected static class WorkerPool implements QueueSetListener {
+    protected final ThreadFactory threadFactory;
+    protected final Object poolSizeChangeLock;
+    protected final Object idleWorkerDequeLock;
+    protected final LongAdder idleWorkerCount;
+    protected final AtomicReference&lt;Worker&gt; idleWorker;
+    protected final AtomicInteger currentPoolSize;
+    protected final Object workerStopNotifyLock;
+    private final AtomicBoolean shutdownStarted;
+    private volatile boolean shutdownFinishing; // once true, never goes to false
+    private volatile int maxPoolSize;  // can only be changed when poolSizeChangeLock locked
+    private volatile long workerTimedParkRunTime;
+    private QueueManager queueManager;  // set before any threads started
+    
+<span class="fc" id="L393">    protected WorkerPool(ThreadFactory threadFactory, int poolSize) {</span>
+<span class="fc" id="L394">      ArgumentVerifier.assertGreaterThanZero(poolSize, &quot;poolSize&quot;);</span>
+<span class="fc bfc" id="L395" title="All 2 branches covered.">      if (threadFactory == null) {</span>
+<span class="fc" id="L396">        threadFactory = new ConfigurableThreadFactory(PriorityScheduler.class.getSimpleName() + &quot;-&quot;, true);</span>
+      }
+      
+<span class="fc" id="L399">      poolSizeChangeLock = new Object();</span>
+<span class="fc" id="L400">      idleWorkerDequeLock = new Object();</span>
+<span class="fc" id="L401">      idleWorkerCount = new LongAdder();</span>
+<span class="fc" id="L402">      idleWorker = new AtomicReference&lt;&gt;(null);</span>
+<span class="fc" id="L403">      currentPoolSize = new AtomicInteger(0);</span>
+<span class="fc" id="L404">      workerStopNotifyLock = new Object();</span>
+      
+<span class="fc" id="L406">      this.threadFactory = threadFactory;</span>
+<span class="fc" id="L407">      this.maxPoolSize = poolSize;</span>
+<span class="fc" id="L408">      this.workerTimedParkRunTime = Long.MAX_VALUE;</span>
+<span class="fc" id="L409">      shutdownStarted = new AtomicBoolean(false);</span>
+<span class="fc" id="L410">      shutdownFinishing = false;</span>
+<span class="fc" id="L411">    }</span>
+
+    /**
+     * Starts the pool, constructing the first thread to start consuming tasks (and starting other 
+     * threads as appropriate).  This should only be called once, and can NOT be called concurrently.
+     * 
+     * @param queueManager QueueManager to source tasks for execution from
+     */
+    public void start(QueueManager queueManager) {
+<span class="pc bpc" id="L420" title="1 of 2 branches missed.">      if (currentPoolSize.get() != 0) {</span>
+<span class="nc" id="L421">        throw new IllegalStateException();</span>
+      }
+      
+<span class="fc" id="L424">      this.queueManager = queueManager;</span>
+      
+      // this is to avoid a deficiency in workerIdle that could cause an idle thread to spin.  This 
+      // spin would be only if there is only one recurring task, and WHILE that recurring task is 
+      // running.  We solve this by adding this recurring task which wont run very long, and is 
+      // scheduled to run very infrequently (Using Integer.MAX_VALUE that's every 24 days).
+      // we add this directly into the scheduledQueue structure to avoid having handleQueueUpdated 
+      // invoked, and thus avoid starting any threads at this point.
+<span class="fc" id="L432">      InternalRunnable doNothingRunnable = new InternalRunnable() {</span>
+        @Override
+        public void run() {
+          // nothing added here so that task runs as short as possible
+          // must be InternalRunnable, and not DoNothingRunnable so it's hidden from the task queue
+<span class="nc" id="L437">        }</span>
+      };
+<span class="fc" id="L439">      queueManager.starvablePriorityQueueSet</span>
+<span class="fc" id="L440">                  .scheduleQueue.add(new RecurringRateTaskWrapper(doNothingRunnable, </span>
+                                                                  queueManager.starvablePriorityQueueSet, 
+<span class="fc" id="L442">                                                                  Clock.lastKnownForwardProgressingMillis() + </span>
+                                                                    Integer.MAX_VALUE, 
+                                                                  Integer.MAX_VALUE));
+<span class="fc" id="L445">    }</span>
+
+    /**
+     * Checks if the shutdown has started by an invocation of {@link #startShutdown()}.
+     * 
+     * @return {@code true} if the shutdown has started
+     */
+    public boolean isShutdownStarted() {
+<span class="fc" id="L453">      return shutdownStarted.get();</span>
+    }
+
+    /**
+     * Will start the shutdown of the worker pool.
+     * 
+     * @return {@code true} if this call initiates the shutdown, {@code false} if the shutdown has already started
+     */
+    public boolean startShutdown() {
+<span class="fc bfc" id="L462" title="All 2 branches covered.">      return ! shutdownStarted.getAndSet(true);</span>
+    }
+  
+    /**
+     * Check weather the shutdown process is finished.  In order for the shutdown to finish 
+     * {@link #finishShutdown()} must have been invoked. 
+     * 
+     * @return {@code true} if the scheduler is finishing its shutdown
+     */
+    public boolean isShutdownFinished() {
+<span class="fc" id="L472">      return shutdownFinishing;</span>
+    }
+
+    /**
+     * Finishes the shutdown of the worker pool.  This will ensure all finishing workers are 
+     * killed.
+     */
+    public void finishShutdown() {
+<span class="fc" id="L480">      shutdownFinishing = true;</span>
+
+<span class="fc" id="L482">      addPoolStateChangeTask(new InternalRunnable() {</span>
+        @Override
+        public void run() {
+          /* as long as we are continuing to run, we need to re-add ourself to ensure 
+           * all threads are able to break out of task poll logic (once shutdown we stay shutdown)
+           */
+<span class="fc" id="L488">          addPoolStateChangeTask(this);</span>
+<span class="fc" id="L489">        }</span>
+      });
+<span class="fc" id="L491">    }</span>
+    
+    /**
+     * When ever pool state is changed that is not checked in the pollTask loop (ie shutdown state, 
+     * pool size), a task must be added that is continually added till the desired state is reached.
+     * &lt;p&gt;
+     * The purpose of this task is to break worker threads out of the tight loop for polling tasks, 
+     * and instead get them to check the initial logic in {@link #workerIdle(Worker)} again.  This 
+     * is in contrast to putting the logic in the poll task loop, which only incurs a performance 
+     * penalty.
+     */
+    private void addPoolStateChangeTask(InternalRunnable task) {
+      // add to starvable queue, since we only need these tasks to be consumed and ran when there 
+      // is nothing else to run.
+<span class="fc" id="L505">      queueManager.starvablePriorityQueueSet</span>
+<span class="fc" id="L506">                  .addExecute(new ImmediateTaskWrapper(task, </span>
+                                                       queueManager.starvablePriorityQueueSet.executeQueue));
+<span class="fc" id="L508">    }</span>
+
+    /**
+     * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+     * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block until the 
+     * timeout is reached.
+     * 
+     * @param timeoutMillis time to block and wait for thread pool to shutdown
+     * @return {@code true} if the pool has shutdown, false if timeout was reached
+     * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+     */
+    public boolean awaitTermination(long timeoutMillis) throws InterruptedException {
+<span class="fc bfc" id="L520" title="All 2 branches covered.">      long start = timeoutMillis &lt; Long.MAX_VALUE ? </span>
+<span class="fc" id="L521">        Clock.accurateForwardProgressingMillis() : Clock.lastKnownForwardProgressingMillis();</span>
+<span class="fc" id="L522">      synchronized (workerStopNotifyLock) {</span>
+        long remainingMillis;
+<span class="pc bpc" id="L524" title="1 of 4 branches missed.">        while ((! shutdownFinishing || currentPoolSize.get() &gt; 0) &amp;&amp; </span>
+<span class="fc bfc" id="L525" title="All 2 branches covered.">               (remainingMillis = timeoutMillis - (Clock.lastKnownForwardProgressingMillis() - start)) &gt; 0) {</span>
+<span class="fc" id="L526">          workerStopNotifyLock.wait(remainingMillis);</span>
+        }
+<span class="fc" id="L528">      }</span>
+      
+<span class="pc bpc" id="L530" title="1 of 4 branches missed.">      return shutdownFinishing &amp;&amp; currentPoolSize.get() == 0;</span>
+    }
+
+    /**
+     * Getter for the currently set max worker pool size.
+     * 
+     * @return current max pool size
+     */
+    public int getMaxPoolSize() {
+<span class="fc" id="L539">      return maxPoolSize;</span>
+    }
+
+    /**
+     * Change the set core pool size.  If the value is less than the current max pool size, the max 
+     * pool size will also be updated to this value.
+     * &lt;p&gt;
+     * If this was a reduction from the previous value, this call will examine idle workers to see 
+     * if they should be expired.  If this call reduced the max pool size, and the current running 
+     * thread count is higher than the new max size, this call will NOT block till the pool is 
+     * reduced.  Instead as those workers complete, they will clean up on their own.
+     * 
+     * @param newPoolSize New core pool size, must be at least one
+     */
+    public void setPoolSize(int newPoolSize) {
+<span class="fc" id="L554">      ArgumentVerifier.assertGreaterThanZero(newPoolSize, &quot;newPoolSize&quot;);</span>
+      
+<span class="pc bpc" id="L556" title="1 of 2 branches missed.">      if (newPoolSize == maxPoolSize) {</span>
+        // short cut the lock
+<span class="nc" id="L558">        return;</span>
+      }
+      
+      boolean poolSizeIncrease;
+<span class="fc" id="L562">      synchronized (poolSizeChangeLock) {</span>
+<span class="fc bfc" id="L563" title="All 2 branches covered.">        poolSizeIncrease = newPoolSize &gt; this.maxPoolSize;</span>
+        
+<span class="fc" id="L565">        this.maxPoolSize = newPoolSize;</span>
+<span class="fc" id="L566">      }</span>
+      
+<span class="fc" id="L568">      handleMaxPoolSizeChange(poolSizeIncrease);</span>
+<span class="fc" id="L569">    }</span>
+    
+    /**
+     * Adjust the pools size by a given delta.  If the provided delta would result in a pool size 
+     * of zero or less, then a {@link IllegalStateException} will be thrown.
+     * 
+     * @param delta Delta to adjust the max pool size by
+     */
+    public void adjustPoolSize(int delta) {
+<span class="pc bpc" id="L578" title="1 of 2 branches missed.">      if (delta == 0) {</span>
+<span class="nc" id="L579">        return;</span>
+      }
+      
+<span class="fc" id="L582">      synchronized (poolSizeChangeLock) {</span>
+<span class="pc bpc" id="L583" title="1 of 2 branches missed.">        if (maxPoolSize + delta &lt; 1) {</span>
+<span class="nc" id="L584">          throw new IllegalStateException(maxPoolSize + &quot; &quot; + delta + &quot; must be at least 1&quot;);</span>
+        }
+<span class="fc" id="L586">        this.maxPoolSize += delta;</span>
+<span class="fc" id="L587">      }</span>
+      
+<span class="pc bpc" id="L589" title="1 of 2 branches missed.">      handleMaxPoolSizeChange(delta &gt; 0);</span>
+<span class="fc" id="L590">    }</span>
+    
+    protected void handleMaxPoolSizeChange(boolean poolSizeIncrease) {
+<span class="fc bfc" id="L593" title="All 2 branches covered.">      if (poolSizeIncrease) {</span>
+        // now that pool size increased, start a worker so workers we can for the waiting tasks
+<span class="fc" id="L595">        handleQueueUpdate();</span>
+<span class="pc bpc" id="L596" title="1 of 2 branches missed.">      } else if (currentPoolSize.get() &gt; maxPoolSize) {</span>
+<span class="fc" id="L597">        addPoolStateChangeTask(new InternalRunnable() {</span>
+          @Override
+          public void run() {
+            /* until the pool has reduced in size, we need to continue to add this task to 
+             * wake threads out of the poll task loop
+             */
+<span class="pc bpc" id="L603" title="1 of 2 branches missed.">            if (currentPoolSize.get() &gt; maxPoolSize) {</span>
+<span class="fc" id="L604">              addPoolStateChangeTask(this);</span>
+            }
+<span class="fc" id="L606">          }</span>
+        });
+      }
+<span class="fc" id="L609">    }</span>
+    
+    
+
+    /**
+     * Check for the current quantity of threads running in this pool (either active or idle).
+     * 
+     * @return current thread count
+     */
+    public int getCurrentPoolSize() {
+<span class="fc" id="L619">      return currentPoolSize.get();</span>
+    }
+
+    /**
+     * Call to check how many workers are currently executing tasks.
+     * 
+     * @return current number of workers executing tasks
+     */
+    public int getActiveTaskCount() {
+      while (true) {
+<span class="fc" id="L629">        int poolSize = currentPoolSize.get();</span>
+<span class="fc" id="L630">        int result = poolSize - idleWorkerCount.intValue();</span>
+<span class="pc bpc" id="L631" title="1 of 2 branches missed.">        if (poolSize == currentPoolSize.get()) {</span>
+<span class="fc" id="L632">          return result;</span>
+        }
+<span class="nc" id="L634">      }</span>
+    }
+
+    /**
+     * Ensures all threads have been started.  This will make new idle workers to accept tasks.
+     */
+    public void prestartAllThreads() {
+      int casPoolSize;
+<span class="fc bfc" id="L642" title="All 2 branches covered.">      while ((casPoolSize = currentPoolSize.get()) &lt; maxPoolSize) {</span>
+<span class="pc bpc" id="L643" title="1 of 2 branches missed.">        if (currentPoolSize.compareAndSet(casPoolSize, casPoolSize + 1)) {</span>
+<span class="fc" id="L644">          makeNewWorker();</span>
+        }
+      }
+<span class="fc" id="L647">    }</span>
+    
+    /**
+     * This call creates and starts a new worker.  It does not modify {@link currentPoolSize} so 
+     * that MUST be updated in a thread safe way before this is invoked.  As soon as the worker 
+     * starts it will attempt to start taking tasks, no further action is needed.
+     */
+    protected void makeNewWorker() {
+<span class="fc" id="L655">      Worker w = new Worker(this, threadFactory);</span>
+<span class="fc" id="L656">      w.start();</span>
+<span class="fc" id="L657">    }</span>
+    
+    /**
+     * Adds a worker to the head of the idle worker chain.
+     * 
+     * @param worker Worker that is ready to become idle
+     */
+    protected void addWorkerToIdleChain(Worker worker) {
+<span class="fc" id="L665">      idleWorkerCount.increment();</span>
+<span class="fc" id="L666">      worker.waitingForUnpark = false;  // reset state before we park, avoid external interactions</span>
+      
+      while (true) {
+<span class="fc" id="L669">        Worker casWorker = idleWorker.get();</span>
+        // we can freely set this value until we get into the idle linked queue
+<span class="fc" id="L671">        worker.nextIdleWorker = casWorker;</span>
+<span class="fc bfc" id="L672" title="All 2 branches covered.">        if (idleWorker.compareAndSet(casWorker, worker)) {</span>
+<span class="fc" id="L673">          break;</span>
+        }
+<span class="fc" id="L675">      }</span>
+<span class="fc" id="L676">    }</span>
+    
+    /**
+     * The counter part to {@link #addWorkerToIdleChain(Worker)}.  This function has no safety 
+     * checks.  The worker provided MUST already be queued in the chain or problems will occur.
+     * 
+     * @param worker Worker reference to remove from the chain (can not be {@code null})
+     */
+    protected void removeWorkerFromIdleChain(Worker worker) {
+<span class="fc" id="L685">      idleWorkerCount.decrement();</span>
+      
+      /* We must lock here to avoid thread contention when removing from the chain.  This is 
+       * the one place where we set the reference to a workers &quot;nextIdleWorker&quot; from a thread 
+       * outside of the workers thread.  If we don't synchronize here, we may end up 
+       * having workers disappear from the chain when the reference is nulled out.
+       */
+<span class="fc" id="L692">      synchronized (idleWorkerDequeLock) {</span>
+<span class="fc" id="L693">        Worker holdingWorker = idleWorker.get();</span>
+<span class="fc bfc" id="L694" title="All 2 branches covered.">        if (holdingWorker == worker) {</span>
+<span class="fc bfc" id="L695" title="All 2 branches covered.">          if (idleWorker.compareAndSet(worker, worker.nextIdleWorker)) {</span>
+<span class="fc" id="L696">            return;</span>
+          } else {
+            /* because we can only queue in parallel, we know that the conflict was a newly queued 
+             * worker.  In addition since we know that queued workers are added at the start, all 
+             * that should be necessary is updating our holding worker reference
+             */
+<span class="fc" id="L702">            holdingWorker = idleWorker.get();</span>
+          }
+        }
+        
+        // no need for null checks due to locking, we assume the worker is in the chain
+<span class="fc bfc" id="L707" title="All 2 branches covered.">        while (holdingWorker.nextIdleWorker != worker) {</span>
+<span class="fc" id="L708">          holdingWorker = holdingWorker.nextIdleWorker;</span>
+        }
+        // now remove this worker from the chain
+<span class="fc" id="L711">        holdingWorker.nextIdleWorker = worker.nextIdleWorker;</span>
+        // now out of the queue, lets clean up our reference
+<span class="fc" id="L713">        worker.nextIdleWorker = null;</span>
+<span class="fc" id="L714">      }</span>
+<span class="fc" id="L715">    }</span>
+
+    /**
+     * Invoked when a worker becomes idle.  This will provide another task for that worker, or 
+     * block until a task is either ready, or the worker should be shutdown (either because pool 
+     * was shut down, or max pool size changed).
+     * 
+     * @param worker Worker which is now idle and ready for a task
+     * @return Task that is ready for immediate execution
+     */
+    public TaskWrapper workerIdle(Worker worker) {
+      /* pool state checks, if any of these change we need a dummy task added to the queue to 
+       * break out of the task polling loop below.  This is done as an optimization, to avoid 
+       * needing to check these on every loop (since they rarely change)
+       */
+      while (true) {
+        int casPoolSize;
+<span class="fc bfc" id="L732" title="All 2 branches covered.">        if (shutdownFinishing) {</span>
+<span class="fc" id="L733">          currentPoolSize.decrementAndGet();</span>
+<span class="fc" id="L734">          worker.stopIfRunning();</span>
+<span class="fc" id="L735">          return null;</span>
+<span class="fc bfc" id="L736" title="All 2 branches covered.">        } else if ((casPoolSize = currentPoolSize.get()) &gt; maxPoolSize) {</span>
+<span class="pc bpc" id="L737" title="1 of 2 branches missed.">          if (currentPoolSize.compareAndSet(casPoolSize, casPoolSize - 1)) {</span>
+<span class="fc" id="L738">            worker.stopIfRunning();</span>
+<span class="fc" id="L739">            return null;</span>
+          } // else, retry, see if we need to shutdown
+        } else {
+          // pool state is consistent, we should keep running
+          break;
+        }
+<span class="nc" id="L745">      }</span>
+      
+<span class="fc" id="L747">      boolean queued = false;</span>
+      try {
+        while (true) {
+<span class="fc" id="L750">          TaskWrapper nextTask = queueManager.getNextTask();</span>
+<span class="fc bfc" id="L751" title="All 2 branches covered.">          if (nextTask == null) {</span>
+<span class="fc bfc" id="L752" title="All 2 branches covered.">            if (queued) { // we can only park after we have queued, then checked again for a result</span>
+<span class="fc" id="L753">              Thread.interrupted(); // reset interrupted status before we block</span>
+<span class="fc" id="L754">              LockSupport.park();</span>
+<span class="fc" id="L755">              worker.waitingForUnpark = false;</span>
+<span class="fc" id="L756">              continue;</span>
+            } else {
+<span class="fc" id="L758">              addWorkerToIdleChain(worker);</span>
+<span class="fc" id="L759">              queued = true;</span>
+            }
+          } else {
+            /* TODO - right now this has a a deficiency where a recurring period task can cut in 
+             * the queue line.  The condition would be as follows:
+             * 
+             * * Thread 1 gets task to run...task is behind execution schedule, likely due to large queue
+             * * Thread 2 gets same task
+             * * Thread 1 gets reference, executes, task execution completes
+             * * Thread 2 now gets the reference, and execution check and time check pass fine
+             * * End result is that task has executed twice (on expected schedule), the second 
+             *     execution was unfair since it was done without respects to queue order and 
+             *     other tasks which are also likely behind execution schedule in this example
+             *     
+             * This should be very rare, but is possible.  The only way I see to solve this right 
+             * now is to introduce locking.
+             */
+            // must get executeReference before time is checked
+<span class="fc" id="L777">            short executeReference = nextTask.getExecuteReference();</span>
+<span class="fc" id="L778">            long taskDelay = nextTask.getScheduleDelay();</span>
+<span class="fc bfc" id="L779" title="All 2 branches covered.">            if (taskDelay &gt; 0) {</span>
+<span class="fc bfc" id="L780" title="All 2 branches covered.">              if (taskDelay == Long.MAX_VALUE) {</span>
+                // the hack at construction/start is to avoid this from causing us to spin here 
+                // if only one recurring task is scheduled (otherwise we would keep pulling 
+                // that task while it's running)
+<span class="fc" id="L784">                continue;</span>
+              }
+<span class="fc bfc" id="L786" title="All 2 branches covered.">              if (queued) {</span>
+<span class="fc" id="L787">                Thread.interrupted(); // reset interrupted status before we block</span>
+<span class="fc bfc" id="L788" title="All 2 branches covered.">                if (nextTask.getPureRunTime() &lt; workerTimedParkRunTime) {</span>
+                  // we can only park after we have queued, then checked again for a result
+<span class="fc" id="L790">                  workerTimedParkRunTime = nextTask.getPureRunTime();</span>
+<span class="fc" id="L791">                  LockSupport.parkNanos(Clock.NANOS_IN_MILLISECOND * taskDelay);</span>
+<span class="fc" id="L792">                  worker.waitingForUnpark = false;</span>
+<span class="fc" id="L793">                  workerTimedParkRunTime = Long.MAX_VALUE;</span>
+<span class="fc" id="L794">                  continue;</span>
+                } else {
+                  // there is another worker already doing a timed park, so we can wait till woken up
+<span class="fc" id="L797">                  LockSupport.park();</span>
+<span class="fc" id="L798">                  worker.waitingForUnpark = false;</span>
+<span class="fc" id="L799">                  continue;</span>
+                }
+              } else {
+<span class="fc" id="L802">                addWorkerToIdleChain(worker);</span>
+<span class="fc" id="L803">                queued = true;</span>
+              }
+<span class="fc bfc" id="L805" title="All 2 branches covered.">            } else if (nextTask.canExecute(executeReference)) {</span>
+<span class="fc" id="L806">              return nextTask;</span>
+            } else {
+              // threading conflict when trying to consume tasks, back thread off with a yield
+              // This helps with a potential tight loop resulting in issues with safe points
+<span class="fc" id="L810">              Thread.yield();</span>
+            }
+          }
+<span class="fc" id="L813">        } // end pollTask loop</span>
+      } finally {
+        // if queued, we must now remove ourselves, since worker is about to either shutdown or become active
+<span class="fc bfc" id="L816" title="All 2 branches covered.">        if (queued) {</span>
+<span class="fc" id="L817">          removeWorkerFromIdleChain(worker);</span>
+        }
+        
+        // wake up next worker so it can check if tasks are ready to consume
+<span class="fc" id="L821">        handleQueueUpdate();</span>
+        
+<span class="fc" id="L823">        Thread.interrupted();  // reset interrupted status if set</span>
+      }
+    }
+
+    @Override
+    public void handleQueueUpdate() {
+      while (true) {
+<span class="fc" id="L830">        Worker nextIdleWorker = idleWorker.get();</span>
+<span class="fc bfc" id="L831" title="All 2 branches covered.">        if (nextIdleWorker == null) {</span>
+<span class="fc" id="L832">          int casSize = currentPoolSize.get();</span>
+<span class="fc bfc" id="L833" title="All 6 branches covered.">          if (casSize &lt; maxPoolSize &amp; ! shutdownFinishing) {</span>
+<span class="fc bfc" id="L834" title="All 2 branches covered.">            if (currentPoolSize.compareAndSet(casSize, casSize + 1)) {</span>
+              // start a new worker for the next task
+<span class="fc" id="L836">              makeNewWorker();</span>
+<span class="fc" id="L837">              break;</span>
+            } // else loop and retry logic
+          } else {
+            // pool has all threads started, or is shutting down
+            break;
+          }
+<span class="fc" id="L843">        } else {</span>
+<span class="fc bfc" id="L844" title="All 2 branches covered.">          if (! nextIdleWorker.waitingForUnpark) {</span>
+<span class="fc" id="L845">            nextIdleWorker.waitingForUnpark = true;</span>
+<span class="fc" id="L846">            LockSupport.unpark(nextIdleWorker.thread);</span>
+          }
+          break;
+        }
+<span class="fc" id="L850">      }</span>
+<span class="fc" id="L851">    }</span>
+  }
+  
+  /**
+   * Runnable which will run on pool threads.  It accepts runnables to run, and tracks usage.
+   * 
+   * @since 1.0.0
+   */
+  protected static class Worker extends AbstractService implements Runnable {
+    protected final WorkerPool workerPool;
+    protected final Thread thread;
+    protected volatile Worker nextIdleWorker;
+    protected volatile boolean waitingForUnpark;
+    
+<span class="fc" id="L865">    protected Worker(WorkerPool workerPool, ThreadFactory threadFactory) {</span>
+<span class="fc" id="L866">      this.workerPool = workerPool;</span>
+<span class="fc" id="L867">      thread = threadFactory.newThread(this);</span>
+<span class="pc bpc" id="L868" title="1 of 2 branches missed.">      if (thread.isAlive()) {</span>
+<span class="nc" id="L869">        throw new IllegalThreadStateException();</span>
+      }
+<span class="fc" id="L871">      nextIdleWorker = null;</span>
+<span class="fc" id="L872">      waitingForUnpark = false;</span>
+<span class="fc" id="L873">    }</span>
+
+    @Override
+    protected void startupService() {
+<span class="fc" id="L877">      thread.start();</span>
+<span class="fc" id="L878">    }</span>
+
+    @Override
+    protected void shutdownService() {
+<span class="fc" id="L882">      LockSupport.unpark(thread);</span>
+<span class="fc" id="L883">    }</span>
+    
+    protected void executeTasksWhileRunning() {
+<span class="fc bfc" id="L886" title="All 2 branches covered.">      while (isRunning()) {</span>
+<span class="fc" id="L887">        TaskWrapper nextTask = workerPool.workerIdle(this);</span>
+<span class="fc bfc" id="L888" title="All 2 branches covered.">        if (nextTask != null) {  // may be null if we are shutting down</span>
+<span class="fc" id="L889">          nextTask.runTask();</span>
+        }
+<span class="fc" id="L891">      }</span>
+<span class="fc" id="L892">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L896">      executeTasksWhileRunning();</span>
+      
+<span class="fc" id="L898">      synchronized (workerPool.workerStopNotifyLock) {</span>
+<span class="fc" id="L899">        workerPool.workerStopNotifyLock.notifyAll();</span>
+<span class="fc" id="L900">      }</span>
+<span class="fc" id="L901">    }</span>
+  }
+  
+  /**
+   * Runnable to be run after tasks already ready to execute.  That way this can be submitted with 
+   * a {@link #execute(Runnable)} to ensure that the shutdown is fair for tasks that were already 
+   * ready to be run/executed.  Once this runs the shutdown sequence will be finished, and no 
+   * remaining asks in the queue can be executed.
+   * 
+   * @since 1.0.0
+   */
+  protected static class ShutdownRunnable implements InternalRunnable {
+    private final WorkerPool wm;
+    
+<span class="fc" id="L915">    protected ShutdownRunnable(WorkerPool wm) {</span>
+<span class="fc" id="L916">      this.wm = wm;</span>
+<span class="fc" id="L917">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L921">      wm.finishShutdown();</span>
+<span class="fc" id="L922">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

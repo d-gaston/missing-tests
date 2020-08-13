@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CheckUtil.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.internal.utils</a> &gt; <span class="el_source">CheckUtil.java</span></div><h1>CheckUtil.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.internal.utils;
+
+import java.io.File;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.text.MessageFormat;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+
+import com.google.common.reflect.ClassPath;
+import com.puppycrawl.tools.checkstyle.checks.regexp.RegexpMultilineCheck;
+import com.puppycrawl.tools.checkstyle.checks.regexp.RegexpSinglelineCheck;
+import com.puppycrawl.tools.checkstyle.checks.regexp.RegexpSinglelineJavaCheck;
+import com.puppycrawl.tools.checkstyle.utils.JavadocUtil;
+import com.puppycrawl.tools.checkstyle.utils.ModuleReflectionUtil;
+import com.puppycrawl.tools.checkstyle.utils.TokenUtil;
+
+public final class CheckUtil {
+
+    private CheckUtil() {
+    }
+
+    public static Set&lt;String&gt; getConfigCheckStyleModules() {
+<span class="fc" id="L55">        return getCheckStyleModulesReferencedInConfig(&quot;config/checkstyle_checks.xml&quot;);</span>
+    }
+
+    public static Set&lt;String&gt; getConfigSunStyleModules() {
+<span class="fc" id="L59">        return getCheckStyleModulesReferencedInConfig(&quot;src/main/resources/sun_checks.xml&quot;);</span>
+    }
+
+    public static Set&lt;String&gt; getConfigGoogleStyleModules() {
+<span class="fc" id="L63">        return getCheckStyleModulesReferencedInConfig(&quot;src/main/resources/google_checks.xml&quot;);</span>
+    }
+
+    /**
+     * Retrieves a list of class names, removing 'Check' from the end if the class is
+     * a checkstyle check.
+     * @param checks class instances.
+     * @return a set of simple names.
+     */
+    public static Set&lt;String&gt; getSimpleNames(Set&lt;Class&lt;?&gt;&gt; checks) {
+<span class="fc" id="L73">        return checks.stream().map(check -&gt; {</span>
+<span class="fc" id="L74">            String name = check.getSimpleName();</span>
+
+<span class="fc bfc" id="L76" title="All 2 branches covered.">            if (name.endsWith(&quot;Check&quot;)) {</span>
+<span class="fc" id="L77">                name = name.substring(0, name.length() - 5);</span>
+            }
+
+<span class="fc" id="L80">            return name;</span>
+<span class="fc" id="L81">        }).collect(Collectors.toSet());</span>
+    }
+
+    /**
+     * Gets a set of names of checkstyle's checks which are referenced in checkstyle_checks.xml.
+     *
+     * @param configFilePath
+     *            file path of checkstyle_checks.xml.
+     * @return names of checkstyle's checks which are referenced in checkstyle_checks.xml.
+     */
+    private static Set&lt;String&gt; getCheckStyleModulesReferencedInConfig(String configFilePath) {
+        try {
+<span class="fc" id="L93">            final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();</span>
+
+            // Validations of XML file make parsing too slow, that is why we
+            // disable all validations.
+<span class="fc" id="L97">            factory.setNamespaceAware(false);</span>
+<span class="fc" id="L98">            factory.setValidating(false);</span>
+<span class="fc" id="L99">            factory.setFeature(&quot;http://xml.org/sax/features/namespaces&quot;, false);</span>
+<span class="fc" id="L100">            factory.setFeature(&quot;http://xml.org/sax/features/validation&quot;, false);</span>
+<span class="fc" id="L101">            factory.setFeature(&quot;http://apache.org/xml/features/nonvalidating/load-dtd-grammar&quot;,</span>
+                    false);
+<span class="fc" id="L103">            factory.setFeature(&quot;http://apache.org/xml/features/nonvalidating/load-external-dtd&quot;,</span>
+                    false);
+
+<span class="fc" id="L106">            final DocumentBuilder builder = factory.newDocumentBuilder();</span>
+<span class="fc" id="L107">            final Document document = builder.parse(new File(configFilePath));</span>
+
+            // optional, but recommended
+            // FYI:
+            // http://stackoverflow.com/questions/13786607/normalization-in-dom-parsing-with-java-
+            // how-does-it-work
+<span class="fc" id="L113">            document.getDocumentElement().normalize();</span>
+
+<span class="fc" id="L115">            final NodeList nodeList = document.getElementsByTagName(&quot;module&quot;);</span>
+
+<span class="fc" id="L117">            final Set&lt;String&gt; checksReferencedInCheckstyleChecksXml = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L118" title="All 2 branches covered.">            for (int i = 0; i &lt; nodeList.getLength(); i++) {</span>
+<span class="fc" id="L119">                final Node currentNode = nodeList.item(i);</span>
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">                if (currentNode.getNodeType() == Node.ELEMENT_NODE) {</span>
+<span class="fc" id="L121">                    final Element module = (Element) currentNode;</span>
+<span class="fc" id="L122">                    final String checkName = module.getAttribute(&quot;name&quot;);</span>
+<span class="fc" id="L123">                    checksReferencedInCheckstyleChecksXml.add(checkName);</span>
+                }
+            }
+<span class="fc" id="L126">            return checksReferencedInCheckstyleChecksXml;</span>
+        }
+<span class="nc" id="L128">        catch (Exception exception) {</span>
+<span class="nc" id="L129">            throw new IllegalStateException(exception);</span>
+        }
+    }
+
+    /**
+     * Gets all checkstyle's non-abstract checks.
+     * @return the set of checkstyle's non-abstract check classes.
+     * @throws IOException if the attempt to read class path resources failed.
+     */
+    public static Set&lt;Class&lt;?&gt;&gt; getCheckstyleChecks() throws IOException {
+<span class="fc" id="L139">        final ClassLoader loader = Thread.currentThread()</span>
+<span class="fc" id="L140">                .getContextClassLoader();</span>
+<span class="fc" id="L141">        final String packageName = &quot;com.puppycrawl.tools.checkstyle&quot;;</span>
+<span class="fc" id="L142">        return getCheckstyleModulesRecursive(packageName, loader).stream()</span>
+<span class="fc" id="L143">                .filter(ModuleReflectionUtil::isCheckstyleTreeWalkerCheck)</span>
+<span class="fc" id="L144">                .collect(Collectors.toSet());</span>
+    }
+
+    /**
+     * Gets all checkstyle's modules.
+     * @return the set of checkstyle's module classes.
+     * @throws IOException if the attempt to read class path resources failed.
+     */
+    public static Set&lt;Class&lt;?&gt;&gt; getCheckstyleModules() throws IOException {
+<span class="fc" id="L153">        final ClassLoader loader = Thread.currentThread()</span>
+<span class="fc" id="L154">                .getContextClassLoader();</span>
+<span class="fc" id="L155">        final String packageName = &quot;com.puppycrawl.tools.checkstyle&quot;;</span>
+<span class="fc" id="L156">        return getCheckstyleModulesRecursive(packageName, loader);</span>
+    }
+
+    /**
+     * Gets checkstyle's modules in the given package recursively.
+     * @param packageName the package name to use
+     * @param loader the class loader used to load Checkstyle package name
+     * @return the set of checkstyle's module classes
+     * @throws IOException if the attempt to read class path resources failed
+     * @see ModuleReflectionUtil#isCheckstyleModule(Class)
+     */
+    private static Set&lt;Class&lt;?&gt;&gt; getCheckstyleModulesRecursive(
+            String packageName, ClassLoader loader) throws IOException {
+<span class="fc" id="L169">        final ClassPath classPath = ClassPath.from(loader);</span>
+<span class="fc" id="L170">        return classPath.getTopLevelClassesRecursive(packageName).stream()</span>
+<span class="fc" id="L171">                .map(ClassPath.ClassInfo::load)</span>
+<span class="fc" id="L172">                .filter(ModuleReflectionUtil::isCheckstyleModule)</span>
+<span class="fc" id="L173">                .filter(CheckUtil::isFromAllowedPackages)</span>
+<span class="fc" id="L174">                .collect(Collectors.toSet());</span>
+    }
+
+    /**
+     * Checks that class is from allowed packages.
+     *
+     * @param cls class to check
+     * @return true if class is from allowed packages, false otherwise
+     */
+    private static boolean isFromAllowedPackages(Class&lt;?&gt; cls) {
+<span class="fc" id="L184">        final String canonicalName = cls.getCanonicalName();</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">        return !canonicalName.startsWith(&quot;com.puppycrawl.tools.checkstyle.packageobjectfactory&quot;)</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">            &amp;&amp; !canonicalName.startsWith(&quot;com.puppycrawl.tools.checkstyle.internal.testmodules&quot;);</span>
+    }
+
+    /**
+     * Get's the check's messages.
+     * @param module class to examine.
+     * @return a set of checkstyle's module message fields.
+     * @throws ClassNotFoundException if the attempt to read a protected class fails.
+     */
+    public static Set&lt;Field&gt; getCheckMessages(Class&lt;?&gt; module) throws ClassNotFoundException {
+<span class="fc" id="L196">        final Set&lt;Field&gt; checkstyleMessages = new HashSet&lt;&gt;();</span>
+
+        // get all fields from current class
+<span class="fc" id="L199">        final Field[] fields = module.getDeclaredFields();</span>
+
+<span class="fc bfc" id="L201" title="All 2 branches covered.">        for (Field field : fields) {</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">            if (field.getName().startsWith(&quot;MSG_&quot;)) {</span>
+<span class="fc" id="L203">                checkstyleMessages.add(field);</span>
+            }
+        }
+
+        // deep scan class through hierarchy
+<span class="fc" id="L208">        final Class&lt;?&gt; superModule = module.getSuperclass();</span>
+
+<span class="fc bfc" id="L210" title="All 2 branches covered.">        if (superModule != null) {</span>
+<span class="fc" id="L211">            checkstyleMessages.addAll(getCheckMessages(superModule));</span>
+        }
+
+        // special cases that require additional classes
+<span class="fc bfc" id="L215" title="All 2 branches covered.">        if (module == RegexpMultilineCheck.class) {</span>
+<span class="fc" id="L216">            checkstyleMessages.addAll(getCheckMessages(Class</span>
+<span class="fc" id="L217">                    .forName(&quot;com.puppycrawl.tools.checkstyle.checks.regexp.MultilineDetector&quot;)));</span>
+        }
+<span class="fc bfc" id="L219" title="All 4 branches covered.">        else if (module == RegexpSinglelineCheck.class</span>
+                || module == RegexpSinglelineJavaCheck.class) {
+<span class="fc" id="L221">            checkstyleMessages.addAll(getCheckMessages(Class</span>
+<span class="fc" id="L222">                    .forName(&quot;com.puppycrawl.tools.checkstyle.checks.regexp.SinglelineDetector&quot;)));</span>
+        }
+
+<span class="fc" id="L225">        return checkstyleMessages;</span>
+    }
+
+    /**
+     * Gets the check message 'as is' from appropriate 'messages.properties'
+     * file.
+     *
+     * @param module The package the message is located in.
+     * @param locale the locale to get the message for.
+     * @param messageKey the key of message in 'messages*.properties' file.
+     * @param arguments the arguments of message in 'messages*.properties' file.
+     * @return the check's formatted message.
+     */
+    public static String getCheckMessage(Class&lt;?&gt; module, Locale locale, String messageKey,
+            Object... arguments) {
+        String checkMessage;
+        try {
+<span class="fc" id="L242">            final Properties pr = new Properties();</span>
+<span class="fc bfc" id="L243" title="All 2 branches covered.">            if (locale == Locale.ENGLISH) {</span>
+<span class="fc" id="L244">                pr.load(module.getResourceAsStream(&quot;messages.properties&quot;));</span>
+            }
+            else {
+<span class="fc" id="L247">                pr.load(module</span>
+<span class="fc" id="L248">                        .getResourceAsStream(&quot;messages_&quot; + locale.getLanguage() + &quot;.properties&quot;));</span>
+            }
+<span class="fc" id="L250">            final MessageFormat formatter = new MessageFormat(pr.getProperty(messageKey), locale);</span>
+<span class="fc" id="L251">            checkMessage = formatter.format(arguments);</span>
+        }
+<span class="nc" id="L253">        catch (IOException ignored) {</span>
+<span class="nc" id="L254">            checkMessage = null;</span>
+<span class="fc" id="L255">        }</span>
+<span class="fc" id="L256">        return checkMessage;</span>
+    }
+
+    public static String getTokenText(int[] tokens, int... subtractions) {
+        final String tokenText;
+<span class="fc bfc" id="L261" title="All 4 branches covered.">        if (subtractions.length == 0 &amp;&amp; Arrays.equals(tokens, TokenUtil.getAllTokenIds())) {</span>
+<span class="fc" id="L262">            tokenText = &quot;TokenTypes.&quot;;</span>
+        }
+        else {
+<span class="fc" id="L265">            final StringBuilder result = new StringBuilder(50);</span>
+<span class="fc" id="L266">            boolean first = true;</span>
+
+<span class="fc bfc" id="L268" title="All 2 branches covered.">            for (int token : tokens) {</span>
+<span class="fc" id="L269">                boolean found = false;</span>
+
+<span class="fc bfc" id="L271" title="All 2 branches covered.">                for (int subtraction : subtractions) {</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">                    if (subtraction == token) {</span>
+<span class="fc" id="L273">                        found = true;</span>
+<span class="fc" id="L274">                        break;</span>
+                    }
+                }
+
+<span class="fc bfc" id="L278" title="All 2 branches covered.">                if (found) {</span>
+<span class="fc" id="L279">                    continue;</span>
+                }
+
+<span class="fc bfc" id="L282" title="All 2 branches covered.">                if (first) {</span>
+<span class="fc" id="L283">                    first = false;</span>
+                }
+                else {
+<span class="fc" id="L286">                    result.append(&quot;, &quot;);</span>
+                }
+
+<span class="fc" id="L289">                result.append(TokenUtil.getTokenName(token));</span>
+            }
+
+<span class="fc bfc" id="L292" title="All 2 branches covered.">            if (result.length() == 0) {</span>
+<span class="fc" id="L293">                result.append(&quot;empty&quot;);</span>
+            }
+            else {
+<span class="fc" id="L296">                result.append('.');</span>
+            }
+
+<span class="fc" id="L299">            tokenText = result.toString();</span>
+        }
+<span class="fc" id="L301">        return tokenText;</span>
+    }
+
+    public static Set&lt;String&gt; getTokenNameSet(int... tokens) {
+<span class="fc" id="L305">        final Set&lt;String&gt; result = new HashSet&lt;&gt;();</span>
+
+<span class="fc bfc" id="L307" title="All 2 branches covered.">        for (int token : tokens) {</span>
+<span class="fc" id="L308">            result.add(TokenUtil.getTokenName(token));</span>
+        }
+
+<span class="fc" id="L311">        return result;</span>
+    }
+
+    public static String getJavadocTokenText(int[] tokens, int... subtractions) {
+<span class="fc" id="L315">        final StringBuilder result = new StringBuilder(50);</span>
+<span class="fc" id="L316">        boolean first = true;</span>
+
+<span class="fc bfc" id="L318" title="All 2 branches covered.">        for (int token : tokens) {</span>
+<span class="fc" id="L319">            boolean found = false;</span>
+
+<span class="pc bpc" id="L321" title="1 of 2 branches missed.">            for (int subtraction : subtractions) {</span>
+<span class="nc bnc" id="L322" title="All 2 branches missed.">                if (subtraction == token) {</span>
+<span class="nc" id="L323">                    found = true;</span>
+<span class="nc" id="L324">                    break;</span>
+                }
+            }
+
+<span class="pc bpc" id="L328" title="1 of 2 branches missed.">            if (found) {</span>
+<span class="nc" id="L329">                continue;</span>
+            }
+
+<span class="fc bfc" id="L332" title="All 2 branches covered.">            if (first) {</span>
+<span class="fc" id="L333">                first = false;</span>
+            }
+            else {
+<span class="fc" id="L336">                result.append(&quot;, &quot;);</span>
+            }
+
+<span class="fc" id="L339">            result.append(JavadocUtil.getTokenName(token));</span>
+        }
+
+<span class="pc bpc" id="L342" title="1 of 2 branches missed.">        if (result.length() == 0) {</span>
+<span class="nc" id="L343">            result.append(&quot;empty&quot;);</span>
+        }
+        else {
+<span class="fc" id="L346">            result.append('.');</span>
+        }
+
+<span class="fc" id="L349">        return result.toString();</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

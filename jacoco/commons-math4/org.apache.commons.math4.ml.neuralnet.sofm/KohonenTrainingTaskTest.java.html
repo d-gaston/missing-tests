@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KohonenTrainingTaskTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ml.neuralnet.sofm</a> &gt; <span class="el_source">KohonenTrainingTaskTest.java</span></div><h1>KohonenTrainingTaskTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ml.neuralnet.sofm;
+
+import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import org.apache.commons.math4.Retry;
+import org.apache.commons.math4.RetryRunner;
+import org.apache.commons.math4.ml.neuralnet.sofm.KohonenTrainingTask;
+import org.apache.commons.math4.util.FastMath;
+import org.junit.Assert;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+/**
+ * Tests for {@link KohonenTrainingTask}
+ */
+@RunWith(RetryRunner.class)
+<span class="fc" id="L43">public class KohonenTrainingTaskTest {</span>
+    @Test
+    public void testTravellerSalesmanSquareTourSequentialSolver() {
+        // Cities (in optimal travel order).
+<span class="fc" id="L47">        final City[] squareOfCities = new City[] {</span>
+            new City(&quot;o0&quot;, 0, 0),
+            new City(&quot;o1&quot;, 1, 0),
+            new City(&quot;o2&quot;, 2, 0),
+            new City(&quot;o3&quot;, 3, 0),
+            new City(&quot;o4&quot;, 3, 1),
+            new City(&quot;o5&quot;, 3, 2),
+            new City(&quot;o6&quot;, 3, 3),
+            new City(&quot;o7&quot;, 2, 3),
+            new City(&quot;o8&quot;, 1, 3),
+            new City(&quot;o9&quot;, 0, 3),
+            new City(&quot;i3&quot;, 1, 2),
+            new City(&quot;i2&quot;, 2, 2),
+            new City(&quot;i1&quot;, 2, 1),
+            new City(&quot;i0&quot;, 1, 1),
+        };
+
+        // Seed that allows the unit test to always succeed.
+<span class="fc" id="L65">        final long seed = 1245632379L;</span>
+
+<span class="fc" id="L67">        final TravellingSalesmanSolver solver = new TravellingSalesmanSolver(squareOfCities, 2, seed);</span>
+        // printSummary(&quot;before.travel.seq.dat&quot;, solver);
+<span class="fc" id="L69">        final Runnable task = solver.createSequentialTask(15000);</span>
+<span class="fc" id="L70">        task.run();</span>
+
+        // All update attempts must be successful in the absence of concurrency.
+<span class="fc" id="L73">        Assert.assertEquals(solver.getUpdateRatio(), 1, 0d);</span>
+
+        // printSummary(&quot;after.travel.seq.dat&quot;, solver);
+<span class="fc" id="L76">        final City[] result = solver.getCityList();</span>
+<span class="fc" id="L77">        Assert.assertEquals(squareOfCities.length,</span>
+<span class="fc" id="L78">                            uniqueCities(result).size());</span>
+<span class="fc" id="L79">        final double ratio = computeTravelDistance(squareOfCities) / computeTravelDistance(result);</span>
+<span class="fc" id="L80">        Assert.assertEquals(1, ratio, 1e-1); // We do not require the optimal travel.</span>
+<span class="fc" id="L81">    }</span>
+
+    // Test can sometimes fail: Run several times.
+    @Test
+    @Retry
+    public void testTravellerSalesmanSquareTourParallelSolver() throws ExecutionException {
+        // Cities (in optimal travel order).
+<span class="fc" id="L88">        final City[] squareOfCities = new City[] {</span>
+            new City(&quot;o0&quot;, 0, 0),
+            new City(&quot;o1&quot;, 1, 0),
+            new City(&quot;o2&quot;, 2, 0),
+            new City(&quot;o3&quot;, 3, 0),
+            new City(&quot;o4&quot;, 3, 1),
+            new City(&quot;o5&quot;, 3, 2),
+            new City(&quot;o6&quot;, 3, 3),
+            new City(&quot;o7&quot;, 2, 3),
+            new City(&quot;o8&quot;, 1, 3),
+            new City(&quot;o9&quot;, 0, 3),
+            new City(&quot;i3&quot;, 1, 2),
+            new City(&quot;i2&quot;, 2, 2),
+            new City(&quot;i1&quot;, 2, 1),
+            new City(&quot;i0&quot;, 1, 1),
+        };
+
+        // Seed that allows the unit test to always succeed.
+<span class="fc" id="L106">        final long seed = 534712311L;</span>
+
+<span class="fc" id="L108">        final TravellingSalesmanSolver solver = new TravellingSalesmanSolver(squareOfCities, 2, seed);</span>
+        // printSummary(&quot;before.travel.par.dat&quot;, solver);
+
+        // Parallel execution.
+<span class="fc" id="L112">        final ExecutorService service = Executors.newCachedThreadPool();</span>
+<span class="fc" id="L113">        final int numProcs = Runtime.getRuntime().availableProcessors();</span>
+<span class="fc" id="L114">        final Runnable[] tasks = solver.createParallelTasks(numProcs, 5000);</span>
+<span class="fc" id="L115">        final List&lt;Future&lt;?&gt;&gt; execOutput = new ArrayList&lt;&gt;();</span>
+        // Run tasks.
+<span class="fc bfc" id="L117" title="All 2 branches covered.">        for (Runnable r : tasks) {</span>
+<span class="fc" id="L118">            execOutput.add(service.submit(r));</span>
+        }
+        // Wait for completion (ignoring return value).
+        try {
+<span class="fc bfc" id="L122" title="All 2 branches covered.">            for (Future&lt;?&gt; f : execOutput) {</span>
+<span class="fc" id="L123">                f.get();</span>
+<span class="fc" id="L124">            }</span>
+<span class="pc" id="L125">        } catch (InterruptedException ignored) {}</span>
+        // Terminate all threads.
+<span class="fc" id="L127">        service.shutdown();</span>
+
+<span class="pc bpc" id="L129" title="1 of 2 branches missed.">        if (numProcs &gt; 1) {</span>
+            // We expect that some update attempts will be concurrent.
+<span class="pc bpc" id="L131" title="1 of 2 branches missed.">            Assert.assertTrue(solver.getUpdateRatio() &lt; 1);</span>
+        }
+
+        // printSummary(&quot;after.travel.par.dat&quot;, solver);
+<span class="fc" id="L135">        final City[] result = solver.getCityList();</span>
+<span class="fc" id="L136">        Assert.assertEquals(squareOfCities.length,</span>
+<span class="fc" id="L137">                            uniqueCities(result).size());</span>
+<span class="fc" id="L138">        final double ratio = computeTravelDistance(squareOfCities) / computeTravelDistance(result);</span>
+<span class="fc" id="L139">        Assert.assertEquals(1, ratio, 1e-1); // We do not require the optimal travel.</span>
+<span class="fc" id="L140">    }</span>
+
+    /**
+     * Creates a map of the travel suggested by the solver.
+     *
+     * @param solver Solver.
+     * @return a 4-columns table: {@code &lt;x (neuron)&gt; &lt;y (neuron)&gt; &lt;x (city)&gt; &lt;y (city)&gt;}.
+     */
+    private String travelCoordinatesTable(TravellingSalesmanSolver solver) {
+<span class="nc" id="L149">        final StringBuilder s = new StringBuilder();</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">        for (double[] c : solver.getCoordinatesList()) {</span>
+<span class="nc" id="L151">            s.append(c[0]).append(&quot; &quot;).append(c[1]).append(&quot; &quot;);</span>
+<span class="nc" id="L152">            final City city = solver.getClosestCity(c[0], c[1]);</span>
+<span class="nc" id="L153">            final double[] cityCoord = city.getCoordinates();</span>
+<span class="nc" id="L154">            s.append(cityCoord[0]).append(&quot; &quot;).append(cityCoord[1]).append(&quot; &quot;);</span>
+<span class="nc" id="L155">            s.append(&quot;   # &quot;).append(city.getName()).append(&quot;\n&quot;);</span>
+<span class="nc" id="L156">        }</span>
+<span class="nc" id="L157">        return s.toString();</span>
+    }
+
+    /**
+     * Compute the distance covered by the salesman, including
+     * the trip back (from the last to first city).
+     *
+     * @param cityList List of cities visited during the travel.
+     * @return the total distance.
+     */
+    private Collection&lt;City&gt; uniqueCities(City[] cityList) {
+<span class="fc" id="L168">        final Set&lt;City&gt; unique = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L169" title="All 2 branches covered.">        for (City c : cityList) {</span>
+<span class="fc" id="L170">            unique.add(c);</span>
+        }
+<span class="fc" id="L172">        return unique;</span>
+    }
+
+    /**
+     * Compute the distance covered by the salesman, including
+     * the trip back (from the last to first city).
+     *
+     * @param cityList List of cities visited during the travel.
+     * @return the total distance.
+     */
+    private double computeTravelDistance(City[] cityList) {
+<span class="fc" id="L183">        double dist = 0;</span>
+<span class="fc bfc" id="L184" title="All 2 branches covered.">        for (int i = 0; i &lt; cityList.length; i++) {</span>
+<span class="fc" id="L185">            final double[] currentCoord = cityList[i].getCoordinates();</span>
+<span class="fc" id="L186">            final double[] nextCoord = cityList[(i + 1) % cityList.length].getCoordinates();</span>
+
+<span class="fc" id="L188">            final double xDiff = currentCoord[0] - nextCoord[0];</span>
+<span class="fc" id="L189">            final double yDiff = currentCoord[1] - nextCoord[1];</span>
+
+<span class="fc" id="L191">            dist += FastMath.sqrt(xDiff * xDiff + yDiff * yDiff);</span>
+        }
+
+<span class="fc" id="L194">        return dist;</span>
+    }
+
+    /**
+     * Prints a summary of the current state of the solver to the
+     * given filename.
+     *
+     * @param filename File.
+     * @param solver Solver.
+     */
+    @SuppressWarnings(&quot;unused&quot;)
+    private void printSummary(String filename,
+                              TravellingSalesmanSolver solver) {
+<span class="nc" id="L207">        PrintWriter out = null;</span>
+        try {
+<span class="nc" id="L209">            out = new PrintWriter(filename);</span>
+<span class="nc" id="L210">            out.println(travelCoordinatesTable(solver));</span>
+
+<span class="nc" id="L212">            final City[] result = solver.getCityList();</span>
+<span class="nc" id="L213">            out.println(&quot;# Number of unique cities: &quot; + uniqueCities(result).size());</span>
+<span class="nc" id="L214">            out.println(&quot;# Travel distance: &quot; + computeTravelDistance(result));</span>
+<span class="nc" id="L215">        } catch (Exception e) {</span>
+            // Do nothing.
+        } finally {
+<span class="nc bnc" id="L218" title="All 2 branches missed.">            if (out != null) {</span>
+<span class="nc" id="L219">                out.close();</span>
+            }
+        }
+<span class="nc" id="L222">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,900 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>JavadocMethodCheck.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.checks.javadoc</a> &gt; <span class="el_source">JavadocMethodCheck.java</span></div><h1>JavadocMethodCheck.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.checks.javadoc;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import com.puppycrawl.tools.checkstyle.api.DetailAST;
+import com.puppycrawl.tools.checkstyle.api.FileContents;
+import com.puppycrawl.tools.checkstyle.api.FullIdent;
+import com.puppycrawl.tools.checkstyle.api.Scope;
+import com.puppycrawl.tools.checkstyle.api.TextBlock;
+import com.puppycrawl.tools.checkstyle.api.TokenTypes;
+import com.puppycrawl.tools.checkstyle.utils.AnnotationUtil;
+import com.puppycrawl.tools.checkstyle.utils.CheckUtil;
+import com.puppycrawl.tools.checkstyle.utils.CommonUtil;
+import com.puppycrawl.tools.checkstyle.utils.ScopeUtil;
+
+/**
+ * Checks the Javadoc of a method or constructor.
+ *
+ *
+ * @noinspection deprecation
+ */
+<span class="fc" id="L50">public class JavadocMethodCheck extends AbstractTypeAwareCheck {</span>
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_CLASS_INFO = &quot;javadoc.classInfo&quot;;
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_UNUSED_TAG_GENERAL = &quot;javadoc.unusedTagGeneral&quot;;
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_INVALID_INHERIT_DOC = &quot;javadoc.invalidInheritDoc&quot;;
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_UNUSED_TAG = &quot;javadoc.unusedTag&quot;;
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_EXPECTED_TAG = &quot;javadoc.expectedTag&quot;;
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_RETURN_EXPECTED = &quot;javadoc.return.expected&quot;;
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_DUPLICATE_TAG = &quot;javadoc.duplicateTag&quot;;
+
+    /** Compiled regexp to match Javadoc tags that take an argument. */
+<span class="fc" id="L95">    private static final Pattern MATCH_JAVADOC_ARG = CommonUtil.createPattern(</span>
+            &quot;^\\s*(?&gt;\\*|\\/\\*\\*)?\\s*@(throws|exception|param)\\s+(\\S+)\\s+\\S*&quot;);
+
+    /** Compiled regexp to match first part of multilineJavadoc tags. */
+<span class="fc" id="L99">    private static final Pattern MATCH_JAVADOC_ARG_MULTILINE_START = CommonUtil.createPattern(</span>
+            &quot;^\\s*(?&gt;\\*|\\/\\*\\*)?\\s*@(throws|exception|param)\\s+(\\S+)\\s*$&quot;);
+
+    /** Compiled regexp to look for a continuation of the comment. */
+<span class="fc" id="L103">    private static final Pattern MATCH_JAVADOC_MULTILINE_CONT =</span>
+<span class="fc" id="L104">            CommonUtil.createPattern(&quot;(\\*/|@|[^\\s\\*])&quot;);</span>
+
+    /** Multiline finished at end of comment. */
+    private static final String END_JAVADOC = &quot;*/&quot;;
+    /** Multiline finished at next Javadoc. */
+    private static final String NEXT_TAG = &quot;@&quot;;
+
+    /** Compiled regexp to match Javadoc tags with no argument. */
+<span class="fc" id="L112">    private static final Pattern MATCH_JAVADOC_NOARG =</span>
+<span class="fc" id="L113">            CommonUtil.createPattern(&quot;^\\s*(?&gt;\\*|\\/\\*\\*)?\\s*@(return|see)\\s+\\S&quot;);</span>
+    /** Compiled regexp to match first part of multilineJavadoc tags. */
+<span class="fc" id="L115">    private static final Pattern MATCH_JAVADOC_NOARG_MULTILINE_START =</span>
+<span class="fc" id="L116">            CommonUtil.createPattern(&quot;^\\s*(?&gt;\\*|\\/\\*\\*)?\\s*@(return|see)\\s*$&quot;);</span>
+    /** Compiled regexp to match Javadoc tags with no argument and {}. */
+<span class="fc" id="L118">    private static final Pattern MATCH_JAVADOC_NOARG_CURLY =</span>
+<span class="fc" id="L119">            CommonUtil.createPattern(&quot;\\{\\s*@(inheritDoc)\\s*\\}&quot;);</span>
+
+    /** The visibility scope where Javadoc comments are checked. */
+<span class="fc" id="L122">    private Scope scope = Scope.PRIVATE;</span>
+
+    /** The visibility scope where Javadoc comments shouldn't be checked. */
+    private Scope excludeScope;
+
+    /**
+     * Controls whether to allow documented exceptions that are not declared if
+     * they are a subclass of java.lang.RuntimeException.
+     */
+    // -@cs[AbbreviationAsWordInName] We can not change it as,
+    // check's property is part of API (used in configurations).
+    private boolean allowUndeclaredRTE;
+
+    /**
+     * Allows validating throws tags.
+     */
+    private boolean validateThrows;
+
+    /**
+     * Controls whether to allow documented exceptions that are subclass of one
+     * of declared exception. Defaults to false (backward compatibility).
+     */
+    private boolean allowThrowsTagsForSubclasses;
+
+    /**
+     * Controls whether to ignore errors when a method has parameters but does
+     * not have matching param tags in the javadoc. Defaults to false.
+     */
+    private boolean allowMissingParamTags;
+
+    /**
+     * Controls whether to ignore errors when a method declares that it throws
+     * exceptions but does not have matching throws tags in the javadoc.
+     * Defaults to false.
+     */
+    private boolean allowMissingThrowsTags;
+
+    /**
+     * Controls whether to ignore errors when a method returns non-void type
+     * but does not have a return tag in the javadoc. Defaults to false.
+     */
+    private boolean allowMissingReturnTag;
+
+    /** List of annotations that allow missed documentation. */
+<span class="fc" id="L166">    private List&lt;String&gt; allowedAnnotations = Collections.singletonList(&quot;Override&quot;);</span>
+
+    /**
+     * Set regex for matching method names to ignore.
+     * @param pattern a pattern.
+     * @deprecated Use {@link MissingJavadocMethodCheck} instead.
+     */
+    @Deprecated
+    public void setIgnoreMethodNamesRegex(Pattern pattern) {
+        // deprecated
+<span class="fc" id="L176">    }</span>
+
+    /**
+     * Sets minimal amount of lines in method to allow no documentation.
+     * @param value user's value.
+     * @deprecated Use {@link MissingJavadocMethodCheck} instead.
+     */
+    @Deprecated
+    public void setMinLineCount(int value) {
+        // deprecated
+<span class="fc" id="L186">    }</span>
+
+    /**
+     * Allow validating throws tag.
+     * @param value user's value.
+     */
+    public void setValidateThrows(boolean value) {
+<span class="fc" id="L193">        validateThrows = value;</span>
+<span class="fc" id="L194">    }</span>
+
+    /**
+     * Sets list of annotations.
+     * @param userAnnotations user's value.
+     */
+    public void setAllowedAnnotations(String... userAnnotations) {
+<span class="fc" id="L201">        allowedAnnotations = Arrays.asList(userAnnotations);</span>
+<span class="fc" id="L202">    }</span>
+
+    /**
+     * Set the scope.
+     *
+     * @param scope a scope.
+     */
+    public void setScope(Scope scope) {
+<span class="fc" id="L210">        this.scope = scope;</span>
+<span class="fc" id="L211">    }</span>
+
+    /**
+     * Set the excludeScope.
+     *
+     * @param excludeScope a scope.
+     */
+    public void setExcludeScope(Scope excludeScope) {
+<span class="fc" id="L219">        this.excludeScope = excludeScope;</span>
+<span class="fc" id="L220">    }</span>
+
+    /**
+     * Controls whether to allow documented exceptions that are not declared if
+     * they are a subclass of java.lang.RuntimeException.
+     *
+     * @param flag a {@code Boolean} value
+     */
+    // -@cs[AbbreviationAsWordInName] We can not change it as,
+    // check's property is part of API (used in configurations).
+    public void setAllowUndeclaredRTE(boolean flag) {
+<span class="fc" id="L231">        allowUndeclaredRTE = flag;</span>
+<span class="fc" id="L232">    }</span>
+
+    /**
+     * Controls whether to allow documented exception that are subclass of one
+     * of declared exceptions.
+     *
+     * @param flag a {@code Boolean} value
+     */
+    public void setAllowThrowsTagsForSubclasses(boolean flag) {
+<span class="fc" id="L241">        allowThrowsTagsForSubclasses = flag;</span>
+<span class="fc" id="L242">    }</span>
+
+    /**
+     * Controls whether to allow a method which has parameters to omit matching
+     * param tags in the javadoc. Defaults to false.
+     *
+     * @param flag a {@code Boolean} value
+     */
+    public void setAllowMissingParamTags(boolean flag) {
+<span class="fc" id="L251">        allowMissingParamTags = flag;</span>
+<span class="fc" id="L252">    }</span>
+
+    /**
+     * Controls whether to allow a method which declares that it throws
+     * exceptions to omit matching throws tags in the javadoc. Defaults to
+     * false.
+     *
+     * @param flag a {@code Boolean} value
+     */
+    public void setAllowMissingThrowsTags(boolean flag) {
+<span class="fc" id="L262">        allowMissingThrowsTags = flag;</span>
+<span class="fc" id="L263">    }</span>
+
+    /**
+     * Controls whether to allow a method which returns non-void type to omit
+     * the return tag in the javadoc. Defaults to false.
+     *
+     * @param flag a {@code Boolean} value
+     */
+    public void setAllowMissingReturnTag(boolean flag) {
+<span class="fc" id="L272">        allowMissingReturnTag = flag;</span>
+<span class="fc" id="L273">    }</span>
+
+    /**
+     * Controls whether to ignore errors when there is no javadoc. Defaults to
+     * false.
+     *
+     * @param flag a {@code Boolean} value
+     * @deprecated Use {@link MissingJavadocMethodCheck} instead.
+     */
+    @Deprecated
+    public void setAllowMissingJavadoc(boolean flag) {
+        // deprecated
+<span class="fc" id="L285">    }</span>
+
+    /**
+     * Controls whether to ignore errors when there is no javadoc for a
+     * property accessor (setter/getter methods). Defaults to false.
+     *
+     * @param flag a {@code Boolean} value
+     * @deprecated Use {@link MissingJavadocMethodCheck} instead.
+     */
+    @Deprecated
+    public void setAllowMissingPropertyJavadoc(final boolean flag) {
+        // deprecated
+<span class="fc" id="L297">    }</span>
+
+    @Override
+    public int[] getDefaultTokens() {
+<span class="fc" id="L301">        return getAcceptableTokens();</span>
+    }
+
+    @Override
+    public int[] getAcceptableTokens() {
+<span class="fc" id="L306">        return new int[] {</span>
+            TokenTypes.PACKAGE_DEF,
+            TokenTypes.IMPORT,
+            TokenTypes.CLASS_DEF,
+            TokenTypes.ENUM_DEF,
+            TokenTypes.INTERFACE_DEF,
+            TokenTypes.METHOD_DEF,
+            TokenTypes.CTOR_DEF,
+            TokenTypes.ANNOTATION_FIELD_DEF,
+        };
+    }
+
+    @Override
+    protected final void processAST(DetailAST ast) {
+<span class="fc" id="L320">        final Scope theScope = calculateScope(ast);</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">        if (shouldCheck(ast, theScope)) {</span>
+<span class="fc" id="L322">            final FileContents contents = getFileContents();</span>
+<span class="fc" id="L323">            final TextBlock textBlock = contents.getJavadocBefore(ast.getLineNo());</span>
+
+<span class="fc bfc" id="L325" title="All 2 branches covered.">            if (textBlock != null) {</span>
+<span class="fc" id="L326">                checkComment(ast, textBlock);</span>
+            }
+        }
+<span class="fc" id="L329">    }</span>
+
+    @Override
+    protected final void logLoadError(Token ident) {
+<span class="fc" id="L333">        logLoadErrorImpl(ident.getLineNo(), ident.getColumnNo(),</span>
+            MSG_CLASS_INFO,
+<span class="fc" id="L335">            JavadocTagInfo.THROWS.getText(), ident.getText());</span>
+<span class="fc" id="L336">    }</span>
+
+    /**
+     * Whether we should check this node.
+     *
+     * @param ast a given node.
+     * @param nodeScope the scope of the node.
+     * @return whether we should check a given node.
+     */
+    private boolean shouldCheck(final DetailAST ast, final Scope nodeScope) {
+<span class="fc" id="L346">        final Scope surroundingScope = ScopeUtil.getSurroundingScope(ast);</span>
+
+<span class="fc bfc" id="L348" title="All 6 branches covered.">        return (excludeScope == null</span>
+                || nodeScope != excludeScope
+                &amp;&amp; surroundingScope != excludeScope)
+<span class="fc bfc" id="L351" title="All 2 branches covered.">            &amp;&amp; nodeScope.isIn(scope)</span>
+<span class="fc bfc" id="L352" title="All 2 branches covered.">            &amp;&amp; surroundingScope.isIn(scope);</span>
+    }
+
+    /**
+     * Checks the Javadoc for a method.
+     *
+     * @param ast the token for the method
+     * @param comment the Javadoc comment
+     */
+    private void checkComment(DetailAST ast, TextBlock comment) {
+<span class="fc" id="L362">        final List&lt;JavadocTag&gt; tags = getMethodTags(comment);</span>
+
+<span class="fc bfc" id="L364" title="All 2 branches covered.">        if (!hasShortCircuitTag(ast, tags)) {</span>
+<span class="fc bfc" id="L365" title="All 2 branches covered.">            if (ast.getType() == TokenTypes.ANNOTATION_FIELD_DEF) {</span>
+<span class="fc" id="L366">                checkReturnTag(tags, ast.getLineNo(), true);</span>
+            }
+            else {
+<span class="fc" id="L369">                final Iterator&lt;JavadocTag&gt; it = tags.iterator();</span>
+                // Check for inheritDoc
+<span class="fc" id="L371">                boolean hasInheritDocTag = false;</span>
+<span class="fc bfc" id="L372" title="All 4 branches covered.">                while (!hasInheritDocTag &amp;&amp; it.hasNext()) {</span>
+<span class="fc" id="L373">                    hasInheritDocTag = it.next().isInheritDocTag();</span>
+                }
+<span class="fc bfc" id="L375" title="All 2 branches covered.">                final boolean reportExpectedTags = !hasInheritDocTag</span>
+<span class="fc bfc" id="L376" title="All 2 branches covered.">                    &amp;&amp; !AnnotationUtil.containsAnnotation(ast, allowedAnnotations);</span>
+
+<span class="fc" id="L378">                checkParamTags(tags, ast, reportExpectedTags);</span>
+<span class="fc" id="L379">                checkThrowsTags(tags, getThrows(ast), reportExpectedTags);</span>
+<span class="fc bfc" id="L380" title="All 2 branches covered.">                if (CheckUtil.isNonVoidMethod(ast)) {</span>
+<span class="fc" id="L381">                    checkReturnTag(tags, ast.getLineNo(), reportExpectedTags);</span>
+                }
+            }
+
+            // Dump out all unused tags
+<span class="fc bfc" id="L386" title="All 2 branches covered.">            tags.stream().filter(javadocTag -&gt; !javadocTag.isSeeOrInheritDocTag())</span>
+<span class="fc" id="L387">                .forEach(javadocTag -&gt; log(javadocTag.getLineNo(), MSG_UNUSED_TAG_GENERAL));</span>
+        }
+<span class="fc" id="L389">    }</span>
+
+    /**
+     * Validates whether the Javadoc has a short circuit tag. Currently this is
+     * the inheritTag. Any errors are logged.
+     *
+     * @param ast the construct being checked
+     * @param tags the list of Javadoc tags associated with the construct
+     * @return true if the construct has a short circuit tag.
+     */
+    private boolean hasShortCircuitTag(final DetailAST ast, final List&lt;JavadocTag&gt; tags) {
+<span class="fc" id="L400">        boolean result = true;</span>
+        // Check if it contains {@inheritDoc} tag
+<span class="fc bfc" id="L402" title="All 2 branches covered.">        if (tags.size() == 1</span>
+<span class="fc bfc" id="L403" title="All 2 branches covered.">                &amp;&amp; tags.get(0).isInheritDocTag()) {</span>
+            // Invalid if private, a constructor, or a static method
+<span class="fc bfc" id="L405" title="All 2 branches covered.">            if (!JavadocTagInfo.INHERIT_DOC.isValidOn(ast)) {</span>
+<span class="fc" id="L406">                log(ast, MSG_INVALID_INHERIT_DOC);</span>
+            }
+        }
+        else {
+<span class="fc" id="L410">            result = false;</span>
+        }
+<span class="fc" id="L412">        return result;</span>
+    }
+
+    /**
+     * Returns the scope for the method/constructor at the specified AST. If
+     * the method is in an interface or annotation block, the scope is assumed
+     * to be public.
+     *
+     * @param ast the token of the method/constructor
+     * @return the scope of the method/constructor
+     */
+    private static Scope calculateScope(final DetailAST ast) {
+        final Scope scope;
+
+<span class="fc bfc" id="L426" title="All 2 branches covered.">        if (ScopeUtil.isInInterfaceOrAnnotationBlock(ast)) {</span>
+<span class="fc" id="L427">            scope = Scope.PUBLIC;</span>
+        }
+        else {
+<span class="fc" id="L430">            final DetailAST mods = ast.findFirstToken(TokenTypes.MODIFIERS);</span>
+<span class="fc" id="L431">            scope = ScopeUtil.getScopeFromMods(mods);</span>
+        }
+<span class="fc" id="L433">        return scope;</span>
+    }
+
+    /**
+     * Returns the tags in a javadoc comment. Only finds throws, exception,
+     * param, return and see tags.
+     *
+     * @param comment the Javadoc comment
+     * @return the tags found
+     */
+    private static List&lt;JavadocTag&gt; getMethodTags(TextBlock comment) {
+<span class="fc" id="L444">        final String[] lines = comment.getText();</span>
+<span class="fc" id="L445">        final List&lt;JavadocTag&gt; tags = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L446">        int currentLine = comment.getStartLineNo() - 1;</span>
+<span class="fc" id="L447">        final int startColumnNumber = comment.getStartColNo();</span>
+
+<span class="fc bfc" id="L449" title="All 2 branches covered.">        for (int i = 0; i &lt; lines.length; i++) {</span>
+<span class="fc" id="L450">            currentLine++;</span>
+<span class="fc" id="L451">            final Matcher javadocArgMatcher =</span>
+<span class="fc" id="L452">                MATCH_JAVADOC_ARG.matcher(lines[i]);</span>
+<span class="fc" id="L453">            final Matcher javadocNoargMatcher =</span>
+<span class="fc" id="L454">                MATCH_JAVADOC_NOARG.matcher(lines[i]);</span>
+<span class="fc" id="L455">            final Matcher noargCurlyMatcher =</span>
+<span class="fc" id="L456">                MATCH_JAVADOC_NOARG_CURLY.matcher(lines[i]);</span>
+<span class="fc" id="L457">            final Matcher argMultilineStart =</span>
+<span class="fc" id="L458">                MATCH_JAVADOC_ARG_MULTILINE_START.matcher(lines[i]);</span>
+<span class="fc" id="L459">            final Matcher noargMultilineStart =</span>
+<span class="fc" id="L460">                MATCH_JAVADOC_NOARG_MULTILINE_START.matcher(lines[i]);</span>
+
+<span class="fc bfc" id="L462" title="All 2 branches covered.">            if (javadocArgMatcher.find()) {</span>
+<span class="fc" id="L463">                final int col = calculateTagColumn(javadocArgMatcher, i, startColumnNumber);</span>
+<span class="fc" id="L464">                tags.add(new JavadocTag(currentLine, col, javadocArgMatcher.group(1),</span>
+<span class="fc" id="L465">                        javadocArgMatcher.group(2)));</span>
+<span class="fc" id="L466">            }</span>
+<span class="fc bfc" id="L467" title="All 2 branches covered.">            else if (javadocNoargMatcher.find()) {</span>
+<span class="fc" id="L468">                final int col = calculateTagColumn(javadocNoargMatcher, i, startColumnNumber);</span>
+<span class="fc" id="L469">                tags.add(new JavadocTag(currentLine, col, javadocNoargMatcher.group(1)));</span>
+<span class="fc" id="L470">            }</span>
+<span class="fc bfc" id="L471" title="All 2 branches covered.">            else if (noargCurlyMatcher.find()) {</span>
+<span class="fc" id="L472">                final int col = calculateTagColumn(noargCurlyMatcher, i, startColumnNumber);</span>
+<span class="fc" id="L473">                tags.add(new JavadocTag(currentLine, col, noargCurlyMatcher.group(1)));</span>
+<span class="fc" id="L474">            }</span>
+<span class="fc bfc" id="L475" title="All 2 branches covered.">            else if (argMultilineStart.find()) {</span>
+<span class="fc" id="L476">                final int col = calculateTagColumn(argMultilineStart, i, startColumnNumber);</span>
+<span class="fc" id="L477">                tags.addAll(getMultilineArgTags(argMultilineStart, col, lines, i, currentLine));</span>
+<span class="fc" id="L478">            }</span>
+<span class="fc bfc" id="L479" title="All 2 branches covered.">            else if (noargMultilineStart.find()) {</span>
+<span class="fc" id="L480">                tags.addAll(getMultilineNoArgTags(noargMultilineStart, lines, i, currentLine));</span>
+            }
+        }
+<span class="fc" id="L483">        return tags;</span>
+    }
+
+    /**
+     * Calculates column number using Javadoc tag matcher.
+     * @param javadocTagMatcher found javadoc tag matcher
+     * @param lineNumber line number of Javadoc tag in comment
+     * @param startColumnNumber column number of Javadoc comment beginning
+     * @return column number
+     */
+    private static int calculateTagColumn(Matcher javadocTagMatcher,
+            int lineNumber, int startColumnNumber) {
+<span class="fc" id="L495">        int col = javadocTagMatcher.start(1) - 1;</span>
+<span class="fc bfc" id="L496" title="All 2 branches covered.">        if (lineNumber == 0) {</span>
+<span class="fc" id="L497">            col += startColumnNumber;</span>
+        }
+<span class="fc" id="L499">        return col;</span>
+    }
+
+    /**
+     * Gets multiline Javadoc tags with arguments.
+     * @param argMultilineStart javadoc tag Matcher
+     * @param column column number of Javadoc tag
+     * @param lines comment text lines
+     * @param lineIndex line number that contains the javadoc tag
+     * @param tagLine javadoc tag line number in file
+     * @return javadoc tags with arguments
+     */
+    private static List&lt;JavadocTag&gt; getMultilineArgTags(final Matcher argMultilineStart,
+            final int column, final String[] lines, final int lineIndex, final int tagLine) {
+<span class="fc" id="L513">        final List&lt;JavadocTag&gt; tags = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L514">        final String param1 = argMultilineStart.group(1);</span>
+<span class="fc" id="L515">        final String param2 = argMultilineStart.group(2);</span>
+<span class="fc bfc" id="L516" title="All 2 branches covered.">        for (int remIndex = lineIndex + 1; remIndex &lt; lines.length; remIndex++) {</span>
+<span class="fc" id="L517">            final Matcher multilineCont = MATCH_JAVADOC_MULTILINE_CONT.matcher(lines[remIndex]);</span>
+<span class="fc bfc" id="L518" title="All 2 branches covered.">            if (multilineCont.find()) {</span>
+<span class="fc" id="L519">                final String lFin = multilineCont.group(1);</span>
+<span class="fc bfc" id="L520" title="All 2 branches covered.">                if (!lFin.equals(NEXT_TAG)</span>
+<span class="fc bfc" id="L521" title="All 2 branches covered.">                    &amp;&amp; !lFin.equals(END_JAVADOC)) {</span>
+<span class="fc" id="L522">                    tags.add(new JavadocTag(tagLine, column, param1, param2));</span>
+                }
+                break;
+            }
+        }
+
+<span class="fc" id="L528">        return tags;</span>
+    }
+
+    /**
+     * Gets multiline Javadoc tags with no arguments.
+     * @param noargMultilineStart javadoc tag Matcher
+     * @param lines comment text lines
+     * @param lineIndex line number that contains the javadoc tag
+     * @param tagLine javadoc tag line number in file
+     * @return javadoc tags with no arguments
+     */
+    private static List&lt;JavadocTag&gt; getMultilineNoArgTags(final Matcher noargMultilineStart,
+            final String[] lines, final int lineIndex, final int tagLine) {
+<span class="fc" id="L541">        int remIndex = lineIndex;</span>
+        Matcher multilineCont;
+
+        do {
+<span class="fc" id="L545">            remIndex++;</span>
+<span class="fc" id="L546">            multilineCont = MATCH_JAVADOC_MULTILINE_CONT.matcher(lines[remIndex]);</span>
+<span class="fc bfc" id="L547" title="All 2 branches covered.">        } while (!multilineCont.find());</span>
+
+<span class="fc" id="L549">        final List&lt;JavadocTag&gt; tags = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L550">        final String lFin = multilineCont.group(1);</span>
+<span class="fc bfc" id="L551" title="All 2 branches covered.">        if (!lFin.equals(NEXT_TAG)</span>
+<span class="fc bfc" id="L552" title="All 2 branches covered.">            &amp;&amp; !lFin.equals(END_JAVADOC)) {</span>
+<span class="fc" id="L553">            final String param1 = noargMultilineStart.group(1);</span>
+<span class="fc" id="L554">            final int col = noargMultilineStart.start(1) - 1;</span>
+
+<span class="fc" id="L556">            tags.add(new JavadocTag(tagLine, col, param1));</span>
+        }
+
+<span class="fc" id="L559">        return tags;</span>
+    }
+
+    /**
+     * Computes the parameter nodes for a method.
+     *
+     * @param ast the method node.
+     * @return the list of parameter nodes for ast.
+     */
+    private static List&lt;DetailAST&gt; getParameters(DetailAST ast) {
+<span class="fc" id="L569">        final DetailAST params = ast.findFirstToken(TokenTypes.PARAMETERS);</span>
+<span class="fc" id="L570">        final List&lt;DetailAST&gt; returnValue = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L572">        DetailAST child = params.getFirstChild();</span>
+<span class="fc bfc" id="L573" title="All 2 branches covered.">        while (child != null) {</span>
+<span class="fc bfc" id="L574" title="All 2 branches covered.">            if (child.getType() == TokenTypes.PARAMETER_DEF) {</span>
+<span class="fc" id="L575">                final DetailAST ident = child.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc bfc" id="L576" title="All 2 branches covered.">                if (ident != null) {</span>
+<span class="fc" id="L577">                    returnValue.add(ident);</span>
+                }
+            }
+<span class="fc" id="L580">            child = child.getNextSibling();</span>
+        }
+<span class="fc" id="L582">        return returnValue;</span>
+    }
+
+    /**
+     * Computes the exception nodes for a method.
+     *
+     * @param ast the method node.
+     * @return the list of exception nodes for ast.
+     */
+    private List&lt;ExceptionInfo&gt; getThrows(DetailAST ast) {
+<span class="fc" id="L592">        final List&lt;ExceptionInfo&gt; returnValue = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L593">        final DetailAST throwsAST = ast</span>
+<span class="fc" id="L594">                .findFirstToken(TokenTypes.LITERAL_THROWS);</span>
+<span class="fc bfc" id="L595" title="All 2 branches covered.">        if (throwsAST != null) {</span>
+<span class="fc" id="L596">            DetailAST child = throwsAST.getFirstChild();</span>
+<span class="fc bfc" id="L597" title="All 2 branches covered.">            while (child != null) {</span>
+<span class="fc bfc" id="L598" title="All 2 branches covered.">                if (child.getType() == TokenTypes.IDENT</span>
+<span class="fc bfc" id="L599" title="All 2 branches covered.">                        || child.getType() == TokenTypes.DOT) {</span>
+<span class="fc" id="L600">                    final FullIdent ident = FullIdent.createFullIdent(child);</span>
+<span class="fc" id="L601">                    final ExceptionInfo exceptionInfo = new ExceptionInfo(</span>
+<span class="fc" id="L602">                            createClassInfo(new Token(ident), getCurrentClassName()));</span>
+<span class="fc" id="L603">                    returnValue.add(exceptionInfo);</span>
+                }
+<span class="fc" id="L605">                child = child.getNextSibling();</span>
+            }
+        }
+<span class="fc" id="L608">        return returnValue;</span>
+    }
+
+    /**
+     * Checks a set of tags for matching parameters.
+     *
+     * @param tags the tags to check
+     * @param parent the node which takes the parameters
+     * @param reportExpectedTags whether we should report if do not find
+     *            expected tag
+     */
+    private void checkParamTags(final List&lt;JavadocTag&gt; tags,
+            final DetailAST parent, boolean reportExpectedTags) {
+<span class="fc" id="L621">        final List&lt;DetailAST&gt; params = getParameters(parent);</span>
+<span class="fc" id="L622">        final List&lt;DetailAST&gt; typeParams = CheckUtil</span>
+<span class="fc" id="L623">                .getTypeParameters(parent);</span>
+
+        // Loop over the tags, checking to see they exist in the params.
+<span class="fc" id="L626">        final ListIterator&lt;JavadocTag&gt; tagIt = tags.listIterator();</span>
+<span class="fc bfc" id="L627" title="All 2 branches covered.">        while (tagIt.hasNext()) {</span>
+<span class="fc" id="L628">            final JavadocTag tag = tagIt.next();</span>
+
+<span class="fc bfc" id="L630" title="All 2 branches covered.">            if (!tag.isParamTag()) {</span>
+<span class="fc" id="L631">                continue;</span>
+            }
+
+<span class="fc" id="L634">            tagIt.remove();</span>
+
+<span class="fc" id="L636">            final String arg1 = tag.getFirstArg();</span>
+<span class="fc" id="L637">            boolean found = removeMatchingParam(params, arg1);</span>
+
+<span class="fc bfc" id="L639" title="All 4 branches covered.">            if (CommonUtil.startsWithChar(arg1, '&lt;') &amp;&amp; CommonUtil.endsWithChar(arg1, '&gt;')) {</span>
+<span class="fc" id="L640">                found = searchMatchingTypeParameter(typeParams,</span>
+<span class="fc" id="L641">                        arg1.substring(1, arg1.length() - 1));</span>
+            }
+
+            // Handle extra JavadocTag
+<span class="fc bfc" id="L645" title="All 2 branches covered.">            if (!found) {</span>
+<span class="fc" id="L646">                log(tag.getLineNo(), tag.getColumnNo(), MSG_UNUSED_TAG,</span>
+                        &quot;@param&quot;, arg1);
+            }
+<span class="fc" id="L649">        }</span>
+
+        // Now dump out all type parameters/parameters without tags :- unless
+        // the user has chosen to suppress these problems
+<span class="fc bfc" id="L653" title="All 4 branches covered.">        if (!allowMissingParamTags &amp;&amp; reportExpectedTags) {</span>
+<span class="fc bfc" id="L654" title="All 2 branches covered.">            for (DetailAST param : params) {</span>
+<span class="fc" id="L655">                log(param, MSG_EXPECTED_TAG,</span>
+<span class="fc" id="L656">                    JavadocTagInfo.PARAM.getText(), param.getText());</span>
+<span class="fc" id="L657">            }</span>
+
+<span class="fc bfc" id="L659" title="All 2 branches covered.">            for (DetailAST typeParam : typeParams) {</span>
+<span class="fc" id="L660">                log(typeParam, MSG_EXPECTED_TAG,</span>
+<span class="fc" id="L661">                    JavadocTagInfo.PARAM.getText(),</span>
+<span class="fc" id="L662">                    &quot;&lt;&quot; + typeParam.findFirstToken(TokenTypes.IDENT).getText()</span>
+                    + &quot;&gt;&quot;);
+<span class="fc" id="L664">            }</span>
+        }
+<span class="fc" id="L666">    }</span>
+
+    /**
+     * Returns true if required type found in type parameters.
+     * @param typeParams
+     *            list of type parameters
+     * @param requiredTypeName
+     *            name of required type
+     * @return true if required type found in type parameters.
+     */
+    private static boolean searchMatchingTypeParameter(List&lt;DetailAST&gt; typeParams,
+            String requiredTypeName) {
+        // Loop looking for matching type param
+<span class="fc" id="L679">        final Iterator&lt;DetailAST&gt; typeParamsIt = typeParams.iterator();</span>
+<span class="fc" id="L680">        boolean found = false;</span>
+<span class="fc bfc" id="L681" title="All 2 branches covered.">        while (typeParamsIt.hasNext()) {</span>
+<span class="fc" id="L682">            final DetailAST typeParam = typeParamsIt.next();</span>
+<span class="fc" id="L683">            if (typeParam.findFirstToken(TokenTypes.IDENT).getText()</span>
+<span class="fc bfc" id="L684" title="All 2 branches covered.">                    .equals(requiredTypeName)) {</span>
+<span class="fc" id="L685">                found = true;</span>
+<span class="fc" id="L686">                typeParamsIt.remove();</span>
+<span class="fc" id="L687">                break;</span>
+            }
+<span class="fc" id="L689">        }</span>
+<span class="fc" id="L690">        return found;</span>
+    }
+
+    /**
+     * Remove parameter from params collection by name.
+     * @param params collection of DetailAST parameters
+     * @param paramName name of parameter
+     * @return true if parameter found and removed
+     */
+    private static boolean removeMatchingParam(List&lt;DetailAST&gt; params, String paramName) {
+<span class="fc" id="L700">        boolean found = false;</span>
+<span class="fc" id="L701">        final Iterator&lt;DetailAST&gt; paramIt = params.iterator();</span>
+<span class="fc bfc" id="L702" title="All 2 branches covered.">        while (paramIt.hasNext()) {</span>
+<span class="fc" id="L703">            final DetailAST param = paramIt.next();</span>
+<span class="fc bfc" id="L704" title="All 2 branches covered.">            if (param.getText().equals(paramName)) {</span>
+<span class="fc" id="L705">                found = true;</span>
+<span class="fc" id="L706">                paramIt.remove();</span>
+<span class="fc" id="L707">                break;</span>
+            }
+<span class="fc" id="L709">        }</span>
+<span class="fc" id="L710">        return found;</span>
+    }
+
+    /**
+     * Checks for only one return tag. All return tags will be removed from the
+     * supplied list.
+     *
+     * @param tags the tags to check
+     * @param lineNo the line number of the expected tag
+     * @param reportExpectedTags whether we should report if do not find
+     *            expected tag
+     */
+    private void checkReturnTag(List&lt;JavadocTag&gt; tags, int lineNo,
+        boolean reportExpectedTags) {
+        // Loop over tags finding return tags. After the first one, report an
+        // error.
+<span class="fc" id="L726">        boolean found = false;</span>
+<span class="fc" id="L727">        final ListIterator&lt;JavadocTag&gt; it = tags.listIterator();</span>
+<span class="fc bfc" id="L728" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L729">            final JavadocTag javadocTag = it.next();</span>
+<span class="fc bfc" id="L730" title="All 2 branches covered.">            if (javadocTag.isReturnTag()) {</span>
+<span class="fc bfc" id="L731" title="All 2 branches covered.">                if (found) {</span>
+<span class="fc" id="L732">                    log(javadocTag.getLineNo(), javadocTag.getColumnNo(),</span>
+                            MSG_DUPLICATE_TAG,
+<span class="fc" id="L734">                            JavadocTagInfo.RETURN.getText());</span>
+                }
+<span class="fc" id="L736">                found = true;</span>
+<span class="fc" id="L737">                it.remove();</span>
+            }
+<span class="fc" id="L739">        }</span>
+
+        // Handle there being no @return tags :- unless
+        // the user has chosen to suppress these problems
+<span class="fc bfc" id="L743" title="All 6 branches covered.">        if (!found &amp;&amp; !allowMissingReturnTag &amp;&amp; reportExpectedTags) {</span>
+<span class="fc" id="L744">            log(lineNo, MSG_RETURN_EXPECTED);</span>
+        }
+<span class="fc" id="L746">    }</span>
+
+    /**
+     * Checks a set of tags for matching throws.
+     *
+     * @param tags the tags to check
+     * @param throwsList the throws to check
+     * @param reportExpectedTags whether we should report if do not find
+     *            expected tag
+     */
+    private void checkThrowsTags(List&lt;JavadocTag&gt; tags,
+            List&lt;ExceptionInfo&gt; throwsList, boolean reportExpectedTags) {
+        // Loop over the tags, checking to see they exist in the throws.
+        // The foundThrows used for performance only
+<span class="fc" id="L760">        final Set&lt;String&gt; foundThrows = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L761">        final ListIterator&lt;JavadocTag&gt; tagIt = tags.listIterator();</span>
+<span class="fc bfc" id="L762" title="All 2 branches covered.">        while (tagIt.hasNext()) {</span>
+<span class="fc" id="L763">            final JavadocTag tag = tagIt.next();</span>
+
+<span class="fc bfc" id="L765" title="All 2 branches covered.">            if (!tag.isThrowsTag()) {</span>
+<span class="fc" id="L766">                continue;</span>
+            }
+<span class="fc" id="L768">            tagIt.remove();</span>
+
+            // Loop looking for matching throw
+<span class="fc" id="L771">            final String documentedEx = tag.getFirstArg();</span>
+<span class="fc" id="L772">            final Token token = new Token(tag.getFirstArg(), tag.getLineNo(), tag</span>
+<span class="fc" id="L773">                    .getColumnNo());</span>
+<span class="fc" id="L774">            final AbstractClassInfo documentedClassInfo = createClassInfo(token,</span>
+<span class="fc" id="L775">                    getCurrentClassName());</span>
+<span class="fc bfc" id="L776" title="All 2 branches covered.">            final boolean found = foundThrows.contains(documentedEx)</span>
+<span class="fc bfc" id="L777" title="All 2 branches covered.">                    || isInThrows(throwsList, documentedClassInfo, foundThrows);</span>
+
+            // Handle extra JavadocTag.
+<span class="fc bfc" id="L780" title="All 2 branches covered.">            if (!found) {</span>
+<span class="fc" id="L781">                boolean reqd = true;</span>
+<span class="fc bfc" id="L782" title="All 2 branches covered.">                if (allowUndeclaredRTE) {</span>
+<span class="fc bfc" id="L783" title="All 2 branches covered.">                    reqd = !isUnchecked(documentedClassInfo.getClazz());</span>
+                }
+
+<span class="fc bfc" id="L786" title="All 4 branches covered.">                if (reqd &amp;&amp; validateThrows) {</span>
+<span class="fc" id="L787">                    log(tag.getLineNo(), tag.getColumnNo(),</span>
+                        MSG_UNUSED_TAG,
+<span class="fc" id="L789">                        JavadocTagInfo.THROWS.getText(), tag.getFirstArg());</span>
+                }
+            }
+<span class="fc" id="L792">        }</span>
+        // Now dump out all throws without tags :- unless
+        // the user has chosen to suppress these problems
+<span class="fc bfc" id="L795" title="All 4 branches covered.">        if (!allowMissingThrowsTags &amp;&amp; reportExpectedTags) {</span>
+<span class="fc bfc" id="L796" title="All 2 branches covered.">            throwsList.stream().filter(exceptionInfo -&gt; !exceptionInfo.isFound())</span>
+<span class="fc" id="L797">                .forEach(exceptionInfo -&gt; {</span>
+<span class="fc" id="L798">                    final Token token = exceptionInfo.getName();</span>
+<span class="fc" id="L799">                    log(token.getLineNo(), token.getColumnNo(),</span>
+                        MSG_EXPECTED_TAG,
+<span class="fc" id="L801">                        JavadocTagInfo.THROWS.getText(), token.getText());</span>
+<span class="fc" id="L802">                });</span>
+        }
+<span class="fc" id="L804">    }</span>
+
+    /**
+     * Verifies that documented exception is in throws.
+     *
+     * @param throwsList list of throws
+     * @param documentedClassInfo documented exception class info
+     * @param foundThrows previously found throws
+     * @return true if documented exception is in throws.
+     */
+    private boolean isInThrows(List&lt;ExceptionInfo&gt; throwsList,
+            AbstractClassInfo documentedClassInfo, Set&lt;String&gt; foundThrows) {
+<span class="fc" id="L816">        boolean found = false;</span>
+<span class="fc" id="L817">        ExceptionInfo foundException = null;</span>
+
+        // First look for matches on the exception name
+<span class="fc bfc" id="L820" title="All 2 branches covered.">        for (ExceptionInfo exceptionInfo : throwsList) {</span>
+<span class="fc bfc" id="L821" title="All 2 branches covered.">            if (exceptionInfo.getName().getText().equals(</span>
+<span class="fc" id="L822">                    documentedClassInfo.getName().getText())) {</span>
+<span class="fc" id="L823">                found = true;</span>
+<span class="fc" id="L824">                foundException = exceptionInfo;</span>
+<span class="fc" id="L825">                break;</span>
+            }
+<span class="fc" id="L827">        }</span>
+
+        // Now match on the exception type
+<span class="fc" id="L830">        final ListIterator&lt;ExceptionInfo&gt; exceptionInfoIt = throwsList.listIterator();</span>
+<span class="fc bfc" id="L831" title="All 4 branches covered.">        while (!found &amp;&amp; exceptionInfoIt.hasNext()) {</span>
+<span class="fc" id="L832">            final ExceptionInfo exceptionInfo = exceptionInfoIt.next();</span>
+
+<span class="fc bfc" id="L834" title="All 2 branches covered.">            if (documentedClassInfo.getClazz() == exceptionInfo.getClazz()) {</span>
+<span class="fc" id="L835">                found = true;</span>
+<span class="fc" id="L836">                foundException = exceptionInfo;</span>
+            }
+<span class="fc bfc" id="L838" title="All 2 branches covered.">            else if (allowThrowsTagsForSubclasses) {</span>
+<span class="fc" id="L839">                found = isSubclass(documentedClassInfo.getClazz(), exceptionInfo.getClazz());</span>
+            }
+<span class="fc" id="L841">        }</span>
+
+<span class="fc bfc" id="L843" title="All 2 branches covered.">        if (foundException != null) {</span>
+<span class="fc" id="L844">            foundException.setFound();</span>
+<span class="fc" id="L845">            foundThrows.add(documentedClassInfo.getName().getText());</span>
+        }
+
+<span class="fc" id="L848">        return found;</span>
+    }
+
+    /** Stores useful information about declared exception. */
+    private static class ExceptionInfo {
+
+        /** Class information associated with this exception. */
+        private final AbstractClassInfo classInfo;
+        /** Does the exception have throws tag associated with. */
+        private boolean found;
+
+        /**
+         * Creates new instance for {@code FullIdent}.
+         *
+         * @param classInfo class info
+         */
+<span class="fc" id="L864">        /* package */ ExceptionInfo(AbstractClassInfo classInfo) {</span>
+<span class="fc" id="L865">            this.classInfo = classInfo;</span>
+<span class="fc" id="L866">        }</span>
+
+        /** Mark that the exception has associated throws tag. */
+        private void setFound() {
+<span class="fc" id="L870">            found = true;</span>
+<span class="fc" id="L871">        }</span>
+
+        /**
+         * Checks that the exception has throws tag associated with it.
+         * @return whether the exception has throws tag associated with
+         */
+        private boolean isFound() {
+<span class="fc" id="L878">            return found;</span>
+        }
+
+        /**
+         * Gets exception name.
+         * @return exception's name
+         */
+        private Token getName() {
+<span class="fc" id="L886">            return classInfo.getName();</span>
+        }
+
+        /**
+         * Gets exception class.
+         * @return class for this exception
+         */
+        private Class&lt;?&gt; getClazz() {
+<span class="fc" id="L894">            return classInfo.getClazz();</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

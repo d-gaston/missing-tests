@@ -1,0 +1,1207 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Table.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">Table.java</span></div><h1>Table.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import static java.util.stream.Collectors.toList;
+import static tech.tablesaw.aggregate.AggregateFunctions.countMissing;
+import static tech.tablesaw.api.QuerySupport.not;
+import static tech.tablesaw.selection.Selection.selectNRowsAtRandom;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Streams;
+import com.google.common.primitives.Ints;
+import io.github.classgraph.ClassGraph;
+import io.github.classgraph.ScanResult;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+import tech.tablesaw.aggregate.AggregateFunction;
+import tech.tablesaw.aggregate.CrossTab;
+import tech.tablesaw.aggregate.PivotTable;
+import tech.tablesaw.aggregate.Summarizer;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.io.DataFrameReader;
+import tech.tablesaw.io.DataFrameWriter;
+import tech.tablesaw.io.DataReader;
+import tech.tablesaw.io.DataWriter;
+import tech.tablesaw.io.ReaderRegistry;
+import tech.tablesaw.io.WriterRegistry;
+import tech.tablesaw.joining.DataFrameJoiner;
+import tech.tablesaw.selection.BitmapBackedSelection;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.sorting.Sort;
+import tech.tablesaw.sorting.SortUtils;
+import tech.tablesaw.sorting.comparators.IntComparatorChain;
+import tech.tablesaw.table.Relation;
+import tech.tablesaw.table.Rows;
+import tech.tablesaw.table.StandardTableSliceGroup;
+import tech.tablesaw.table.TableSliceGroup;
+
+/**
+ * A table of data, consisting of some number of columns, each of which has the same number of rows.
+ * All the data in a column has the same type: integer, float, category, etc., but a table may
+ * contain an arbitrary number of columns of any type.
+ *
+ * &lt;p&gt;Tables are the main data-type and primary focus of Tablesaw.
+ */
+public class Table extends Relation implements Iterable&lt;Row&gt; {
+
+<span class="fc" id="L69">  public static final ReaderRegistry defaultReaderRegistry = new ReaderRegistry();</span>
+<span class="fc" id="L70">  public static final WriterRegistry defaultWriterRegistry = new WriterRegistry();</span>
+
+  static {
+<span class="fc" id="L73">    autoRegisterReadersAndWriters();</span>
+<span class="fc" id="L74">  }</span>
+
+  /** The columns that hold the data in this table */
+<span class="fc" id="L77">  private final List&lt;Column&lt;?&gt;&gt; columnList = new ArrayList&lt;&gt;();</span>
+  /** The name of the table */
+  private String name;
+
+  /** Returns a new table */
+<span class="fc" id="L82">  private Table() {}</span>
+
+  /** Returns a new table initialized with the given name */
+<span class="fc" id="L85">  private Table(String name) {</span>
+<span class="fc" id="L86">    this.name = name;</span>
+<span class="fc" id="L87">  }</span>
+
+  /**
+   * Returns a new Table initialized with the given columns
+   *
+   * @param columns One or more columns, all of which must have either the same length or size 0
+   */
+  protected Table(Column&lt;?&gt;... columns) {
+<span class="fc" id="L95">    this(null, columns);</span>
+<span class="fc" id="L96">  }</span>
+
+  /**
+   * Returns a new Table initialized with the given names and columns
+   *
+   * @param name The name of the table
+   * @param columns One or more columns, all of which must have either the same length or size 0
+   */
+  protected Table(String name, Column&lt;?&gt;... columns) {
+<span class="fc" id="L105">    this(name);</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">    for (final Column&lt;?&gt; column : columns) {</span>
+<span class="fc" id="L107">      this.addColumns(column);</span>
+    }
+<span class="fc" id="L109">  }</span>
+
+  private static void autoRegisterReadersAndWriters() {
+<span class="fc" id="L112">    try (ScanResult scanResult =</span>
+<span class="fc" id="L113">        new ClassGraph().enableAllInfo().whitelistPackages(&quot;tech.tablesaw.io&quot;).scan()) {</span>
+<span class="fc" id="L114">      List&lt;String&gt; classes = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L115">      classes.addAll(scanResult.getClassesImplementing(DataWriter.class.getName()).getNames());</span>
+<span class="fc" id="L116">      classes.addAll(scanResult.getClassesImplementing(DataReader.class.getName()).getNames());</span>
+<span class="fc bfc" id="L117" title="All 2 branches covered.">      for (String clazz : classes) {</span>
+        try {
+<span class="fc" id="L119">          Class.forName(clazz);</span>
+<span class="nc" id="L120">        } catch (ClassNotFoundException e) {</span>
+<span class="nc" id="L121">          throw new IllegalStateException(e);</span>
+<span class="fc" id="L122">        }</span>
+<span class="fc" id="L123">      }</span>
+    }
+<span class="fc" id="L125">  }</span>
+
+  /** Returns a new, empty table (without rows or columns) */
+  public static Table create() {
+<span class="fc" id="L129">    return new Table();</span>
+  }
+
+  /** Returns a new, empty table (without rows or columns) with the given name */
+  public static Table create(String tableName) {
+<span class="fc" id="L134">    return new Table(tableName);</span>
+  }
+
+  /**
+   * Returns a new table with the given columns
+   *
+   * @param columns one or more columns, all of the same @code{column.size()}
+   */
+  public static Table create(Column&lt;?&gt;... columns) {
+<span class="fc" id="L143">    return new Table(columns);</span>
+  }
+
+  /**
+   * Returns a new table with the given columns and given name
+   *
+   * @param name the name for this table
+   * @param columns one or more columns, all of the same @code{column.size()}
+   */
+  public static Table create(String name, Column&lt;?&gt;... columns) {
+<span class="fc" id="L153">    return new Table(name, columns);</span>
+  }
+
+  /**
+   * Returns a sort Key that can be used for simple or chained comparator sorting
+   *
+   * &lt;p&gt;You can extend the sort key by using .next() to fill more columns to the sort order
+   */
+  private static Sort first(String columnName, Sort.Order order) {
+<span class="fc" id="L162">    return Sort.on(columnName, order);</span>
+  }
+
+  /**
+   * Returns an object that can be used to sort this table in the order specified for by the given
+   * column names
+   */
+  private static Sort getSort(String... columnNames) {
+<span class="fc" id="L170">    Sort key = null;</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">    for (String s : columnNames) {</span>
+<span class="fc bfc" id="L172" title="All 2 branches covered.">      if (key == null) {</span>
+<span class="fc" id="L173">        key = first(s, Sort.Order.DESCEND);</span>
+      } else {
+<span class="fc" id="L175">        key.next(s, Sort.Order.DESCEND);</span>
+      }
+    }
+<span class="fc" id="L178">    return key;</span>
+  }
+
+  public static DataFrameReader read() {
+<span class="fc" id="L182">    return new DataFrameReader(defaultReaderRegistry);</span>
+  }
+
+  public DataFrameWriter write() {
+<span class="fc" id="L186">    return new DataFrameWriter(defaultWriterRegistry, this);</span>
+  }
+
+  /** Adds the given column to this table */
+  @Override
+  public Table addColumns(final Column&lt;?&gt;... cols) {
+<span class="fc bfc" id="L192" title="All 2 branches covered.">    for (final Column&lt;?&gt; c : cols) {</span>
+<span class="fc" id="L193">      validateColumn(c);</span>
+<span class="fc" id="L194">      columnList.add(c);</span>
+    }
+<span class="fc" id="L196">    return this;</span>
+  }
+
+  /**
+   * Throws an IllegalArgumentException if a column with the given name is already in the table, or
+   * if the number of rows in the column does not match the number of rows in the table
+   */
+  private void validateColumn(final Column&lt;?&gt; newColumn) {
+<span class="fc" id="L204">    Preconditions.checkNotNull(</span>
+        newColumn, &quot;Attempted to add a null to the columns in table &quot; + name);
+<span class="fc" id="L206">    List&lt;String&gt; stringList = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L207" title="All 2 branches covered.">    for (String name : columnNames()) {</span>
+<span class="fc" id="L208">      stringList.add(name.toLowerCase());</span>
+<span class="fc" id="L209">    }</span>
+<span class="fc bfc" id="L210" title="All 2 branches covered.">    if (stringList.contains(newColumn.name().toLowerCase())) {</span>
+<span class="fc" id="L211">      String message =</span>
+<span class="fc" id="L212">          String.format(&quot;Cannot add column with duplicate name %s to table %s&quot;, newColumn, name);</span>
+<span class="fc" id="L213">      throw new IllegalArgumentException(message);</span>
+    }
+
+<span class="fc" id="L216">    checkColumnSize(newColumn);</span>
+<span class="fc" id="L217">  }</span>
+
+  /**
+   * Throws an IllegalArgumentException if the column size doesn't match the rowCount() for the
+   * table
+   */
+  private void checkColumnSize(Column&lt;?&gt; newColumn) {
+<span class="fc bfc" id="L224" title="All 2 branches covered.">    if (columnCount() != 0) {</span>
+<span class="fc" id="L225">      Preconditions.checkArgument(</span>
+<span class="fc bfc" id="L226" title="All 2 branches covered.">          newColumn.size() == rowCount(),</span>
+          &quot;Column &quot;
+<span class="fc" id="L228">              + newColumn.name()</span>
+              + &quot; does not have the same number of rows as the other columns in the table.&quot;);
+    }
+<span class="fc" id="L231">  }</span>
+
+  /**
+   * Adds the given column to this table at the given position in the column list
+   *
+   * @param index Zero-based index into the column list
+   * @param column Column to be added
+   */
+  public Table insertColumn(int index, Column&lt;?&gt; column) {
+<span class="fc" id="L240">    validateColumn(column);</span>
+<span class="fc" id="L241">    columnList.add(index, column);</span>
+<span class="fc" id="L242">    return this;</span>
+  }
+
+  /**
+   * Replaces an existing column (by index) in this table with the given new column
+   *
+   * @param colIndex Zero-based index of the column to be replaced
+   * @param newColumn Column to be added
+   */
+  public Table replaceColumn(final int colIndex, final Column&lt;?&gt; newColumn) {
+<span class="fc" id="L252">    removeColumns(column(colIndex));</span>
+<span class="fc" id="L253">    return insertColumn(colIndex, newColumn);</span>
+  }
+
+  /**
+   * Replaces an existing column (by name) in this table with the given new column
+   *
+   * @param columnName String name of the column to be replaced
+   * @param newColumn Column to be added
+   */
+  public Table replaceColumn(final String columnName, final Column&lt;?&gt; newColumn) {
+<span class="fc" id="L263">    int colIndex = columnIndex(columnName);</span>
+<span class="fc" id="L264">    return replaceColumn(colIndex, newColumn);</span>
+  }
+
+  /**
+   * Replaces an existing column having the same name of the given column with the given column
+   *
+   * @param newColumn Column to be added
+   */
+  public Table replaceColumn(Column&lt;?&gt; newColumn) {
+<span class="nc" id="L273">    return replaceColumn(newColumn.name(), newColumn);</span>
+  }
+
+  /** Sets the name of the table */
+  @Override
+  public Table setName(String name) {
+<span class="fc" id="L279">    this.name = name;</span>
+<span class="fc" id="L280">    return this;</span>
+  }
+
+  /**
+   * Returns the column at the given index in the column list
+   *
+   * @param columnIndex an integer at least 0 and less than number of columns in the table
+   */
+  @Override
+  public Column&lt;?&gt; column(int columnIndex) {
+<span class="fc" id="L290">    return columnList.get(columnIndex);</span>
+  }
+
+  /** Returns the number of columns in the table */
+  @Override
+  public int columnCount() {
+<span class="fc" id="L296">    return columnList.size();</span>
+  }
+
+  /** Returns the number of rows in the table */
+  @Override
+  public int rowCount() {
+<span class="fc" id="L302">    int result = 0;</span>
+<span class="fc bfc" id="L303" title="All 2 branches covered.">    if (!columnList.isEmpty()) {</span>
+      // all the columns have the same number of elements, so we can check any of them
+<span class="fc" id="L305">      result = columnList.get(0).size();</span>
+    }
+<span class="fc" id="L307">    return result;</span>
+  }
+
+  /** Returns the list of columns */
+  @Override
+  public List&lt;Column&lt;?&gt;&gt; columns() {
+<span class="fc" id="L313">    return columnList;</span>
+  }
+
+  public Column&lt;?&gt;[] columnArray() {
+<span class="nc" id="L317">    return columnList.toArray(new Column&lt;?&gt;[columnCount()]);</span>
+  }
+
+  /** Returns only the columns whose names are given in the input array */
+  public List&lt;CategoricalColumn&lt;?&gt;&gt; categoricalColumns(String... columnNames) {
+<span class="fc" id="L322">    List&lt;CategoricalColumn&lt;?&gt;&gt; columns = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L323" title="All 2 branches covered.">    for (String columnName : columnNames) {</span>
+<span class="fc" id="L324">      columns.add(categoricalColumn(columnName));</span>
+    }
+<span class="fc" id="L326">    return columns;</span>
+  }
+
+  /**
+   * Returns the index of the column with the given name
+   *
+   * @throws IllegalArgumentException if the input string is not the name of any column in the table
+   */
+  public int columnIndex(String columnName) {
+<span class="fc" id="L335">    int columnIndex = -1;</span>
+<span class="pc bpc" id="L336" title="1 of 2 branches missed.">    for (int i = 0; i &lt; columnList.size(); i++) {</span>
+<span class="fc bfc" id="L337" title="All 2 branches covered.">      if (columnList.get(i).name().equalsIgnoreCase(columnName)) {</span>
+<span class="fc" id="L338">        columnIndex = i;</span>
+<span class="fc" id="L339">        break;</span>
+      }
+    }
+<span class="pc bpc" id="L342" title="1 of 2 branches missed.">    if (columnIndex == -1) {</span>
+<span class="nc" id="L343">      throw new IllegalArgumentException(</span>
+<span class="nc" id="L344">          String.format(&quot;Column %s is not present in table %s&quot;, columnName, name));</span>
+    }
+<span class="fc" id="L346">    return columnIndex;</span>
+  }
+
+  /**
+   * Returns the index of the given column (its position in the list of columns)
+   *
+   * &lt;p&gt;
+   *
+   * @throws IllegalArgumentException if the column is not present in this table
+   */
+  public int columnIndex(Column&lt;?&gt; column) {
+<span class="fc" id="L357">    int columnIndex = -1;</span>
+<span class="pc bpc" id="L358" title="1 of 2 branches missed.">    for (int i = 0; i &lt; columnList.size(); i++) {</span>
+<span class="fc bfc" id="L359" title="All 2 branches covered.">      if (columnList.get(i).equals(column)) {</span>
+<span class="fc" id="L360">        columnIndex = i;</span>
+<span class="fc" id="L361">        break;</span>
+      }
+    }
+<span class="pc bpc" id="L364" title="1 of 2 branches missed.">    if (columnIndex == -1) {</span>
+<span class="nc" id="L365">      throw new IllegalArgumentException(</span>
+<span class="nc" id="L366">          String.format(&quot;Column %s is not present in table %s&quot;, column.name(), name));</span>
+    }
+<span class="fc" id="L368">    return columnIndex;</span>
+  }
+
+  /** Returns the name of the table */
+  @Override
+  public String name() {
+<span class="fc" id="L374">    return name;</span>
+  }
+
+  /** Returns a List of the names of all the columns in this table */
+  public List&lt;String&gt; columnNames() {
+<span class="fc" id="L379">    return columnList.stream().map(Column::name).collect(toList());</span>
+  }
+
+  /** Returns a table with the same columns as this table */
+  public Table copy() {
+<span class="fc" id="L384">    Table copy = new Table(name);</span>
+<span class="fc bfc" id="L385" title="All 2 branches covered.">    for (Column&lt;?&gt; column : columnList) {</span>
+<span class="fc" id="L386">      copy.addColumns(column.emptyCopy(rowCount()));</span>
+<span class="fc" id="L387">    }</span>
+
+<span class="fc" id="L389">    int[] rows = new int[rowCount()];</span>
+<span class="fc bfc" id="L390" title="All 2 branches covered.">    for (int i = 0; i &lt; rowCount(); i++) {</span>
+<span class="fc" id="L391">      rows[i] = i;</span>
+    }
+<span class="fc" id="L393">    Rows.copyRowsToTable(rows, this, copy);</span>
+<span class="fc" id="L394">    return copy;</span>
+  }
+
+  /** Returns a table with the same columns as this table, but no data */
+  public Table emptyCopy() {
+<span class="fc" id="L399">    Table copy = new Table(name);</span>
+<span class="fc bfc" id="L400" title="All 2 branches covered.">    for (Column&lt;?&gt; column : columnList) {</span>
+<span class="fc" id="L401">      copy.addColumns(column.emptyCopy());</span>
+<span class="fc" id="L402">    }</span>
+<span class="fc" id="L403">    return copy;</span>
+  }
+
+  /**
+   * Returns a table with the same columns as this table, but no data, initialized to the given row
+   * size
+   */
+  public Table emptyCopy(int rowSize) {
+<span class="fc" id="L411">    Table copy = new Table(name);</span>
+<span class="fc bfc" id="L412" title="All 2 branches covered.">    for (Column&lt;?&gt; column : columnList) {</span>
+<span class="fc" id="L413">      copy.addColumns(column.emptyCopy(rowSize));</span>
+<span class="fc" id="L414">    }</span>
+<span class="fc" id="L415">    return copy;</span>
+  }
+
+  /**
+   * Splits the table into two, randomly assigning records to each according to the proportion given
+   * in trainingProportion
+   *
+   * @param table1Proportion The proportion to go in the first table
+   * @return An array two tables, with the first table having the proportion specified in the method
+   *     parameter, and the second table having the balance of the rows
+   */
+  public Table[] sampleSplit(double table1Proportion) {
+<span class="fc" id="L427">    Table[] tables = new Table[2];</span>
+<span class="fc" id="L428">    int table1Count = (int) Math.round(rowCount() * table1Proportion);</span>
+
+<span class="fc" id="L430">    Selection table2Selection = new BitmapBackedSelection();</span>
+<span class="fc bfc" id="L431" title="All 2 branches covered.">    for (int i = 0; i &lt; rowCount(); i++) {</span>
+<span class="fc" id="L432">      table2Selection.add(i);</span>
+    }
+<span class="fc" id="L434">    Selection table1Selection = new BitmapBackedSelection();</span>
+
+<span class="fc" id="L436">    Selection table1Records = selectNRowsAtRandom(table1Count, rowCount());</span>
+<span class="fc bfc" id="L437" title="All 2 branches covered.">    for (int table1Record : table1Records) {</span>
+<span class="fc" id="L438">      table1Selection.add(table1Record);</span>
+<span class="fc" id="L439">    }</span>
+<span class="fc" id="L440">    table2Selection.andNot(table1Selection);</span>
+<span class="fc" id="L441">    tables[0] = where(table1Selection);</span>
+<span class="fc" id="L442">    tables[1] = where(table2Selection);</span>
+<span class="fc" id="L443">    return tables;</span>
+  }
+
+  /**
+   * Splits the table into two stratified samples, this uses the specified column to divide the
+   * table into groups, randomly assigning records to each according to the proportion given in
+   * trainingProportion.
+   *
+   * @param column the column to be used for the stratified sampling
+   * @param table1Proportion The proportion to go in the first table
+   * @return An array two tables, with the first table having the proportion specified in the method
+   *     parameter, and the second table having the balance of the rows
+   */
+  public Table[] stratifiedSampleSplit(CategoricalColumn&lt;?&gt; column, double table1Proportion) {
+<span class="fc" id="L457">    Preconditions.checkArgument(</span>
+<span class="fc" id="L458">        containsColumn(column),</span>
+        &quot;The categorical column must be part of the table, you can create a string column and add it to this table before sampling.&quot;);
+<span class="fc" id="L460">    final Table first = emptyCopy();</span>
+<span class="fc" id="L461">    final Table second = emptyCopy();</span>
+
+<span class="fc" id="L463">    splitOn(column)</span>
+<span class="fc" id="L464">        .asTableList()</span>
+<span class="fc" id="L465">        .forEach(</span>
+            tab -&gt; {
+<span class="fc" id="L467">              Table[] splits = tab.sampleSplit(table1Proportion);</span>
+<span class="fc" id="L468">              first.append(splits[0]);</span>
+<span class="fc" id="L469">              second.append(splits[1]);</span>
+<span class="fc" id="L470">            });</span>
+
+<span class="fc" id="L472">    return new Table[] {first, second};</span>
+  }
+
+  /**
+   * Returns a table consisting of randomly selected records from this table. The sample size is
+   * based on the given proportion
+   *
+   * @param proportion The proportion to go in the sample
+   */
+  public Table sampleX(double proportion) {
+<span class="pc bpc" id="L482" title="2 of 4 branches missed.">    Preconditions.checkArgument(</span>
+        proportion &lt;= 1 &amp;&amp; proportion &gt;= 0, &quot;The sample proportion must be between 0 and 1&quot;);
+
+<span class="fc" id="L485">    int tableSize = (int) Math.round(rowCount() * proportion);</span>
+<span class="fc" id="L486">    return where(selectNRowsAtRandom(tableSize, rowCount()));</span>
+  }
+
+  /**
+   * Returns a table consisting of randomly selected records from this table
+   *
+   * @param nRows The number of rows to go in the sample
+   */
+  public Table sampleN(int nRows) {
+<span class="pc bpc" id="L495" title="1 of 2 branches missed.">    Preconditions.checkArgument(</span>
+<span class="pc bpc" id="L496" title="1 of 2 branches missed.">        nRows &gt; 0 &amp;&amp; nRows &lt; rowCount(),</span>
+        &quot;The number of rows sampled must be greater than 0 and less than the number of rows in the table.&quot;);
+<span class="fc" id="L498">    return where(selectNRowsAtRandom(nRows, rowCount()));</span>
+  }
+
+  /** Clears all the data from this table */
+  @Override
+  public void clear() {
+<span class="nc" id="L504">    columnList.forEach(Column::clear);</span>
+<span class="nc" id="L505">  }</span>
+
+  /** Returns a new table containing the first {@code nrows} of data in this table */
+  public Table first(int nRows) {
+<span class="fc" id="L509">    int newRowCount = Math.min(nRows, rowCount());</span>
+<span class="fc" id="L510">    return inRange(0, newRowCount);</span>
+  }
+
+  /** Returns a new table containing the last {@code nrows} of data in this table */
+  public Table last(int nRows) {
+<span class="fc" id="L515">    int newRowCount = Math.min(nRows, rowCount());</span>
+<span class="fc" id="L516">    return inRange(rowCount() - newRowCount, rowCount());</span>
+  }
+
+  /**
+   * Sorts this table into a new table on the columns indexed
+   *
+   * &lt;p&gt;if index is negative then sort that column in descending order otherwise sort ascending
+   */
+  public Table sortOn(int... columnIndexes) {
+<span class="fc" id="L525">    List&lt;String&gt; names = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L526" title="All 2 branches covered.">    for (int i : columnIndexes) {</span>
+<span class="fc bfc" id="L527" title="All 2 branches covered.">      if (i &gt;= 0) {</span>
+<span class="fc" id="L528">        names.add(columnList.get(i).name());</span>
+      } else {
+<span class="fc" id="L530">        names.add(&quot;-&quot; + columnList.get(-i).name());</span>
+      }
+    }
+<span class="fc" id="L533">    return sortOn(names.toArray(new String[names.size()]));</span>
+  }
+
+  /**
+   * Returns a copy of this table sorted on the given column names, applied in order,
+   *
+   * &lt;p&gt;if column name starts with - then sort that column descending otherwise sort ascending
+   */
+  public Table sortOn(String... columnNames) {
+<span class="fc" id="L542">    return this.sortOn(Sort.create(this, columnNames));</span>
+  }
+
+  /**
+   * Returns a copy of this table sorted in the order of the given column names, in ascending order
+   */
+  public Table sortAscendingOn(String... columnNames) {
+<span class="fc" id="L549">    return this.sortOn(columnNames);</span>
+  }
+
+  /**
+   * Returns a copy of this table sorted on the given column names, applied in order, descending
+   * TODO: Provide equivalent methods naming columns by index
+   */
+  public Table sortDescendingOn(String... columnNames) {
+<span class="fc" id="L557">    Sort key = getSort(columnNames);</span>
+<span class="fc" id="L558">    return sortOn(key);</span>
+  }
+
+  /**
+   * Returns a copy of this table sorted using the given sort key.
+   *
+   * @param key to sort on.
+   * @return a sorted copy of this table.
+   */
+  public Table sortOn(Sort key) {
+<span class="pc bpc" id="L568" title="1 of 2 branches missed.">    Preconditions.checkArgument(!key.isEmpty());</span>
+<span class="fc bfc" id="L569" title="All 2 branches covered.">    if (key.size() == 1) {</span>
+<span class="fc" id="L570">      IntComparator comparator = SortUtils.getComparator(this, key);</span>
+<span class="fc" id="L571">      return sortOn(comparator);</span>
+    }
+<span class="fc" id="L573">    IntComparatorChain chain = SortUtils.getChain(this, key);</span>
+<span class="fc" id="L574">    return sortOn(chain);</span>
+  }
+
+  /** Returns a copy of this table sorted using the given comparator */
+  private Table sortOn(IntComparator rowComparator) {
+<span class="fc" id="L579">    Table newTable = emptyCopy(rowCount());</span>
+
+<span class="fc" id="L581">    int[] newRows = rows();</span>
+<span class="fc" id="L582">    IntArrays.parallelQuickSort(newRows, rowComparator);</span>
+
+<span class="fc" id="L584">    Rows.copyRowsToTable(newRows, this, newTable);</span>
+<span class="fc" id="L585">    return newTable;</span>
+  }
+
+  /** Returns a copy of this table sorted using the given comparator */
+  public Table sortOn(Comparator&lt;Row&gt; rowComparator) {
+<span class="fc" id="L590">    Row row1 = new Row(this);</span>
+<span class="fc" id="L591">    Row row2 = new Row(this);</span>
+<span class="fc" id="L592">    return sortOn(</span>
+        (IntComparator)
+            (k1, k2) -&gt; {
+<span class="fc" id="L595">              row1.at(k1);</span>
+<span class="fc" id="L596">              row2.at(k2);</span>
+<span class="fc" id="L597">              return rowComparator.compare(row1, row2);</span>
+            });
+  }
+
+  /** Returns an array of ints of the same number of rows as the table */
+  private int[] rows() {
+<span class="fc" id="L603">    int[] rowIndexes = new int[rowCount()];</span>
+<span class="fc bfc" id="L604" title="All 2 branches covered.">    for (int i = 0; i &lt; rowCount(); i++) {</span>
+<span class="fc" id="L605">      rowIndexes[i] = i;</span>
+    }
+<span class="fc" id="L607">    return rowIndexes;</span>
+  }
+
+  /**
+   * Adds a single row to this table from sourceTable, copying every column in sourceTable
+   *
+   * @param rowIndex The row in sourceTable to add to this table
+   * @param sourceTable A table with the same column structure as this table
+   */
+  public void addRow(int rowIndex, Table sourceTable) {
+<span class="nc bnc" id="L617" title="All 2 branches missed.">    for (int i = 0; i &lt; columnCount(); i++) {</span>
+<span class="nc" id="L618">      column(i).appendObj(sourceTable.column(i).get(rowIndex));</span>
+    }
+<span class="nc" id="L620">  }</span>
+
+  public void addRow(Row row) {
+<span class="fc bfc" id="L623" title="All 2 branches covered.">    for (int i = 0; i &lt; row.columnCount(); i++) {</span>
+<span class="fc" id="L624">      column(i).appendObj(row.getObject(i));</span>
+    }
+<span class="fc" id="L626">  }</span>
+
+  public Row row(int rowIndex) {
+<span class="fc" id="L629">    Row row = new Row(Table.this);</span>
+<span class="fc" id="L630">    row.at(rowIndex);</span>
+<span class="fc" id="L631">    return row;</span>
+  }
+
+  public Table rows(int... rowNumbers) {
+<span class="pc bpc" id="L635" title="1 of 2 branches missed.">    Preconditions.checkArgument(Ints.max(rowNumbers) &lt;= rowCount());</span>
+<span class="fc" id="L636">    return where(Selection.with(rowNumbers));</span>
+  }
+
+  public Table dropRows(int... rowNumbers) {
+<span class="pc bpc" id="L640" title="1 of 2 branches missed.">    Preconditions.checkArgument(Ints.max(rowNumbers) &lt;= rowCount());</span>
+<span class="fc" id="L641">    Selection selection = Selection.withRange(0, rowCount()).andNot(Selection.with(rowNumbers));</span>
+<span class="fc" id="L642">    return where(selection);</span>
+  }
+
+  /**
+   * Retains the first rowCount rows if rowCount positive. Retains the last rowCount rows if
+   * rowCount negative.
+   */
+  public Table inRange(int rowCount) {
+<span class="pc bpc" id="L650" title="1 of 2 branches missed.">    Preconditions.checkArgument(rowCount &lt;= rowCount());</span>
+<span class="fc bfc" id="L651" title="All 2 branches covered.">    int rowStart = rowCount &gt;= 0 ? 0 : rowCount() + rowCount;</span>
+<span class="fc bfc" id="L652" title="All 2 branches covered.">    int rowEnd = rowCount &gt;= 0 ? rowCount : rowCount();</span>
+<span class="fc" id="L653">    return where(Selection.withRange(rowStart, rowEnd));</span>
+  }
+
+  public Table inRange(int rowStart, int rowEnd) {
+<span class="pc bpc" id="L657" title="1 of 2 branches missed.">    Preconditions.checkArgument(rowEnd &lt;= rowCount());</span>
+<span class="fc" id="L658">    return where(Selection.withRange(rowStart, rowEnd));</span>
+  }
+
+  /**
+   * Drops the first rowCount rows if rowCount positive. Drops the last rowCount rows if rowCount
+   * negative.
+   */
+  public Table dropRange(int rowCount) {
+<span class="pc bpc" id="L666" title="1 of 2 branches missed.">    Preconditions.checkArgument(rowCount &lt;= rowCount());</span>
+<span class="fc bfc" id="L667" title="All 2 branches covered.">    int rowStart = rowCount &gt;= 0 ? rowCount : 0;</span>
+<span class="fc bfc" id="L668" title="All 2 branches covered.">    int rowEnd = rowCount &gt;= 0 ? rowCount() : rowCount() + rowCount;</span>
+<span class="fc" id="L669">    return where(Selection.withRange(rowStart, rowEnd));</span>
+  }
+
+  public Table dropRange(int rowStart, int rowEnd) {
+<span class="pc bpc" id="L673" title="1 of 2 branches missed.">    Preconditions.checkArgument(rowEnd &lt;= rowCount());</span>
+<span class="fc" id="L674">    return where(Selection.withoutRange(0, rowCount(), rowStart, rowEnd));</span>
+  }
+
+  public Table where(Selection selection) {
+<span class="fc" id="L678">    Table newTable = this.emptyCopy(selection.size());</span>
+<span class="fc" id="L679">    Rows.copyRowsToTable(selection, this, newTable);</span>
+<span class="fc" id="L680">    return newTable;</span>
+  }
+
+  public Table where(Function&lt;Table, Selection&gt; selection) {
+<span class="fc" id="L684">    Table tempTable = where(selection.apply(this));</span>
+<span class="fc" id="L685">    Table newTable = tempTable.emptyCopy(tempTable.rowCount());</span>
+<span class="fc" id="L686">    Rows.copyRowsToTable(selection.apply(this), this, newTable);</span>
+<span class="fc" id="L687">    return newTable;</span>
+  }
+
+  public Table dropWhere(Function&lt;Table, Selection&gt; selection) {
+<span class="fc" id="L691">    return where(not(selection));</span>
+  }
+
+  public Table dropWhere(Selection selection) {
+<span class="fc" id="L695">    Selection opposite = new BitmapBackedSelection();</span>
+<span class="fc" id="L696">    opposite.addRange(0, rowCount());</span>
+<span class="fc" id="L697">    opposite.andNot(selection);</span>
+<span class="fc" id="L698">    Table newTable = this.emptyCopy(opposite.size());</span>
+<span class="fc" id="L699">    Rows.copyRowsToTable(opposite, this, newTable);</span>
+<span class="fc" id="L700">    return newTable;</span>
+  }
+
+  /**
+   * Returns a pivot on this table, where: The first column contains unique values from the index
+   * column1 There are n additional columns, one for each unique value in column2 The values in each
+   * of the cells in these new columns are the result of applying the given AggregateFunction to the
+   * data in column3, grouped by the values of column1 and column2
+   */
+  public Table pivot(
+      CategoricalColumn&lt;?&gt; column1,
+      CategoricalColumn&lt;?&gt; column2,
+      NumericColumn&lt;?&gt; column3,
+      AggregateFunction&lt;?, ?&gt; aggregateFunction) {
+<span class="nc" id="L714">    return PivotTable.pivot(this, column1, column2, column3, aggregateFunction);</span>
+  }
+
+  /**
+   * Returns a pivot on this table, where: The first column contains unique values from the index
+   * column1 There are n additional columns, one for each unique value in column2 The values in each
+   * of the cells in these new columns are the result of applying the given AggregateFunction to the
+   * data in column3, grouped by the values of column1 and column2
+   */
+  public Table pivot(
+      String column1Name,
+      String column2Name,
+      String column3Name,
+      AggregateFunction&lt;?, ?&gt; aggregateFunction) {
+<span class="nc" id="L728">    return pivot(</span>
+<span class="nc" id="L729">        categoricalColumn(column1Name),</span>
+<span class="nc" id="L730">        categoricalColumn(column2Name),</span>
+<span class="nc" id="L731">        numberColumn(column3Name),</span>
+        aggregateFunction);
+  }
+
+  /**
+   * Returns a non-overlapping and exhaustive collection of &quot;slices&quot; over this table. Each slice is
+   * like a virtual table containing a subset of the records in this table
+   *
+   * &lt;p&gt;This method is intended for advanced or unusual operations on the subtables. If you want to
+   * calculate summary statistics for each subtable, the summarize methods (e.g)
+   *
+   * &lt;p&gt;table.summarize(myColumn, mean, median).by(columns)
+   *
+   * &lt;p&gt;are preferred
+   */
+  public TableSliceGroup splitOn(String... columns) {
+<span class="fc" id="L747">    return splitOn(categoricalColumns(columns).toArray(new CategoricalColumn&lt;?&gt;[columns.length]));</span>
+  }
+
+  /**
+   * Returns a non-overlapping and exhaustive collection of &quot;slices&quot; over this table. Each slice is
+   * like a virtual table containing a subset of the records in this table
+   *
+   * &lt;p&gt;This method is intended for advanced or unusual operations on the subtables. If you want to
+   * calculate summary statistics for each subtable, the summarize methods (e.g)
+   *
+   * &lt;p&gt;table.summarize(myColumn, mean, median).by(columns)
+   *
+   * &lt;p&gt;are preferred
+   */
+  public TableSliceGroup splitOn(CategoricalColumn&lt;?&gt;... columns) {
+<span class="fc" id="L762">    return StandardTableSliceGroup.create(this, columns);</span>
+  }
+
+  public Table structure() {
+<span class="fc" id="L766">    Table t = new Table(&quot;Structure of &quot; + name());</span>
+
+<span class="fc" id="L768">    IntColumn index = IntColumn.indexColumn(&quot;Index&quot;, columnCount(), 0);</span>
+<span class="fc" id="L769">    StringColumn columnName = StringColumn.create(&quot;Column Name&quot;, columnCount());</span>
+<span class="fc" id="L770">    StringColumn columnType = StringColumn.create(&quot;Column Type&quot;, columnCount());</span>
+<span class="fc" id="L771">    t.addColumns(index);</span>
+<span class="fc" id="L772">    t.addColumns(columnName);</span>
+<span class="fc" id="L773">    t.addColumns(columnType);</span>
+<span class="fc bfc" id="L774" title="All 2 branches covered.">    for (int i = 0; i &lt; columnCount(); i++) {</span>
+<span class="fc" id="L775">      Column&lt;?&gt; column = columnList.get(i);</span>
+<span class="fc" id="L776">      columnType.set(i, column.type().name());</span>
+<span class="fc" id="L777">      columnName.set(i, columnNames().get(i));</span>
+    }
+<span class="fc" id="L779">    return t;</span>
+  }
+
+  /** Returns the unique records in this table Note: Uses a lot of memory for a sort */
+  public Table dropDuplicateRows() {
+
+<span class="fc" id="L785">    Table sorted = this.sortOn(columnNames().toArray(new String[columns().size()]));</span>
+<span class="fc" id="L786">    Table temp = emptyCopy();</span>
+
+<span class="fc bfc" id="L788" title="All 2 branches covered.">    for (int row = 0; row &lt; rowCount(); row++) {</span>
+<span class="fc bfc" id="L789" title="All 4 branches covered.">      if (temp.isEmpty() || !Rows.compareRows(row, sorted, temp)) {</span>
+<span class="fc" id="L790">        Rows.appendRowToTable(row, sorted, temp);</span>
+      }
+    }
+<span class="fc" id="L793">    return temp;</span>
+  }
+
+  /** Returns only those records in this table that have no columns with missing values */
+  public Table dropRowsWithMissingValues() {
+
+<span class="fc" id="L799">    Selection missing = new BitmapBackedSelection();</span>
+
+<span class="fc bfc" id="L801" title="All 2 branches covered.">    for (int row = 0; row &lt; rowCount(); row++) {</span>
+<span class="fc bfc" id="L802" title="All 2 branches covered.">      for (int col = 0; col &lt; columnCount(); col++) {</span>
+<span class="fc" id="L803">        Column&lt;?&gt; c = column(col);</span>
+<span class="fc bfc" id="L804" title="All 2 branches covered.">        if (c.isMissing(row)) {</span>
+<span class="fc" id="L805">          missing.add(row);</span>
+<span class="fc" id="L806">          break;</span>
+        }
+      }
+    }
+<span class="fc" id="L810">    Selection notMissing = Selection.withRange(0, rowCount());</span>
+<span class="fc" id="L811">    notMissing.andNot(missing);</span>
+<span class="fc" id="L812">    Table temp = emptyCopy(notMissing.size());</span>
+<span class="fc" id="L813">    Rows.copyRowsToTable(notMissing, this, temp);</span>
+<span class="fc" id="L814">    return temp;</span>
+  }
+
+  public Table select(Column&lt;?&gt;... columns) {
+<span class="fc" id="L818">    return new Table(this.name, columns);</span>
+  }
+
+  public Table select(String... columnNames) {
+<span class="fc" id="L822">    return Table.create(this.name, columns(columnNames).toArray(new Column&lt;?&gt;[0]));</span>
+  }
+
+  /** Removes the given columns */
+  @Override
+  public Table removeColumns(Column&lt;?&gt;... columns) {
+<span class="fc" id="L828">    columnList.removeAll(Arrays.asList(columns));</span>
+<span class="fc" id="L829">    return this;</span>
+  }
+
+  /** Removes the given columns with missing values */
+  public Table removeColumnsWithMissingValues() {
+<span class="nc bnc" id="L834" title="All 2 branches missed.">    removeColumns(columnList.stream().filter(x -&gt; x.countMissing() &gt; 0).toArray(Column&lt;?&gt;[]::new));</span>
+<span class="nc" id="L835">    return this;</span>
+  }
+
+  /** Removes all columns except for those given in the argument from this table */
+  public Table retainColumns(Column&lt;?&gt;... columns) {
+<span class="nc" id="L840">    List&lt;Column&lt;?&gt;&gt; retained = Arrays.asList(columns);</span>
+<span class="nc" id="L841">    columnList.clear();</span>
+<span class="nc" id="L842">    columnList.addAll(retained);</span>
+<span class="nc" id="L843">    return this;</span>
+  }
+
+  /** Removes all columns except for those given in the argument from this table */
+  public Table retainColumns(String... columnNames) {
+<span class="fc" id="L848">    List&lt;Column&lt;?&gt;&gt; retained = columns(columnNames);</span>
+<span class="fc" id="L849">    columnList.clear();</span>
+<span class="fc" id="L850">    columnList.addAll(retained);</span>
+<span class="fc" id="L851">    return this;</span>
+  }
+
+  @SuppressWarnings({&quot;rawtypes&quot;, &quot;unchecked&quot;})
+  public Table append(Table tableToAppend) {
+<span class="fc bfc" id="L856" title="All 2 branches covered.">    for (final Column column : columnList) {</span>
+<span class="fc" id="L857">      final Column columnToAppend = tableToAppend.column(column.name());</span>
+<span class="fc" id="L858">      column.append(columnToAppend);</span>
+<span class="fc" id="L859">    }</span>
+<span class="fc" id="L860">    return this;</span>
+  }
+
+  /**
+   * Appends an empty row and returns a Row object indexed to the newly added row so values can be
+   * set.
+   *
+   * &lt;p&gt;Intended usage:
+   *
+   * &lt;p&gt;for (int i = 0; ...) { Row row = table.appendRow(); row.setString(&quot;name&quot;, &quot;Bob&quot;);
+   * row.setFloat(&quot;IQ&quot;, 123.4f); ...etc. }
+   */
+  public Row appendRow() {
+<span class="fc bfc" id="L873" title="All 2 branches covered.">    for (final Column&lt;?&gt; column : columnList) {</span>
+<span class="fc" id="L874">      column.appendMissing();</span>
+<span class="fc" id="L875">    }</span>
+<span class="fc" id="L876">    return row(rowCount() - 1);</span>
+  }
+
+  /**
+   * Add all the columns of tableToConcatenate to this table Note: The columns in the result must
+   * have unique names, when compared case insensitive Note: Both tables must have the same number
+   * of rows
+   *
+   * @param tableToConcatenate The table containing the columns to be added
+   * @return This table
+   */
+  public Table concat(Table tableToConcatenate) {
+<span class="fc" id="L888">    Preconditions.checkArgument(</span>
+<span class="pc bpc" id="L889" title="1 of 2 branches missed.">        tableToConcatenate.rowCount() == this.rowCount(),</span>
+        &quot;Both tables must have the same number of rows to concatenate them.&quot;);
+<span class="fc bfc" id="L891" title="All 2 branches covered.">    for (Column&lt;?&gt; column : tableToConcatenate.columns()) {</span>
+<span class="fc" id="L892">      this.addColumns(column);</span>
+<span class="fc" id="L893">    }</span>
+<span class="fc" id="L894">    return this;</span>
+  }
+
+  public Summarizer summarize(String columName, AggregateFunction&lt;?, ?&gt;... functions) {
+<span class="fc" id="L898">    return summarize(column(columName), functions);</span>
+  }
+
+  public Summarizer summarize(List&lt;String&gt; columnNames, AggregateFunction&lt;?, ?&gt;... functions) {
+<span class="fc" id="L902">    return new Summarizer(this, columnNames, functions);</span>
+  }
+
+  public Summarizer summarize(
+      String numericColumn1Name, String numericColumn2Name, AggregateFunction&lt;?, ?&gt;... functions) {
+<span class="fc" id="L907">    return summarize(column(numericColumn1Name), column(numericColumn2Name), functions);</span>
+  }
+
+  public Summarizer summarize(
+      String col1Name, String col2Name, String col3Name, AggregateFunction&lt;?, ?&gt;... functions) {
+<span class="nc" id="L912">    return summarize(column(col1Name), column(col2Name), column(col3Name), functions);</span>
+  }
+
+  public Summarizer summarize(
+      String col1Name,
+      String col2Name,
+      String col3Name,
+      String col4Name,
+      AggregateFunction&lt;?, ?&gt;... functions) {
+<span class="nc" id="L921">    return summarize(</span>
+<span class="nc" id="L922">        column(col1Name), column(col2Name), column(col3Name), column(col4Name), functions);</span>
+  }
+
+  public Summarizer summarize(Column&lt;?&gt; numberColumn, AggregateFunction&lt;?, ?&gt;... function) {
+<span class="fc" id="L926">    return new Summarizer(this, numberColumn, function);</span>
+  }
+
+  public Summarizer summarize(
+      Column&lt;?&gt; column1, Column&lt;?&gt; column2, AggregateFunction&lt;?, ?&gt;... function) {
+<span class="fc" id="L931">    return new Summarizer(this, column1, column2, function);</span>
+  }
+
+  public Summarizer summarize(
+      Column&lt;?&gt; column1,
+      Column&lt;?&gt; column2,
+      Column&lt;?&gt; column3,
+      AggregateFunction&lt;?, ?&gt;... function) {
+<span class="nc" id="L939">    return new Summarizer(this, column1, column2, column3, function);</span>
+  }
+
+  public Summarizer summarize(
+      Column&lt;?&gt; column1,
+      Column&lt;?&gt; column2,
+      Column&lt;?&gt; column3,
+      Column&lt;?&gt; column4,
+      AggregateFunction&lt;?, ?&gt;... function) {
+<span class="nc" id="L948">    return new Summarizer(this, column1, column2, column3, column4, function);</span>
+  }
+
+  /**
+   * Returns a table with n by m + 1 cells. The first column contains labels, the other cells
+   * contains the counts for every unique combination of values from the two specified columns in
+   * this table
+   */
+  public Table xTabCounts(String column1Name, String column2Name) {
+<span class="fc" id="L957">    return CrossTab.counts(this, categoricalColumn(column1Name), categoricalColumn(column2Name));</span>
+  }
+
+  public Table xTabRowPercents(String column1Name, String column2Name) {
+<span class="nc" id="L961">    return CrossTab.rowPercents(this, column1Name, column2Name);</span>
+  }
+
+  public Table xTabColumnPercents(String column1Name, String column2Name) {
+<span class="nc" id="L965">    return CrossTab.columnPercents(this, column1Name, column2Name);</span>
+  }
+
+  /**
+   * Returns a table with n by m + 1 cells. The first column contains labels, the other cells
+   * contains the proportion for a unique combination of values from the two specified columns in
+   * this table
+   */
+  public Table xTabTablePercents(String column1Name, String column2Name) {
+<span class="nc" id="L974">    return CrossTab.tablePercents(this, column1Name, column2Name);</span>
+  }
+
+  /**
+   * Returns a table with two columns, the first contains a value each unique value in the argument,
+   * and the second contains the proportion of observations having that value
+   */
+  public Table xTabPercents(String column1Name) {
+<span class="nc" id="L982">    return CrossTab.percents(this, column1Name);</span>
+  }
+
+  /**
+   * Returns a table with two columns, the first contains a value each unique value in the argument,
+   * and the second contains the number of observations of each value
+   */
+  public Table xTabCounts(String column1Name) {
+<span class="nc" id="L990">    return CrossTab.counts(this, column1Name);</span>
+  }
+
+  /**
+   * Returns a table containing two columns, the grouping column, and a column named &quot;Count&quot; that
+   * contains the counts for each grouping column value
+   */
+  public Table countBy(CategoricalColumn&lt;?&gt; groupingColumn) {
+<span class="fc" id="L998">    return groupingColumn.countByCategory();</span>
+  }
+
+  /**
+   * Returns a table containing two columns, the grouping column, and a column named &quot;Count&quot; that
+   * contains the counts for each grouping column value
+   *
+   * @param categoricalColumnName The name of a CategoricalColumn in this table
+   * @return A table containing counts of rows grouped by the categorical column
+   * @throws ClassCastException if the categoricalColumnName parameter is the name of a column that
+   *     does not * implement categorical
+   */
+  public Table countBy(String categoricalColumnName) {
+<span class="fc" id="L1011">    CategoricalColumn&lt;?&gt; groupingColumn = categoricalColumn(categoricalColumnName);</span>
+<span class="fc" id="L1012">    return groupingColumn.countByCategory();</span>
+  }
+
+  /**
+   * Returns a new DataFrameJoiner initialized with multiple {@code columnNames}
+   *
+   * @param columnNames Name of the columns to join on.
+   * @return The new DataFrameJoiner
+   */
+  public DataFrameJoiner joinOn(String... columnNames) {
+<span class="fc" id="L1022">    return new DataFrameJoiner(this, columnNames);</span>
+  }
+
+  public Table missingValueCounts() {
+<span class="fc" id="L1026">    return summarize(columnNames(), countMissing).apply();</span>
+  }
+
+  @Override
+  public Iterator&lt;Row&gt; iterator() {
+
+<span class="fc" id="L1032">    return new Iterator&lt;Row&gt;() {</span>
+
+<span class="fc" id="L1034">      private final Row row = new Row(Table.this);</span>
+
+      @Override
+      public Row next() {
+<span class="fc" id="L1038">        return row.next();</span>
+      }
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L1043">        return row.hasNext();</span>
+      }
+    };
+  }
+
+  /**
+   * Iterates over rolling sets of rows. I.e. 0 to n-1, 1 to n, 2 to n+1, etc.
+   *
+   * @param n the number of rows to return for each iteration
+   */
+  public Iterator&lt;Row[]&gt; rollingIterator(int n) {
+
+<span class="fc" id="L1055">    return new Iterator&lt;Row[]&gt;() {</span>
+
+<span class="fc" id="L1057">      private int currRow = 0;</span>
+
+      @Override
+      public Row[] next() {
+<span class="fc" id="L1061">        Row[] rows = new Row[n];</span>
+<span class="fc bfc" id="L1062" title="All 2 branches covered.">        for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L1063">          rows[i] = new Row(Table.this, currRow + i);</span>
+        }
+<span class="fc" id="L1065">        currRow++;</span>
+<span class="fc" id="L1066">        return rows;</span>
+      }
+
+      @Override
+      public boolean hasNext() {
+<span class="fc bfc" id="L1071" title="All 2 branches covered.">        return currRow + n &lt;= rowCount();</span>
+      }
+    };
+  }
+
+  /**
+   * Streams over stepped sets of rows. I.e. 0 to n-1, n to 2n-1, 2n to 3n-1, etc. Only returns full
+   * sets of rows.
+   *
+   * @param n the number of rows to return for each iteration
+   */
+  public Iterator&lt;Row[]&gt; steppingIterator(int n) {
+
+<span class="fc" id="L1084">    return new Iterator&lt;Row[]&gt;() {</span>
+
+<span class="fc" id="L1086">      private int currRow = 0;</span>
+
+      @Override
+      public Row[] next() {
+<span class="fc" id="L1090">        Row[] rows = new Row[n];</span>
+<span class="fc bfc" id="L1091" title="All 2 branches covered.">        for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L1092">          rows[i] = new Row(Table.this, currRow + i);</span>
+        }
+<span class="fc" id="L1094">        currRow += n;</span>
+<span class="fc" id="L1095">        return rows;</span>
+      }
+
+      @Override
+      public boolean hasNext() {
+<span class="fc bfc" id="L1100" title="All 2 branches covered.">        return currRow + n &lt;= rowCount();</span>
+      }
+    };
+  }
+
+  public Stream&lt;Row&gt; stream() {
+<span class="fc" id="L1106">    return Streams.stream(iterator());</span>
+  }
+
+  /**
+   * Streams over stepped sets of rows. I.e. 0 to n-1, n to 2n-1, 2n to 3n-1, etc. Only returns full
+   * sets of rows.
+   *
+   * @param n the number of rows to return for each iteration
+   */
+  public Stream&lt;Row[]&gt; steppingStream(int n) {
+<span class="fc" id="L1116">    return Streams.stream(steppingIterator(n));</span>
+  }
+
+  /**
+   * Streams over rolling sets of rows. I.e. 0 to n-1, 1 to n, 2 to n+1, etc.
+   *
+   * @param n the number of rows to return for each iteration
+   */
+  public Stream&lt;Row[]&gt; rollingStream(int n) {
+<span class="fc" id="L1125">    return Streams.stream(rollingIterator(n));</span>
+  }
+
+  /**
+   * Applies the operation in {@code doable} to every row in the table
+   *
+   * @deprecated use {@code stream().forEach}
+   */
+  @Deprecated
+  public void doWithRows(Consumer&lt;Row&gt; doable) {
+<span class="nc" id="L1135">    stream().forEach(doable);</span>
+<span class="nc" id="L1136">  }</span>
+
+  /**
+   * Applies the predicate to each row, and return true if any row returns true
+   *
+   * @deprecated use {@code stream().anyMatch}
+   */
+  @Deprecated
+  public boolean detect(Predicate&lt;Row&gt; predicate) {
+<span class="nc" id="L1145">    return stream().anyMatch(predicate);</span>
+  }
+
+  /** @deprecated use steppingStream(n).forEach(rowConsumer) */
+  @Deprecated
+  public void stepWithRows(Consumer&lt;Row[]&gt; rowConsumer, int n) {
+<span class="fc" id="L1151">    steppingStream(n).forEach(rowConsumer);</span>
+<span class="fc" id="L1152">  }</span>
+
+  /** @deprecated use stream(2).forEach(rowConsumer) */
+  @Deprecated
+  public void doWithRows(Pairs pairs) {
+<span class="fc" id="L1157">    rollingStream(2).forEach(rows -&gt; pairs.doWithPair(rows[0], rows[1]));</span>
+<span class="fc" id="L1158">  }</span>
+
+  /** @deprecated use stream(2).forEach(rowConsumer) */
+  @Deprecated
+  public void doWithRowPairs(Consumer&lt;RowPair&gt; pairConsumer) {
+<span class="nc" id="L1163">    rollingStream(2).forEach(rows -&gt; pairConsumer.accept(new RowPair(rows[0], rows[1])));</span>
+<span class="nc" id="L1164">  }</span>
+
+  /** @deprecated use stream(n).forEach(rowConsumer) */
+  @Deprecated
+  public void rollWithRows(Consumer&lt;Row[]&gt; rowConsumer, int n) {
+<span class="fc" id="L1169">    rollingStream(n).forEach(rowConsumer);</span>
+<span class="fc" id="L1170">  }</span>
+
+  @Deprecated
+  public static class RowPair {
+    private final Row first;
+    private final Row second;
+
+<span class="nc" id="L1177">    public RowPair(Row first, Row second) {</span>
+<span class="nc" id="L1178">      this.first = first;</span>
+<span class="nc" id="L1179">      this.second = second;</span>
+<span class="nc" id="L1180">    }</span>
+
+    public Row getFirst() {
+<span class="nc" id="L1183">      return first;</span>
+    }
+
+    public Row getSecond() {
+<span class="nc" id="L1187">      return second;</span>
+    }
+  }
+
+  @Deprecated
+  interface Pairs {
+
+    void doWithPair(Row row1, Row row2);
+
+    /**
+     * Returns an object containing the results of applying doWithPair() to the rows in a table.
+     *
+     * &lt;p&gt;The default implementation throws an exception, to be used if the operation produces only
+     * side effects
+     */
+    default Object getResult() {
+<span class="nc" id="L1203">      throw new UnsupportedOperationException(&quot;This Pairs function returns no results&quot;);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,569 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PrioritySchedulerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">PrioritySchedulerTest.java</span></div><h1>PrioritySchedulerTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
+
+import org.junit.Test;
+import org.threadly.BlockingTestRunnable;
+import org.threadly.concurrent.AbstractPriorityScheduler.OneTimeTaskWrapper;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.wrapper.priority.DefaultPriorityWrapper;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.util.Clock;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L22">public class PrioritySchedulerTest extends AbstractPrioritySchedulerTest {</span>
+  @Override
+  protected AbstractPrioritySchedulerFactory getAbstractPrioritySchedulerFactory() {
+<span class="fc" id="L25">    return getPrioritySchedulerFactory();</span>
+  }
+  
+  protected PrioritySchedulerServiceFactory getPrioritySchedulerFactory() {
+<span class="fc" id="L29">    return new PrioritySchedulerFactory();</span>
+  }
+  
+  @Override
+  protected boolean isSingleThreaded() {
+<span class="fc" id="L34">    return false;</span>
+  }
+  
+  @Test
+  @SuppressWarnings(&quot;unused&quot;)
+  public void constructorFail() {
+    try {
+<span class="nc" id="L41">      new PriorityScheduler(0, TaskPriority.High, 1, null);</span>
+<span class="nc" id="L42">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L43">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L45">    }</span>
+    try {
+<span class="nc" id="L47">      new PriorityScheduler(1, TaskPriority.High, -1, null);</span>
+<span class="nc" id="L48">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L49">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L51">    }</span>
+<span class="fc" id="L52">  }</span>
+  
+  @Test
+  public void constructorNullFactoryTest() {
+<span class="fc" id="L56">    PriorityScheduler ps = new PriorityScheduler(1, TaskPriority.High, 1, null);</span>
+    // should be set with default
+<span class="fc" id="L58">    assertNotNull(ps.workerPool.threadFactory);</span>
+<span class="fc" id="L59">  }</span>
+  
+  @Test
+  public void getAndSetPoolSizeTest() {
+<span class="fc" id="L63">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L64">    int corePoolSize = 1;</span>
+<span class="fc" id="L65">    PriorityScheduler scheduler = factory.makePriorityScheduler(corePoolSize);</span>
+    try {
+<span class="fc" id="L67">      assertEquals(corePoolSize, scheduler.getMaxPoolSize());</span>
+      
+<span class="fc" id="L69">      corePoolSize = 10;</span>
+<span class="fc" id="L70">      scheduler.setPoolSize(corePoolSize);</span>
+      
+<span class="fc" id="L72">      assertEquals(corePoolSize, scheduler.getMaxPoolSize());</span>
+    } finally {
+<span class="fc" id="L74">      factory.shutdown();</span>
+    }
+<span class="fc" id="L76">  }</span>
+  
+  @Test
+  public void setPoolSizeSmallerTest() {
+<span class="fc" id="L80">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L81">    PriorityScheduler scheduler = factory.makePriorityScheduler(10);</span>
+    try {
+<span class="fc" id="L83">      scheduler.prestartAllThreads();</span>
+      
+<span class="fc" id="L85">      scheduler.setPoolSize(1);</span>
+      
+<span class="fc" id="L87">      assertEquals(1, scheduler.getMaxPoolSize());</span>
+    } finally {
+<span class="fc" id="L89">      factory.shutdown();</span>
+    }
+<span class="fc" id="L91">  }</span>
+  
+  @Test
+  public void setPoolSizeFail() {
+<span class="fc" id="L95">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    // first construct a valid scheduler
+<span class="fc" id="L97">    PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+    try {
+      // verify no negative values
+      try {
+<span class="nc" id="L101">        scheduler.setPoolSize(-1);</span>
+<span class="nc" id="L102">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L103">      } catch (IllegalArgumentException expected) {</span>
+        // ignored
+<span class="nc" id="L105">      }</span>
+    } finally {
+<span class="fc" id="L107">      factory.shutdown();</span>
+    }
+<span class="fc" id="L109">  }</span>
+  
+  @Test
+  public void increasePoolSizeWithWaitingTaskTest() {
+<span class="fc" id="L113">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L114">    PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+<span class="fc" id="L115">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+    try {
+<span class="fc" id="L117">      scheduler.execute(btr);</span>
+<span class="fc" id="L118">      btr.blockTillStarted();</span>
+      // all these runnables should be blocked
+<span class="fc" id="L120">      List&lt;TestRunnable&gt; executedRunnables = executeTestRunnables(scheduler, 0);</span>
+      
+      // this should allow the waiting test runnables to quickly execute
+<span class="fc" id="L123">      scheduler.setPoolSize(Math.max(2, TEST_QTY / 2));</span>
+      
+<span class="fc" id="L125">      Iterator&lt;TestRunnable&gt; it = executedRunnables.iterator();</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L127">        it.next().blockTillStarted(); // will throw exception if not ran</span>
+      }
+    } finally {
+<span class="fc" id="L130">      btr.unblock();</span>
+<span class="fc" id="L131">      factory.shutdown();</span>
+    }
+<span class="fc" id="L133">  }</span>
+  
+  @Test
+  public void getCurrentPoolSizeTest() {
+<span class="fc" id="L137">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L138">    PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+    try {
+      // verify nothing at the start
+<span class="fc" id="L141">      assertEquals(0, scheduler.getCurrentPoolSize());</span>
+      
+<span class="fc" id="L143">      TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L144">      scheduler.execute(tr);</span>
+      
+<span class="fc" id="L146">      tr.blockTillStarted();  // wait for execution</span>
+      
+<span class="fc" id="L148">      assertEquals(1, scheduler.getCurrentPoolSize());</span>
+    } finally {
+<span class="fc" id="L150">      factory.shutdown();</span>
+    }
+<span class="fc" id="L152">  }</span>
+  
+  @Test
+  public void interruptedDuringRunTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L156">    final long taskRunTime = 1000 * 10;</span>
+<span class="fc" id="L157">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L159">      final PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+<span class="fc" id="L160">      final AsyncVerifier interruptSentAV = new AsyncVerifier();</span>
+<span class="fc" id="L161">      TestRunnable tr = new TestRunnable() {</span>
+        @Override
+        public void handleRunFinish() {
+<span class="fc" id="L164">          long startTime = System.currentTimeMillis();</span>
+<span class="fc" id="L165">          Thread currentThread = Thread.currentThread();</span>
+<span class="pc bpc" id="L166" title="1 of 2 branches missed.">          while (System.currentTimeMillis() - startTime &lt; taskRunTime &amp;&amp; </span>
+<span class="fc bfc" id="L167" title="All 2 branches covered.">                 ! currentThread.isInterrupted()) {</span>
+            // spin
+          }
+          
+<span class="fc" id="L171">          interruptSentAV.assertTrue(currentThread.isInterrupted());</span>
+<span class="fc" id="L172">          interruptSentAV.signalComplete();</span>
+<span class="fc" id="L173">        }</span>
+      };
+      
+<span class="fc" id="L176">      ListenableFuture&lt;?&gt; future = scheduler.submit(tr);</span>
+      
+<span class="fc" id="L178">      tr.blockTillStarted();</span>
+      
+      // should interrupt
+<span class="fc" id="L181">      assertTrue(future.cancel(true));</span>
+<span class="fc" id="L182">      interruptSentAV.waitForTest(); // verify thread was interrupted as expected</span>
+      
+      // verify worker was returned to pool
+<span class="fc bfc" id="L185" title="All 2 branches covered.">      new TestCondition(() -&gt; scheduler.workerPool.idleWorker.get() != null).blockTillTrue();</span>
+      // verify pool size is still correct
+<span class="fc" id="L187">      assertEquals(1, scheduler.getCurrentPoolSize());</span>
+      
+      // verify interrupted status has been cleared
+<span class="fc" id="L190">      final AsyncVerifier interruptClearedAV = new AsyncVerifier();</span>
+<span class="fc" id="L191">      scheduler.execute(new Runnable() {</span>
+        @Override
+        public void run() {
+<span class="fc" id="L194">          interruptClearedAV.assertFalse(Thread.currentThread().isInterrupted());</span>
+<span class="fc" id="L195">          interruptClearedAV.signalComplete();</span>
+<span class="fc" id="L196">        }</span>
+      });
+      // block till we have verified that the interrupted status has been reset
+<span class="fc" id="L199">      interruptClearedAV.waitForTest();</span>
+    } finally {
+<span class="fc" id="L201">      factory.shutdown();</span>
+    }
+<span class="fc" id="L203">  }</span>
+  
+  @Test
+  public void isShutdownTest() {
+<span class="fc" id="L207">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L209">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L211">      assertFalse(scheduler.isShutdown());</span>
+      
+<span class="fc" id="L213">      scheduler.shutdown();</span>
+      
+<span class="fc" id="L215">      assertTrue(scheduler.isShutdown());</span>
+      
+<span class="fc" id="L217">      scheduler = factory.makePriorityScheduler(1);</span>
+<span class="fc" id="L218">      scheduler.shutdownNow();</span>
+      
+<span class="fc" id="L220">      assertTrue(scheduler.isShutdown());</span>
+    } finally {
+<span class="fc" id="L222">      factory.shutdown();</span>
+    }
+<span class="fc" id="L224">  }</span>
+  
+  @Test
+  public void shutdownTest() {
+<span class="fc" id="L228">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L230">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      /* adding a run time to have greater chances that runnable 
+       * will be waiting to execute after shutdown call.
+       */
+<span class="fc" id="L234">      TestRunnable lastRunnable = </span>
+<span class="fc" id="L235">          executeTestRunnables(new DefaultPriorityWrapper(scheduler, TaskPriority.Low), 5)</span>
+<span class="fc" id="L236">            .get(TEST_QTY - 1);</span>
+      
+<span class="fc" id="L238">      scheduler.shutdown();</span>
+      
+      // runnable should finish
+<span class="fc" id="L241">      lastRunnable.blockTillFinished();</span>
+    } finally {
+<span class="fc" id="L243">      factory.shutdown();</span>
+    }
+<span class="fc" id="L245">  }</span>
+  
+  @Test
+  public void shutdownRecurringTest() {
+<span class="fc" id="L249">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L251">      final PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+<span class="fc" id="L252">      TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L253">      scheduler.scheduleWithFixedDelay(tr, 0, 0);</span>
+      
+<span class="fc" id="L255">      tr.blockTillStarted();</span>
+      
+<span class="fc" id="L257">      scheduler.shutdown();</span>
+      
+<span class="fc bfc" id="L259" title="All 2 branches covered.">      new TestCondition(() -&gt; scheduler.workerPool.isShutdownFinished() &amp;&amp; </span>
+<span class="pc bpc" id="L260" title="1 of 2 branches missed.">                                scheduler.getCurrentPoolSize() == 0).blockTillTrue();</span>
+    } finally {
+<span class="fc" id="L262">      factory.shutdown();</span>
+    }
+<span class="fc" id="L264">  }</span>
+  
+  @Test
+  public void shutdownFail() {
+<span class="fc" id="L268">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L270">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L272">      scheduler.shutdown();</span>
+      
+      try {
+<span class="nc" id="L275">        scheduler.execute(DoNothingRunnable.instance());</span>
+<span class="nc" id="L276">        fail(&quot;Execption should have been thrown&quot;);</span>
+<span class="fc" id="L277">      } catch (RejectedExecutionException e) {</span>
+        // expected
+<span class="nc" id="L279">      }</span>
+      try {
+<span class="nc" id="L281">        scheduler.schedule(DoNothingRunnable.instance(), 1000, null);</span>
+<span class="nc" id="L282">        fail(&quot;Execption should have been thrown&quot;);</span>
+<span class="fc" id="L283">      } catch (RejectedExecutionException e) {</span>
+        // expected
+<span class="nc" id="L285">      }</span>
+      try {
+<span class="nc" id="L287">        scheduler.scheduleWithFixedDelay(DoNothingRunnable.instance(), 100, 100);</span>
+<span class="nc" id="L288">        fail(&quot;Execption should have been thrown&quot;);</span>
+<span class="fc" id="L289">      } catch (RejectedExecutionException e) {</span>
+        // expected
+<span class="nc" id="L291">      }</span>
+    } finally {
+<span class="fc" id="L293">      factory.shutdown();</span>
+    }
+<span class="fc" id="L295">  }</span>
+  
+  @Test
+  public void shutdownNowTest() {
+<span class="fc" id="L299">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L300">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+    try {
+<span class="fc" id="L302">      final PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+
+      // execute one runnable which will not complete
+<span class="fc" id="L305">      scheduler.execute(btr);</span>
+<span class="fc" id="L306">      btr.blockTillStarted();</span>
+      
+<span class="fc" id="L308">      final List&lt;TestRunnable&gt; expectedRunnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L309" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L310">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L311">        expectedRunnables.add(tr);</span>
+<span class="fc bfc" id="L312" title="All 2 branches covered.">        scheduler.execute(tr, i % 2 == 0 ? TaskPriority.High : TaskPriority.Low);</span>
+      }
+      
+<span class="fc" id="L315">      List&lt;Runnable&gt; canceledRunnables = scheduler.shutdownNow();</span>
+      // unblock now so that others can run (if the unit test fails)
+<span class="fc" id="L317">      btr.unblock();</span>
+      
+<span class="fc" id="L319">      assertNotNull(canceledRunnables);</span>
+<span class="fc" id="L320">      assertTrue(canceledRunnables.containsAll(expectedRunnables));</span>
+<span class="fc" id="L321">      assertTrue(expectedRunnables.containsAll(canceledRunnables));</span>
+      
+<span class="fc" id="L323">      Iterator&lt;TestRunnable&gt; it = expectedRunnables.iterator();</span>
+<span class="fc bfc" id="L324" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L325">        assertEquals(0, it.next().getRunCount());</span>
+      }
+    } finally {
+<span class="fc" id="L328">      btr.unblock();</span>
+<span class="fc" id="L329">      factory.shutdown();</span>
+    }
+<span class="fc" id="L331">  }</span>
+  
+  @Test
+  public void shutdownNowFail() {
+<span class="fc" id="L335">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L337">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L339">      scheduler.shutdownNow();</span>
+      
+      try {
+<span class="nc" id="L342">        scheduler.execute(DoNothingRunnable.instance());</span>
+<span class="nc" id="L343">        fail(&quot;Execption should have been thrown&quot;);</span>
+<span class="fc" id="L344">      } catch (RejectedExecutionException e) {</span>
+        // expected
+<span class="nc" id="L346">      }</span>
+      try {
+<span class="nc" id="L348">        scheduler.schedule(DoNothingRunnable.instance(), 1000, null);</span>
+<span class="nc" id="L349">        fail(&quot;Execption should have been thrown&quot;);</span>
+<span class="fc" id="L350">      } catch (RejectedExecutionException e) {</span>
+        // expected
+<span class="nc" id="L352">      }</span>
+      try {
+<span class="nc" id="L354">        scheduler.scheduleWithFixedDelay(DoNothingRunnable.instance(), 100, 100);</span>
+<span class="nc" id="L355">        fail(&quot;Execption should have been thrown&quot;);</span>
+<span class="fc" id="L356">      } catch (RejectedExecutionException e) {</span>
+        // expected
+<span class="nc" id="L358">      }</span>
+    } finally {
+<span class="fc" id="L360">      factory.shutdown();</span>
+    }
+<span class="fc" id="L362">  }</span>
+  
+  @Test
+  public void shutdownNowIgnoreCanceledFuturesTest() {
+
+<span class="fc" id="L367">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L369">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L371">      Runnable nonCanceledRunnable = new TestRunnable();</span>
+<span class="fc" id="L372">      scheduler.submitScheduled(nonCanceledRunnable, 1000 * 60 * 60);</span>
+<span class="fc" id="L373">      ListenableFuture&lt;?&gt; future = scheduler.submitScheduled(DoNothingRunnable.instance(), </span>
+                                                             1000 * 60 * 60);
+      
+<span class="fc" id="L376">      future.cancel(false);</span>
+      
+<span class="fc" id="L378">      List&lt;Runnable&gt; result = scheduler.shutdownNow();</span>
+<span class="fc" id="L379">      assertEquals(1, result.size()); // only canceled task removed</span>
+    } finally {
+<span class="fc" id="L381">      factory.shutdown();</span>
+    }
+<span class="fc" id="L383">  }</span>
+  
+  @Test
+  public void awaitTerminationTest() throws InterruptedException {
+<span class="fc" id="L387">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L389">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L391">      TestRunnable tr = new TestRunnable(DELAY_TIME * 2);</span>
+<span class="fc" id="L392">      long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L393">      scheduler.execute(tr);</span>
+      
+<span class="fc" id="L395">      tr.blockTillStarted();</span>
+<span class="fc" id="L396">      scheduler.shutdown();</span>
+  
+<span class="fc" id="L398">      scheduler.awaitTermination();</span>
+<span class="fc" id="L399">      long stop = Clock.accurateForwardProgressingMillis();</span>
+      
+<span class="pc bpc" id="L401" title="1 of 2 branches missed.">      assertTrue(stop - start &gt;= (DELAY_TIME * 2) - 10);</span>
+    } finally {
+<span class="fc" id="L403">      factory.shutdown();</span>
+    }
+<span class="fc" id="L405">  }</span>
+  
+  @Test
+  public void awaitTerminationTimeoutTest() throws InterruptedException {
+<span class="fc" id="L409">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L411">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L413">      TestRunnable tr = new TestRunnable(DELAY_TIME * 2);</span>
+<span class="fc" id="L414">      long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L415">      scheduler.execute(tr);</span>
+      
+<span class="fc" id="L417">      tr.blockTillStarted();</span>
+<span class="fc" id="L418">      scheduler.shutdown();</span>
+  
+<span class="fc" id="L420">      assertTrue(scheduler.awaitTermination(DELAY_TIME * 10));</span>
+<span class="fc" id="L421">      long stop = Clock.accurateForwardProgressingMillis();</span>
+      
+<span class="pc bpc" id="L423" title="1 of 2 branches missed.">      assertTrue(stop - start &gt;= (DELAY_TIME * 2) - 10);</span>
+    } finally {
+<span class="fc" id="L425">      factory.shutdown();</span>
+    }
+<span class="fc" id="L427">  }</span>
+  
+  @Test
+  public void awaitTerminationTimeoutExcededTest() throws InterruptedException {
+<span class="fc" id="L431">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+    try {
+<span class="fc" id="L433">      PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+      
+<span class="fc" id="L435">      TestRunnable tr = new TestRunnable(DELAY_TIME * 100);</span>
+<span class="fc" id="L436">      scheduler.execute(tr);</span>
+<span class="fc" id="L437">      tr.blockTillStarted();</span>
+<span class="fc" id="L438">      scheduler.shutdown();</span>
+
+<span class="fc" id="L440">      long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L441">      assertFalse(scheduler.awaitTermination(DELAY_TIME));</span>
+<span class="fc" id="L442">      long stop = Clock.accurateForwardProgressingMillis();</span>
+      
+<span class="pc bpc" id="L444" title="1 of 2 branches missed.">      assertTrue(stop - start &gt;= DELAY_TIME);</span>
+    } finally {
+<span class="fc" id="L446">      factory.shutdown();</span>
+    }
+<span class="fc" id="L448">  }</span>
+  
+  @Test
+  public void addToQueueTest() {
+<span class="fc" id="L452">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L453">    long taskDelay = 1000 * 10; // make it long to prevent it from getting consumed from the queue</span>
+    
+<span class="fc" id="L455">    PriorityScheduler scheduler = factory.makePriorityScheduler(1);</span>
+    try {
+<span class="fc" id="L457">      scheduler.addToScheduleQueue(scheduler.taskQueueManager.highPriorityQueueSet, </span>
+                                   new OneTimeTaskWrapper(new TestRunnable(), null, 
+<span class="fc" id="L459">                                                          Clock.lastKnownForwardProgressingMillis() + taskDelay));</span>
+
+<span class="fc" id="L461">      assertEquals(1, scheduler.taskQueueManager.highPriorityQueueSet.scheduleQueue.size());</span>
+<span class="fc" id="L462">      assertEquals(0, scheduler.taskQueueManager.lowPriorityQueueSet.scheduleQueue.size());</span>
+      
+<span class="fc" id="L464">      scheduler.addToScheduleQueue(scheduler.taskQueueManager.lowPriorityQueueSet, </span>
+                                   new OneTimeTaskWrapper(new TestRunnable(), null, 
+<span class="fc" id="L466">                                                          Clock.lastKnownForwardProgressingMillis() + taskDelay));</span>
+
+<span class="fc" id="L468">      assertEquals(1, scheduler.taskQueueManager.highPriorityQueueSet.scheduleQueue.size());</span>
+<span class="fc" id="L469">      assertEquals(1, scheduler.taskQueueManager.lowPriorityQueueSet.scheduleQueue.size());</span>
+    } finally {
+<span class="fc" id="L471">      factory.shutdown();</span>
+    }
+<span class="fc" id="L473">  }</span>
+
+  @Test
+  public void scheduleLaterThenSoonerTest() {
+    // This test is focused around the scheduling defect fixed in 4.4.1
+    // The condition hit was where we would park for one scheduled task, then a future task 
+    // would not get executed in time because the first parked thread was not woken up
+
+<span class="fc" id="L481">    PrioritySchedulerServiceFactory factory = getPrioritySchedulerFactory();</span>
+<span class="fc" id="L482">    final PriorityScheduler scheduler = factory.makePriorityScheduler(2);</span>
+    try {
+      // schedule one task a ways out
+<span class="fc" id="L485">      scheduler.schedule(DoNothingRunnable.instance(), 1000 * 60 * 10);</span>
+      // ensure first thread has blocked
+<span class="fc bfc" id="L487" title="All 2 branches covered.">      new TestCondition(() -&gt; scheduler.workerPool.idleWorker.get() != null).blockTillTrue();</span>
+      
+      // start second thread
+<span class="fc" id="L490">      scheduler.prestartAllThreads();</span>
+      // ensure second thread has blocked
+<span class="fc bfc" id="L492" title="All 2 branches covered.">      new TestCondition(() -&gt; scheduler.workerPool.idleWorker.get().nextIdleWorker != null)</span>
+<span class="fc" id="L493">        .blockTillTrue();</span>
+      
+      // schedule soon to run task
+<span class="fc" id="L496">      TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L497">      scheduler.schedule(tr, 10);</span>
+      
+<span class="fc" id="L499">      tr.blockTillStarted();</span>
+    } finally {
+<span class="fc" id="L501">      factory.shutdown();</span>
+    }
+<span class="fc" id="L503">  }</span>
+  
+  public interface PrioritySchedulerServiceFactory extends AbstractPrioritySchedulerFactory {
+    public PriorityScheduler makePriorityScheduler(int poolSize, TaskPriority defaultPriority, 
+                                                   long maxWaitForLowPriority);
+    
+    public PriorityScheduler makePriorityScheduler(int poolSize);
+  }
+  
+  public static class PrioritySchedulerFactory implements PrioritySchedulerServiceFactory {
+    private final List&lt;PriorityScheduler&gt; executors;
+    
+<span class="fc" id="L515">    public PrioritySchedulerFactory() {</span>
+<span class="fc" id="L516">      executors = new ArrayList&lt;&gt;(2);</span>
+<span class="fc" id="L517">    }</span>
+
+    @Override
+    public SchedulerService makeSchedulerService(int poolSize, boolean prestartIfAvailable) {
+<span class="fc" id="L521">      PriorityScheduler result = makePriorityScheduler(poolSize);</span>
+<span class="fc bfc" id="L522" title="All 2 branches covered.">      if (prestartIfAvailable) {</span>
+<span class="fc" id="L523">        result.prestartAllThreads();</span>
+      }
+      
+<span class="fc" id="L526">      return result;</span>
+    }
+
+    @Override
+    public AbstractPriorityScheduler makeAbstractPriorityScheduler(int poolSize,
+                                                                   TaskPriority defaultPriority,
+                                                                   long maxWaitForLowPriority) {
+<span class="fc" id="L533">      return makePriorityScheduler(poolSize, defaultPriority, maxWaitForLowPriority);</span>
+    }
+
+    @Override
+    public AbstractPriorityScheduler makeAbstractPriorityScheduler(int poolSize) {
+<span class="fc" id="L538">      return makePriorityScheduler(poolSize);</span>
+    }
+
+    @Override
+    public PriorityScheduler makePriorityScheduler(int poolSize, TaskPriority defaultPriority,
+                                                   long maxWaitForLowPriority) {
+<span class="fc" id="L544">      PriorityScheduler result = new StrictPriorityScheduler(poolSize, defaultPriority, </span>
+                                                             maxWaitForLowPriority);
+<span class="fc" id="L546">      executors.add(result);</span>
+      
+<span class="fc" id="L548">      return result;</span>
+    }
+
+    @Override
+    public PriorityScheduler makePriorityScheduler(int poolSize) {
+<span class="fc" id="L553">      PriorityScheduler result = new StrictPriorityScheduler(poolSize);</span>
+<span class="fc" id="L554">      executors.add(result);</span>
+      
+<span class="fc" id="L556">      return result;</span>
+    }
+
+    @Override
+    public void shutdown() {
+<span class="fc" id="L561">      Iterator&lt;PriorityScheduler&gt; it = executors.iterator();</span>
+<span class="fc bfc" id="L562" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L563">        it.next().shutdownNow();</span>
+<span class="fc" id="L564">        it.remove();</span>
+      }
+<span class="fc" id="L566">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

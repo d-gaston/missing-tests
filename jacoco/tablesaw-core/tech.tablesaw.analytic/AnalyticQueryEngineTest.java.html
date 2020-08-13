@@ -1,0 +1,723 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AnalyticQueryEngineTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.analytic</a> &gt; <span class="el_source">AnalyticQueryEngineTest.java</span></div><h1>AnalyticQueryEngineTest.java</h1><pre class="source lang-java linenums">package tech.tablesaw.analytic;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.google.common.collect.ImmutableList;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import tech.tablesaw.api.DoubleColumn;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+
+<span class="fc" id="L15">class AnalyticQueryEngineTest {</span>
+
+  private static Table referenceImplementation;
+
+  // Before runs tests a few seconds faster.
+  @BeforeAll
+  public static void setUp() throws Exception {
+    // Reference implementation generated from BigQuery.
+    referenceImplementation =
+<span class="fc" id="L24">        Table.read().csv(&quot;../data/bush_analytic_reference_implementation.csv&quot;);</span>
+<span class="fc" id="L25">  }</span>
+
+  private double[] intSourceColumnAsDoubleArray(String columnName) {
+<span class="fc" id="L28">    return referenceImplementation.intColumn(columnName).asDoubleArray();</span>
+  }
+
+  private double[] doubleSourceColumnAsDoubleArray(String columnName) {
+<span class="fc" id="L32">    return referenceImplementation.doubleColumn(columnName).asDoubleArray();</span>
+  }
+
+  @Test
+  public void testInvalidSourceColumn() {
+<span class="fc" id="L37">    String destinationColumnName = &quot;dest&quot;;</span>
+<span class="fc" id="L38">    Table table = Table.create(&quot;table&quot;, StringColumn.create(&quot;col1&quot;, new String[] {&quot;bad&quot;}));</span>
+
+    AnalyticQuery query =
+<span class="fc" id="L41">        AnalyticQuery.quickQuery()</span>
+<span class="fc" id="L42">            .from(table)</span>
+<span class="fc" id="L43">            .rowsBetween()</span>
+<span class="fc" id="L44">            .preceding(1)</span>
+<span class="fc" id="L45">            .andCurrentRow()</span>
+<span class="fc" id="L46">            .sum(&quot;col1&quot;)</span>
+<span class="fc" id="L47">            .as(destinationColumnName)</span>
+<span class="fc" id="L48">            .build();</span>
+
+<span class="fc" id="L50">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L51">    Throwable thrown = assertThrows(IllegalArgumentException.class, queryEngine::execute);</span>
+<span class="fc" id="L52">    assertTrue(</span>
+<span class="fc" id="L53">        thrown.getMessage().contains(&quot;Function: SUM Is not compatible with column type: STRING&quot;));</span>
+<span class="fc" id="L54">  }</span>
+
+  @Test
+  public void testBasic() {
+<span class="fc" id="L58">    Table table =</span>
+<span class="fc" id="L59">        Table.create(&quot;table&quot;, DoubleColumn.create(&quot;col1&quot;, new double[] {2, 1, 1, 1, 1, 1, 1}));</span>
+
+    AnalyticQuery query =
+<span class="fc" id="L62">        AnalyticQuery.quickQuery()</span>
+<span class="fc" id="L63">            .from(table)</span>
+<span class="fc" id="L64">            .rowsBetween()</span>
+<span class="fc" id="L65">            .preceding(3)</span>
+<span class="fc" id="L66">            .andUnBoundedFollowing()</span>
+<span class="fc" id="L67">            .sum(&quot;col1&quot;)</span>
+<span class="fc" id="L68">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L69">            .max(&quot;col1&quot;)</span>
+<span class="fc" id="L70">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L71">            .build();</span>
+
+<span class="fc" id="L73">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L74">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L76">    double[] expected = new double[] {8, 8, 8, 8, 6, 5, 4};</span>
+<span class="fc" id="L77">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L78">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L80">    expected = new double[] {2, 2, 2, 2, 1, 1, 1};</span>
+<span class="fc" id="L81">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L82">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L83">  }</span>
+
+  @Test
+  public void testMissingValues() {
+<span class="fc" id="L87">    String destinationColumnName = &quot;dest&quot;;</span>
+<span class="fc" id="L88">    Table table =</span>
+<span class="fc" id="L89">        Table.create(</span>
+            &quot;table&quot;,
+<span class="fc" id="L91">            DoubleColumn.create(</span>
+                &quot;col1&quot;, new double[] {1, 1, 1, Double.NaN, Double.NaN, Double.NaN, 1, 1, 1}));
+
+    AnalyticQuery query =
+<span class="fc" id="L95">        AnalyticQuery.quickQuery()</span>
+<span class="fc" id="L96">            .from(table)</span>
+<span class="fc" id="L97">            .rowsBetween()</span>
+<span class="fc" id="L98">            .preceding(1)</span>
+<span class="fc" id="L99">            .andCurrentRow()</span>
+<span class="fc" id="L100">            .sum(&quot;col1&quot;)</span>
+<span class="fc" id="L101">            .as(destinationColumnName)</span>
+<span class="fc" id="L102">            .build();</span>
+
+<span class="fc" id="L104">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L105">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L107">    double[] expected = new double[] {1, 2, 2, 1, Double.NaN, Double.NaN, 1, 2, 2};</span>
+<span class="fc" id="L108">    double[] actual = result.doubleColumn(destinationColumnName).asDoubleArray();</span>
+<span class="fc" id="L109">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L110">  }</span>
+
+  @Test
+  public void unoundedPrecedingAnd5Preceding() {
+    AnalyticQuery query =
+<span class="fc" id="L115">        AnalyticQuery.query()</span>
+<span class="fc" id="L116">            .from(referenceImplementation)</span>
+<span class="fc" id="L117">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L118">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L119">            .rowsBetween()</span>
+<span class="fc" id="L120">            .unboundedPreceding()</span>
+<span class="fc" id="L121">            .andPreceding(5)</span>
+<span class="fc" id="L122">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L123">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L124">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L125">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L126">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L127">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L128">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L129">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L130">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L131">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L132">            .build();</span>
+
+<span class="fc" id="L134">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L135">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L137">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_unboundedpreceding_and_5preceding&quot;);</span>
+<span class="fc" id="L138">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L139">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L141">    expected = intSourceColumnAsDoubleArray(&quot;max_unboundedpreceding_and_5preceding&quot;);</span>
+<span class="fc" id="L142">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L143">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L145">    expected = intSourceColumnAsDoubleArray(&quot;min_unboundedpreceding_and_5preceding&quot;);</span>
+<span class="fc" id="L146">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L147">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L149">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_unboundedpreceding_and_5preceding&quot;);</span>
+<span class="fc" id="L150">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L151">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L153">    expected = intSourceColumnAsDoubleArray(&quot;count_unboundedpreceding_and_5preceding&quot;);</span>
+<span class="fc" id="L154">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L155">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L156">  }</span>
+
+  @Test
+  public void unboundedPrecedingAndCurrentRow() {
+    AnalyticQuery query =
+<span class="fc" id="L161">        AnalyticQuery.query()</span>
+<span class="fc" id="L162">            .from(referenceImplementation)</span>
+<span class="fc" id="L163">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L164">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L165">            .rowsBetween()</span>
+<span class="fc" id="L166">            .unboundedPreceding()</span>
+<span class="fc" id="L167">            .andCurrentRow()</span>
+<span class="fc" id="L168">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L169">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L170">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L171">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L172">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L173">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L174">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L175">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L176">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L177">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L178">            .build();</span>
+
+<span class="fc" id="L180">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L181">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L183">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_unboundedpreceding_and_currentrow&quot;);</span>
+<span class="fc" id="L184">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L185">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L187">    expected = intSourceColumnAsDoubleArray(&quot;max_unboundedpreceding_and_currentrow&quot;);</span>
+<span class="fc" id="L188">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L189">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L191">    expected = intSourceColumnAsDoubleArray(&quot;min_unboundedpreceding_and_currentrow&quot;);</span>
+<span class="fc" id="L192">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L193">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L195">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_unboundedpreceding_and_currentrow&quot;);</span>
+<span class="fc" id="L196">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L197">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L199">    expected = intSourceColumnAsDoubleArray(&quot;count_unboundedpreceding_and_currentrow&quot;);</span>
+<span class="fc" id="L200">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L201">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L202">  }</span>
+
+  @Test
+  public void unboundedPrecedingAnd5Following() {
+    AnalyticQuery query =
+<span class="fc" id="L207">        AnalyticQuery.query()</span>
+<span class="fc" id="L208">            .from(referenceImplementation)</span>
+<span class="fc" id="L209">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L210">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L211">            .rowsBetween()</span>
+<span class="fc" id="L212">            .unboundedPreceding()</span>
+<span class="fc" id="L213">            .andFollowing(5)</span>
+<span class="fc" id="L214">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L215">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L216">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L217">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L218">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L219">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L220">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L221">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L222">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L223">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L224">            .build();</span>
+
+<span class="fc" id="L226">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L227">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L229">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_unboundedpreceding_and_5following&quot;);</span>
+<span class="fc" id="L230">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L231">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L233">    expected = intSourceColumnAsDoubleArray(&quot;max_unboundedpreceding_and_5following&quot;);</span>
+<span class="fc" id="L234">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L235">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L237">    expected = intSourceColumnAsDoubleArray(&quot;min_unboundedpreceding_and_5following&quot;);</span>
+<span class="fc" id="L238">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L239">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L241">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_unboundedpreceding_and_5following&quot;);</span>
+<span class="fc" id="L242">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L243">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L245">    expected = intSourceColumnAsDoubleArray(&quot;count_unboundedpreceding_and_5following&quot;);</span>
+<span class="fc" id="L246">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L247">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L248">  }</span>
+
+  @Test
+  public void unboundedPrecedingAndUnboundedFollowing() {
+    AnalyticQuery query =
+<span class="fc" id="L253">        AnalyticQuery.query()</span>
+<span class="fc" id="L254">            .from(referenceImplementation)</span>
+<span class="fc" id="L255">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L256">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L257">            .rowsBetween()</span>
+<span class="fc" id="L258">            .unboundedPreceding()</span>
+<span class="fc" id="L259">            .andUnBoundedFollowing()</span>
+<span class="fc" id="L260">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L261">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L262">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L263">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L264">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L265">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L266">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L267">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L268">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L269">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L270">            .build();</span>
+
+<span class="fc" id="L272">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L273">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L275">    double[] expected =</span>
+<span class="fc" id="L276">        intSourceColumnAsDoubleArray(&quot;sum_unboundedpreceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L277">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L278">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L280">    expected = intSourceColumnAsDoubleArray(&quot;max_unboundedpreceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L281">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L282">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L284">    expected = intSourceColumnAsDoubleArray(&quot;min_unboundedpreceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L285">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L286">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L288">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_unboundedpreceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L289">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L290">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L292">    expected = intSourceColumnAsDoubleArray(&quot;count_unboundedpreceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L293">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L294">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L295">  }</span>
+
+  @Test
+  public void fivePrecedingAnd3Preceding() {
+    AnalyticQuery query =
+<span class="fc" id="L300">        AnalyticQuery.query()</span>
+<span class="fc" id="L301">            .from(referenceImplementation)</span>
+<span class="fc" id="L302">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L303">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L304">            .rowsBetween()</span>
+<span class="fc" id="L305">            .preceding(5)</span>
+<span class="fc" id="L306">            .andPreceding(3)</span>
+<span class="fc" id="L307">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L308">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L309">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L310">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L311">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L312">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L313">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L314">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L315">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L316">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L317">            .build();</span>
+
+<span class="fc" id="L319">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L320">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L322">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_5preceding_and_3preceding&quot;);</span>
+<span class="fc" id="L323">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L324">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L326">    expected = intSourceColumnAsDoubleArray(&quot;max_5preceding_and_3preceding&quot;);</span>
+<span class="fc" id="L327">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L328">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L330">    expected = intSourceColumnAsDoubleArray(&quot;min_5preceding_and_3preceding&quot;);</span>
+<span class="fc" id="L331">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L332">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L334">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_5preceding_and_3preceding&quot;);</span>
+<span class="fc" id="L335">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L336">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L338">    expected = intSourceColumnAsDoubleArray(&quot;count_5preceding_and_3preceding&quot;);</span>
+<span class="fc" id="L339">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L340">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L341">  }</span>
+
+  @Test
+  public void fivePrecedingAndCurrentRow() {
+    AnalyticQuery query =
+<span class="fc" id="L346">        AnalyticQuery.query()</span>
+<span class="fc" id="L347">            .from(referenceImplementation)</span>
+<span class="fc" id="L348">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L349">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L350">            .rowsBetween()</span>
+<span class="fc" id="L351">            .preceding(5)</span>
+<span class="fc" id="L352">            .andCurrentRow()</span>
+<span class="fc" id="L353">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L354">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L355">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L356">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L357">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L358">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L359">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L360">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L361">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L362">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L363">            .build();</span>
+
+<span class="fc" id="L365">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L366">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L368">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_5preceding_and_currentrow&quot;);</span>
+<span class="fc" id="L369">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L370">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L372">    expected = intSourceColumnAsDoubleArray(&quot;max_5preceding_and_currentrow&quot;);</span>
+<span class="fc" id="L373">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L374">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L376">    expected = intSourceColumnAsDoubleArray(&quot;min_5preceding_and_currentrow&quot;);</span>
+<span class="fc" id="L377">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L378">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L380">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_5preceding_and_currentrow&quot;);</span>
+<span class="fc" id="L381">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L382">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L384">    expected = intSourceColumnAsDoubleArray(&quot;count_5preceding_and_currentrow&quot;);</span>
+<span class="fc" id="L385">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L386">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L387">  }</span>
+
+  @Test
+  public void fivePrecedingAnd5Following() {
+    AnalyticQuery query =
+<span class="fc" id="L392">        AnalyticQuery.query()</span>
+<span class="fc" id="L393">            .from(referenceImplementation)</span>
+<span class="fc" id="L394">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L395">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L396">            .rowsBetween()</span>
+<span class="fc" id="L397">            .preceding(5)</span>
+<span class="fc" id="L398">            .andFollowing(5)</span>
+<span class="fc" id="L399">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L400">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L401">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L402">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L403">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L404">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L405">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L406">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L407">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L408">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L409">            .build();</span>
+
+<span class="fc" id="L411">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L412">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L414">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_5preceding_and_5following&quot;);</span>
+<span class="fc" id="L415">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L416">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L418">    expected = intSourceColumnAsDoubleArray(&quot;max_5preceding_and_5following&quot;);</span>
+<span class="fc" id="L419">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L420">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L422">    expected = intSourceColumnAsDoubleArray(&quot;min_5preceding_and_5following&quot;);</span>
+<span class="fc" id="L423">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L424">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L426">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_5preceding_and_5following&quot;);</span>
+<span class="fc" id="L427">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L428">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L430">    expected = intSourceColumnAsDoubleArray(&quot;count_5preceding_and_5following&quot;);</span>
+<span class="fc" id="L431">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L432">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L433">  }</span>
+
+  @Test
+  public void fivePrecedingAndUnboundedFollowing() {
+    AnalyticQuery query =
+<span class="fc" id="L438">        AnalyticQuery.query()</span>
+<span class="fc" id="L439">            .from(referenceImplementation)</span>
+<span class="fc" id="L440">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L441">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L442">            .rowsBetween()</span>
+<span class="fc" id="L443">            .preceding(5)</span>
+<span class="fc" id="L444">            .andUnBoundedFollowing()</span>
+<span class="fc" id="L445">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L446">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L447">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L448">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L449">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L450">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L451">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L452">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L453">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L454">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L455">            .build();</span>
+
+<span class="fc" id="L457">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L458">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L460">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_5preceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L461">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L462">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L464">    expected = intSourceColumnAsDoubleArray(&quot;max_5preceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L465">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L466">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L468">    expected = intSourceColumnAsDoubleArray(&quot;min_5preceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L469">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L470">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L472">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_5preceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L473">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L474">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L476">    expected = intSourceColumnAsDoubleArray(&quot;count_5preceding_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L477">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L478">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L479">  }</span>
+
+  @Test
+  public void currentRowAndUnboundedFollowing() {
+    AnalyticQuery query =
+<span class="fc" id="L484">        AnalyticQuery.query()</span>
+<span class="fc" id="L485">            .from(referenceImplementation)</span>
+<span class="fc" id="L486">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L487">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L488">            .rowsBetween()</span>
+<span class="fc" id="L489">            .currentRow()</span>
+<span class="fc" id="L490">            .andUnBoundedFollowing()</span>
+<span class="fc" id="L491">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L492">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L493">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L494">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L495">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L496">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L497">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L498">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L499">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L500">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L501">            .build();</span>
+
+<span class="fc" id="L503">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L504">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L506">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_currentrow_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L507">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L508">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L510">    expected = intSourceColumnAsDoubleArray(&quot;max_currentrow_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L511">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L512">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L514">    expected = intSourceColumnAsDoubleArray(&quot;min_currentrow_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L515">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L516">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L518">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_currentrow_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L519">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L520">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L522">    expected = intSourceColumnAsDoubleArray(&quot;count_currentrow_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L523">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L524">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L525">  }</span>
+
+  @Test
+  public void fiveFollowingAnd8Following() {
+    AnalyticQuery query =
+<span class="fc" id="L530">        AnalyticQuery.query()</span>
+<span class="fc" id="L531">            .from(referenceImplementation)</span>
+<span class="fc" id="L532">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L533">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L534">            .rowsBetween()</span>
+<span class="fc" id="L535">            .following(5)</span>
+<span class="fc" id="L536">            .andFollowing(8)</span>
+<span class="fc" id="L537">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L538">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L539">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L540">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L541">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L542">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L543">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L544">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L545">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L546">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L547">            .build();</span>
+
+<span class="fc" id="L549">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L550">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L552">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_5following_and_8following&quot;);</span>
+<span class="fc" id="L553">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L554">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L556">    expected = intSourceColumnAsDoubleArray(&quot;max_5following_and_8following&quot;);</span>
+<span class="fc" id="L557">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L558">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L560">    expected = intSourceColumnAsDoubleArray(&quot;min_5following_and_8following&quot;);</span>
+<span class="fc" id="L561">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L562">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L564">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_5following_and_8following&quot;);</span>
+<span class="fc" id="L565">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L566">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L568">    expected = intSourceColumnAsDoubleArray(&quot;count_5following_and_8following&quot;);</span>
+<span class="fc" id="L569">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L570">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L571">  }</span>
+
+  @Test
+  public void fiveFollowingAndUnboundedFollowing() {
+    AnalyticQuery query =
+<span class="fc" id="L576">        AnalyticQuery.query()</span>
+<span class="fc" id="L577">            .from(referenceImplementation)</span>
+<span class="fc" id="L578">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L579">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L580">            .rowsBetween()</span>
+<span class="fc" id="L581">            .following(5)</span>
+<span class="fc" id="L582">            .andUnBoundedFollowing()</span>
+<span class="fc" id="L583">            .sum(&quot;approval&quot;)</span>
+<span class="fc" id="L584">            .as(&quot;sum&quot;)</span>
+<span class="fc" id="L585">            .max(&quot;approval&quot;)</span>
+<span class="fc" id="L586">            .as(&quot;max&quot;)</span>
+<span class="fc" id="L587">            .min(&quot;approval&quot;)</span>
+<span class="fc" id="L588">            .as(&quot;min&quot;)</span>
+<span class="fc" id="L589">            .mean(&quot;approval&quot;)</span>
+<span class="fc" id="L590">            .as(&quot;mean&quot;)</span>
+<span class="fc" id="L591">            .count(&quot;approval&quot;)</span>
+<span class="fc" id="L592">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L593">            .build();</span>
+
+<span class="fc" id="L595">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L596">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L598">    double[] expected = intSourceColumnAsDoubleArray(&quot;sum_5following_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L599">    double[] actual = result.doubleColumn(&quot;sum&quot;).asDoubleArray();</span>
+<span class="fc" id="L600">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L602">    expected = intSourceColumnAsDoubleArray(&quot;max_5following_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L603">    actual = result.doubleColumn(&quot;max&quot;).asDoubleArray();</span>
+<span class="fc" id="L604">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L606">    expected = intSourceColumnAsDoubleArray(&quot;min_5following_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L607">    actual = result.doubleColumn(&quot;min&quot;).asDoubleArray();</span>
+<span class="fc" id="L608">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L610">    expected = doubleSourceColumnAsDoubleArray(&quot;mean_5following_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L611">    actual = result.doubleColumn(&quot;mean&quot;).asDoubleArray();</span>
+<span class="fc" id="L612">    assertArrayEquals(expected, actual);</span>
+
+<span class="fc" id="L614">    expected = intSourceColumnAsDoubleArray(&quot;count_5following_and_unboundedfollowing&quot;);</span>
+<span class="fc" id="L615">    actual = result.intColumn(&quot;count&quot;).asDoubleArray();</span>
+<span class="fc" id="L616">    assertArrayEquals(expected, actual);</span>
+<span class="fc" id="L617">  }</span>
+
+  @Test
+  public void countWithStrings() {
+<span class="fc" id="L621">    Table table =</span>
+<span class="fc" id="L622">        Table.create(</span>
+            &quot;table&quot;,
+<span class="fc" id="L624">            StringColumn.create(&quot;col1&quot;, new String[] {&quot;A&quot;, &quot;B&quot;, null, &quot;C&quot;, &quot;C&quot;, &quot;C&quot;, &quot;D&quot;}));</span>
+
+    AnalyticQuery query =
+<span class="fc" id="L627">        AnalyticQuery.quickQuery()</span>
+<span class="fc" id="L628">            .from(table)</span>
+<span class="fc" id="L629">            .rowsBetween()</span>
+<span class="fc" id="L630">            .unboundedPreceding()</span>
+<span class="fc" id="L631">            .andCurrentRow()</span>
+<span class="fc" id="L632">            .count(&quot;col1&quot;)</span>
+<span class="fc" id="L633">            .as(&quot;count&quot;)</span>
+<span class="fc" id="L634">            .build();</span>
+
+<span class="fc" id="L636">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L637">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L639">    assertEquals(ImmutableList.of(1, 2, 2, 3, 4, 5, 6), result.intColumn(&quot;count&quot;).asList());</span>
+<span class="fc" id="L640">  }</span>
+
+  @Test
+  public void numberingFunctionReferenceImplementation() {
+    AnalyticQuery query =
+<span class="fc" id="L645">        AnalyticQuery.numberingQuery()</span>
+<span class="fc" id="L646">            .from(referenceImplementation)</span>
+<span class="fc" id="L647">            .partitionBy(&quot;who&quot;)</span>
+<span class="fc" id="L648">            .orderBy(&quot;date&quot;)</span>
+<span class="fc" id="L649">            .rowNumber()</span>
+<span class="fc" id="L650">            .as(&quot;rowNumber&quot;)</span>
+<span class="fc" id="L651">            .rank()</span>
+<span class="fc" id="L652">            .as(&quot;rank&quot;)</span>
+<span class="fc" id="L653">            .denseRank()</span>
+<span class="fc" id="L654">            .as(&quot;denseRank&quot;)</span>
+<span class="fc" id="L655">            .build();</span>
+
+<span class="fc" id="L657">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L658">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L660">    assertArrayEquals(</span>
+<span class="fc" id="L661">        intSourceColumnAsDoubleArray(&quot;row_number&quot;), result.intColumn(&quot;rowNumber&quot;).asDoubleArray());</span>
+<span class="fc" id="L662">    assertArrayEquals(</span>
+<span class="fc" id="L663">        intSourceColumnAsDoubleArray(&quot;rank&quot;), result.intColumn(&quot;rank&quot;).asDoubleArray());</span>
+<span class="fc" id="L664">    assertArrayEquals(</span>
+<span class="fc" id="L665">        intSourceColumnAsDoubleArray(&quot;dense_rank&quot;), result.intColumn(&quot;denseRank&quot;).asDoubleArray());</span>
+<span class="fc" id="L666">  }</span>
+
+  @Test
+  public void numberingFunctionsWithStrings() {
+<span class="fc" id="L670">    Table table =</span>
+<span class="fc" id="L671">        Table.create(</span>
+<span class="fc" id="L672">            &quot;table&quot;, StringColumn.create(&quot;col1&quot;, new String[] {&quot;A&quot;, &quot;B&quot;, &quot;B&quot;, &quot;C&quot;, &quot;C&quot;, &quot;C&quot;, &quot;D&quot;}));</span>
+
+    AnalyticQuery query =
+<span class="fc" id="L675">        AnalyticQuery.numberingQuery()</span>
+<span class="fc" id="L676">            .from(table)</span>
+<span class="fc" id="L677">            .partitionBy()</span>
+<span class="fc" id="L678">            .orderBy(&quot;col1&quot;)</span>
+<span class="fc" id="L679">            .rowNumber()</span>
+<span class="fc" id="L680">            .as(&quot;rowNumber&quot;)</span>
+<span class="fc" id="L681">            .rank()</span>
+<span class="fc" id="L682">            .as(&quot;rank&quot;)</span>
+<span class="fc" id="L683">            .denseRank()</span>
+<span class="fc" id="L684">            .as(&quot;denseRank&quot;)</span>
+<span class="fc" id="L685">            .build();</span>
+
+<span class="fc" id="L687">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L688">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L690">    assertArrayEquals(</span>
+        new double[] {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0},
+<span class="fc" id="L692">        result.intColumn(&quot;rowNumber&quot;).asDoubleArray());</span>
+<span class="fc" id="L693">    assertArrayEquals(</span>
+<span class="fc" id="L694">        new double[] {1.0, 2.0, 2.0, 4.0, 4.0, 4.0, 7.0}, result.intColumn(&quot;rank&quot;).asDoubleArray());</span>
+<span class="fc" id="L695">    assertArrayEquals(</span>
+        new double[] {1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0},
+<span class="fc" id="L697">        result.intColumn(&quot;denseRank&quot;).asDoubleArray());</span>
+<span class="fc" id="L698">  }</span>
+
+  @Test
+  public void resultColumnOrderSameAsSpecifiedInQuery() {
+<span class="fc" id="L702">    Table table = Table.create(&quot;table&quot;, StringColumn.create(&quot;col1&quot;, new String[] {}));</span>
+
+    AnalyticQuery query =
+<span class="fc" id="L705">        AnalyticQuery.numberingQuery()</span>
+<span class="fc" id="L706">            .from(table)</span>
+<span class="fc" id="L707">            .partitionBy()</span>
+<span class="fc" id="L708">            .orderBy(&quot;col1&quot;)</span>
+<span class="fc" id="L709">            .rowNumber()</span>
+<span class="fc" id="L710">            .as(&quot;rowNumber&quot;)</span>
+<span class="fc" id="L711">            .rank()</span>
+<span class="fc" id="L712">            .as(&quot;rank&quot;)</span>
+<span class="fc" id="L713">            .denseRank()</span>
+<span class="fc" id="L714">            .as(&quot;denseRank&quot;)</span>
+<span class="fc" id="L715">            .build();</span>
+
+<span class="fc" id="L717">    AnalyticQueryEngine queryEngine = AnalyticQueryEngine.create(query);</span>
+<span class="fc" id="L718">    Table result = queryEngine.execute();</span>
+
+<span class="fc" id="L720">    assertEquals(ImmutableList.of(&quot;rowNumber&quot;, &quot;rank&quot;, &quot;denseRank&quot;), result.columnNames());</span>
+<span class="fc" id="L721">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

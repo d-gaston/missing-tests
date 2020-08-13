@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>HighLevelEncodeTestCase.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.datamatrix.encoder</a> &gt; <span class="el_source">HighLevelEncodeTestCase.java</span></div><h1>HighLevelEncodeTestCase.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2006 Jeremias Maerki.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.datamatrix.encoder;
+
+import java.nio.charset.StandardCharsets;
+
+import junit.framework.ComparisonFailure;
+import org.junit.Assert;
+import org.junit.Ignore;
+import org.junit.Test;
+
+/**
+ * Tests for {@link HighLevelEncoder}.
+ */
+<span class="fc" id="L29">public final class HighLevelEncodeTestCase extends Assert {</span>
+
+<span class="fc" id="L31">  private static final SymbolInfo[] TEST_SYMBOLS = {</span>
+    new SymbolInfo(false, 3, 5, 8, 8, 1),
+    new SymbolInfo(false, 5, 7, 10, 10, 1),
+      /*rect*/new SymbolInfo(true, 5, 7, 16, 6, 1),
+    new SymbolInfo(false, 8, 10, 12, 12, 1),
+      /*rect*/new SymbolInfo(true, 10, 11, 14, 6, 2),
+    new SymbolInfo(false, 13, 0, 0, 0, 1),
+    new SymbolInfo(false, 77, 0, 0, 0, 1)
+    //The last entries are fake entries to test special conditions with C40 encoding
+  };
+
+  private static void useTestSymbols() {
+<span class="fc" id="L43">    SymbolInfo.overrideSymbolSet(TEST_SYMBOLS);</span>
+<span class="fc" id="L44">  }</span>
+
+  private static void resetSymbols() {
+<span class="fc" id="L47">    SymbolInfo.overrideSymbolSet(SymbolInfo.PROD_SYMBOLS);</span>
+<span class="fc" id="L48">  }</span>
+
+  @Test
+  public void testASCIIEncodation() {
+
+<span class="fc" id="L53">    String visualized = encodeHighLevel(&quot;123456&quot;);</span>
+<span class="fc" id="L54">    assertEquals(&quot;142 164 186&quot;, visualized);</span>
+
+<span class="fc" id="L56">    visualized = encodeHighLevel(&quot;123456£&quot;);</span>
+<span class="fc" id="L57">    assertEquals(&quot;142 164 186 235 36&quot;, visualized);</span>
+
+<span class="fc" id="L59">    visualized = encodeHighLevel(&quot;30Q324343430794&lt;OQQ&quot;);</span>
+<span class="fc" id="L60">    assertEquals(&quot;160 82 162 173 173 173 137 224 61 80 82 82&quot;, visualized);</span>
+<span class="fc" id="L61">  }</span>
+
+  @Test
+  public void testC40EncodationBasic1() {
+
+<span class="fc" id="L66">    String visualized = encodeHighLevel(&quot;AIMAIMAIM&quot;);</span>
+<span class="fc" id="L67">    assertEquals(&quot;230 91 11 91 11 91 11 254&quot;, visualized);</span>
+    //230 shifts to C40 encodation, 254 unlatches, &quot;else&quot; case
+<span class="fc" id="L69">  }</span>
+
+  @Test  
+  public void testC40EncodationBasic2() {
+
+<span class="fc" id="L74">    String visualized = encodeHighLevel(&quot;AIMAIAB&quot;);</span>
+<span class="fc" id="L75">    assertEquals(&quot;230 91 11 90 255 254 67 129&quot;, visualized);</span>
+    //&quot;B&quot; is normally encoded as &quot;15&quot; (one C40 value)
+    //&quot;else&quot; case: &quot;B&quot; is encoded as ASCII
+
+<span class="fc" id="L79">    visualized = encodeHighLevel(&quot;AIMAIAb&quot;);</span>
+<span class="fc" id="L80">    assertEquals(&quot;66 74 78 66 74 66 99 129&quot;, visualized); //Encoded as ASCII</span>
+    //Alternative solution:
+    //assertEquals(&quot;230 91 11 90 255 254 99 129&quot;, visualized);
+    //&quot;b&quot; is normally encoded as &quot;Shift 3, 2&quot; (two C40 values)
+    //&quot;else&quot; case: &quot;b&quot; is encoded as ASCII
+
+<span class="fc" id="L86">    visualized = encodeHighLevel(&quot;AIMAIMAIMË&quot;);</span>
+<span class="fc" id="L87">    assertEquals(&quot;230 91 11 91 11 91 11 254 235 76&quot;, visualized);</span>
+    //Alternative solution:
+    //assertEquals(&quot;230 91 11 91 11 91 11 11 9 254&quot;, visualized);
+    //Expl: 230 = shift to C40, &quot;91 11&quot; = &quot;AIM&quot;,
+    //&quot;11 9&quot; = &quot;�&quot; = &quot;Shift 2, UpperShift, &lt;char&gt;
+    //&quot;else&quot; case
+
+<span class="fc" id="L94">    visualized = encodeHighLevel(&quot;AIMAIMAIMë&quot;);</span>
+<span class="fc" id="L95">    assertEquals(&quot;230 91 11 91 11 91 11 254 235 108&quot;, visualized); //Activate when additional rectangulars are available</span>
+    //Expl: 230 = shift to C40, &quot;91 11&quot; = &quot;AIM&quot;,
+    //&quot;�&quot; in C40 encodes to: 1 30 2 11 which doesn't fit into a triplet
+    //&quot;10 243&quot; =
+    //254 = unlatch, 235 = Upper Shift, 108 = � = 0xEB/235 - 128 + 1
+    //&quot;else&quot; case
+<span class="fc" id="L101">  }</span>
+
+  @Test  
+  public void testC40EncodationSpecExample() {
+    //Example in Figure 1 in the spec
+<span class="fc" id="L106">    String visualized = encodeHighLevel(&quot;A1B2C3D4E5F6G7H8I9J0K1L2&quot;);</span>
+<span class="fc" id="L107">    assertEquals(&quot;230 88 88 40 8 107 147 59 67 126 206 78 126 144 121 35 47 254&quot;, visualized);</span>
+<span class="fc" id="L108">  }</span>
+
+  @Test  
+  public void testC40EncodationSpecialCases1() {
+
+    //Special tests avoiding ultra-long test strings because these tests are only used
+    //with the 16x48 symbol (47 data codewords)
+<span class="fc" id="L115">    useTestSymbols();</span>
+
+<span class="fc" id="L117">    String visualized = encodeHighLevel(&quot;AIMAIMAIMAIMAIMAIM&quot;);</span>
+<span class="fc" id="L118">    assertEquals(&quot;230 91 11 91 11 91 11 91 11 91 11 91 11&quot;, visualized);</span>
+    //case &quot;a&quot;: Unlatch is not required
+
+<span class="fc" id="L121">    visualized = encodeHighLevel(&quot;AIMAIMAIMAIMAIMAI&quot;);</span>
+<span class="fc" id="L122">    assertEquals(&quot;230 91 11 91 11 91 11 91 11 91 11 90 241&quot;, visualized);</span>
+    //case &quot;b&quot;: Add trailing shift 0 and Unlatch is not required
+
+<span class="fc" id="L125">    visualized = encodeHighLevel(&quot;AIMAIMAIMAIMAIMA&quot;);</span>
+<span class="fc" id="L126">    assertEquals(&quot;230 91 11 91 11 91 11 91 11 91 11 254 66&quot;, visualized);</span>
+    //case &quot;c&quot;: Unlatch and write last character in ASCII
+
+<span class="fc" id="L129">    resetSymbols();</span>
+
+<span class="fc" id="L131">    visualized = encodeHighLevel(&quot;AIMAIMAIMAIMAIMAI&quot;);</span>
+<span class="fc" id="L132">    assertEquals(&quot;230 91 11 91 11 91 11 91 11 91 11 254 66 74 129 237&quot;, visualized);</span>
+
+<span class="fc" id="L134">    visualized = encodeHighLevel(&quot;AIMAIMAIMA&quot;);</span>
+<span class="fc" id="L135">    assertEquals(&quot;230 91 11 91 11 91 11 66&quot;, visualized);</span>
+    //case &quot;d&quot;: Skip Unlatch and write last character in ASCII
+<span class="fc" id="L137">  }</span>
+
+  @Test  
+  public void testC40EncodationSpecialCases2() {
+
+<span class="fc" id="L142">    String visualized = encodeHighLevel(&quot;AIMAIMAIMAIMAIMAIMAI&quot;);</span>
+<span class="fc" id="L143">    assertEquals(&quot;230 91 11 91 11 91 11 91 11 91 11 91 11 254 66 74&quot;, visualized);</span>
+    //available &gt; 2, rest = 2 --&gt; unlatch and encode as ASCII
+<span class="fc" id="L145">  }</span>
+
+  @Test  
+  public void testTextEncodation() {
+
+<span class="fc" id="L150">    String visualized = encodeHighLevel(&quot;aimaimaim&quot;);</span>
+<span class="fc" id="L151">    assertEquals(&quot;239 91 11 91 11 91 11 254&quot;, visualized);</span>
+    //239 shifts to Text encodation, 254 unlatches
+
+<span class="fc" id="L154">    visualized = encodeHighLevel(&quot;aimaimaim'&quot;);</span>
+<span class="fc" id="L155">    assertEquals(&quot;239 91 11 91 11 91 11 254 40 129&quot;, visualized);</span>
+    //assertEquals(&quot;239 91 11 91 11 91 11 7 49 254&quot;, visualized);
+    //This is an alternative, but doesn't strictly follow the rules in the spec.
+
+<span class="fc" id="L159">    visualized = encodeHighLevel(&quot;aimaimaIm&quot;);</span>
+<span class="fc" id="L160">    assertEquals(&quot;239 91 11 91 11 87 218 110&quot;, visualized);</span>
+
+<span class="fc" id="L162">    visualized = encodeHighLevel(&quot;aimaimaimB&quot;);</span>
+<span class="fc" id="L163">    assertEquals(&quot;239 91 11 91 11 91 11 254 67 129&quot;, visualized);</span>
+
+<span class="fc" id="L165">    visualized = encodeHighLevel(&quot;aimaimaim{txt}\u0004&quot;);</span>
+<span class="fc" id="L166">    assertEquals(&quot;239 91 11 91 11 91 11 16 218 236 107 181 69 254 129 237&quot;, visualized);</span>
+<span class="fc" id="L167">  }</span>
+
+  @Test  
+  public void testX12Encodation() {
+
+    //238 shifts to X12 encodation, 254 unlatches
+
+<span class="fc" id="L174">    String visualized = encodeHighLevel(&quot;ABC&gt;ABC123&gt;AB&quot;);</span>
+<span class="fc" id="L175">    assertEquals(&quot;238 89 233 14 192 100 207 44 31 67&quot;, visualized);</span>
+
+<span class="fc" id="L177">    visualized = encodeHighLevel(&quot;ABC&gt;ABC123&gt;ABC&quot;);</span>
+<span class="fc" id="L178">    assertEquals(&quot;238 89 233 14 192 100 207 44 31 254 67 68&quot;, visualized);</span>
+
+<span class="fc" id="L180">    visualized = encodeHighLevel(&quot;ABC&gt;ABC123&gt;ABCD&quot;);</span>
+<span class="fc" id="L181">    assertEquals(&quot;238 89 233 14 192 100 207 44 31 96 82 254&quot;, visualized);</span>
+
+<span class="fc" id="L183">    visualized = encodeHighLevel(&quot;ABC&gt;ABC123&gt;ABCDE&quot;);</span>
+<span class="fc" id="L184">    assertEquals(&quot;238 89 233 14 192 100 207 44 31 96 82 70&quot;, visualized);</span>
+
+<span class="fc" id="L186">    visualized = encodeHighLevel(&quot;ABC&gt;ABC123&gt;ABCDEF&quot;);</span>
+<span class="fc" id="L187">    assertEquals(&quot;238 89 233 14 192 100 207 44 31 96 82 254 70 71 129 237&quot;, visualized);</span>
+
+<span class="fc" id="L189">  }</span>
+
+  @Test  
+  public void testEDIFACTEncodation() {
+
+    //240 shifts to EDIFACT encodation
+
+<span class="fc" id="L196">    String visualized = encodeHighLevel(&quot;.A.C1.3.DATA.123DATA.123DATA&quot;);</span>
+<span class="fc" id="L197">    assertEquals(&quot;240 184 27 131 198 236 238 16 21 1 187 28 179 16 21 1 187 28 179 16 21 1&quot;,</span>
+                 visualized);
+
+<span class="fc" id="L200">    visualized = encodeHighLevel(&quot;.A.C1.3.X.X2..&quot;);</span>
+<span class="fc" id="L201">    assertEquals(&quot;240 184 27 131 198 236 238 98 230 50 47 47&quot;, visualized);</span>
+
+<span class="fc" id="L203">    visualized = encodeHighLevel(&quot;.A.C1.3.X.X2.&quot;);</span>
+<span class="fc" id="L204">    assertEquals(&quot;240 184 27 131 198 236 238 98 230 50 47 129&quot;, visualized);</span>
+
+<span class="fc" id="L206">    visualized = encodeHighLevel(&quot;.A.C1.3.X.X2&quot;);</span>
+<span class="fc" id="L207">    assertEquals(&quot;240 184 27 131 198 236 238 98 230 50&quot;, visualized);</span>
+
+<span class="fc" id="L209">    visualized = encodeHighLevel(&quot;.A.C1.3.X.X&quot;);</span>
+<span class="fc" id="L210">    assertEquals(&quot;240 184 27 131 198 236 238 98 230 31&quot;, visualized);</span>
+
+<span class="fc" id="L212">    visualized = encodeHighLevel(&quot;.A.C1.3.X.&quot;);</span>
+<span class="fc" id="L213">    assertEquals(&quot;240 184 27 131 198 236 238 98 231 192&quot;, visualized);</span>
+
+<span class="fc" id="L215">    visualized = encodeHighLevel(&quot;.A.C1.3.X&quot;);</span>
+<span class="fc" id="L216">    assertEquals(&quot;240 184 27 131 198 236 238 89&quot;, visualized);</span>
+
+    //Checking temporary unlatch from EDIFACT
+<span class="fc" id="L219">    visualized = encodeHighLevel(&quot;.XXX.XXX.XXX.XXX.XXX.XXX.üXX.XXX.XXX.XXX.XXX.XXX.XXX&quot;);</span>
+<span class="fc" id="L220">    assertEquals(&quot;240 185 134 24 185 134 24 185 134 24 185 134 24 185 134 24 185 134 24&quot;</span>
+                     + &quot; 124 47 235 125 240&quot; //&lt;-- this is the temporary unlatch
+                     + &quot; 97 139 152 97 139 152 97 139 152 97 139 152 97 139 152 97 139 152 89 89&quot;,
+                 visualized);
+<span class="fc" id="L224">  }</span>
+
+  @Test  
+  public void testBase256Encodation() {
+
+    //231 shifts to Base256 encodation
+
+<span class="fc" id="L231">    String visualized = encodeHighLevel(&quot;\u00ABäöüé\u00BB&quot;);</span>
+<span class="fc" id="L232">    assertEquals(&quot;231 44 108 59 226 126 1 104&quot;, visualized);</span>
+<span class="fc" id="L233">    visualized = encodeHighLevel(&quot;\u00ABäöüéà\u00BB&quot;);</span>
+<span class="fc" id="L234">    assertEquals(&quot;231 51 108 59 226 126 1 141 254 129&quot;, visualized);</span>
+<span class="fc" id="L235">    visualized = encodeHighLevel(&quot;\u00ABäöüéàá\u00BB&quot;);</span>
+<span class="fc" id="L236">    assertEquals(&quot;231 44 108 59 226 126 1 141 36 147&quot;, visualized);</span>
+
+<span class="fc" id="L238">    visualized = encodeHighLevel(&quot; 23£&quot;); //ASCII only (for reference)</span>
+<span class="fc" id="L239">    assertEquals(&quot;33 153 235 36 129&quot;, visualized);</span>
+
+<span class="fc" id="L241">    visualized = encodeHighLevel(&quot;\u00ABäöüé\u00BB 234&quot;); //Mixed Base256 + ASCII</span>
+<span class="fc" id="L242">    assertEquals(&quot;231 51 108 59 226 126 1 104 99 153 53 129&quot;, visualized);</span>
+
+<span class="fc" id="L244">    visualized = encodeHighLevel(&quot;\u00ABäöüé\u00BB 23£ 1234567890123456789&quot;);</span>
+<span class="fc" id="L245">    assertEquals(&quot;231 55 108 59 226 126 1 104 99 10 161 167 185 142 164 186 208&quot;</span>
+                     + &quot; 220 142 164 186 208 58 129 59 209 104 254 150 45&quot;, visualized);
+
+<span class="fc" id="L248">    visualized = encodeHighLevel(createBinaryMessage(20));</span>
+<span class="fc" id="L249">    assertEquals(&quot;231 44 108 59 226 126 1 141 36 5 37 187 80 230 123 17 166 60 210 103 253 150&quot;,</span>
+                 visualized);
+<span class="fc" id="L251">    visualized = encodeHighLevel(createBinaryMessage(19)); //padding necessary at the end</span>
+<span class="fc" id="L252">    assertEquals(&quot;231 63 108 59 226 126 1 141 36 5 37 187 80 230 123 17 166 60 210 103 1 129&quot;,</span>
+                 visualized);
+
+<span class="fc" id="L255">    visualized = encodeHighLevel(createBinaryMessage(276));</span>
+<span class="fc" id="L256">    assertStartsWith(&quot;231 38 219 2 208 120 20 150 35&quot;, visualized);</span>
+<span class="fc" id="L257">    assertEndsWith(&quot;146 40 194 129&quot;, visualized);</span>
+
+<span class="fc" id="L259">    visualized = encodeHighLevel(createBinaryMessage(277));</span>
+<span class="fc" id="L260">    assertStartsWith(&quot;231 38 220 2 208 120 20 150 35&quot;, visualized);</span>
+<span class="fc" id="L261">    assertEndsWith(&quot;146 40 190 87&quot;, visualized);</span>
+<span class="fc" id="L262">  }</span>
+
+  private static String createBinaryMessage(int len) {
+<span class="fc" id="L265">    StringBuilder sb = new StringBuilder();</span>
+<span class="fc" id="L266">    sb.append(&quot;\u00ABäöüéàá-&quot;);</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">    for (int i = 0; i &lt; len - 9; i++) {</span>
+<span class="fc" id="L268">      sb.append('\u00B7');</span>
+    }
+<span class="fc" id="L270">    sb.append('\u00BB');</span>
+<span class="fc" id="L271">    return sb.toString();</span>
+  }
+
+  private static void assertStartsWith(String expected, String actual) {
+<span class="pc bpc" id="L275" title="1 of 2 branches missed.">    if (!actual.startsWith(expected)) {</span>
+<span class="nc" id="L276">      throw new ComparisonFailure(null, expected, actual.substring(0, expected.length()));</span>
+    }
+<span class="fc" id="L278">  }</span>
+
+  private static void assertEndsWith(String expected, String actual) {
+<span class="pc bpc" id="L281" title="1 of 2 branches missed.">    if (!actual.endsWith(expected)) {</span>
+<span class="nc" id="L282">      throw new ComparisonFailure(null, expected, actual.substring(actual.length() - expected.length()));</span>
+    }
+<span class="fc" id="L284">  }</span>
+
+  @Test  
+  public void testUnlatchingFromC40() {
+
+<span class="fc" id="L289">    String visualized = encodeHighLevel(&quot;AIMAIMAIMAIMaimaimaim&quot;);</span>
+<span class="fc" id="L290">    assertEquals(&quot;230 91 11 91 11 91 11 254 66 74 78 239 91 11 91 11 91 11&quot;, visualized);</span>
+<span class="fc" id="L291">  }</span>
+
+  @Test  
+  public void testUnlatchingFromText() {
+
+<span class="fc" id="L296">    String visualized = encodeHighLevel(&quot;aimaimaimaim12345678&quot;);</span>
+<span class="fc" id="L297">    assertEquals(&quot;239 91 11 91 11 91 11 91 11 254 142 164 186 208 129 237&quot;, visualized);</span>
+<span class="fc" id="L298">  }</span>
+
+  @Test  
+  public void testHelloWorld() {
+
+<span class="fc" id="L303">    String visualized = encodeHighLevel(&quot;Hello World!&quot;);</span>
+<span class="fc" id="L304">    assertEquals(&quot;73 239 116 130 175 123 148 64 158 233 254 34&quot;, visualized);</span>
+<span class="fc" id="L305">  }</span>
+
+  @Test  
+  public void testBug1664266() {
+    //There was an exception and the encoder did not handle the unlatching from
+    //EDIFACT encoding correctly
+
+<span class="fc" id="L312">    String visualized = encodeHighLevel(&quot;CREX-TAN:h&quot;);</span>
+<span class="fc" id="L313">    assertEquals(&quot;240 13 33 88 181 64 78 124 59 105&quot;, visualized);</span>
+
+<span class="fc" id="L315">    visualized = encodeHighLevel(&quot;CREX-TAN:hh&quot;);</span>
+<span class="fc" id="L316">    assertEquals(&quot;240 13 33 88 181 64 78 124 59 105 105 129&quot;, visualized);</span>
+
+<span class="fc" id="L318">    visualized = encodeHighLevel(&quot;CREX-TAN:hhh&quot;);</span>
+<span class="fc" id="L319">    assertEquals(&quot;240 13 33 88 181 64 78 124 59 105 105 105&quot;, visualized);</span>
+<span class="fc" id="L320">  }</span>
+
+  @Test
+  public void testX12Unlatch() {
+<span class="fc" id="L324">    String visualized = encodeHighLevel(&quot;*DTCP01&quot;);</span>
+<span class="fc" id="L325">    assertEquals(&quot;238 9 10 104 141 254 50 129&quot;, visualized);</span>
+<span class="fc" id="L326">  }</span>
+
+  @Test
+  public void testX12Unlatch2() {
+<span class="fc" id="L330">    String visualized = encodeHighLevel(&quot;*DTCP0&quot;);</span>
+<span class="fc" id="L331">    assertEquals(&quot;238 9 10 104 141&quot;, visualized);</span>
+<span class="fc" id="L332">  }</span>
+
+  @Test  
+  public void testBug3048549() {
+    //There was an IllegalArgumentException for an illegal character here because
+    //of an encoding problem of the character 0x0060 in Java source code.
+
+<span class="fc" id="L339">    String visualized = encodeHighLevel(&quot;fiykmj*Rh2`,e6&quot;);</span>
+<span class="fc" id="L340">    assertEquals(&quot;239 122 87 154 40 7 171 115 207 12 130 71 155 254 129 237&quot;, visualized);</span>
+
+<span class="fc" id="L342">  }</span>
+
+  @Test  
+  public void testMacroCharacters() {
+
+<span class="fc" id="L347">    String visualized = encodeHighLevel(&quot;[)&gt;\u001E05\u001D5555\u001C6666\u001E\u0004&quot;);</span>
+    //assertEquals(&quot;92 42 63 31 135 30 185 185 29 196 196 31 5 129 87 237&quot;, visualized);
+<span class="fc" id="L349">    assertEquals(&quot;236 185 185 29 196 196 129 56&quot;, visualized);</span>
+<span class="fc" id="L350">  }</span>
+
+  @Test
+  public void testEncodingWithStartAsX12AndLatchToEDIFACTInTheMiddle() {
+
+<span class="fc" id="L355">    String visualized = encodeHighLevel(&quot;*MEMANT-1F-MESTECH&quot;);</span>
+<span class="fc" id="L356">    assertEquals(&quot;238 10 99 164 204 254 240 82 220 70 180 209 83 80 80 200&quot;, visualized);</span>
+<span class="fc" id="L357">  }</span>
+
+  @Ignore
+  @Test  
+  public void testDataURL() {
+
+<span class="nc" id="L363">    byte[] data = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,</span>
+        0x7E, 0x7F, (byte) 0x80, (byte) 0x81, (byte) 0x82};
+<span class="nc" id="L365">    String expected = encodeHighLevel(new String(data, StandardCharsets.ISO_8859_1));</span>
+<span class="nc" id="L366">    String visualized = encodeHighLevel(&quot;url(data:text/plain;charset=iso-8859-1,&quot;</span>
+                                            + &quot;%00%01%02%03%04%05%06%07%08%09%0A%7E%7F%80%81%82)&quot;);
+<span class="nc" id="L368">    assertEquals(expected, visualized);</span>
+<span class="nc" id="L369">    assertEquals(&quot;1 2 3 4 5 6 7 8 9 10 11 231 153 173 67 218 112 7&quot;, visualized);</span>
+
+<span class="nc" id="L371">    visualized = encodeHighLevel(&quot;url(data:;base64,flRlc3R+)&quot;);</span>
+<span class="nc" id="L372">    assertEquals(&quot;127 85 102 116 117 127 129 56&quot;, visualized);</span>
+<span class="nc" id="L373">  }</span>
+
+  private static String encodeHighLevel(String msg) {
+<span class="fc" id="L376">    CharSequence encoded = HighLevelEncoder.encodeHighLevel(msg);</span>
+    //DecodeHighLevel.decode(encoded);
+<span class="fc" id="L378">    return visualize(encoded);</span>
+  }
+  
+  /**
+   * Convert a string of char codewords into a different string which lists each character
+   * using its decimal value.
+   *
+   * @param codewords the codewords
+   * @return the visualized codewords
+   */
+  static String visualize(CharSequence codewords) {
+<span class="fc" id="L389">    StringBuilder sb = new StringBuilder();</span>
+<span class="fc bfc" id="L390" title="All 2 branches covered.">    for (int i = 0; i &lt; codewords.length(); i++) {</span>
+<span class="fc bfc" id="L391" title="All 2 branches covered.">      if (i &gt; 0) {</span>
+<span class="fc" id="L392">        sb.append(' ');</span>
+      }
+<span class="fc" id="L394">      sb.append((int) codewords.charAt(i));</span>
+    }
+<span class="fc" id="L396">    return sb.toString();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

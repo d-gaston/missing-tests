@@ -1,0 +1,647 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>NoThreadSchedulerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">NoThreadSchedulerTest.java</span></div><h1>NoThreadSchedulerTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.AbstractPriorityScheduler.OneTimeTaskWrapper;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionHandler;
+import org.threadly.util.SuppressedStackRuntimeException;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L27">public class NoThreadSchedulerTest extends ThreadlyTester {</span>
+  protected NoThreadScheduler scheduler;
+  
+  @Before
+  public void setup() {
+<span class="fc" id="L32">    scheduler = new NoThreadScheduler();</span>
+<span class="fc" id="L33">  }</span>
+  
+  @After
+  public void cleanup() {
+<span class="fc" id="L37">    scheduler = null;</span>
+<span class="fc" id="L38">  }</span>
+  
+  private static List&lt;TestRunnable&gt; getRunnableList() {
+<span class="fc" id="L41">    List&lt;TestRunnable&gt; result = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L42" title="All 2 branches covered.">    for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L43">      result.add(new TestRunnable());</span>
+    }
+    
+<span class="fc" id="L46">    return result;</span>
+  }
+  
+  private static List&lt;TestCallable&gt; getCallableList() {
+<span class="fc" id="L50">    List&lt;TestCallable&gt; result = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L51" title="All 2 branches covered.">    for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L52">      result.add(new TestCallable());</span>
+    }
+    
+<span class="fc" id="L55">    return result;</span>
+  }
+  
+  @Test
+  public void isShutdownTest() {
+<span class="fc" id="L60">    assertFalse(scheduler.isShutdown());</span>
+<span class="fc" id="L61">  }</span>
+  
+  @Test
+  public void tickWithoutHandlerThrowsRuntimeExceptionTest() {
+<span class="fc" id="L65">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L66">    scheduler.execute(new TestRuntimeFailureRunnable(failure));</span>
+    
+    try {
+<span class="nc" id="L69">      scheduler.tick(null);</span>
+<span class="nc" id="L70">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L71">    } catch (Exception e) {</span>
+<span class="pc bpc" id="L72" title="1 of 2 branches missed.">      assertTrue(e == failure);</span>
+<span class="nc" id="L73">    }</span>
+<span class="fc" id="L74">  }</span>
+  
+  @Test
+  public void tickHandlesRuntimeExceptionTest() {
+<span class="fc" id="L78">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L79">    final AtomicReference&lt;Throwable&gt; handledException = new AtomicReference&lt;&gt;(null);</span>
+<span class="fc" id="L80">    scheduler.execute(new TestRuntimeFailureRunnable(failure));</span>
+    
+<span class="fc" id="L82">    int runCount = scheduler.tick(new ExceptionHandler() {</span>
+      @Override
+      public void handleException(Throwable thrown) {
+<span class="fc" id="L85">        handledException.set(thrown);</span>
+<span class="fc" id="L86">      }</span>
+    });
+    
+<span class="fc" id="L89">    assertEquals(1, runCount);</span>
+<span class="pc bpc" id="L90" title="1 of 2 branches missed.">    assertTrue(handledException.get() == failure);</span>
+<span class="fc" id="L91">  }</span>
+  
+  @Test
+  public void executeTest() {
+<span class="fc" id="L95">    List&lt;TestRunnable&gt; runnables = getRunnableList();</span>
+<span class="fc" id="L96">    Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L98">      scheduler.execute(it.next());</span>
+    }
+    
+    // all should run now
+<span class="fc" id="L102">    assertEquals(TEST_QTY, scheduler.tick(null));</span>
+    
+<span class="fc" id="L104">    it = runnables.iterator();</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L106">      assertEquals(1, it.next().getRunCount());</span>
+    }
+    
+    // verify no more run after a second tick
+<span class="fc" id="L110">    assertEquals(scheduler.tick(null), 0);</span>
+    
+<span class="fc" id="L112">    it = runnables.iterator();</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L114">      assertEquals(1, it.next().getRunCount());</span>
+    }
+<span class="fc" id="L116">  }</span>
+  
+  @Test
+  public void executeInOrderTest() {
+<span class="fc" id="L120">    TestRunnable lastRun = null;</span>
+<span class="fc" id="L121">    long startTime = System.currentTimeMillis();</span>
+<span class="fc" id="L122">    int testQty = 0;</span>
+<span class="fc bfc" id="L123" title="All 4 branches covered.">    while (testQty &lt; TEST_QTY || System.currentTimeMillis() - startTime &lt; 100) {</span>
+<span class="fc" id="L124">      testQty++;</span>
+<span class="fc" id="L125">      final TestRunnable fLastRun = lastRun;</span>
+<span class="fc" id="L126">      lastRun = new TestRunnable() {</span>
+        @Override
+        public void handleRunStart() {
+<span class="pc bpc" id="L129" title="1 of 4 branches missed.">          if (fLastRun != null &amp;&amp; !fLastRun.ranOnce()) {</span>
+<span class="nc" id="L130">            fail(&quot;last run did not complete&quot;);</span>
+          }
+<span class="fc" id="L132">        }</span>
+      };
+<span class="fc" id="L134">      scheduler.schedule(DoNothingRunnable.instance(), 5);</span>
+<span class="fc" id="L135">      scheduler.execute(lastRun);</span>
+<span class="fc" id="L136">    }</span>
+    
+    // should throw exception if any internal failures occurred
+<span class="fc" id="L139">    scheduler.tick(null);</span>
+<span class="fc" id="L140">  }</span>
+  
+  @Test
+  public void scheduleInOrderTest() {
+<span class="fc" id="L144">    TestRunnable lastRun = null;</span>
+<span class="fc" id="L145">    int testQty = 0;</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    while (testQty &lt; TEST_QTY) {</span>
+<span class="fc" id="L147">      testQty++;</span>
+<span class="fc" id="L148">      final TestRunnable fLastRun = lastRun;</span>
+<span class="fc" id="L149">      lastRun = new TestRunnable() {</span>
+        @Override
+        public void handleRunStart() {
+<span class="nc bnc" id="L152" title="All 4 branches missed.">          if (fLastRun != null &amp;&amp; !fLastRun.ranOnce()) {</span>
+<span class="nc" id="L153">            fail(&quot;last run did not complete&quot;);</span>
+          }
+<span class="nc" id="L155">        }</span>
+      };
+      
+<span class="fc" id="L158">      scheduler.schedule(lastRun, DELAY_TIME);</span>
+<span class="fc" id="L159">    }</span>
+    
+    // should throw exception if any internal failures occurred
+<span class="fc" id="L162">    scheduler.tick(null);</span>
+<span class="fc" id="L163">  }</span>
+  
+  @Test
+  public void submitRunnableTest() {
+<span class="fc" id="L167">    List&lt;TestRunnable&gt; runnables = getRunnableList();</span>
+<span class="fc" id="L168">    List&lt;Future&lt;?&gt;&gt; futures = new ArrayList&lt;&gt;(runnables.size());</span>
+<span class="fc" id="L169">    Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L170" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L171">      Future&lt;?&gt; future = scheduler.submit(it.next());</span>
+<span class="fc" id="L172">      assertNotNull(future);</span>
+<span class="fc" id="L173">      futures.add(future);</span>
+<span class="fc" id="L174">    }</span>
+    
+    // all should run now
+<span class="fc" id="L177">    assertEquals(TEST_QTY, scheduler.tick(null));</span>
+    
+<span class="fc" id="L179">    it = runnables.iterator();</span>
+<span class="fc bfc" id="L180" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L181">      assertEquals(1, it.next().getRunCount());</span>
+    }
+    
+    // verify no more run after a second tick
+<span class="fc" id="L185">    assertEquals(0, scheduler.tick(null));</span>
+    
+<span class="fc" id="L187">    it = runnables.iterator();</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L189">      assertEquals(1, it.next().getRunCount());</span>
+    }
+    
+<span class="fc" id="L192">    Iterator&lt;Future&lt;?&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">    while (futureIt.hasNext()) {</span>
+<span class="fc" id="L194">      assertTrue(futureIt.next().isDone());</span>
+    }
+<span class="fc" id="L196">  }</span>
+  
+  @Test
+  public void submitCallableTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L200">    List&lt;TestCallable&gt; callables = getCallableList();</span>
+<span class="fc" id="L201">    List&lt;Future&lt;Object&gt;&gt; futures = new ArrayList&lt;&gt;(callables.size());</span>
+<span class="fc" id="L202">    Iterator&lt;TestCallable&gt; it = callables.iterator();</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L204">      Future&lt;Object&gt; future = scheduler.submit(it.next());</span>
+<span class="fc" id="L205">      assertNotNull(future);</span>
+<span class="fc" id="L206">      futures.add(future);</span>
+<span class="fc" id="L207">    }</span>
+    
+    // all should run now
+<span class="fc" id="L210">    assertEquals(TEST_QTY, scheduler.tick(null));</span>
+    
+<span class="fc" id="L212">    it = callables.iterator();</span>
+<span class="fc bfc" id="L213" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L214">      assertTrue(it.next().isDone());</span>
+    }
+
+<span class="fc" id="L217">    it = callables.iterator();</span>
+<span class="fc" id="L218">    Iterator&lt;Future&lt;Object&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">    while (futureIt.hasNext()) {</span>
+<span class="fc" id="L220">      Future&lt;Object&gt; future = futureIt.next();</span>
+<span class="fc" id="L221">      TestCallable tc = it.next();</span>
+      
+<span class="fc" id="L223">      assertTrue(future.isDone());</span>
+<span class="pc bpc" id="L224" title="1 of 2 branches missed.">      assertTrue(tc.getReturnedResult() == future.get());</span>
+<span class="fc" id="L225">    }</span>
+<span class="fc" id="L226">  }</span>
+  
+  @Test
+  public void scheduleRunnableTest() {
+<span class="fc" id="L230">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L231">    long scheduleTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L232">    scheduler.schedule(tr, DELAY_TIME);</span>
+    
+<span class="fc" id="L234">    int runCount = 0;</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    while (runCount == 0) {</span>
+<span class="fc" id="L236">      runCount = scheduler.tick(null);</span>
+    }
+<span class="fc" id="L238">    long runTime = Clock.accurateForwardProgressingMillis();</span>
+    
+<span class="fc" id="L240">    assertEquals(1, runCount);</span>
+    
+<span class="fc" id="L242">    assertTrue(tr.ranOnce());</span>
+<span class="pc bpc" id="L243" title="1 of 2 branches missed.">    assertTrue((runTime - scheduleTime) &gt;= DELAY_TIME);</span>
+<span class="fc" id="L244">  }</span>
+  
+  @Test
+  public void submitScheduledRunnableTest() {
+<span class="fc" id="L248">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L249">    ListenableFuture&lt;?&gt; future = scheduler.submitScheduled(tr, DELAY_TIME);</span>
+    
+<span class="fc" id="L251">    int runCount = 0;</span>
+<span class="fc bfc" id="L252" title="All 2 branches covered.">    while (runCount == 0) {</span>
+<span class="fc" id="L253">      runCount = scheduler.tick(null);</span>
+    }
+    
+<span class="fc" id="L256">    assertEquals(1, runCount);</span>
+    
+<span class="pc bpc" id="L258" title="1 of 2 branches missed.">    assertTrue(tr.getDelayTillFirstRun() &gt;= DELAY_TIME);</span>
+<span class="fc" id="L259">    assertTrue(future.isDone());</span>
+<span class="fc" id="L260">  }</span>
+  
+  @Test
+  public void submitScheduledRunnableFail() {
+    try {
+<span class="nc" id="L265">      scheduler.submitScheduled((Runnable)null, 10);</span>
+<span class="nc" id="L266">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L267">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L269">    }</span>
+    try {
+<span class="nc" id="L271">      scheduler.submitScheduled(DoNothingRunnable.instance(), -10);</span>
+<span class="nc" id="L272">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L273">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L275">    }</span>
+<span class="fc" id="L276">  }</span>
+  
+  @Test
+  public void submitScheduledCallableTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L280">    TestCallable tc = new TestCallable();</span>
+<span class="fc" id="L281">    ListenableFuture&lt;?&gt; future = scheduler.submitScheduled(tc, DELAY_TIME);</span>
+    
+<span class="fc" id="L283">    int runCount = 0;</span>
+<span class="fc bfc" id="L284" title="All 2 branches covered.">    while (runCount == 0) {</span>
+<span class="fc" id="L285">      runCount = scheduler.tick(null);</span>
+    }
+    
+<span class="fc" id="L288">    assertEquals(1, runCount);</span>
+    
+<span class="pc bpc" id="L290" title="1 of 2 branches missed.">    assertTrue(tc.getDelayTillFirstRun() &gt;= DELAY_TIME);</span>
+<span class="fc" id="L291">    assertTrue(future.isDone());</span>
+<span class="pc bpc" id="L292" title="1 of 2 branches missed.">    assertTrue(future.get() == tc.getReturnedResult());</span>
+<span class="fc" id="L293">  }</span>
+  
+  @Test
+  public void submitScheduledCallableFail() {
+    try {
+<span class="nc" id="L298">      scheduler.submitScheduled((Callable&lt;?&gt;)null, 10);</span>
+<span class="nc" id="L299">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L300">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L302">    }</span>
+    try {
+<span class="nc" id="L304">      scheduler.submitScheduled(new TestCallable(), -10);</span>
+<span class="nc" id="L305">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L306">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L308">    }</span>
+<span class="fc" id="L309">  }</span>
+  
+  @Test
+  public void scheduleWithFixedZeroDelayTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L313">    final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L314">    final TestRunnable[] testRunnables = new TestRunnable[TEST_QTY];</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">    for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L316">      testRunnables[i] = new TestRunnable();</span>
+    }
+    
+<span class="fc" id="L319">    Runnable workRunnable = new Runnable() {</span>
+<span class="fc" id="L320">      private int runIndex = -1;</span>
+      
+      @Override
+      public void run() {
+<span class="fc bfc" id="L324" title="All 2 branches covered.">        if (runIndex &gt;= 0) {</span>
+          // verify they ran ahead of us
+<span class="fc" id="L326">          av.assertTrue(testRunnables[runIndex].ranOnce());</span>
+        }
+        
+<span class="fc bfc" id="L329" title="All 2 branches covered.">        if (++runIndex &lt; testRunnables.length) {</span>
+<span class="fc" id="L330">          scheduler.execute(testRunnables[runIndex]);</span>
+        } else {  // we are done
+          // remove task so .tick can unblock
+<span class="fc" id="L333">          scheduler.remove(this);</span>
+<span class="fc" id="L334">          av.signalComplete();</span>
+        }
+<span class="fc" id="L336">      }</span>
+    };
+    
+<span class="fc" id="L339">    scheduler.scheduleWithFixedDelay(workRunnable, 0, 0);</span>
+    
+<span class="fc" id="L341">    scheduler.tick(null);</span>
+    
+<span class="fc" id="L343">    av.waitForTest();</span>
+<span class="fc" id="L344">  }</span>
+  
+  @Test
+  public void scheduleWithFixedDelayFail() {
+    try {
+<span class="nc" id="L349">      scheduler.scheduleWithFixedDelay(null, 10, 10);</span>
+<span class="nc" id="L350">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L351">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L353">    }</span>
+    try {
+<span class="nc" id="L355">      scheduler.scheduleWithFixedDelay(DoNothingRunnable.instance(), -10, 10);</span>
+<span class="nc" id="L356">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L357">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L359">    }</span>
+    try {
+<span class="nc" id="L361">      scheduler.scheduleWithFixedDelay(DoNothingRunnable.instance(), 10, -10);</span>
+<span class="nc" id="L362">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L363">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L365">    }</span>
+<span class="fc" id="L366">  }</span>
+  
+  @Test
+  public void scheduleAtFixedRateFail() {
+    try {
+<span class="nc" id="L371">      scheduler.scheduleAtFixedRate(null, 10, 10);</span>
+<span class="nc" id="L372">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L373">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L375">    }</span>
+    try {
+<span class="nc" id="L377">      scheduler.scheduleAtFixedRate(DoNothingRunnable.instance(), -10, 10);</span>
+<span class="nc" id="L378">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L379">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L381">    }</span>
+    try {
+<span class="nc" id="L383">      scheduler.scheduleAtFixedRate(DoNothingRunnable.instance(), 10, -10);</span>
+<span class="nc" id="L384">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L385">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L387">    }</span>
+<span class="fc" id="L388">  }</span>
+  
+  @Test
+  public void removeRunnableTest() {
+<span class="fc" id="L392">    TestRunnable tr = new TestRunnable();</span>
+    
+<span class="fc" id="L394">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L396">    scheduler.execute(tr);</span>
+<span class="fc" id="L397">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L398">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L400">    scheduler.submit(tr);</span>
+<span class="fc" id="L401">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L402">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L404">    scheduler.submit(tr, new Object());</span>
+<span class="fc" id="L405">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L406">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L408">    scheduler.schedule(tr, DELAY_TIME);</span>
+<span class="fc" id="L409">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L410">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L412">    scheduler.submitScheduled(tr, DELAY_TIME);</span>
+<span class="fc" id="L413">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L414">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L416">    scheduler.submitScheduled(tr, new Object(), DELAY_TIME);</span>
+<span class="fc" id="L417">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L418">    assertFalse(scheduler.remove(tr));</span>
+    
+<span class="fc" id="L420">    scheduler.scheduleWithFixedDelay(tr, 0, DELAY_TIME);</span>
+<span class="fc" id="L421">    assertTrue(scheduler.remove(tr));</span>
+<span class="fc" id="L422">    assertFalse(scheduler.remove(tr));</span>
+<span class="fc" id="L423">  }</span>
+  
+  @Test
+  public void removeRecurringRunnableTest() throws InterruptedException {
+<span class="fc" id="L427">    TestRunnable immediateRun = new TestRunnable();</span>
+<span class="fc" id="L428">    TestRunnable initialDelay = new TestRunnable();</span>
+    
+<span class="fc" id="L430">    assertFalse(scheduler.remove(immediateRun));</span>
+    
+<span class="fc" id="L432">    scheduler.scheduleWithFixedDelay(immediateRun, 0, DELAY_TIME);</span>
+<span class="fc" id="L433">    assertTrue(scheduler.remove(immediateRun));</span>
+    
+<span class="fc" id="L435">    scheduler.scheduleWithFixedDelay(immediateRun, 0, DELAY_TIME);</span>
+<span class="fc" id="L436">    scheduler.scheduleWithFixedDelay(initialDelay, DELAY_TIME, DELAY_TIME);</span>
+    
+<span class="fc" id="L438">    assertEquals(1, scheduler.tick(null));</span>
+    
+<span class="fc" id="L440">    assertEquals(1, immediateRun.getRunCount());   // should have run</span>
+<span class="fc" id="L441">    assertEquals(0, initialDelay.getRunCount());  // should NOT have run yet</span>
+    
+<span class="fc" id="L443">    assertTrue(scheduler.remove(immediateRun));</span>
+    
+<span class="fc" id="L445">    assertEquals(1, scheduler.blockingTick(null));</span>
+    
+<span class="fc" id="L447">    assertEquals(1, immediateRun.getRunCount());   // should NOT have run again</span>
+<span class="fc" id="L448">    assertEquals(1, initialDelay.getRunCount());  // should have run</span>
+<span class="fc" id="L449">  }</span>
+  
+  @Test
+  public void removeCallableTest() throws InterruptedException {
+<span class="fc" id="L453">    TestCallable immediateRun = new TestCallable();</span>
+<span class="fc" id="L454">    TestCallable delayRun = new TestCallable();</span>
+    
+<span class="fc" id="L456">    assertFalse(scheduler.remove(immediateRun));</span>
+    
+<span class="fc" id="L458">    scheduler.submitScheduled(immediateRun, 0);</span>
+<span class="fc" id="L459">    assertTrue(scheduler.remove(immediateRun));</span>
+<span class="fc" id="L460">    assertFalse(scheduler.remove(immediateRun));</span>
+    
+<span class="fc" id="L462">    scheduler.submitScheduled(delayRun, DELAY_TIME);</span>
+    
+<span class="fc" id="L464">    assertEquals(1, scheduler.blockingTick(null));</span>
+    
+<span class="fc" id="L466">    assertFalse(immediateRun.isDone());</span>
+<span class="fc" id="L467">    assertTrue(delayRun.isDone());</span>
+<span class="fc" id="L468">  }</span>
+  
+  @Test
+  public void removeWhileRunningTest() {
+<span class="fc" id="L472">    TestRunnable tr = new TestRunnable() {</span>
+      @Override
+      public void handleRunStart() {
+<span class="fc" id="L475">        assertTrue(scheduler.remove(this));</span>
+<span class="fc" id="L476">      }</span>
+    };
+    
+<span class="fc" id="L479">    scheduler.scheduleWithFixedDelay(tr, 0, 0);</span>
+    
+<span class="fc" id="L481">    assertEquals(1, scheduler.tick(null));</span>
+    
+    // should be removed for subsequent ticks
+<span class="fc" id="L484">    assertEquals(0, scheduler.tick(null));</span>
+    
+<span class="fc" id="L486">    assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L487">  }</span>
+  
+  @Test
+  public void blockTillAvailableExecuteTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L491">    final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L492">    TestRunnable tickRunnable = new TestRunnable() {</span>
+      @Override
+      public void handleRunStart() {
+        try {
+<span class="fc" id="L496">          int runCount = scheduler.blockingTick(null);  // should block</span>
+<span class="fc" id="L497">          av.assertEquals(1, runCount);</span>
+<span class="fc" id="L498">          av.signalComplete();</span>
+<span class="nc" id="L499">        } catch (InterruptedException e) {</span>
+<span class="nc" id="L500">          av.fail(e);</span>
+<span class="fc" id="L501">        }</span>
+<span class="fc" id="L502">      }</span>
+    };
+<span class="fc" id="L504">    new Thread(tickRunnable).start();</span>
+    
+    // should be blocked waiting for task now
+<span class="fc" id="L507">    tickRunnable.blockTillStarted();</span>
+    
+<span class="fc" id="L509">    TestRunnable testTask = new TestRunnable();</span>
+<span class="fc" id="L510">    scheduler.execute(testTask);</span>
+    
+<span class="fc" id="L512">    testTask.blockTillFinished(); // should run without issue</span>
+    
+<span class="fc" id="L514">    av.waitForTest(); // our parent thread should finish quickly</span>
+<span class="fc" id="L515">  }</span>
+  
+  @Test
+  public void blockTillAvailableScheduleTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L519">    final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L520">    final TestRunnable testTask = new TestRunnable();</span>
+<span class="fc" id="L521">    TestRunnable tickRunnable = new TestRunnable() {</span>
+      @Override
+      public void handleRunStart() {
+        try {
+<span class="fc" id="L525">          long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L526">          scheduler.schedule(testTask, DELAY_TIME);</span>
+<span class="fc" id="L527">          int runCount = scheduler.blockingTick(null);  // should block</span>
+<span class="fc" id="L528">          long finishTime = Clock.accurateForwardProgressingMillis();</span>
+          
+<span class="fc" id="L530">          av.assertEquals(1, runCount);</span>
+<span class="pc bpc" id="L531" title="1 of 2 branches missed.">          av.assertTrue(finishTime - startTime &gt;= DELAY_TIME);</span>
+<span class="fc" id="L532">          av.assertTrue(testTask.ranOnce());</span>
+<span class="fc" id="L533">          av.signalComplete();</span>
+<span class="nc" id="L534">        } catch (InterruptedException e) {</span>
+<span class="nc" id="L535">          av.fail(e);</span>
+<span class="fc" id="L536">        }</span>
+<span class="fc" id="L537">      }</span>
+    };
+<span class="fc" id="L539">    new Thread(tickRunnable).start();</span>
+    
+<span class="fc" id="L541">    av.waitForTest();</span>
+<span class="fc" id="L542">  }</span>
+  
+  @Test
+  public void hasTaskReadyToRunTest() {
+<span class="fc" id="L546">    assertFalse(scheduler.hasTaskReadyToRun());</span>
+    
+    // schedule in the future
+<span class="fc" id="L549">    scheduler.schedule(DoNothingRunnable.instance(), 1000 * 15);</span>
+    
+    // still should have nothing ready to run
+<span class="fc" id="L552">    assertFalse(scheduler.hasTaskReadyToRun());</span>
+    
+<span class="fc" id="L554">    scheduler.execute(DoNothingRunnable.instance());</span>
+    
+    // should now have tasks ready to run
+<span class="fc" id="L557">    assertTrue(scheduler.hasTaskReadyToRun());</span>
+    
+<span class="fc" id="L559">    scheduler.tick(null);</span>
+    
+    // should no longer have anything to run
+<span class="fc" id="L562">    assertFalse(scheduler.hasTaskReadyToRun());</span>
+    
+<span class="fc" id="L564">    scheduler.queueManager.highPriorityQueueSet</span>
+<span class="fc" id="L565">             .addScheduled(new OneTimeTaskWrapper(DoNothingRunnable.instance(), </span>
+                                                  scheduler.queueManager.highPriorityQueueSet.scheduleQueue, 
+<span class="fc" id="L567">                                                  Clock.lastKnownForwardProgressingMillis()));</span>
+    
+    // now should be true with scheduled task which is ready to run
+<span class="fc" id="L570">    assertTrue(scheduler.hasTaskReadyToRun());</span>
+<span class="fc" id="L571">  }</span>
+  
+  @Test
+  public void hasTaskReadyToRunRunningTaskTest() {
+<span class="fc" id="L575">    scheduler.scheduleWithFixedDelay(new Runnable() {</span>
+      @Override
+      public void run() {
+<span class="fc" id="L578">        assertFalse(scheduler.hasTaskReadyToRun());</span>
+        
+<span class="fc" id="L580">        scheduler.execute(DoNothingRunnable.instance());</span>
+<span class="fc" id="L581">        assertTrue(scheduler.hasTaskReadyToRun());</span>
+        
+<span class="fc" id="L583">        scheduler.remove(this);</span>
+<span class="fc" id="L584">      }</span>
+    }, 0, 1000);
+    
+<span class="fc" id="L587">    scheduler.tick(null);</span>
+<span class="fc" id="L588">  }</span>
+  
+  @Test
+  public void getDelayTillNextTaskTest() {
+<span class="fc" id="L592">    assertEquals(Long.MAX_VALUE, scheduler.getDelayTillNextTask());</span>
+    
+    // schedule in the future
+<span class="fc" id="L595">    scheduler.schedule(DoNothingRunnable.instance(), 1000 * 15);</span>
+    
+    // still should have nothing ready to run
+<span class="pc bpc" id="L598" title="1 of 2 branches missed.">    assertTrue(scheduler.getDelayTillNextTask() &gt; 0);</span>
+    
+<span class="fc" id="L600">    scheduler.execute(DoNothingRunnable.instance());</span>
+    
+    // should now have tasks ready to run
+<span class="pc bpc" id="L603" title="1 of 2 branches missed.">    assertTrue(scheduler.getDelayTillNextTask() &lt;= 0);</span>
+    
+<span class="fc" id="L605">    scheduler.tick(null);</span>
+    
+    // should no longer have anything to run
+<span class="pc bpc" id="L608" title="1 of 2 branches missed.">    assertTrue(scheduler.getDelayTillNextTask() &gt; 0);</span>
+    
+<span class="fc" id="L610">    scheduler.queueManager.highPriorityQueueSet</span>
+<span class="fc" id="L611">             .addScheduled(new OneTimeTaskWrapper(DoNothingRunnable.instance(), </span>
+                                                  scheduler.queueManager.highPriorityQueueSet.scheduleQueue, 
+<span class="fc" id="L613">                                                  Clock.lastKnownForwardProgressingMillis()));</span>
+    
+    // now should be true with scheduled task which is ready to run
+<span class="pc bpc" id="L616" title="1 of 2 branches missed.">    assertTrue(scheduler.getDelayTillNextTask() &lt;= 0);</span>
+<span class="fc" id="L617">  }</span>
+  
+  @Test
+  public void getDelayTillNextTaskRunningTaskTest() {
+<span class="fc" id="L621">    scheduler.execute(new Runnable() {</span>
+      @Override
+      public void run() {
+<span class="fc" id="L624">        assertEquals(Long.MAX_VALUE, scheduler.getDelayTillNextTask());</span>
+        
+<span class="fc" id="L626">        scheduler.execute(DoNothingRunnable.instance());</span>
+<span class="pc bpc" id="L627" title="1 of 2 branches missed.">        assertTrue(scheduler.getDelayTillNextTask() &lt;= 0);</span>
+        
+<span class="fc" id="L629">        scheduler.remove(this);</span>
+<span class="fc" id="L630">      }</span>
+    });
+    
+<span class="fc" id="L633">    scheduler.tick(null);</span>
+<span class="fc" id="L634">  }</span>
+  
+  @Test
+  public void clearTasksTest() {
+<span class="fc" id="L638">    scheduler.schedule(DoNothingRunnable.instance(), 1000 * 15);</span>
+<span class="fc" id="L639">    scheduler.execute(DoNothingRunnable.instance());</span>
+    
+<span class="fc" id="L641">    scheduler.clearTasks();</span>
+    
+<span class="fc" id="L643">    assertEquals(0, scheduler.queueManager.highPriorityQueueSet.queueSize());</span>
+<span class="fc" id="L644">    assertEquals(0, scheduler.queueManager.lowPriorityQueueSet.queueSize());</span>
+<span class="fc" id="L645">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

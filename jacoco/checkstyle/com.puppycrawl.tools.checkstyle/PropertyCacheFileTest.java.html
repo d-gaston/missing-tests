@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PropertyCacheFileTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle</a> &gt; <span class="el_source">PropertyCacheFileTest.java</span></div><h1>PropertyCacheFileTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Properties;
+import java.util.Set;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import com.google.common.io.BaseEncoding;
+import com.google.common.io.ByteStreams;
+import com.puppycrawl.tools.checkstyle.api.Configuration;
+import com.puppycrawl.tools.checkstyle.utils.CommonUtil;
+
+<span class="fc" id="L52">public class PropertyCacheFileTest extends AbstractPathTestSupport {</span>
+
+<span class="fc" id="L54">    @Rule</span>
+    public final TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    @Override
+    protected String getPackageLocation() {
+<span class="fc" id="L59">        return &quot;com/puppycrawl/tools/checkstyle/propertycachefile&quot;;</span>
+    }
+
+    @Test
+    public void testCtor() {
+        try {
+<span class="nc" id="L65">            final Object test = new PropertyCacheFile(null, &quot;&quot;);</span>
+<span class="nc" id="L66">            fail(&quot;exception expected but got &quot; + test);</span>
+        }
+<span class="fc" id="L68">        catch (IllegalArgumentException ex) {</span>
+<span class="fc" id="L69">            assertEquals(&quot;Invalid exception message&quot;,</span>
+<span class="fc" id="L70">                    &quot;config can not be null&quot;, ex.getMessage());</span>
+<span class="nc" id="L71">        }</span>
+        try {
+<span class="fc" id="L73">            final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="nc" id="L74">            final Object test = new PropertyCacheFile(config, null);</span>
+<span class="nc" id="L75">            fail(&quot;exception expected but got &quot; + test);</span>
+        }
+<span class="fc" id="L77">        catch (IllegalArgumentException ex) {</span>
+<span class="fc" id="L78">            assertEquals(&quot;Invalid exception message&quot;,</span>
+<span class="fc" id="L79">                    &quot;fileName can not be null&quot;, ex.getMessage());</span>
+<span class="nc" id="L80">        }</span>
+<span class="fc" id="L81">    }</span>
+
+    @Test
+    public void testInCache() throws IOException {
+<span class="fc" id="L85">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L86">        final String filePath = temporaryFolder.newFile().getPath();</span>
+<span class="fc" id="L87">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+<span class="fc" id="L88">        cache.put(&quot;myFile&quot;, 1);</span>
+<span class="fc" id="L89">        assertTrue(&quot;Should return true when file is in cache&quot;,</span>
+<span class="fc" id="L90">                cache.isInCache(&quot;myFile&quot;, 1));</span>
+<span class="fc" id="L91">        assertFalse(&quot;Should return false when file is not in cache&quot;,</span>
+<span class="fc" id="L92">                cache.isInCache(&quot;myFile&quot;, 2));</span>
+<span class="fc" id="L93">        assertFalse(&quot;Should return false when file is not in cache&quot;,</span>
+<span class="fc" id="L94">                cache.isInCache(&quot;myFile1&quot;, 1));</span>
+<span class="fc" id="L95">    }</span>
+
+    @Test
+    public void testResetIfFileDoesNotExist() throws IOException {
+<span class="fc" id="L99">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L100">        final PropertyCacheFile cache = new PropertyCacheFile(config, &quot;fileDoesNotExist.txt&quot;);</span>
+
+<span class="fc" id="L102">        cache.load();</span>
+
+<span class="fc" id="L104">        assertNotNull(&quot;Config hash key should not be null&quot;,</span>
+<span class="fc" id="L105">                cache.get(PropertyCacheFile.CONFIG_HASH_KEY));</span>
+<span class="fc" id="L106">    }</span>
+
+    @Test
+    public void testPopulateDetails() throws IOException {
+<span class="fc" id="L110">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L111">        final PropertyCacheFile cache = new PropertyCacheFile(config,</span>
+<span class="fc" id="L112">                getPath(&quot;InputPropertyCacheFile&quot;));</span>
+<span class="fc" id="L113">        cache.load();</span>
+
+<span class="fc" id="L115">        final String hash = cache.get(PropertyCacheFile.CONFIG_HASH_KEY);</span>
+<span class="fc" id="L116">        assertNotNull(&quot;Config hash key should not be null&quot;, hash);</span>
+<span class="fc" id="L117">        assertNull(&quot;Should return null if key is not in cache&quot;, cache.get(&quot;key&quot;));</span>
+
+<span class="fc" id="L119">        cache.load();</span>
+
+<span class="fc" id="L121">        assertEquals(&quot;Invalid config hash key&quot;, hash, cache.get(PropertyCacheFile.CONFIG_HASH_KEY));</span>
+<span class="fc" id="L122">        assertEquals(&quot;Invalid cache value&quot;, &quot;value&quot;, cache.get(&quot;key&quot;));</span>
+<span class="fc" id="L123">        assertNotNull(&quot;Config hash key should not be null&quot;,</span>
+<span class="fc" id="L124">                cache.get(PropertyCacheFile.CONFIG_HASH_KEY));</span>
+<span class="fc" id="L125">    }</span>
+
+    @Test
+    public void testConfigHashOnReset() throws IOException {
+<span class="fc" id="L129">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L130">        final String filePath = temporaryFolder.newFile().getPath();</span>
+<span class="fc" id="L131">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+
+<span class="fc" id="L133">        cache.load();</span>
+
+<span class="fc" id="L135">        final String hash = cache.get(PropertyCacheFile.CONFIG_HASH_KEY);</span>
+<span class="fc" id="L136">        assertNotNull(&quot;Config hash key should not be null&quot;, hash);</span>
+
+<span class="fc" id="L138">        cache.reset();</span>
+
+<span class="fc" id="L140">        assertEquals(&quot;Invalid config hash key&quot;,</span>
+<span class="fc" id="L141">                hash, cache.get(PropertyCacheFile.CONFIG_HASH_KEY));</span>
+<span class="fc" id="L142">    }</span>
+
+    @Test
+    public void testConfigHashRemainsOnResetExternalResources() throws IOException {
+<span class="fc" id="L146">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L147">        final String filePath = temporaryFolder.newFile().getPath();</span>
+<span class="fc" id="L148">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+
+        // create cache with one file
+<span class="fc" id="L151">        cache.load();</span>
+<span class="fc" id="L152">        cache.put(&quot;myFile&quot;, 1);</span>
+
+<span class="fc" id="L154">        final String hash = cache.get(PropertyCacheFile.CONFIG_HASH_KEY);</span>
+<span class="fc" id="L155">        assertNotNull(&quot;Config hash key should not be null&quot;, hash);</span>
+
+        // apply new external resource to clear cache
+<span class="fc" id="L158">        final Set&lt;String&gt; resources = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L159">        resources.add(&quot;dummy&quot;);</span>
+<span class="fc" id="L160">        cache.putExternalResources(resources);</span>
+
+<span class="fc" id="L162">        assertEquals(&quot;Invalid config hash key&quot;,</span>
+<span class="fc" id="L163">                hash, cache.get(PropertyCacheFile.CONFIG_HASH_KEY));</span>
+<span class="fc" id="L164">        assertFalse(&quot;Should return false in file is not in cache&quot;,</span>
+<span class="fc" id="L165">                cache.isInCache(&quot;myFile&quot;, 1));</span>
+<span class="fc" id="L166">    }</span>
+
+    @Test
+    public void testCacheRemainsWhenExternalResourceTheSame() throws IOException {
+<span class="fc" id="L170">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L171">        final String externalResourcePath = temporaryFolder.newFile().getPath();</span>
+<span class="fc" id="L172">        final String filePath = temporaryFolder.newFile().getPath();</span>
+<span class="fc" id="L173">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+
+        // pre-populate with cache with resources
+
+<span class="fc" id="L177">        cache.load();</span>
+
+<span class="fc" id="L179">        final Set&lt;String&gt; resources = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L180">        resources.add(externalResourcePath);</span>
+<span class="fc" id="L181">        cache.putExternalResources(resources);</span>
+
+<span class="fc" id="L183">        cache.persist();</span>
+
+        // test cache with same resources and new file
+
+<span class="fc" id="L187">        cache.load();</span>
+<span class="fc" id="L188">        cache.put(&quot;myFile&quot;, 1);</span>
+<span class="fc" id="L189">        cache.putExternalResources(resources);</span>
+
+<span class="fc" id="L191">        assertTrue(&quot;Should return true in file is in cache&quot;,</span>
+<span class="fc" id="L192">                cache.isInCache(&quot;myFile&quot;, 1));</span>
+<span class="fc" id="L193">    }</span>
+
+    @Test
+    public void testExternalResourceIsSavedInCache() throws Exception {
+<span class="fc" id="L197">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L198">        final String filePath = temporaryFolder.newFile().getPath();</span>
+<span class="fc" id="L199">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+
+<span class="fc" id="L201">        cache.load();</span>
+
+<span class="fc" id="L203">        final Set&lt;String&gt; resources = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L204">        final String pathToResource = getPath(&quot;InputPropertyCacheFileExternal.properties&quot;);</span>
+<span class="fc" id="L205">        resources.add(pathToResource);</span>
+<span class="fc" id="L206">        cache.putExternalResources(resources);</span>
+
+<span class="fc" id="L208">        final MessageDigest digest = MessageDigest.getInstance(&quot;SHA-1&quot;);</span>
+<span class="fc" id="L209">        final URI uri = CommonUtil.getUriByFilename(pathToResource);</span>
+<span class="fc" id="L210">        final byte[] input =</span>
+<span class="fc" id="L211">                ByteStreams.toByteArray(new BufferedInputStream(uri.toURL().openStream()));</span>
+<span class="fc" id="L212">        final ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L213">        try (ObjectOutputStream oos = new ObjectOutputStream(out)) {</span>
+<span class="fc" id="L214">            oos.writeObject(input);</span>
+        }
+<span class="fc" id="L216">        digest.update(out.toByteArray());</span>
+<span class="fc" id="L217">        final String expected = BaseEncoding.base16().upperCase().encode(digest.digest());</span>
+
+<span class="fc" id="L219">        assertEquals(&quot;Hashes are not equal&quot;, expected,</span>
+<span class="fc" id="L220">                cache.get(&quot;module-resource*?:&quot; + pathToResource));</span>
+<span class="fc" id="L221">    }</span>
+
+    @Test
+    public void testCacheDirectoryDoesNotExistAndShouldBeCreated() throws IOException {
+<span class="fc" id="L225">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L226">        final String filePath = String.format(Locale.getDefault(), &quot;%s%2$stemp%2$scache.temp&quot;,</span>
+<span class="fc" id="L227">            temporaryFolder.getRoot(), File.separator);</span>
+<span class="fc" id="L228">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+
+        // no exception expected, cache directory should be created
+<span class="fc" id="L231">        cache.persist();</span>
+
+<span class="fc" id="L233">        assertTrue(&quot;cache exists in directory&quot;, new File(filePath).exists());</span>
+<span class="fc" id="L234">    }</span>
+
+    @Test
+    public void testPathToCacheContainsOnlyFileName() throws IOException {
+<span class="fc" id="L238">        final Configuration config = new DefaultConfiguration(&quot;myName&quot;);</span>
+<span class="fc" id="L239">        final String filePath = &quot;temp.cache&quot;;</span>
+<span class="fc" id="L240">        final PropertyCacheFile cache = new PropertyCacheFile(config, filePath);</span>
+
+        // no exception expected
+<span class="fc" id="L243">        cache.persist();</span>
+<span class="fc" id="L244">        assertTrue(&quot;Cache file does not exist&quot;, Files.exists(Paths.get(filePath)));</span>
+<span class="fc" id="L245">        Files.delete(Paths.get(filePath));</span>
+<span class="fc" id="L246">    }</span>
+
+    @Test
+    public void testChangeInConfig() throws Exception {
+<span class="fc" id="L250">        final DefaultConfiguration config = new DefaultConfiguration(&quot;myConfig&quot;);</span>
+<span class="fc" id="L251">        config.addAttribute(&quot;attr&quot;, &quot;value&quot;);</span>
+
+<span class="fc" id="L253">        final File cacheFile = temporaryFolder.newFile();</span>
+<span class="fc" id="L254">        final PropertyCacheFile cache = new PropertyCacheFile(config, cacheFile.getPath());</span>
+<span class="fc" id="L255">        cache.load();</span>
+
+<span class="fc" id="L257">        final String expectedInitialConfigHash = &quot;91753B970AFDF9F5F3DFA0D258064841949D3C6B&quot;;</span>
+<span class="fc" id="L258">        final String actualInitialConfigHash = cache.get(PropertyCacheFile.CONFIG_HASH_KEY);</span>
+<span class="fc" id="L259">        assertEquals(&quot;Invalid config hash&quot;, expectedInitialConfigHash, actualInitialConfigHash);</span>
+
+<span class="fc" id="L261">        cache.persist();</span>
+
+<span class="fc" id="L263">        final Properties details = new Properties();</span>
+<span class="fc" id="L264">        details.load(Files.newBufferedReader(cacheFile.toPath()));</span>
+<span class="fc" id="L265">        assertEquals(&quot;Invalid details size&quot;, 1, details.size());</span>
+
+        // change in config
+<span class="fc" id="L268">        config.addAttribute(&quot;newAttr&quot;, &quot;newValue&quot;);</span>
+
+<span class="fc" id="L270">        final PropertyCacheFile cacheAfterChangeInConfig =</span>
+<span class="fc" id="L271">            new PropertyCacheFile(config, cacheFile.getPath());</span>
+<span class="fc" id="L272">        cacheAfterChangeInConfig.load();</span>
+
+<span class="fc" id="L274">        final String expectedConfigHashAfterChange = &quot;4CF5EC78955B81D76153ACC2CA6D60CB77FDCB2A&quot;;</span>
+<span class="fc" id="L275">        final String actualConfigHashAfterChange =</span>
+<span class="fc" id="L276">            cacheAfterChangeInConfig.get(PropertyCacheFile.CONFIG_HASH_KEY);</span>
+<span class="fc" id="L277">        assertEquals(&quot;Invalid config hash&quot;,</span>
+                expectedConfigHashAfterChange, actualConfigHashAfterChange);
+
+<span class="fc" id="L280">        cacheAfterChangeInConfig.persist();</span>
+
+<span class="fc" id="L282">        final Properties detailsAfterChangeInConfig = new Properties();</span>
+<span class="fc" id="L283">        detailsAfterChangeInConfig.load(Files.newBufferedReader(cacheFile.toPath()));</span>
+<span class="fc" id="L284">        assertEquals(&quot;Invalid cache size&quot;, 1, detailsAfterChangeInConfig.size());</span>
+<span class="fc" id="L285">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

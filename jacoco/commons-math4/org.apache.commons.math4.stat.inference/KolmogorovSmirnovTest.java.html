@@ -1,0 +1,1207 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KolmogorovSmirnovTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.stat.inference</a> &gt; <span class="el_source">KolmogorovSmirnovTest.java</span></div><h1>KolmogorovSmirnovTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.stat.inference;
+
+import java.math.BigDecimal;
+import java.util.Arrays;
+
+import org.apache.commons.rng.simple.RandomSource;
+import org.apache.commons.rng.UniformRandomProvider;
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.numbers.combinatorics.BinomialCoefficientDouble;
+import org.apache.commons.math4.distribution.EnumeratedRealDistribution;
+import org.apache.commons.math4.distribution.AbstractRealDistribution;
+import org.apache.commons.math4.exception.InsufficientDataException;
+import org.apache.commons.math4.exception.MathArithmeticException;
+import org.apache.commons.math4.exception.MathInternalError;
+import org.apache.commons.math4.exception.NullArgumentException;
+import org.apache.commons.math4.exception.NumberIsTooLargeException;
+import org.apache.commons.math4.exception.OutOfRangeException;
+import org.apache.commons.math4.exception.TooManyIterationsException;
+import org.apache.commons.math4.exception.NotANumberException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.fraction.BigFraction;
+import org.apache.commons.math4.fraction.BigFractionField;
+import org.apache.commons.math4.fraction.FractionConversionException;
+import org.apache.commons.math4.linear.Array2DRowFieldMatrix;
+import org.apache.commons.math4.linear.FieldMatrix;
+import org.apache.commons.math4.linear.MatrixUtils;
+import org.apache.commons.math4.linear.RealMatrix;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.MathArrays;
+import org.apache.commons.math4.util.MathUtils;
+
+/**
+ * Implementation of the &lt;a href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt;
+ * Kolmogorov-Smirnov (K-S) test&lt;/a&gt; for equality of continuous distributions.
+ * &lt;p&gt;
+ * The K-S test uses a statistic based on the maximum deviation of the empirical distribution of
+ * sample data points from the distribution expected under the null hypothesis. For one-sample tests
+ * evaluating the null hypothesis that a set of sample data points follow a given distribution, the
+ * test statistic is \(D_n=\sup_x |F_n(x)-F(x)|\), where \(F\) is the expected distribution and
+ * \(F_n\) is the empirical distribution of the \(n\) sample data points. The distribution of
+ * \(D_n\) is estimated using a method based on [1] with certain quick decisions for extreme values
+ * given in [2].
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * Two-sample tests are also supported, evaluating the null hypothesis that the two samples
+ * {@code x} and {@code y} come from the same underlying distribution. In this case, the test
+ * statistic is \(D_{n,m}=\sup_t | F_n(t)-F_m(t)|\) where \(n\) is the length of {@code x}, \(m\) is
+ * the length of {@code y}, \(F_n\) is the empirical distribution that puts mass \(1/n\) at each of
+ * the values in {@code x} and \(F_m\) is the empirical distribution of the {@code y} values. The
+ * default 2-sample test method, {@link #kolmogorovSmirnovTest(double[], double[])} works as
+ * follows:
+ * &lt;ul&gt;
+ * &lt;li&gt;When the product of the sample sizes is less than 10000, the method presented in [4]
+ * is used to compute the exact p-value for the 2-sample test.&lt;/li&gt;
+ * &lt;li&gt;When the product of the sample sizes is larger, the asymptotic
+ * distribution of \(D_{n,m}\) is used. See {@link #approximateP(double, int, int)} for details on
+ * the approximation.&lt;/li&gt;
+ * &lt;/ul&gt;&lt;p&gt;
+ * For small samples (former case), if the data contains ties, random jitter is added
+ * to the sample data to break ties before applying the algorithm above. Alternatively,
+ * the {@link #bootstrap(double[],double[],int,boolean,UniformRandomProvider)}
+ * method, modeled after &lt;a href=&quot;http://sekhon.berkeley.edu/matching/ks.boot.html&quot;&gt;ks.boot&lt;/a&gt;
+ * in the R Matching package [3], can be used if ties are known to be present in the data.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * In the two-sample case, \(D_{n,m}\) has a discrete distribution. This makes the p-value
+ * associated with the null hypothesis \(H_0 : D_{n,m} \ge d \) differ from \(H_0 : D_{n,m} \ge d \)
+ * by the mass of the observed value \(d\). To distinguish these, the two-sample tests use a boolean
+ * {@code strict} parameter. This parameter is ignored for large samples.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * The methods used by the 2-sample default implementation are also exposed directly:
+ * &lt;ul&gt;
+ * &lt;li&gt;{@link #exactP(double, int, int, boolean)} computes exact 2-sample p-values&lt;/li&gt;
+ * &lt;li&gt;{@link #approximateP(double, int, int)} uses the asymptotic distribution The {@code boolean}
+ * arguments in the first two methods allow the probability used to estimate the p-value to be
+ * expressed using strict or non-strict inequality. See
+ * {@link #kolmogorovSmirnovTest(double[], double[], boolean)}.&lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;
+ * References:
+ * &lt;ul&gt;
+ * &lt;li&gt;[1] &lt;a href=&quot;http://www.jstatsoft.org/v08/i18/&quot;&gt; Evaluating Kolmogorov's Distribution&lt;/a&gt; by
+ * George Marsaglia, Wai Wan Tsang, and Jingbo Wang&lt;/li&gt;
+ * &lt;li&gt;[2] &lt;a href=&quot;http://www.jstatsoft.org/v39/i11/&quot;&gt; Computing the Two-Sided Kolmogorov-Smirnov
+ * Distribution&lt;/a&gt; by Richard Simard and Pierre L'Ecuyer&lt;/li&gt;
+ * &lt;li&gt;[3] Jasjeet S. Sekhon. 2011. &lt;a href=&quot;http://www.jstatsoft.org/article/view/v042i07&quot;&gt;
+ * Multivariate and Propensity Score Matching Software with Automated Balance Optimization:
+ * The Matching package for R&lt;/a&gt; Journal of Statistical Software, 42(7): 1-52.&lt;/li&gt;
+ * &lt;li&gt;[4] Wilcox, Rand. 2012. Introduction to Robust Estimation and Hypothesis Testing,
+ * Chapter 5, 3rd Ed. Academic Press.&lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;br&gt;
+ * Note that [1] contains an error in computing h, refer to &lt;a
+ * href=&quot;https://issues.apache.org/jira/browse/MATH-437&quot;&gt;MATH-437&lt;/a&gt; for details.
+ *
+ * @since 3.3
+ */
+<span class="fc" id="L116">public class KolmogorovSmirnovTest {</span>
+    /**
+     * Bound on the number of partial sums in {@link #ksSum(double, double, int)}
+     */
+    private static final int MAXIMUM_PARTIAL_SUM_COUNT = 100000;
+    /** Convergence criterion for {@link #ksSum(double, double, int)} */
+    private static final double KS_SUM_CAUCHY_CRITERION = 1e-20;
+    /** Convergence criterion for the sums in {@link #pelzGood(double, int)} */
+    private static final double PG_SUM_RELATIVE_ERROR = 1e-10;
+
+    /**
+     * When product of sample sizes exceeds this value, 2-sample K-S test uses asymptotic
+     * distribution to compute the p-value.
+     */
+    private static final int LARGE_SAMPLE_PRODUCT = 10000;
+
+    /**
+     * Computes the &lt;i&gt;p-value&lt;/i&gt;, or &lt;i&gt;observed significance level&lt;/i&gt;, of a one-sample &lt;a
+     * href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt; Kolmogorov-Smirnov test&lt;/a&gt;
+     * evaluating the null hypothesis that {@code data} conforms to {@code distribution}. If
+     * {@code exact} is true, the distribution used to compute the p-value is computed using
+     * extended precision. See {@link #cdfExact(double, int)}.
+     *
+     * @param distribution reference distribution
+     * @param data sample being being evaluated
+     * @param exact whether or not to force exact computation of the p-value
+     * @return the p-value associated with the null hypothesis that {@code data} is a sample from
+     *         {@code distribution}
+     * @throws InsufficientDataException if {@code data} does not have length at least 2
+     * @throws NullArgumentException if {@code data} is null
+     */
+    public double kolmogorovSmirnovTest(ContinuousDistribution distribution, double[] data, boolean exact) {
+<span class="fc" id="L148">        return 1d - cdf(kolmogorovSmirnovStatistic(distribution, data), data.length, exact);</span>
+    }
+
+    /**
+     * Computes the one-sample Kolmogorov-Smirnov test statistic, \(D_n=\sup_x |F_n(x)-F(x)|\) where
+     * \(F\) is the distribution (cdf) function associated with {@code distribution}, \(n\) is the
+     * length of {@code data} and \(F_n\) is the empirical distribution that puts mass \(1/n\) at
+     * each of the values in {@code data}.
+     *
+     * @param distribution reference distribution
+     * @param data sample being evaluated
+     * @return Kolmogorov-Smirnov statistic \(D_n\)
+     * @throws InsufficientDataException if {@code data} does not have length at least 2
+     * @throws NullArgumentException if {@code data} is null
+     */
+    public double kolmogorovSmirnovStatistic(ContinuousDistribution distribution, double[] data) {
+<span class="fc" id="L164">        checkArray(data);</span>
+<span class="fc" id="L165">        final int n = data.length;</span>
+<span class="fc" id="L166">        final double nd = n;</span>
+<span class="fc" id="L167">        final double[] dataCopy = new double[n];</span>
+<span class="fc" id="L168">        System.arraycopy(data, 0, dataCopy, 0, n);</span>
+<span class="fc" id="L169">        Arrays.sort(dataCopy);</span>
+<span class="fc" id="L170">        double d = 0d;</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">        for (int i = 1; i &lt;= n; i++) {</span>
+<span class="fc" id="L172">            final double yi = distribution.cumulativeProbability(dataCopy[i - 1]);</span>
+<span class="fc" id="L173">            final double currD = FastMath.max(yi - (i - 1) / nd, i / nd - yi);</span>
+<span class="fc bfc" id="L174" title="All 2 branches covered.">            if (currD &gt; d) {</span>
+<span class="fc" id="L175">                d = currD;</span>
+            }
+        }
+<span class="fc" id="L178">        return d;</span>
+    }
+
+    /**
+     * Computes the &lt;i&gt;p-value&lt;/i&gt;, or &lt;i&gt;observed significance level&lt;/i&gt;, of a two-sample &lt;a
+     * href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt; Kolmogorov-Smirnov test&lt;/a&gt;
+     * evaluating the null hypothesis that {@code x} and {@code y} are samples drawn from the same
+     * probability distribution. Specifically, what is returned is an estimate of the probability
+     * that the {@link #kolmogorovSmirnovStatistic(double[], double[])} associated with a randomly
+     * selected partition of the combined sample into subsamples of sizes {@code x.length} and
+     * {@code y.length} will strictly exceed (if {@code strict} is {@code true}) or be at least as
+     * large as (if {@code strict} is {@code false}) as {@code kolmogorovSmirnovStatistic(x, y)}.
+     *
+     * @param x first sample dataset.
+     * @param y second sample dataset.
+     * @param strict whether or not the probability to compute is expressed as
+     * a strict inequality (ignored for large samples).
+     * @return p-value associated with the null hypothesis that {@code x} and
+     * {@code y} represent samples from the same distribution.
+     * @throws InsufficientDataException if either {@code x} or {@code y} does
+     * not have length at least 2.
+     * @throws NullArgumentException if either {@code x} or {@code y} is null.
+     * @throws NotANumberException if the input arrays contain NaN values.
+     *
+     * @see #bootstrap(double[],double[],int,boolean,UniformRandomProvider)
+     */
+    public double kolmogorovSmirnovTest(double[] x, double[] y, boolean strict) {
+<span class="fc" id="L205">        final long lengthProduct = (long) x.length * y.length;</span>
+<span class="fc" id="L206">        double[] xa = null;</span>
+<span class="fc" id="L207">        double[] ya = null;</span>
+<span class="fc bfc" id="L208" title="All 4 branches covered.">        if (lengthProduct &lt; LARGE_SAMPLE_PRODUCT &amp;&amp; hasTies(x,y)) {</span>
+<span class="fc" id="L209">            xa = MathArrays.copyOf(x);</span>
+<span class="fc" id="L210">            ya = MathArrays.copyOf(y);</span>
+<span class="fc" id="L211">            fixTies(xa, ya);</span>
+        } else {
+<span class="fc" id="L213">            xa = x;</span>
+<span class="fc" id="L214">            ya = y;</span>
+        }
+<span class="fc bfc" id="L216" title="All 2 branches covered.">        if (lengthProduct &lt; LARGE_SAMPLE_PRODUCT) {</span>
+<span class="fc" id="L217">            return exactP(kolmogorovSmirnovStatistic(xa, ya), x.length, y.length, strict);</span>
+        }
+<span class="fc" id="L219">        return approximateP(kolmogorovSmirnovStatistic(x, y), x.length, y.length);</span>
+    }
+
+    /**
+     * Computes the &lt;i&gt;p-value&lt;/i&gt;, or &lt;i&gt;observed significance level&lt;/i&gt;, of a two-sample &lt;a
+     * href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt; Kolmogorov-Smirnov test&lt;/a&gt;
+     * evaluating the null hypothesis that {@code x} and {@code y} are samples drawn from the same
+     * probability distribution. Assumes the strict form of the inequality used to compute the
+     * p-value. See {@link #kolmogorovSmirnovTest(ContinuousDistribution, double[], boolean)}.
+     *
+     * @param x first sample dataset
+     * @param y second sample dataset
+     * @return p-value associated with the null hypothesis that {@code x} and {@code y} represent
+     *         samples from the same distribution
+     * @throws InsufficientDataException if either {@code x} or {@code y} does not have length at
+     *         least 2
+     * @throws NullArgumentException if either {@code x} or {@code y} is null
+     */
+    public double kolmogorovSmirnovTest(double[] x, double[] y) {
+<span class="fc" id="L238">        return kolmogorovSmirnovTest(x, y, true);</span>
+    }
+
+    /**
+     * Computes the two-sample Kolmogorov-Smirnov test statistic, \(D_{n,m}=\sup_x |F_n(x)-F_m(x)|\)
+     * where \(n\) is the length of {@code x}, \(m\) is the length of {@code y}, \(F_n\) is the
+     * empirical distribution that puts mass \(1/n\) at each of the values in {@code x} and \(F_m\)
+     * is the empirical distribution of the {@code y} values.
+     *
+     * @param x first sample
+     * @param y second sample
+     * @return test statistic \(D_{n,m}\) used to evaluate the null hypothesis that {@code x} and
+     *         {@code y} represent samples from the same underlying distribution
+     * @throws InsufficientDataException if either {@code x} or {@code y} does not have length at
+     *         least 2
+     * @throws NullArgumentException if either {@code x} or {@code y} is null
+     */
+    public double kolmogorovSmirnovStatistic(double[] x, double[] y) {
+<span class="fc" id="L256">        return integralKolmogorovSmirnovStatistic(x, y)/((double)(x.length * (long)y.length));</span>
+    }
+
+    /**
+     * Computes the two-sample Kolmogorov-Smirnov test statistic, \(D_{n,m}=\sup_x |F_n(x)-F_m(x)|\)
+     * where \(n\) is the length of {@code x}, \(m\) is the length of {@code y}, \(F_n\) is the
+     * empirical distribution that puts mass \(1/n\) at each of the values in {@code x} and \(F_m\)
+     * is the empirical distribution of the {@code y} values. Finally \(n m D_{n,m}\) is returned
+     * as long value.
+     *
+     * @param x first sample
+     * @param y second sample
+     * @return test statistic \(n m D_{n,m}\) used to evaluate the null hypothesis that {@code x} and
+     *         {@code y} represent samples from the same underlying distribution
+     * @throws InsufficientDataException if either {@code x} or {@code y} does not have length at
+     *         least 2
+     * @throws NullArgumentException if either {@code x} or {@code y} is null
+     */
+    private long integralKolmogorovSmirnovStatistic(double[] x, double[] y) {
+<span class="fc" id="L275">        checkArray(x);</span>
+<span class="fc" id="L276">        checkArray(y);</span>
+        // Copy and sort the sample arrays
+<span class="fc" id="L278">        final double[] sx = MathArrays.copyOf(x);</span>
+<span class="fc" id="L279">        final double[] sy = MathArrays.copyOf(y);</span>
+<span class="fc" id="L280">        Arrays.sort(sx);</span>
+<span class="fc" id="L281">        Arrays.sort(sy);</span>
+<span class="fc" id="L282">        final int n = sx.length;</span>
+<span class="fc" id="L283">        final int m = sy.length;</span>
+
+<span class="fc" id="L285">        int rankX = 0;</span>
+<span class="fc" id="L286">        int rankY = 0;</span>
+<span class="fc" id="L287">        long curD = 0l;</span>
+
+        // Find the max difference between cdf_x and cdf_y
+<span class="fc" id="L290">        long supD = 0l;</span>
+        do {
+<span class="fc bfc" id="L292" title="All 2 branches covered.">            double z = Double.compare(sx[rankX], sy[rankY]) &lt;= 0 ? sx[rankX] : sy[rankY];</span>
+<span class="fc bfc" id="L293" title="All 4 branches covered.">            while(rankX &lt; n &amp;&amp; Double.compare(sx[rankX], z) == 0) {</span>
+<span class="fc" id="L294">                rankX += 1;</span>
+<span class="fc" id="L295">                curD += m;</span>
+            }
+<span class="fc bfc" id="L297" title="All 4 branches covered.">            while(rankY &lt; m &amp;&amp; Double.compare(sy[rankY], z) == 0) {</span>
+<span class="fc" id="L298">                rankY += 1;</span>
+<span class="fc" id="L299">                curD -= n;</span>
+            }
+<span class="fc bfc" id="L301" title="All 2 branches covered.">            if (curD &gt; supD) {</span>
+<span class="fc" id="L302">                supD = curD;</span>
+            }
+<span class="fc bfc" id="L304" title="All 2 branches covered.">            else if (-curD &gt; supD) {</span>
+<span class="fc" id="L305">                supD = -curD;</span>
+            }
+<span class="fc bfc" id="L307" title="All 4 branches covered.">        } while(rankX &lt; n &amp;&amp; rankY &lt; m);</span>
+<span class="fc" id="L308">        return supD;</span>
+    }
+
+    /**
+     * Computes the &lt;i&gt;p-value&lt;/i&gt;, or &lt;i&gt;observed significance level&lt;/i&gt;, of a one-sample &lt;a
+     * href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt; Kolmogorov-Smirnov test&lt;/a&gt;
+     * evaluating the null hypothesis that {@code data} conforms to {@code distribution}.
+     *
+     * @param distribution reference distribution
+     * @param data sample being being evaluated
+     * @return the p-value associated with the null hypothesis that {@code data} is a sample from
+     *         {@code distribution}
+     * @throws InsufficientDataException if {@code data} does not have length at least 2
+     * @throws NullArgumentException if {@code data} is null
+     */
+    public double kolmogorovSmirnovTest(ContinuousDistribution distribution, double[] data) {
+<span class="fc" id="L324">        return kolmogorovSmirnovTest(distribution, data, false);</span>
+    }
+
+    /**
+     * Performs a &lt;a href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt; Kolmogorov-Smirnov
+     * test&lt;/a&gt; evaluating the null hypothesis that {@code data} conforms to {@code distribution}.
+     *
+     * @param distribution reference distribution
+     * @param data sample being being evaluated
+     * @param alpha significance level of the test
+     * @return true iff the null hypothesis that {@code data} is a sample from {@code distribution}
+     *         can be rejected with confidence 1 - {@code alpha}
+     * @throws InsufficientDataException if {@code data} does not have length at least 2
+     * @throws NullArgumentException if {@code data} is null
+     */
+    public boolean kolmogorovSmirnovTest(ContinuousDistribution distribution, double[] data, double alpha) {
+<span class="pc bpc" id="L340" title="2 of 4 branches missed.">        if ((alpha &lt;= 0) || (alpha &gt; 0.5)) {</span>
+<span class="nc" id="L341">            throw new OutOfRangeException(LocalizedFormats.OUT_OF_BOUND_SIGNIFICANCE_LEVEL, alpha, 0, 0.5);</span>
+        }
+<span class="fc bfc" id="L343" title="All 2 branches covered.">        return kolmogorovSmirnovTest(distribution, data) &lt; alpha;</span>
+    }
+
+    /**
+     * Estimates the &lt;i&gt;p-value&lt;/i&gt; of a two-sample
+     * &lt;a href=&quot;http://en.wikipedia.org/wiki/Kolmogorov-Smirnov_test&quot;&gt;Kolmogorov-Smirnov test&lt;/a&gt;
+     * evaluating the null hypothesis that {@code x} and {@code y} are samples
+     * drawn from the same probability distribution.
+     * This method estimates the p-value by repeatedly sampling sets of size
+     * {@code x.length} and {@code y.length} from the empirical distribution
+     * of the combined sample.
+     * When {@code strict} is true, this is equivalent to the algorithm implemented
+     * in the R function {@code ks.boot}, described in &lt;pre&gt;
+     * Jasjeet S. Sekhon. 2011. 'Multivariate and Propensity Score Matching
+     * Software with Automated Balance Optimization: The Matching package for R.'
+     * Journal of Statistical Software, 42(7): 1-52.
+     * &lt;/pre&gt;
+     *
+     * @param x First sample.
+     * @param y Second sample.
+     * @param iterations Number of bootstrap resampling iterations.
+     * @param strict Whether or not the null hypothesis is expressed as a strict inequality.
+     * @param rng RNG for creating the sampling sets.
+     * @return the estimated p-value.
+     */
+    public double bootstrap(double[] x,
+                            double[] y,
+                            int iterations,
+                            boolean strict,
+                            UniformRandomProvider rng) {
+<span class="fc" id="L373">        final int xLength = x.length;</span>
+<span class="fc" id="L374">        final int yLength = y.length;</span>
+<span class="fc" id="L375">        final double[] combined = new double[xLength + yLength];</span>
+<span class="fc" id="L376">        System.arraycopy(x, 0, combined, 0, xLength);</span>
+<span class="fc" id="L377">        System.arraycopy(y, 0, combined, xLength, yLength);</span>
+<span class="fc" id="L378">        final ContinuousDistribution.Sampler sampler = new EnumeratedRealDistribution(combined).createSampler(rng);</span>
+<span class="fc" id="L379">        final long d = integralKolmogorovSmirnovStatistic(x, y);</span>
+<span class="fc" id="L380">        int greaterCount = 0;</span>
+<span class="fc" id="L381">        int equalCount = 0;</span>
+        double[] curX;
+        double[] curY;
+        long curD;
+<span class="fc bfc" id="L385" title="All 2 branches covered.">        for (int i = 0; i &lt; iterations; i++) {</span>
+<span class="fc" id="L386">            curX = AbstractRealDistribution.sample(xLength, sampler);</span>
+<span class="fc" id="L387">            curY = AbstractRealDistribution.sample(yLength, sampler);</span>
+<span class="fc" id="L388">            curD = integralKolmogorovSmirnovStatistic(curX, curY);</span>
+<span class="fc bfc" id="L389" title="All 2 branches covered.">            if (curD &gt; d) {</span>
+<span class="fc" id="L390">                greaterCount++;</span>
+<span class="fc bfc" id="L391" title="All 2 branches covered.">            } else if (curD == d) {</span>
+<span class="fc" id="L392">                equalCount++;</span>
+            }
+        }
+<span class="fc bfc" id="L395" title="All 2 branches covered.">        return strict ? greaterCount / (double) iterations :</span>
+            (greaterCount + equalCount) / (double) iterations;
+    }
+
+    /**
+     * Calculates \(P(D_n &amp;lt; d)\) using the method described in [1] with quick decisions for extreme
+     * values given in [2] (see above). The result is not exact as with
+     * {@link #cdfExact(double, int)} because calculations are based on
+     * {@code double} rather than {@link org.apache.commons.math4.fraction.BigFraction}.
+     *
+     * @param d statistic
+     * @param n sample size
+     * @return \(P(D_n &amp;lt; d)\)
+     * @throws MathArithmeticException if algorithm fails to convert {@code h} to a
+     *         {@link org.apache.commons.math4.fraction.BigFraction} in expressing {@code d} as \((k
+     *         - h) / m\) for integer {@code k, m} and \(0 \le h &amp;lt; 1\)
+     */
+    public double cdf(double d, int n)
+        throws MathArithmeticException {
+<span class="nc" id="L414">        return cdf(d, n, false);</span>
+    }
+
+    /**
+     * Calculates {@code P(D_n &lt; d)}. The result is exact in the sense that BigFraction/BigReal is
+     * used everywhere at the expense of very slow execution time. Almost never choose this in real
+     * applications unless you are very sure; this is almost solely for verification purposes.
+     * Normally, you would choose {@link #cdf(double, int)}. See the class
+     * javadoc for definitions and algorithm description.
+     *
+     * @param d statistic
+     * @param n sample size
+     * @return \(P(D_n &amp;lt; d)\)
+     * @throws MathArithmeticException if the algorithm fails to convert {@code h} to a
+     *         {@link org.apache.commons.math4.fraction.BigFraction} in expressing {@code d} as \((k
+     *         - h) / m\) for integer {@code k, m} and \(0 \le h &amp;lt; 1\)
+     */
+    public double cdfExact(double d, int n)
+        throws MathArithmeticException {
+<span class="nc" id="L433">        return cdf(d, n, true);</span>
+    }
+
+    /**
+     * Calculates {@code P(D_n &lt; d)} using method described in [1] with quick decisions for extreme
+     * values given in [2] (see above).
+     *
+     * @param d statistic
+     * @param n sample size
+     * @param exact whether the probability should be calculated exact using
+     *        {@link org.apache.commons.math4.fraction.BigFraction} everywhere at the expense of
+     *        very slow execution time, or if {@code double} should be used convenient places to
+     *        gain speed. Almost never choose {@code true} in real applications unless you are very
+     *        sure; {@code true} is almost solely for verification purposes.
+     * @return \(P(D_n &amp;lt; d)\)
+     * @throws MathArithmeticException if algorithm fails to convert {@code h} to a
+     *         {@link org.apache.commons.math4.fraction.BigFraction} in expressing {@code d} as \((k
+     *         - h) / m\) for integer {@code k, m} and \(0 \le h &amp;lt; 1\).
+     */
+    public double cdf(double d, int n, boolean exact)
+        throws MathArithmeticException {
+
+<span class="fc" id="L455">        final double ninv = 1 / ((double) n);</span>
+<span class="fc" id="L456">        final double ninvhalf = 0.5 * ninv;</span>
+
+<span class="pc bpc" id="L458" title="1 of 2 branches missed.">        if (d &lt;= ninvhalf) {</span>
+<span class="nc" id="L459">            return 0;</span>
+<span class="pc bpc" id="L460" title="2 of 4 branches missed.">        } else if (ninvhalf &lt; d &amp;&amp; d &lt;= ninv) {</span>
+<span class="nc" id="L461">            double res = 1;</span>
+<span class="nc" id="L462">            final double f = 2 * d - ninv;</span>
+            // n! f^n = n*f * (n-1)*f * ... * 1*x
+<span class="nc bnc" id="L464" title="All 2 branches missed.">            for (int i = 1; i &lt;= n; ++i) {</span>
+<span class="nc" id="L465">                res *= i * f;</span>
+            }
+<span class="nc" id="L467">            return res;</span>
+<span class="pc bpc" id="L468" title="3 of 4 branches missed.">        } else if (1 - ninv &lt;= d &amp;&amp; d &lt; 1) {</span>
+<span class="nc" id="L469">            return 1 - 2 * Math.pow(1 - d, n);</span>
+<span class="pc bpc" id="L470" title="1 of 2 branches missed.">        } else if (1 &lt;= d) {</span>
+<span class="nc" id="L471">            return 1;</span>
+        }
+<span class="pc bpc" id="L473" title="1 of 2 branches missed.">        if (exact) {</span>
+<span class="nc" id="L474">            return exactK(d, n);</span>
+        }
+<span class="pc bpc" id="L476" title="1 of 2 branches missed.">        if (n &lt;= 140) {</span>
+<span class="fc" id="L477">            return roundedK(d, n);</span>
+        }
+<span class="nc" id="L479">        return pelzGood(d, n);</span>
+    }
+
+    /**
+     * Calculates the exact value of {@code P(D_n &lt; d)} using the method described in [1] (reference
+     * in class javadoc above) and {@link org.apache.commons.math4.fraction.BigFraction} (see
+     * above).
+     *
+     * @param d statistic
+     * @param n sample size
+     * @return the two-sided probability of \(P(D_n &amp;lt; d)\)
+     * @throws MathArithmeticException if algorithm fails to convert {@code h} to a
+     *         {@link org.apache.commons.math4.fraction.BigFraction} in expressing {@code d} as \((k
+     *         - h) / m\) for integer {@code k, m} and \(0 \le h &amp;lt; 1\).
+     */
+    private double exactK(double d, int n)
+        throws MathArithmeticException {
+
+<span class="nc" id="L497">        final int k = (int) Math.ceil(n * d);</span>
+
+<span class="nc" id="L499">        final FieldMatrix&lt;BigFraction&gt; H = this.createExactH(d, n);</span>
+<span class="nc" id="L500">        final FieldMatrix&lt;BigFraction&gt; Hpower = H.power(n);</span>
+
+<span class="nc" id="L502">        BigFraction pFrac = Hpower.getEntry(k - 1, k - 1);</span>
+
+<span class="nc bnc" id="L504" title="All 2 branches missed.">        for (int i = 1; i &lt;= n; ++i) {</span>
+<span class="nc" id="L505">            pFrac = pFrac.multiply(i).divide(n);</span>
+        }
+
+        /*
+         * BigFraction.doubleValue converts numerator to double and the denominator to double and
+         * divides afterwards. That gives NaN quite easy. This does not (scale is the number of
+         * digits):
+         */
+<span class="nc" id="L513">        return pFrac.bigDecimalValue(20, BigDecimal.ROUND_HALF_UP).doubleValue();</span>
+    }
+
+    /**
+     * Calculates {@code P(D_n &lt; d)} using method described in [1] and doubles (see above).
+     *
+     * @param d statistic
+     * @param n sample size
+     * @return \(P(D_n &amp;lt; d)\)
+     */
+    private double roundedK(double d, int n) {
+
+<span class="fc" id="L525">        final int k = (int) Math.ceil(n * d);</span>
+<span class="fc" id="L526">        final RealMatrix H = this.createRoundedH(d, n);</span>
+<span class="fc" id="L527">        final RealMatrix Hpower = H.power(n);</span>
+
+<span class="fc" id="L529">        double pFrac = Hpower.getEntry(k - 1, k - 1);</span>
+<span class="fc bfc" id="L530" title="All 2 branches covered.">        for (int i = 1; i &lt;= n; ++i) {</span>
+<span class="fc" id="L531">            pFrac *= (double) i / (double) n;</span>
+        }
+
+<span class="fc" id="L534">        return pFrac;</span>
+    }
+
+    /**
+     * Computes the Pelz-Good approximation for \(P(D_n &amp;lt; d)\) as described in [2] in the class javadoc.
+     *
+     * @param d value of d-statistic (x in [2])
+     * @param n sample size
+     * @return \(P(D_n &amp;lt; d)\)
+     * @since 3.4
+     */
+    public double pelzGood(double d, int n) {
+        // Change the variable since approximation is for the distribution evaluated at d / sqrt(n)
+<span class="fc" id="L547">        final double sqrtN = FastMath.sqrt(n);</span>
+<span class="fc" id="L548">        final double z = d * sqrtN;</span>
+<span class="fc" id="L549">        final double z2 = d * d * n;</span>
+<span class="fc" id="L550">        final double z4 = z2 * z2;</span>
+<span class="fc" id="L551">        final double z6 = z4 * z2;</span>
+<span class="fc" id="L552">        final double z8 = z4 * z4;</span>
+
+        // Eventual return value
+<span class="fc" id="L555">        double ret = 0;</span>
+
+        // Compute K_0(z)
+<span class="fc" id="L558">        double sum = 0;</span>
+<span class="fc" id="L559">        double increment = 0;</span>
+<span class="fc" id="L560">        double kTerm = 0;</span>
+<span class="fc" id="L561">        double z2Term = MathUtils.PI_SQUARED / (8 * z2);</span>
+<span class="fc" id="L562">        int k = 1;</span>
+<span class="pc bpc" id="L563" title="1 of 2 branches missed.">        for (; k &lt; MAXIMUM_PARTIAL_SUM_COUNT; k++) {</span>
+<span class="fc" id="L564">            kTerm = 2 * k - 1;</span>
+<span class="fc" id="L565">            increment = FastMath.exp(-z2Term * kTerm * kTerm);</span>
+<span class="fc" id="L566">            sum += increment;</span>
+<span class="fc bfc" id="L567" title="All 2 branches covered.">            if (increment &lt;= PG_SUM_RELATIVE_ERROR * sum) {</span>
+<span class="fc" id="L568">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L571" title="1 of 2 branches missed.">        if (k == MAXIMUM_PARTIAL_SUM_COUNT) {</span>
+<span class="nc" id="L572">            throw new TooManyIterationsException(MAXIMUM_PARTIAL_SUM_COUNT);</span>
+        }
+<span class="fc" id="L574">        ret = sum * FastMath.sqrt(2 * FastMath.PI) / z;</span>
+
+        // K_1(z)
+        // Sum is -inf to inf, but k term is always (k + 1/2) ^ 2, so really have
+        // twice the sum from k = 0 to inf (k = -1 is same as 0, -2 same as 1, ...)
+<span class="fc" id="L579">        final double twoZ2 = 2 * z2;</span>
+<span class="fc" id="L580">        sum = 0;</span>
+<span class="fc" id="L581">        kTerm = 0;</span>
+<span class="fc" id="L582">        double kTerm2 = 0;</span>
+<span class="pc bpc" id="L583" title="1 of 2 branches missed.">        for (k = 0; k &lt; MAXIMUM_PARTIAL_SUM_COUNT; k++) {</span>
+<span class="fc" id="L584">            kTerm = k + 0.5;</span>
+<span class="fc" id="L585">            kTerm2 = kTerm * kTerm;</span>
+<span class="fc" id="L586">            increment = (MathUtils.PI_SQUARED * kTerm2 - z2) * FastMath.exp(-MathUtils.PI_SQUARED * kTerm2 / twoZ2);</span>
+<span class="fc" id="L587">            sum += increment;</span>
+<span class="fc bfc" id="L588" title="All 2 branches covered.">            if (FastMath.abs(increment) &lt; PG_SUM_RELATIVE_ERROR * FastMath.abs(sum)) {</span>
+<span class="fc" id="L589">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L592" title="1 of 2 branches missed.">        if (k == MAXIMUM_PARTIAL_SUM_COUNT) {</span>
+<span class="nc" id="L593">            throw new TooManyIterationsException(MAXIMUM_PARTIAL_SUM_COUNT);</span>
+        }
+<span class="fc" id="L595">        final double sqrtHalfPi = FastMath.sqrt(FastMath.PI / 2);</span>
+        // Instead of doubling sum, divide by 3 instead of 6
+<span class="fc" id="L597">        ret += sum * sqrtHalfPi / (3 * z4 * sqrtN);</span>
+
+        // K_2(z)
+        // Same drill as K_1, but with two doubly infinite sums, all k terms are even powers.
+<span class="fc" id="L601">        final double z4Term = 2 * z4;</span>
+<span class="fc" id="L602">        final double z6Term = 6 * z6;</span>
+<span class="fc" id="L603">        z2Term = 5 * z2;</span>
+<span class="fc" id="L604">        final double pi4 = MathUtils.PI_SQUARED * MathUtils.PI_SQUARED;</span>
+<span class="fc" id="L605">        sum = 0;</span>
+<span class="fc" id="L606">        kTerm = 0;</span>
+<span class="fc" id="L607">        kTerm2 = 0;</span>
+<span class="pc bpc" id="L608" title="1 of 2 branches missed.">        for (k = 0; k &lt; MAXIMUM_PARTIAL_SUM_COUNT; k++) {</span>
+<span class="fc" id="L609">            kTerm = k + 0.5;</span>
+<span class="fc" id="L610">            kTerm2 = kTerm * kTerm;</span>
+<span class="fc" id="L611">            increment =  (z6Term + z4Term + MathUtils.PI_SQUARED * (z4Term - z2Term) * kTerm2 +</span>
+<span class="fc" id="L612">                    pi4 * (1 - twoZ2) * kTerm2 * kTerm2) * FastMath.exp(-MathUtils.PI_SQUARED * kTerm2 / twoZ2);</span>
+<span class="fc" id="L613">            sum += increment;</span>
+<span class="fc bfc" id="L614" title="All 2 branches covered.">            if (FastMath.abs(increment) &lt; PG_SUM_RELATIVE_ERROR * FastMath.abs(sum)) {</span>
+<span class="fc" id="L615">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L618" title="1 of 2 branches missed.">        if (k == MAXIMUM_PARTIAL_SUM_COUNT) {</span>
+<span class="nc" id="L619">            throw new TooManyIterationsException(MAXIMUM_PARTIAL_SUM_COUNT);</span>
+        }
+<span class="fc" id="L621">        double sum2 = 0;</span>
+<span class="fc" id="L622">        kTerm2 = 0;</span>
+<span class="pc bpc" id="L623" title="1 of 2 branches missed.">        for (k = 1; k &lt; MAXIMUM_PARTIAL_SUM_COUNT; k++) {</span>
+<span class="fc" id="L624">            kTerm2 = k * k;</span>
+<span class="fc" id="L625">            increment = MathUtils.PI_SQUARED * kTerm2 * FastMath.exp(-MathUtils.PI_SQUARED * kTerm2 / twoZ2);</span>
+<span class="fc" id="L626">            sum2 += increment;</span>
+<span class="fc bfc" id="L627" title="All 2 branches covered.">            if (FastMath.abs(increment) &lt; PG_SUM_RELATIVE_ERROR * FastMath.abs(sum2)) {</span>
+<span class="fc" id="L628">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L631" title="1 of 2 branches missed.">        if (k == MAXIMUM_PARTIAL_SUM_COUNT) {</span>
+<span class="nc" id="L632">            throw new TooManyIterationsException(MAXIMUM_PARTIAL_SUM_COUNT);</span>
+        }
+        // Again, adjust coefficients instead of doubling sum, sum2
+<span class="fc" id="L635">        ret += (sqrtHalfPi / n) * (sum / (36 * z2 * z2 * z2 * z) - sum2 / (18 * z2 * z));</span>
+
+        // K_3(z) One more time with feeling - two doubly infinite sums, all k powers even.
+        // Multiply coefficient denominators by 2, so omit doubling sums.
+<span class="fc" id="L639">        final double pi6 = pi4 * MathUtils.PI_SQUARED;</span>
+<span class="fc" id="L640">        sum = 0;</span>
+<span class="fc" id="L641">        double kTerm4 = 0;</span>
+<span class="fc" id="L642">        double kTerm6 = 0;</span>
+<span class="pc bpc" id="L643" title="1 of 2 branches missed.">        for (k = 0; k &lt; MAXIMUM_PARTIAL_SUM_COUNT; k++) {</span>
+<span class="fc" id="L644">            kTerm = k + 0.5;</span>
+<span class="fc" id="L645">            kTerm2 = kTerm * kTerm;</span>
+<span class="fc" id="L646">            kTerm4 = kTerm2 * kTerm2;</span>
+<span class="fc" id="L647">            kTerm6 = kTerm4 * kTerm2;</span>
+<span class="fc" id="L648">            increment = (pi6 * kTerm6 * (5 - 30 * z2) + pi4 * kTerm4 * (-60 * z2 + 212 * z4) +</span>
+                            MathUtils.PI_SQUARED * kTerm2 * (135 * z4 - 96 * z6) - 30 * z6 - 90 * z8) *
+<span class="fc" id="L650">                    FastMath.exp(-MathUtils.PI_SQUARED * kTerm2 / twoZ2);</span>
+<span class="fc" id="L651">            sum += increment;</span>
+<span class="fc bfc" id="L652" title="All 2 branches covered.">            if (FastMath.abs(increment) &lt; PG_SUM_RELATIVE_ERROR * FastMath.abs(sum)) {</span>
+<span class="fc" id="L653">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L656" title="1 of 2 branches missed.">        if (k == MAXIMUM_PARTIAL_SUM_COUNT) {</span>
+<span class="nc" id="L657">            throw new TooManyIterationsException(MAXIMUM_PARTIAL_SUM_COUNT);</span>
+        }
+<span class="fc" id="L659">        sum2 = 0;</span>
+<span class="pc bpc" id="L660" title="1 of 2 branches missed.">        for (k = 1; k &lt; MAXIMUM_PARTIAL_SUM_COUNT; k++) {</span>
+<span class="fc" id="L661">            kTerm2 = k * k;</span>
+<span class="fc" id="L662">            kTerm4 = kTerm2 * kTerm2;</span>
+<span class="fc" id="L663">            increment = (-pi4 * kTerm4 + 3 * MathUtils.PI_SQUARED * kTerm2 * z2) *</span>
+<span class="fc" id="L664">                    FastMath.exp(-MathUtils.PI_SQUARED * kTerm2 / twoZ2);</span>
+<span class="fc" id="L665">            sum2 += increment;</span>
+<span class="fc bfc" id="L666" title="All 2 branches covered.">            if (FastMath.abs(increment) &lt; PG_SUM_RELATIVE_ERROR * FastMath.abs(sum2)) {</span>
+<span class="fc" id="L667">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L670" title="1 of 2 branches missed.">        if (k == MAXIMUM_PARTIAL_SUM_COUNT) {</span>
+<span class="nc" id="L671">            throw new TooManyIterationsException(MAXIMUM_PARTIAL_SUM_COUNT);</span>
+        }
+<span class="fc" id="L673">        return ret + (sqrtHalfPi / (sqrtN * n)) * (sum / (3240 * z6 * z4) +</span>
+                + sum2 / (108 * z6));
+
+    }
+
+    /***
+     * Creates {@code H} of size {@code m x m} as described in [1] (see above).
+     *
+     * @param d statistic
+     * @param n sample size
+     * @return H matrix
+     * @throws NumberIsTooLargeException if fractional part is greater than 1
+     * @throws FractionConversionException if algorithm fails to convert {@code h} to a
+     *         {@link org.apache.commons.math4.fraction.BigFraction} in expressing {@code d} as \((k
+     *         - h) / m\) for integer {@code k, m} and \(0 &lt;= h &lt; 1\).
+     */
+    private FieldMatrix&lt;BigFraction&gt; createExactH(double d, int n)
+        throws NumberIsTooLargeException, FractionConversionException {
+
+<span class="nc" id="L692">        final int k = (int) Math.ceil(n * d);</span>
+<span class="nc" id="L693">        final int m = 2 * k - 1;</span>
+<span class="nc" id="L694">        final double hDouble = k - n * d;</span>
+<span class="nc bnc" id="L695" title="All 2 branches missed.">        if (hDouble &gt;= 1) {</span>
+<span class="nc" id="L696">            throw new NumberIsTooLargeException(hDouble, 1.0, false);</span>
+        }
+<span class="nc" id="L698">        BigFraction h = null;</span>
+        try {
+<span class="nc" id="L700">            h = new BigFraction(hDouble, 1.0e-20, 10000);</span>
+<span class="nc" id="L701">        } catch (final FractionConversionException e1) {</span>
+            try {
+<span class="nc" id="L703">                h = new BigFraction(hDouble, 1.0e-10, 10000);</span>
+<span class="nc" id="L704">            } catch (final FractionConversionException e2) {</span>
+<span class="nc" id="L705">                h = new BigFraction(hDouble, 1.0e-5, 10000);</span>
+<span class="nc" id="L706">            }</span>
+<span class="nc" id="L707">        }</span>
+<span class="nc" id="L708">        final BigFraction[][] Hdata = new BigFraction[m][m];</span>
+
+        /*
+         * Start by filling everything with either 0 or 1.
+         */
+<span class="nc bnc" id="L713" title="All 2 branches missed.">        for (int i = 0; i &lt; m; ++i) {</span>
+<span class="nc bnc" id="L714" title="All 2 branches missed.">            for (int j = 0; j &lt; m; ++j) {</span>
+<span class="nc bnc" id="L715" title="All 2 branches missed.">                if (i - j + 1 &lt; 0) {</span>
+<span class="nc" id="L716">                    Hdata[i][j] = BigFraction.ZERO;</span>
+                } else {
+<span class="nc" id="L718">                    Hdata[i][j] = BigFraction.ONE;</span>
+                }
+            }
+        }
+
+        /*
+         * Setting up power-array to avoid calculating the same value twice: hPowers[0] = h^1 ...
+         * hPowers[m-1] = h^m
+         */
+<span class="nc" id="L727">        final BigFraction[] hPowers = new BigFraction[m];</span>
+<span class="nc" id="L728">        hPowers[0] = h;</span>
+<span class="nc bnc" id="L729" title="All 2 branches missed.">        for (int i = 1; i &lt; m; ++i) {</span>
+<span class="nc" id="L730">            hPowers[i] = h.multiply(hPowers[i - 1]);</span>
+        }
+
+        /*
+         * First column and last row has special values (each other reversed).
+         */
+<span class="nc bnc" id="L736" title="All 2 branches missed.">        for (int i = 0; i &lt; m; ++i) {</span>
+<span class="nc" id="L737">            Hdata[i][0] = Hdata[i][0].subtract(hPowers[i]);</span>
+<span class="nc" id="L738">            Hdata[m - 1][i] = Hdata[m - 1][i].subtract(hPowers[m - i - 1]);</span>
+        }
+
+        /*
+         * [1] states: &quot;For 1/2 &lt; h &lt; 1 the bottom left element of the matrix should be (1 - 2*h^m +
+         * (2h - 1)^m )/m!&quot; Since 0 &lt;= h &lt; 1, then if h &gt; 1/2 is sufficient to check:
+         */
+<span class="nc bnc" id="L745" title="All 2 branches missed.">        if (h.compareTo(BigFraction.ONE_HALF) == 1) {</span>
+<span class="nc" id="L746">            Hdata[m - 1][0] = Hdata[m - 1][0].add(h.multiply(2).subtract(1).pow(m));</span>
+        }
+
+        /*
+         * Aside from the first column and last row, the (i, j)-th element is 1/(i - j + 1)! if i -
+         * j + 1 &gt;= 0, else 0. 1's and 0's are already put, so only division with (i - j + 1)! is
+         * needed in the elements that have 1's. There is no need to calculate (i - j + 1)! and then
+         * divide - small steps avoid overflows. Note that i - j + 1 &gt; 0 &lt;=&gt; i + 1 &gt; j instead of
+         * j'ing all the way to m. Also note that it is started at g = 2 because dividing by 1 isn't
+         * really necessary.
+         */
+<span class="nc bnc" id="L757" title="All 2 branches missed.">        for (int i = 0; i &lt; m; ++i) {</span>
+<span class="nc bnc" id="L758" title="All 2 branches missed.">            for (int j = 0; j &lt; i + 1; ++j) {</span>
+<span class="nc bnc" id="L759" title="All 2 branches missed.">                if (i - j + 1 &gt; 0) {</span>
+<span class="nc bnc" id="L760" title="All 2 branches missed.">                    for (int g = 2; g &lt;= i - j + 1; ++g) {</span>
+<span class="nc" id="L761">                        Hdata[i][j] = Hdata[i][j].divide(g);</span>
+                    }
+                }
+            }
+        }
+<span class="nc" id="L766">        return new Array2DRowFieldMatrix&lt;&gt;(BigFractionField.getInstance(), Hdata);</span>
+    }
+
+    /***
+     * Creates {@code H} of size {@code m x m} as described in [1] (see above)
+     * using double-precision.
+     *
+     * @param d statistic
+     * @param n sample size
+     * @return H matrix
+     * @throws NumberIsTooLargeException if fractional part is greater than 1
+     */
+    private RealMatrix createRoundedH(double d, int n)
+        throws NumberIsTooLargeException {
+
+<span class="fc" id="L781">        final int k = (int) Math.ceil(n * d);</span>
+<span class="fc" id="L782">        final int m = 2 * k - 1;</span>
+<span class="fc" id="L783">        final double h = k - n * d;</span>
+<span class="pc bpc" id="L784" title="1 of 2 branches missed.">        if (h &gt;= 1) {</span>
+<span class="nc" id="L785">            throw new NumberIsTooLargeException(h, 1.0, false);</span>
+        }
+<span class="fc" id="L787">        final double[][] Hdata = new double[m][m];</span>
+
+        /*
+         * Start by filling everything with either 0 or 1.
+         */
+<span class="fc bfc" id="L792" title="All 2 branches covered.">        for (int i = 0; i &lt; m; ++i) {</span>
+<span class="fc bfc" id="L793" title="All 2 branches covered.">            for (int j = 0; j &lt; m; ++j) {</span>
+<span class="fc bfc" id="L794" title="All 2 branches covered.">                if (i - j + 1 &lt; 0) {</span>
+<span class="fc" id="L795">                    Hdata[i][j] = 0;</span>
+                } else {
+<span class="fc" id="L797">                    Hdata[i][j] = 1;</span>
+                }
+            }
+        }
+
+        /*
+         * Setting up power-array to avoid calculating the same value twice: hPowers[0] = h^1 ...
+         * hPowers[m-1] = h^m
+         */
+<span class="fc" id="L806">        final double[] hPowers = new double[m];</span>
+<span class="fc" id="L807">        hPowers[0] = h;</span>
+<span class="fc bfc" id="L808" title="All 2 branches covered.">        for (int i = 1; i &lt; m; ++i) {</span>
+<span class="fc" id="L809">            hPowers[i] = h * hPowers[i - 1];</span>
+        }
+
+        /*
+         * First column and last row has special values (each other reversed).
+         */
+<span class="fc bfc" id="L815" title="All 2 branches covered.">        for (int i = 0; i &lt; m; ++i) {</span>
+<span class="fc" id="L816">            Hdata[i][0] = Hdata[i][0] - hPowers[i];</span>
+<span class="fc" id="L817">            Hdata[m - 1][i] -= hPowers[m - i - 1];</span>
+        }
+
+        /*
+         * [1] states: &quot;For 1/2 &lt; h &lt; 1 the bottom left element of the matrix should be (1 - 2*h^m +
+         * (2h - 1)^m )/m!&quot; Since 0 &lt;= h &lt; 1, then if h &gt; 1/2 is sufficient to check:
+         */
+<span class="fc bfc" id="L824" title="All 2 branches covered.">        if (Double.compare(h, 0.5) &gt; 0) {</span>
+<span class="fc" id="L825">            Hdata[m - 1][0] += FastMath.pow(2 * h - 1, m);</span>
+        }
+
+        /*
+         * Aside from the first column and last row, the (i, j)-th element is 1/(i - j + 1)! if i -
+         * j + 1 &gt;= 0, else 0. 1's and 0's are already put, so only division with (i - j + 1)! is
+         * needed in the elements that have 1's. There is no need to calculate (i - j + 1)! and then
+         * divide - small steps avoid overflows. Note that i - j + 1 &gt; 0 &lt;=&gt; i + 1 &gt; j instead of
+         * j'ing all the way to m. Also note that it is started at g = 2 because dividing by 1 isn't
+         * really necessary.
+         */
+<span class="fc bfc" id="L836" title="All 2 branches covered.">        for (int i = 0; i &lt; m; ++i) {</span>
+<span class="fc bfc" id="L837" title="All 2 branches covered.">            for (int j = 0; j &lt; i + 1; ++j) {</span>
+<span class="pc bpc" id="L838" title="1 of 2 branches missed.">                if (i - j + 1 &gt; 0) {</span>
+<span class="fc bfc" id="L839" title="All 2 branches covered.">                    for (int g = 2; g &lt;= i - j + 1; ++g) {</span>
+<span class="fc" id="L840">                        Hdata[i][j] /= g;</span>
+                    }
+                }
+            }
+        }
+<span class="fc" id="L845">        return MatrixUtils.createRealMatrix(Hdata);</span>
+    }
+
+    /**
+     * Verifies that {@code array} has length at least 2.
+     *
+     * @param array array to test
+     * @throws NullArgumentException if array is null
+     * @throws InsufficientDataException if array is too short
+     */
+    private void checkArray(double[] array) {
+<span class="pc bpc" id="L856" title="1 of 2 branches missed.">        if (array == null) {</span>
+<span class="nc" id="L857">            throw new NullArgumentException(LocalizedFormats.NULL_NOT_ALLOWED);</span>
+        }
+<span class="pc bpc" id="L859" title="1 of 2 branches missed.">        if (array.length &lt; 2) {</span>
+<span class="nc" id="L860">            throw new InsufficientDataException(LocalizedFormats.INSUFFICIENT_OBSERVED_POINTS_IN_SAMPLE, array.length,</span>
+<span class="nc" id="L861">                                                2);</span>
+        }
+<span class="fc" id="L863">    }</span>
+
+    /**
+     * Computes \( 1 + 2 \sum_{i=1}^\infty (-1)^i e^{-2 i^2 t^2} \) stopping when successive partial
+     * sums are within {@code tolerance} of one another, or when {@code maxIterations} partial sums
+     * have been computed. If the sum does not converge before {@code maxIterations} iterations a
+     * {@link TooManyIterationsException} is thrown.
+     *
+     * @param t argument
+     * @param tolerance Cauchy criterion for partial sums
+     * @param maxIterations maximum number of partial sums to compute
+     * @return Kolmogorov sum evaluated at t
+     * @throws TooManyIterationsException if the series does not converge
+     */
+    public double ksSum(double t, double tolerance, int maxIterations) {
+<span class="fc bfc" id="L878" title="All 2 branches covered.">        if (t == 0.0) {</span>
+<span class="fc" id="L879">            return 0.0;</span>
+        }
+
+        // TODO: for small t (say less than 1), the alternative expansion in part 3 of [1]
+        // from class javadoc should be used.
+
+<span class="fc" id="L885">        final double x = -2 * t * t;</span>
+<span class="fc" id="L886">        int sign = -1;</span>
+<span class="fc" id="L887">        long i = 1;</span>
+<span class="fc" id="L888">        double partialSum = 0.5d;</span>
+<span class="fc" id="L889">        double delta = 1;</span>
+<span class="pc bpc" id="L890" title="1 of 4 branches missed.">        while (delta &gt; tolerance &amp;&amp; i &lt; maxIterations) {</span>
+<span class="fc" id="L891">            delta = FastMath.exp(x * i * i);</span>
+<span class="fc" id="L892">            partialSum += sign * delta;</span>
+<span class="fc" id="L893">            sign *= -1;</span>
+<span class="fc" id="L894">            i++;</span>
+        }
+<span class="pc bpc" id="L896" title="1 of 2 branches missed.">        if (i == maxIterations) {</span>
+<span class="nc" id="L897">            throw new TooManyIterationsException(maxIterations);</span>
+        }
+<span class="fc" id="L899">        return partialSum * 2;</span>
+    }
+
+    /**
+     * Given a d-statistic in the range [0, 1] and the two sample sizes n and m,
+     * an integral d-statistic in the range [0, n*m] is calculated, that can be used for
+     * comparison with other integral d-statistics. Depending whether {@code strict} is
+     * {@code true} or not, the returned value divided by (n*m) is greater than
+     * (resp greater than or equal to) the given d value (allowing some tolerance).
+     *
+     * @param d a d-statistic in the range [0, 1]
+     * @param n first sample size
+     * @param m second sample size
+     * @param strict whether the returned value divided by (n*m) is allowed to be equal to d
+     * @return the integral d-statistic in the range [0, n*m]
+     */
+    private static long calculateIntegralD(double d, int n, int m, boolean strict) {
+<span class="fc" id="L916">        final double tol = 1e-12;  // d-values within tol of one another are considered equal</span>
+<span class="fc" id="L917">        long nm = n * (long)m;</span>
+<span class="fc" id="L918">        long upperBound = (long)FastMath.ceil((d - tol) * nm);</span>
+<span class="fc" id="L919">        long lowerBound = (long)FastMath.floor((d + tol) * nm);</span>
+<span class="pc bpc" id="L920" title="1 of 4 branches missed.">        if (strict &amp;&amp; lowerBound == upperBound) {</span>
+<span class="fc" id="L921">            return upperBound + 1l;</span>
+        }
+        else {
+<span class="fc" id="L924">            return upperBound;</span>
+        }
+    }
+
+    /**
+     * Computes \(P(D_{n,m} &amp;gt; d)\) if {@code strict} is {@code true}; otherwise \(P(D_{n,m} \ge
+     * d)\), where \(D_{n,m}\) is the 2-sample Kolmogorov-Smirnov statistic. See
+     * {@link #kolmogorovSmirnovStatistic(double[], double[])} for the definition of \(D_{n,m}\).
+     * &lt;p&gt;
+     * The returned probability is exact, implemented by unwinding the recursive function
+     * definitions presented in [4] (class javadoc).
+     * &lt;/p&gt;
+     *
+     * @param d D-statistic value
+     * @param n first sample size
+     * @param m second sample size
+     * @param strict whether or not the probability to compute is expressed as a strict inequality
+     * @return probability that a randomly selected m-n partition of m + n generates \(D_{n,m}\)
+     *         greater than (resp. greater than or equal to) {@code d}
+     */
+    public double exactP(double d, int n, int m, boolean strict) {
+<span class="fc" id="L945">       return 1 - n(m, n, m, n, calculateIntegralD(d, m, n, strict), strict) /</span>
+<span class="fc" id="L946">           BinomialCoefficientDouble.value(n + m, m);</span>
+    }
+
+    /**
+     * Uses the Kolmogorov-Smirnov distribution to approximate \(P(D_{n,m} &amp;gt; d)\) where \(D_{n,m}\)
+     * is the 2-sample Kolmogorov-Smirnov statistic. See
+     * {@link #kolmogorovSmirnovStatistic(double[], double[])} for the definition of \(D_{n,m}\).
+     * &lt;p&gt;
+     * Specifically, what is returned is \(1 - k(d \sqrt{mn / (m + n)})\) where \(k(t) = 1 + 2
+     * \sum_{i=1}^\infty (-1)^i e^{-2 i^2 t^2}\). See {@link #ksSum(double, double, int)} for
+     * details on how convergence of the sum is determined.
+     * &lt;/p&gt;
+     *
+     * @param d D-statistic value
+     * @param n first sample size
+     * @param m second sample size
+     * @return approximate probability that a randomly selected m-n partition of m + n generates
+     *         \(D_{n,m}\) greater than {@code d}
+     */
+    public double approximateP(double d, int n, int m) {
+<span class="fc" id="L966">        final double dm = m;</span>
+<span class="fc" id="L967">        final double dn = n;</span>
+<span class="fc" id="L968">        return 1 - ksSum(d * FastMath.sqrt((dm * dn) / (dm + dn)),</span>
+                         KS_SUM_CAUCHY_CRITERION, MAXIMUM_PARTIAL_SUM_COUNT);
+    }
+
+    /**
+     * Fills a boolean array randomly with a fixed number of {@code true} values.
+     * The method uses a simplified version of the Fisher-Yates shuffle algorithm.
+     * By processing first the {@code true} values followed by the remaining {@code false} values
+     * less random numbers need to be generated. The method is optimized for the case
+     * that the number of {@code true} values is larger than or equal to the number of
+     * {@code false} values.
+     *
+     * @param b boolean array
+     * @param numberOfTrueValues number of {@code true} values the boolean array should finally have
+     * @param rng random data generator
+     */
+    private static void fillBooleanArrayRandomlyWithFixedNumberTrueValues(final boolean[] b, final int numberOfTrueValues, final UniformRandomProvider rng) {
+<span class="fc" id="L985">        Arrays.fill(b, true);</span>
+<span class="fc bfc" id="L986" title="All 2 branches covered.">        for (int k = numberOfTrueValues; k &lt; b.length; k++) {</span>
+<span class="fc" id="L987">            final int r = rng.nextInt(k + 1);</span>
+<span class="fc bfc" id="L988" title="All 2 branches covered.">            b[(b[r]) ? r : k] = false;</span>
+        }
+<span class="fc" id="L990">    }</span>
+
+    /**
+     * Uses Monte Carlo simulation to approximate \(P(D_{n,m} &amp;gt; d)\) where \(D_{n,m}\) is the
+     * 2-sample Kolmogorov-Smirnov statistic. See
+     * {@link #kolmogorovSmirnovStatistic(double[], double[])} for the definition of \(D_{n,m}\).
+     * &lt;p&gt;
+     * The simulation generates {@code iterations} random partitions of {@code m + n} into an
+     * {@code n} set and an {@code m} set, computing \(D_{n,m}\) for each partition and returning
+     * the proportion of values that are greater than {@code d}, or greater than or equal to
+     * {@code d} if {@code strict} is {@code false}.
+     * &lt;/p&gt;
+     *
+     * @param d D-statistic value.
+     * @param n First sample size.
+     * @param m Second sample size.
+     * @param iterations Number of random partitions to generate.
+     * @param strict whether or not the probability to compute is expressed as a strict inequality
+     * @param rng RNG used for generating the partitions.
+     * @return proportion of randomly generated m-n partitions of m + n that result in \(D_{n,m}\)
+     * greater than (resp. greater than or equal to) {@code d}.
+     */
+    public double monteCarloP(final double d,
+                              final int n,
+                              final int m,
+                              final boolean strict,
+                              final int iterations,
+                              UniformRandomProvider rng) {
+<span class="fc" id="L1018">        return integralMonteCarloP(calculateIntegralD(d, n, m, strict), n, m, iterations, rng);</span>
+    }
+
+    /**
+     * Uses Monte Carlo simulation to approximate \(P(D_{n,m} &gt;= d / (n * m))\)
+     * where \(D_{n,m}\) is the 2-sample Kolmogorov-Smirnov statistic.
+     * &lt;p&gt;
+     * Here {@code d} is the D-statistic represented as long value.
+     * The real D-statistic is obtained by dividing {@code d} by {@code n * m}.
+     * See also {@link #monteCarloP(double,int,int,boolean,int,UniformRandomProvider)}.
+     *
+     * @param d Integral D-statistic.
+     * @param n First sample size.
+     * @param m Second sample size.
+     * @param iterations Number of random partitions to generate.
+     * @param rng RNG used for generating the partitions.
+     * @return proportion of randomly generated m-n partitions of m + n that result in \(D_{n,m}\)
+     * greater than or equal to {@code d / (n * m))}.
+     */
+    private double integralMonteCarloP(final long d,
+                                       final int n,
+                                       final int m,
+                                       final int iterations,
+                                       UniformRandomProvider rng) {
+        // ensure that nn is always the max of (n, m) to require fewer random numbers
+<span class="fc" id="L1043">        final int nn = FastMath.max(n, m);</span>
+<span class="fc" id="L1044">        final int mm = FastMath.min(n, m);</span>
+<span class="fc" id="L1045">        final int sum = nn + mm;</span>
+
+<span class="fc" id="L1047">        int tail = 0;</span>
+<span class="fc" id="L1048">        final boolean b[] = new boolean[sum];</span>
+<span class="fc bfc" id="L1049" title="All 2 branches covered.">        for (int i = 0; i &lt; iterations; i++) {</span>
+<span class="fc" id="L1050">            fillBooleanArrayRandomlyWithFixedNumberTrueValues(b, nn, rng);</span>
+<span class="fc" id="L1051">            long curD = 0l;</span>
+<span class="fc bfc" id="L1052" title="All 2 branches covered.">            for(int j = 0; j &lt; b.length; ++j) {</span>
+<span class="fc bfc" id="L1053" title="All 2 branches covered.">                if (b[j]) {</span>
+<span class="fc" id="L1054">                    curD += mm;</span>
+<span class="fc bfc" id="L1055" title="All 2 branches covered.">                    if (curD &gt;= d) {</span>
+<span class="fc" id="L1056">                        tail++;</span>
+<span class="fc" id="L1057">                        break;</span>
+                    }
+                } else {
+<span class="fc" id="L1060">                    curD -= nn;</span>
+<span class="fc bfc" id="L1061" title="All 2 branches covered.">                    if (curD &lt;= -d) {</span>
+<span class="fc" id="L1062">                        tail++;</span>
+<span class="fc" id="L1063">                        break;</span>
+                    }
+                }
+            }
+        }
+<span class="fc" id="L1068">        return (double) tail / iterations;</span>
+    }
+
+    /**
+     * If there are no ties in the combined dataset formed from x and y,
+     * this method is a no-op.
+     * If there are ties, a uniform random deviate in
+     * is added to each value in x and y, and this method overwrites the
+     * data in x and y with the jittered values.
+     *
+     * @param x First sample.
+     * @param y Second sample.
+     * @throw NotANumberException if any of the input arrays contain
+     * a NaN value.
+     */
+    private static void fixTies(double[] x, double[] y) {
+<span class="fc bfc" id="L1084" title="All 2 branches covered.">        if (hasTies(x, y)) {</span>
+            // Add jitter using a fixed seed (so same arguments always give same results),
+            // low-initialization-overhead generator.
+<span class="fc" id="L1087">            final UniformRandomProvider rng = RandomSource.create(RandomSource.TWO_CMRES, 7654321);</span>
+
+            // It is theoretically possible that jitter does not break ties, so repeat
+            // until all ties are gone.  Bound the loop and throw MIE if bound is exceeded.
+<span class="fc" id="L1091">            int ct = 0;</span>
+<span class="fc" id="L1092">            boolean ties = true;</span>
+            do {
+<span class="fc" id="L1094">                jitter(x, rng, 10);</span>
+<span class="fc" id="L1095">                jitter(y, rng, 10);</span>
+<span class="fc" id="L1096">                ties = hasTies(x, y);</span>
+<span class="fc" id="L1097">                ++ct;</span>
+<span class="pc bpc" id="L1098" title="1 of 4 branches missed.">            } while (ties &amp;&amp; ct &lt; 10);</span>
+<span class="pc bpc" id="L1099" title="1 of 2 branches missed.">            if (ties) {</span>
+<span class="nc" id="L1100">                throw new MathInternalError(); // Should never happen.</span>
+            }
+        }
+<span class="fc" id="L1103">    }</span>
+
+    /**
+     * Returns true iff there are ties in the combined sample formed from
+     * x and y.
+     *
+     * @param x First sample.
+     * @param y Second sample.
+     * @return true if x and y together contain ties.
+     * @throw NotANumberException if any of the input arrays contain
+     * a NaN value.
+     */
+    private static boolean hasTies(double[] x, double[] y) {
+<span class="fc" id="L1116">       final double[] values = MathArrays.unique(MathArrays.concatenate(x, y));</span>
+
+       // &quot;unique&quot; moves NaN to the head of the output array.
+<span class="fc bfc" id="L1119" title="All 2 branches covered.">       if (Double.isNaN(values[0])) {</span>
+<span class="fc" id="L1120">           throw new NotANumberException();</span>
+       }
+<span class="fc bfc" id="L1122" title="All 2 branches covered.">       if (values.length == x.length + y.length) {</span>
+<span class="fc" id="L1123">           return false;  // There are no ties.</span>
+       }
+
+<span class="fc" id="L1126">       return true;</span>
+    }
+
+    /**
+     * Adds random jitter to {@code data} using deviates sampled from {@code dist}.
+     * &lt;p&gt;
+     * Note that jitter is applied in-place - i.e., the array
+     * values are overwritten with the result of applying jitter.&lt;/p&gt;
+     *
+     * @param data input/output data array - entries overwritten by the method
+     * @param rng probability distribution to sample for jitter values
+     * @param ulp ulp used when generating random numbers
+     * @throws NullPointerException if either of the parameters is null
+     */
+    private static void jitter(double[] data,
+                               UniformRandomProvider rng,
+                               int ulp) {
+<span class="fc" id="L1143">        final int range = ulp * 2;</span>
+<span class="fc bfc" id="L1144" title="All 2 branches covered.">        for (int i = 0; i &lt; data.length; i++) {</span>
+<span class="fc" id="L1145">            final int rand = rng.nextInt(range) - ulp;</span>
+<span class="fc" id="L1146">            data[i] += rand * Math.ulp(data[i]);</span>
+        }
+<span class="fc" id="L1148">    }</span>
+
+    /**
+     * The function C(i, j) defined in [4] (class javadoc), formula (5.5).
+     * defined to return 1 if |i/n - j/m| &lt;= c; 0 otherwise. Here c is scaled up
+     * and recoded as a long to avoid rounding errors in comparison tests, so what
+     * is actually tested is |im - jn| &lt;= cmn.
+     *
+     * @param i first path parameter
+     * @param j second path paramter
+     * @param m first sample size
+     * @param n second sample size
+     * @param cmn integral D-statistic (see {@link #calculateIntegralD(double, int, int, boolean)})
+     * @param strict whether or not the null hypothesis uses strict inequality
+     * @return C(i,j) for given m, n, c
+     */
+    private static int c(int i, int j, int m, int n, long cmn, boolean strict) {
+<span class="fc bfc" id="L1165" title="All 2 branches covered.">        if (strict) {</span>
+<span class="fc bfc" id="L1166" title="All 2 branches covered.">            return FastMath.abs(i*(long)n - j*(long)m) &lt;= cmn ? 1 : 0;</span>
+        }
+<span class="fc bfc" id="L1168" title="All 2 branches covered.">        return FastMath.abs(i*(long)n - j*(long)m) &lt; cmn ? 1 : 0;</span>
+    }
+
+    /**
+     * The function N(i, j) defined in [4] (class javadoc).
+     * Returns the number of paths over the lattice {(i,j) : 0 &lt;= i &lt;= n, 0 &lt;= j &lt;= m}
+     * from (0,0) to (i,j) satisfying C(h,k, m, n, c) = 1 for each (h,k) on the path.
+     * The return value is integral, but subject to overflow, so it is maintained and
+     * returned as a double.
+     *
+     * @param i first path parameter
+     * @param j second path parameter
+     * @param m first sample size
+     * @param n second sample size
+     * @param cnm integral D-statistic (see {@link #calculateIntegralD(double, int, int, boolean)})
+     * @param strict whether or not the null hypothesis uses strict inequality
+     * @return number or paths to (i, j) from (0,0) representing D-values as large as c for given m, n
+     */
+    private static double n(int i, int j, int m, int n, long cnm, boolean strict) {
+        /*
+         * Unwind the recursive definition given in [4].
+         * Compute n(1,1), n(1,2)...n(2,1), n(2,2)... up to n(i,j), one row at a time.
+         * When n(i,*) are being computed, lag[] holds the values of n(i - 1, *).
+         */
+<span class="fc" id="L1192">        final double[] lag = new double[n];</span>
+<span class="fc" id="L1193">        double last = 0;</span>
+<span class="fc bfc" id="L1194" title="All 2 branches covered.">        for (int k = 0; k &lt; n; k++) {</span>
+<span class="fc" id="L1195">            lag[k] = c(0, k + 1, m, n, cnm, strict);</span>
+        }
+<span class="fc bfc" id="L1197" title="All 2 branches covered.">        for (int k = 1; k &lt;= i; k++) {</span>
+<span class="fc" id="L1198">            last = c(k, 0, m, n, cnm, strict);</span>
+<span class="fc bfc" id="L1199" title="All 2 branches covered.">            for (int l = 1; l &lt;= j; l++) {</span>
+<span class="fc" id="L1200">                lag[l - 1] = c(k, l, m, n, cnm, strict) * (last + lag[l - 1]);</span>
+<span class="fc" id="L1201">                last = lag[l - 1];</span>
+            }
+        }
+<span class="fc" id="L1204">        return last;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

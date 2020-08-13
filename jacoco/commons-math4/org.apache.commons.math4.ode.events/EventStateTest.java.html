@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>EventStateTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ode.events</a> &gt; <span class="el_source">EventStateTest.java</span></div><h1>EventStateTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ode.events;
+
+
+import org.apache.commons.math4.analysis.solvers.BrentSolver;
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.MaxCountExceededException;
+import org.apache.commons.math4.exception.NoBracketingException;
+import org.apache.commons.math4.exception.NumberIsTooSmallException;
+import org.apache.commons.math4.ode.ExpandableStatefulODE;
+import org.apache.commons.math4.ode.FirstOrderDifferentialEquations;
+import org.apache.commons.math4.ode.SecondaryEquations;
+import org.apache.commons.math4.ode.events.EventHandler;
+import org.apache.commons.math4.ode.events.EventState;
+import org.apache.commons.math4.ode.nonstiff.DormandPrince853Integrator;
+import org.apache.commons.math4.ode.nonstiff.LutherIntegrator;
+import org.apache.commons.math4.ode.sampling.AbstractStepInterpolator;
+import org.apache.commons.math4.ode.sampling.DummyStepInterpolator;
+import org.junit.Assert;
+import org.junit.Test;
+
+<span class="fc" id="L38">public class EventStateTest {</span>
+
+    // JIRA: MATH-322
+    @Test
+    public void closeEvents() throws MaxCountExceededException, NoBracketingException {
+
+<span class="fc" id="L44">        final double r1  = 90.0;</span>
+<span class="fc" id="L45">        final double r2  = 135.0;</span>
+<span class="fc" id="L46">        final double gap = r2 - r1;</span>
+
+<span class="fc" id="L48">        final double tolerance = 0.1;</span>
+<span class="fc" id="L49">        EventState es = new EventState(new CloseEventsGenerator(r1, r2), 1.5 * gap,</span>
+                                       tolerance, 100,
+                                       new BrentSolver(tolerance));
+<span class="fc" id="L52">        es.setExpandable(new ExpandableStatefulODE(new FirstOrderDifferentialEquations() {</span>
+            @Override
+            public int getDimension() {
+<span class="fc" id="L55">                return 0;</span>
+            }
+            @Override
+            public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="nc" id="L59">            }</span>
+        }));
+
+<span class="fc" id="L62">        AbstractStepInterpolator interpolator =</span>
+            new DummyStepInterpolator(new double[0], new double[0], true);
+<span class="fc" id="L64">        interpolator.storeTime(r1 - 2.5 * gap);</span>
+<span class="fc" id="L65">        interpolator.shift();</span>
+<span class="fc" id="L66">        interpolator.storeTime(r1 - 1.5 * gap);</span>
+<span class="fc" id="L67">        es.reinitializeBegin(interpolator);</span>
+
+<span class="fc" id="L69">        interpolator.shift();</span>
+<span class="fc" id="L70">        interpolator.storeTime(r1 - 0.5 * gap);</span>
+<span class="fc" id="L71">        Assert.assertFalse(es.evaluateStep(interpolator));</span>
+
+<span class="fc" id="L73">        interpolator.shift();</span>
+<span class="fc" id="L74">        interpolator.storeTime(0.5 * (r1 + r2));</span>
+<span class="fc" id="L75">        Assert.assertTrue(es.evaluateStep(interpolator));</span>
+<span class="fc" id="L76">        Assert.assertEquals(r1, es.getEventTime(), tolerance);</span>
+<span class="fc" id="L77">        es.stepAccepted(es.getEventTime(), new double[0]);</span>
+
+<span class="fc" id="L79">        interpolator.shift();</span>
+<span class="fc" id="L80">        interpolator.storeTime(r2 + 0.4 * gap);</span>
+<span class="fc" id="L81">        Assert.assertTrue(es.evaluateStep(interpolator));</span>
+<span class="fc" id="L82">        Assert.assertEquals(r2, es.getEventTime(), tolerance);</span>
+
+<span class="fc" id="L84">    }</span>
+
+    // Jira: MATH-695
+    @Test
+    public void testIssue695()
+        throws DimensionMismatchException, NumberIsTooSmallException,
+               MaxCountExceededException, NoBracketingException {
+
+<span class="fc" id="L92">        FirstOrderDifferentialEquations equation = new FirstOrderDifferentialEquations() {</span>
+
+            @Override
+            public int getDimension() {
+<span class="fc" id="L96">                return 1;</span>
+            }
+
+            @Override
+            public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L101">                yDot[0] = 1.0;</span>
+<span class="fc" id="L102">            }</span>
+        };
+
+<span class="fc" id="L105">        DormandPrince853Integrator integrator = new DormandPrince853Integrator(0.001, 1000, 1.0e-14, 1.0e-14);</span>
+<span class="fc" id="L106">        integrator.addEventHandler(new ResettingEvent(10.99), 0.1, 1.0e-9, 1000);</span>
+<span class="fc" id="L107">        integrator.addEventHandler(new ResettingEvent(11.01), 0.1, 1.0e-9, 1000);</span>
+<span class="fc" id="L108">        integrator.setInitialStepSize(3.0);</span>
+
+<span class="fc" id="L110">        double target = 30.0;</span>
+<span class="fc" id="L111">        double[] y = new double[1];</span>
+<span class="fc" id="L112">        double tEnd = integrator.integrate(equation, 0.0, y, target, y);</span>
+<span class="fc" id="L113">        Assert.assertEquals(target, tEnd, 1.0e-10);</span>
+<span class="fc" id="L114">        Assert.assertEquals(32.0, y[0], 1.0e-10);</span>
+
+<span class="fc" id="L116">    }</span>
+
+    private static class ResettingEvent implements EventHandler {
+
+<span class="fc" id="L120">        private static double lastTriggerTime = Double.NEGATIVE_INFINITY;</span>
+        private final double tEvent;
+
+<span class="fc" id="L123">        public ResettingEvent(final double tEvent) {</span>
+<span class="fc" id="L124">            this.tEvent = tEvent;</span>
+<span class="fc" id="L125">        }</span>
+
+        @Override
+        public void init(double t0, double[] y0, double t) {
+<span class="fc" id="L129">        }</span>
+
+        @Override
+        public double g(double t, double[] y) {
+            // the bug corresponding to issue 695 causes the g function
+            // to be called at obsolete times t despite an event
+            // occurring later has already been triggered.
+            // When this occurs, the following assertion is violated
+<span class="pc bpc" id="L137" title="1 of 2 branches missed.">            Assert.assertTrue(&quot;going backard in time! (&quot; + t + &quot; &lt; &quot; + lastTriggerTime + &quot;)&quot;,</span>
+                              t &gt;= lastTriggerTime);
+<span class="fc" id="L139">            return t - tEvent;</span>
+        }
+
+        @Override
+        public Action eventOccurred(double t, double[] y, boolean increasing) {
+            // remember in a class variable when the event was triggered
+<span class="fc" id="L145">            lastTriggerTime = t;</span>
+<span class="fc" id="L146">            return Action.RESET_STATE;</span>
+        }
+
+        @Override
+        public void resetState(double t, double[] y) {
+<span class="fc" id="L151">            y[0] += 1.0;</span>
+<span class="fc" id="L152">        }</span>
+
+    }
+
+    // Jira: MATH-965
+    @Test
+    public void testIssue965()
+        throws DimensionMismatchException, NumberIsTooSmallException,
+               MaxCountExceededException, NoBracketingException {
+
+<span class="fc" id="L162">        ExpandableStatefulODE equation =</span>
+<span class="fc" id="L163">                new ExpandableStatefulODE(new FirstOrderDifferentialEquations() {</span>
+
+            @Override
+            public int getDimension() {
+<span class="fc" id="L167">                return 1;</span>
+            }
+
+            @Override
+            public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L172">                yDot[0] = 2.0;</span>
+<span class="fc" id="L173">            }</span>
+        });
+<span class="fc" id="L175">        equation.setTime(0.0);</span>
+<span class="fc" id="L176">        equation.setPrimaryState(new double[1]);</span>
+<span class="fc" id="L177">        equation.addSecondaryEquations(new SecondaryEquations() {</span>
+
+            @Override
+            public int getDimension() {
+<span class="fc" id="L181">                return 1;</span>
+            }
+
+            @Override
+            public void computeDerivatives(double t, double[] primary,
+                                           double[] primaryDot, double[] secondary,
+                                           double[] secondaryDot) {
+<span class="fc" id="L188">                secondaryDot[0] = -3.0;</span>
+<span class="fc" id="L189">            }</span>
+        });
+<span class="fc" id="L191">        int index = equation.getSecondaryMappers()[0].getFirstIndex();</span>
+
+<span class="fc" id="L193">        DormandPrince853Integrator integrator = new DormandPrince853Integrator(0.001, 1000, 1.0e-14, 1.0e-14);</span>
+<span class="fc" id="L194">        integrator.addEventHandler(new SecondaryStateEvent(index, -3.0), 0.1, 1.0e-9, 1000);</span>
+<span class="fc" id="L195">        integrator.setInitialStepSize(3.0);</span>
+
+<span class="fc" id="L197">        integrator.integrate(equation, 30.0);</span>
+<span class="fc" id="L198">        Assert.assertEquals( 1.0, equation.getTime(), 1.0e-10);</span>
+<span class="fc" id="L199">        Assert.assertEquals( 2.0, equation.getPrimaryState()[0], 1.0e-10);</span>
+<span class="fc" id="L200">        Assert.assertEquals(-3.0, equation.getSecondaryState(0)[0], 1.0e-10);</span>
+
+<span class="fc" id="L202">    }</span>
+
+    private static class SecondaryStateEvent implements EventHandler {
+
+        private int index;
+        private final double target;
+
+<span class="fc" id="L209">        public SecondaryStateEvent(final int index, final double target) {</span>
+<span class="fc" id="L210">            this.index  = index;</span>
+<span class="fc" id="L211">            this.target = target;</span>
+<span class="fc" id="L212">        }</span>
+
+        @Override
+        public void init(double t0, double[] y0, double t) {
+<span class="fc" id="L216">        }</span>
+
+        @Override
+        public double g(double t, double[] y) {
+<span class="fc" id="L220">            return y[index] - target;</span>
+        }
+
+        @Override
+        public Action eventOccurred(double t, double[] y, boolean increasing) {
+<span class="fc" id="L225">            return Action.STOP;</span>
+        }
+
+        @Override
+        public void resetState(double t, double[] y) {
+<span class="nc" id="L230">        }</span>
+
+    }
+
+    @Test
+    public void testEventsCloserThanThreshold()
+        throws DimensionMismatchException, NumberIsTooSmallException,
+               MaxCountExceededException, NoBracketingException {
+
+<span class="fc" id="L239">        FirstOrderDifferentialEquations equation = new FirstOrderDifferentialEquations() {</span>
+
+            @Override
+            public int getDimension() {
+<span class="fc" id="L243">                return 1;</span>
+            }
+
+            @Override
+            public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L248">                yDot[0] = 1.0;</span>
+<span class="fc" id="L249">            }</span>
+        };
+
+<span class="fc" id="L252">        LutherIntegrator integrator = new LutherIntegrator(20.0);</span>
+<span class="fc" id="L253">        CloseEventsGenerator eventsGenerator =</span>
+                        new CloseEventsGenerator(9.0 - 1.0 / 128, 9.0 + 1.0 / 128);
+<span class="fc" id="L255">        integrator.addEventHandler(eventsGenerator, 1.0, 0.02, 1000);</span>
+<span class="fc" id="L256">        double[] y = new double[1];</span>
+<span class="fc" id="L257">        double tEnd = integrator.integrate(equation, 0.0, y, 100.0, y);</span>
+<span class="fc" id="L258">        Assert.assertEquals( 2, eventsGenerator.getCount());</span>
+<span class="fc" id="L259">        Assert.assertEquals( 9.0 + 1.0 / 128, tEnd, 1.0 / 32.0);</span>
+
+<span class="fc" id="L261">    }</span>
+
+    private class CloseEventsGenerator implements EventHandler {
+
+        final double r1;
+        final double r2;
+        int count;
+
+<span class="fc" id="L269">        public CloseEventsGenerator(final double r1, final double r2) {</span>
+<span class="fc" id="L270">            this.r1    = r1;</span>
+<span class="fc" id="L271">            this.r2    = r2;</span>
+<span class="fc" id="L272">            this.count = 0;</span>
+<span class="fc" id="L273">        }</span>
+
+        @Override
+        public void init(double t0, double[] y0, double t) {
+<span class="fc" id="L277">        }</span>
+
+        @Override
+        public void resetState(double t, double[] y) {
+<span class="nc" id="L281">        }</span>
+
+        @Override
+        public double g(double t, double[] y) {
+<span class="fc" id="L285">            return (t - r1) * (r2 - t);</span>
+        }
+
+        @Override
+        public Action eventOccurred(double t, double[] y, boolean increasing) {
+<span class="fc bfc" id="L290" title="All 2 branches covered.">            return ++count &lt; 2 ? Action.CONTINUE : Action.STOP;</span>
+        }
+
+        public int getCount() {
+<span class="fc" id="L294">            return count;</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

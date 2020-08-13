@@ -1,0 +1,482 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BitMatrix.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common</a> &gt; <span class="el_source">BitMatrix.java</span></div><h1>BitMatrix.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common;
+
+import java.util.Arrays;
+
+/**
+ * &lt;p&gt;Represents a 2D matrix of bits. In function arguments below, and throughout the common
+ * module, x is the column position, and y is the row position. The ordering is always x, y.
+ * The origin is at the top-left.&lt;/p&gt;
+ *
+ * &lt;p&gt;Internally the bits are represented in a 1-D array of 32-bit ints. However, each row begins
+ * with a new int. This is done intentionally so that we can copy out a row into a BitArray very
+ * efficiently.&lt;/p&gt;
+ *
+ * &lt;p&gt;The ordering of bits is row-major. Within each int, the least significant bits are used first,
+ * meaning they represent lower x values. This is compatible with BitArray's implementation.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ * @author dswitkin@google.com (Daniel Switkin)
+ */
+public final class BitMatrix implements Cloneable {
+
+  private final int width;
+  private final int height;
+  private final int rowSize;
+  private final int[] bits;
+
+  /**
+   * Creates an empty square {@code BitMatrix}.
+   *
+   * @param dimension height and width
+   */
+  public BitMatrix(int dimension) {
+<span class="fc" id="L49">    this(dimension, dimension);</span>
+<span class="fc" id="L50">  }</span>
+
+  /**
+   * Creates an empty {@code BitMatrix}.
+   *
+   * @param width bit matrix width
+   * @param height bit matrix height
+   */
+<span class="fc" id="L58">  public BitMatrix(int width, int height) {</span>
+<span class="pc bpc" id="L59" title="2 of 4 branches missed.">    if (width &lt; 1 || height &lt; 1) {</span>
+<span class="nc" id="L60">      throw new IllegalArgumentException(&quot;Both dimensions must be greater than 0&quot;);</span>
+    }
+<span class="fc" id="L62">    this.width = width;</span>
+<span class="fc" id="L63">    this.height = height;</span>
+<span class="fc" id="L64">    this.rowSize = (width + 31) / 32;</span>
+<span class="fc" id="L65">    bits = new int[rowSize * height];</span>
+<span class="fc" id="L66">  }</span>
+
+<span class="fc" id="L68">  private BitMatrix(int width, int height, int rowSize, int[] bits) {</span>
+<span class="fc" id="L69">    this.width = width;</span>
+<span class="fc" id="L70">    this.height = height;</span>
+<span class="fc" id="L71">    this.rowSize = rowSize;</span>
+<span class="fc" id="L72">    this.bits = bits;</span>
+<span class="fc" id="L73">  }</span>
+
+  /**
+   * Interprets a 2D array of booleans as a {@code BitMatrix}, where &quot;true&quot; means an &quot;on&quot; bit.
+   *
+   * @param image bits of the image, as a row-major 2D array. Elements are arrays representing rows
+   * @return {@code BitMatrix} representation of image
+   */
+  public static BitMatrix parse(boolean[][] image) {
+<span class="nc" id="L82">    int height = image.length;</span>
+<span class="nc" id="L83">    int width = image[0].length;</span>
+<span class="nc" id="L84">    BitMatrix bits = new BitMatrix(width, height);</span>
+<span class="nc bnc" id="L85" title="All 2 branches missed.">    for (int i = 0; i &lt; height; i++) {</span>
+<span class="nc" id="L86">      boolean[] imageI = image[i];</span>
+<span class="nc bnc" id="L87" title="All 2 branches missed.">      for (int j = 0; j &lt; width; j++) {</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">        if (imageI[j]) {</span>
+<span class="nc" id="L89">          bits.set(j, i);</span>
+        }
+      }
+    }
+<span class="nc" id="L93">    return bits;</span>
+  }
+
+  public static BitMatrix parse(String stringRepresentation, String setString, String unsetString) {
+<span class="pc bpc" id="L97" title="1 of 2 branches missed.">    if (stringRepresentation == null) {</span>
+<span class="nc" id="L98">      throw new IllegalArgumentException();</span>
+    }
+
+<span class="fc" id="L101">    boolean[] bits = new boolean[stringRepresentation.length()];</span>
+<span class="fc" id="L102">    int bitsPos = 0;</span>
+<span class="fc" id="L103">    int rowStartPos = 0;</span>
+<span class="fc" id="L104">    int rowLength = -1;</span>
+<span class="fc" id="L105">    int nRows = 0;</span>
+<span class="fc" id="L106">    int pos = 0;</span>
+<span class="fc bfc" id="L107" title="All 2 branches covered.">    while (pos &lt; stringRepresentation.length()) {</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">      if (stringRepresentation.charAt(pos) == '\n' ||</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">          stringRepresentation.charAt(pos) == '\r') {</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">        if (bitsPos &gt; rowStartPos) {</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">          if (rowLength == -1) {</span>
+<span class="fc" id="L112">            rowLength = bitsPos - rowStartPos;</span>
+<span class="pc bpc" id="L113" title="1 of 2 branches missed.">          } else if (bitsPos - rowStartPos != rowLength) {</span>
+<span class="nc" id="L114">            throw new IllegalArgumentException(&quot;row lengths do not match&quot;);</span>
+          }
+<span class="fc" id="L116">          rowStartPos = bitsPos;</span>
+<span class="fc" id="L117">          nRows++;</span>
+        }
+<span class="fc" id="L119">        pos++;</span>
+<span class="fc bfc" id="L120" title="All 2 branches covered.">      }  else if (stringRepresentation.substring(pos, pos + setString.length()).equals(setString)) {</span>
+<span class="fc" id="L121">        pos += setString.length();</span>
+<span class="fc" id="L122">        bits[bitsPos] = true;</span>
+<span class="fc" id="L123">        bitsPos++;</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">      } else if (stringRepresentation.substring(pos, pos + unsetString.length()).equals(unsetString)) {</span>
+<span class="fc" id="L125">        pos += unsetString.length();</span>
+<span class="fc" id="L126">        bits[bitsPos] = false;</span>
+<span class="fc" id="L127">        bitsPos++;</span>
+      } else {
+<span class="fc" id="L129">        throw new IllegalArgumentException(</span>
+<span class="fc" id="L130">            &quot;illegal character encountered: &quot; + stringRepresentation.substring(pos));</span>
+      }
+    }
+
+    // no EOL at end?
+<span class="fc bfc" id="L135" title="All 2 branches covered.">    if (bitsPos &gt; rowStartPos) {</span>
+<span class="fc bfc" id="L136" title="All 2 branches covered.">      if (rowLength == -1) {</span>
+<span class="fc" id="L137">        rowLength = bitsPos - rowStartPos;</span>
+<span class="pc bpc" id="L138" title="1 of 2 branches missed.">      } else if (bitsPos - rowStartPos != rowLength) {</span>
+<span class="nc" id="L139">        throw new IllegalArgumentException(&quot;row lengths do not match&quot;);</span>
+      }
+<span class="fc" id="L141">      nRows++;</span>
+    }
+
+<span class="fc" id="L144">    BitMatrix matrix = new BitMatrix(rowLength, nRows);</span>
+<span class="fc bfc" id="L145" title="All 2 branches covered.">    for (int i = 0; i &lt; bitsPos; i++) {</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">      if (bits[i]) {</span>
+<span class="fc" id="L147">        matrix.set(i % rowLength, i / rowLength);</span>
+      }
+    }
+<span class="fc" id="L150">    return matrix;</span>
+  }
+
+  /**
+   * &lt;p&gt;Gets the requested bit, where true means black.&lt;/p&gt;
+   *
+   * @param x The horizontal component (i.e. which column)
+   * @param y The vertical component (i.e. which row)
+   * @return value of given bit in matrix
+   */
+  public boolean get(int x, int y) {
+<span class="fc" id="L161">    int offset = y * rowSize + (x / 32);</span>
+<span class="fc bfc" id="L162" title="All 2 branches covered.">    return ((bits[offset] &gt;&gt;&gt; (x &amp; 0x1f)) &amp; 1) != 0;</span>
+  }
+
+  /**
+   * &lt;p&gt;Sets the given bit to true.&lt;/p&gt;
+   *
+   * @param x The horizontal component (i.e. which column)
+   * @param y The vertical component (i.e. which row)
+   */
+  public void set(int x, int y) {
+<span class="fc" id="L172">    int offset = y * rowSize + (x / 32);</span>
+<span class="fc" id="L173">    bits[offset] |= 1 &lt;&lt; (x &amp; 0x1f);</span>
+<span class="fc" id="L174">  }</span>
+
+  public void unset(int x, int y) {
+<span class="fc" id="L177">    int offset = y * rowSize + (x / 32);</span>
+<span class="fc" id="L178">    bits[offset] &amp;= ~(1 &lt;&lt; (x &amp; 0x1f));</span>
+<span class="fc" id="L179">  }</span>
+
+  /**
+   * &lt;p&gt;Flips the given bit.&lt;/p&gt;
+   *
+   * @param x The horizontal component (i.e. which column)
+   * @param y The vertical component (i.e. which row)
+   */
+  public void flip(int x, int y) {
+<span class="fc" id="L188">    int offset = y * rowSize + (x / 32);</span>
+<span class="fc" id="L189">    bits[offset] ^= 1 &lt;&lt; (x &amp; 0x1f);</span>
+<span class="fc" id="L190">  }</span>
+
+  /**
+   * Exclusive-or (XOR): Flip the bit in this {@code BitMatrix} if the corresponding
+   * mask bit is set.
+   *
+   * @param mask XOR mask
+   */
+  public void xor(BitMatrix mask) {
+<span class="pc bpc" id="L199" title="1 of 4 branches missed.">    if (width != mask.getWidth() || height != mask.getHeight()</span>
+<span class="pc bpc" id="L200" title="1 of 2 branches missed.">        || rowSize != mask.getRowSize()) {</span>
+<span class="fc" id="L201">      throw new IllegalArgumentException(&quot;input matrix dimensions do not match&quot;);</span>
+    }
+<span class="fc" id="L203">    BitArray rowArray = new BitArray(width);</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc" id="L205">      int offset = y * rowSize;</span>
+<span class="fc" id="L206">      int[] row = mask.getRow(y, rowArray).getBitArray();</span>
+<span class="fc bfc" id="L207" title="All 2 branches covered.">      for (int x = 0; x &lt; rowSize; x++) {</span>
+<span class="fc" id="L208">        bits[offset + x] ^= row[x];</span>
+      }
+    }
+<span class="fc" id="L211">  }</span>
+
+  /**
+   * Clears all bits (sets to false).
+   */
+  public void clear() {
+<span class="fc" id="L217">    int max = bits.length;</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">    for (int i = 0; i &lt; max; i++) {</span>
+<span class="fc" id="L219">      bits[i] = 0;</span>
+    }
+<span class="fc" id="L221">  }</span>
+
+  /**
+   * &lt;p&gt;Sets a square region of the bit matrix to true.&lt;/p&gt;
+   *
+   * @param left The horizontal position to begin at (inclusive)
+   * @param top The vertical position to begin at (inclusive)
+   * @param width The width of the region
+   * @param height The height of the region
+   */
+  public void setRegion(int left, int top, int width, int height) {
+<span class="pc bpc" id="L232" title="2 of 4 branches missed.">    if (top &lt; 0 || left &lt; 0) {</span>
+<span class="nc" id="L233">      throw new IllegalArgumentException(&quot;Left and top must be nonnegative&quot;);</span>
+    }
+<span class="pc bpc" id="L235" title="2 of 4 branches missed.">    if (height &lt; 1 || width &lt; 1) {</span>
+<span class="nc" id="L236">      throw new IllegalArgumentException(&quot;Height and width must be at least 1&quot;);</span>
+    }
+<span class="fc" id="L238">    int right = left + width;</span>
+<span class="fc" id="L239">    int bottom = top + height;</span>
+<span class="pc bpc" id="L240" title="2 of 4 branches missed.">    if (bottom &gt; this.height || right &gt; this.width) {</span>
+<span class="nc" id="L241">      throw new IllegalArgumentException(&quot;The region must fit inside the matrix&quot;);</span>
+    }
+<span class="fc bfc" id="L243" title="All 2 branches covered.">    for (int y = top; y &lt; bottom; y++) {</span>
+<span class="fc" id="L244">      int offset = y * rowSize;</span>
+<span class="fc bfc" id="L245" title="All 2 branches covered.">      for (int x = left; x &lt; right; x++) {</span>
+<span class="fc" id="L246">        bits[offset + (x / 32)] |= 1 &lt;&lt; (x &amp; 0x1f);</span>
+      }
+    }
+<span class="fc" id="L249">  }</span>
+
+  /**
+   * A fast method to retrieve one row of data from the matrix as a BitArray.
+   *
+   * @param y The row to retrieve
+   * @param row An optional caller-allocated BitArray, will be allocated if null or too small
+   * @return The resulting BitArray - this reference should always be used even when passing
+   *         your own row
+   */
+  public BitArray getRow(int y, BitArray row) {
+<span class="fc bfc" id="L260" title="All 4 branches covered.">    if (row == null || row.getSize() &lt; width) {</span>
+<span class="fc" id="L261">      row = new BitArray(width);</span>
+    } else {
+<span class="fc" id="L263">      row.clear();</span>
+    }
+<span class="fc" id="L265">    int offset = y * rowSize;</span>
+<span class="fc bfc" id="L266" title="All 2 branches covered.">    for (int x = 0; x &lt; rowSize; x++) {</span>
+<span class="fc" id="L267">      row.setBulk(x * 32, bits[offset + x]);</span>
+    }
+<span class="fc" id="L269">    return row;</span>
+  }
+
+  /**
+   * @param y row to set
+   * @param row {@link BitArray} to copy from
+   */
+  public void setRow(int y, BitArray row) {
+<span class="fc" id="L277">    System.arraycopy(row.getBitArray(), 0, bits, y * rowSize, rowSize);</span>
+<span class="fc" id="L278">  }</span>
+
+  /**
+   * Modifies this {@code BitMatrix} to represent the same but rotated 180 degrees
+   */
+  public void rotate180() {
+<span class="fc" id="L284">    int width = getWidth();</span>
+<span class="fc" id="L285">    int height = getHeight();</span>
+<span class="fc" id="L286">    BitArray topRow = new BitArray(width);</span>
+<span class="fc" id="L287">    BitArray bottomRow = new BitArray(width);</span>
+<span class="fc bfc" id="L288" title="All 2 branches covered.">    for (int i = 0; i &lt; (height + 1) / 2; i++) {</span>
+<span class="fc" id="L289">      topRow = getRow(i, topRow);</span>
+<span class="fc" id="L290">      bottomRow = getRow(height - 1 - i, bottomRow);</span>
+<span class="fc" id="L291">      topRow.reverse();</span>
+<span class="fc" id="L292">      bottomRow.reverse();</span>
+<span class="fc" id="L293">      setRow(i, bottomRow);</span>
+<span class="fc" id="L294">      setRow(height - 1 - i, topRow);</span>
+    }
+<span class="fc" id="L296">  }</span>
+
+  /**
+   * This is useful in detecting the enclosing rectangle of a 'pure' barcode.
+   *
+   * @return {@code left,top,width,height} enclosing rectangle of all 1 bits, or null if it is all white
+   */
+  public int[] getEnclosingRectangle() {
+<span class="fc" id="L304">    int left = width;</span>
+<span class="fc" id="L305">    int top = height;</span>
+<span class="fc" id="L306">    int right = -1;</span>
+<span class="fc" id="L307">    int bottom = -1;</span>
+
+<span class="fc bfc" id="L309" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc bfc" id="L310" title="All 2 branches covered.">      for (int x32 = 0; x32 &lt; rowSize; x32++) {</span>
+<span class="fc" id="L311">        int theBits = bits[y * rowSize + x32];</span>
+<span class="fc bfc" id="L312" title="All 2 branches covered.">        if (theBits != 0) {</span>
+<span class="fc bfc" id="L313" title="All 2 branches covered.">          if (y &lt; top) {</span>
+<span class="fc" id="L314">            top = y;</span>
+          }
+<span class="fc bfc" id="L316" title="All 2 branches covered.">          if (y &gt; bottom) {</span>
+<span class="fc" id="L317">            bottom = y;</span>
+          }
+<span class="fc bfc" id="L319" title="All 2 branches covered.">          if (x32 * 32 &lt; left) {</span>
+<span class="fc" id="L320">            int bit = 0;</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">            while ((theBits &lt;&lt; (31 - bit)) == 0) {</span>
+<span class="fc" id="L322">              bit++;</span>
+            }
+<span class="fc bfc" id="L324" title="All 2 branches covered.">            if ((x32 * 32 + bit) &lt; left) {</span>
+<span class="fc" id="L325">              left = x32 * 32 + bit;</span>
+            }
+          }
+<span class="fc bfc" id="L328" title="All 2 branches covered.">          if (x32 * 32 + 31 &gt; right) {</span>
+<span class="fc" id="L329">            int bit = 31;</span>
+<span class="fc bfc" id="L330" title="All 2 branches covered.">            while ((theBits &gt;&gt;&gt; bit) == 0) {</span>
+<span class="fc" id="L331">              bit--;</span>
+            }
+<span class="fc bfc" id="L333" title="All 2 branches covered.">            if ((x32 * 32 + bit) &gt; right) {</span>
+<span class="fc" id="L334">              right = x32 * 32 + bit;</span>
+            }
+          }
+        }
+      }
+    }
+
+<span class="pc bpc" id="L341" title="1 of 4 branches missed.">    if (right &lt; left || bottom &lt; top) {</span>
+<span class="fc" id="L342">      return null;</span>
+    }
+
+<span class="fc" id="L345">    return new int[] {left, top, right - left + 1, bottom - top + 1};</span>
+  }
+
+  /**
+   * This is useful in detecting a corner of a 'pure' barcode.
+   *
+   * @return {@code x,y} coordinate of top-left-most 1 bit, or null if it is all white
+   */
+  public int[] getTopLeftOnBit() {
+<span class="fc" id="L354">    int bitsOffset = 0;</span>
+<span class="fc bfc" id="L355" title="All 4 branches covered.">    while (bitsOffset &lt; bits.length &amp;&amp; bits[bitsOffset] == 0) {</span>
+<span class="fc" id="L356">      bitsOffset++;</span>
+    }
+<span class="fc bfc" id="L358" title="All 2 branches covered.">    if (bitsOffset == bits.length) {</span>
+<span class="fc" id="L359">      return null;</span>
+    }
+<span class="fc" id="L361">    int y = bitsOffset / rowSize;</span>
+<span class="fc" id="L362">    int x = (bitsOffset % rowSize) * 32;</span>
+
+<span class="fc" id="L364">    int theBits = bits[bitsOffset];</span>
+<span class="fc" id="L365">    int bit = 0;</span>
+<span class="fc bfc" id="L366" title="All 2 branches covered.">    while ((theBits &lt;&lt; (31 - bit)) == 0) {</span>
+<span class="fc" id="L367">      bit++;</span>
+    }
+<span class="fc" id="L369">    x += bit;</span>
+<span class="fc" id="L370">    return new int[] {x, y};</span>
+  }
+
+  public int[] getBottomRightOnBit() {
+<span class="fc" id="L374">    int bitsOffset = bits.length - 1;</span>
+<span class="fc bfc" id="L375" title="All 4 branches covered.">    while (bitsOffset &gt;= 0 &amp;&amp; bits[bitsOffset] == 0) {</span>
+<span class="fc" id="L376">      bitsOffset--;</span>
+    }
+<span class="fc bfc" id="L378" title="All 2 branches covered.">    if (bitsOffset &lt; 0) {</span>
+<span class="fc" id="L379">      return null;</span>
+    }
+
+<span class="fc" id="L382">    int y = bitsOffset / rowSize;</span>
+<span class="fc" id="L383">    int x = (bitsOffset % rowSize) * 32;</span>
+
+<span class="fc" id="L385">    int theBits = bits[bitsOffset];</span>
+<span class="fc" id="L386">    int bit = 31;</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">    while ((theBits &gt;&gt;&gt; bit) == 0) {</span>
+<span class="fc" id="L388">      bit--;</span>
+    }
+<span class="fc" id="L390">    x += bit;</span>
+
+<span class="fc" id="L392">    return new int[] {x, y};</span>
+  }
+
+  /**
+   * @return The width of the matrix
+   */
+  public int getWidth() {
+<span class="fc" id="L399">    return width;</span>
+  }
+
+  /**
+   * @return The height of the matrix
+   */
+  public int getHeight() {
+<span class="fc" id="L406">    return height;</span>
+  }
+
+  /**
+   * @return The row size of the matrix
+   */
+  public int getRowSize() {
+<span class="fc" id="L413">    return rowSize;</span>
+  }
+
+  @Override
+  public boolean equals(Object o) {
+<span class="pc bpc" id="L418" title="1 of 2 branches missed.">    if (!(o instanceof BitMatrix)) {</span>
+<span class="nc" id="L419">      return false;</span>
+    }
+<span class="fc" id="L421">    BitMatrix other = (BitMatrix) o;</span>
+<span class="pc bpc" id="L422" title="3 of 6 branches missed.">    return width == other.width &amp;&amp; height == other.height &amp;&amp; rowSize == other.rowSize &amp;&amp;</span>
+<span class="fc bfc" id="L423" title="All 2 branches covered.">    Arrays.equals(bits, other.bits);</span>
+  }
+
+  @Override
+  public int hashCode() {
+<span class="fc" id="L428">    int hash = width;</span>
+<span class="fc" id="L429">    hash = 31 * hash + width;</span>
+<span class="fc" id="L430">    hash = 31 * hash + height;</span>
+<span class="fc" id="L431">    hash = 31 * hash + rowSize;</span>
+<span class="fc" id="L432">     hash = 31 * hash + Arrays.hashCode(bits);</span>
+<span class="fc" id="L433">    return hash;</span>
+  }
+
+  /**
+   * @return string representation using &quot;X&quot; for set and &quot; &quot; for unset bits
+   */
+  @Override
+  public String toString() {
+<span class="fc" id="L441">    return toString(&quot;X &quot;, &quot;  &quot;);</span>
+  }
+
+  /**
+   * @param setString representation of a set bit
+   * @param unsetString representation of an unset bit
+   * @return string representation of entire matrix utilizing given strings
+   */
+  public String toString(String setString, String unsetString) {
+<span class="fc" id="L450">    return buildToString(setString, unsetString, &quot;\n&quot;);</span>
+  }
+
+  /**
+   * @param setString representation of a set bit
+   * @param unsetString representation of an unset bit
+   * @param lineSeparator newline character in string representation
+   * @return string representation of entire matrix utilizing given strings and line separator
+   * @deprecated call {@link #toString(String,String)} only, which uses \n line separator always
+   */
+  @Deprecated
+  public String toString(String setString, String unsetString, String lineSeparator) {
+<span class="nc" id="L462">    return buildToString(setString, unsetString, lineSeparator);</span>
+  }
+
+  private String buildToString(String setString, String unsetString, String lineSeparator) {
+<span class="fc" id="L466">    StringBuilder result = new StringBuilder(height * (width + 1));</span>
+<span class="fc bfc" id="L467" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc bfc" id="L468" title="All 2 branches covered.">      for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc bfc" id="L469" title="All 2 branches covered.">        result.append(get(x, y) ? setString : unsetString);</span>
+      }
+<span class="fc" id="L471">      result.append(lineSeparator);</span>
+    }
+<span class="fc" id="L473">    return result.toString();</span>
+  }
+
+  @Override
+  public BitMatrix clone() {
+<span class="fc" id="L478">    return new BitMatrix(width, height, rowSize, bits.clone());</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

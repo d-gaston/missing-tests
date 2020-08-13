@@ -1,0 +1,474 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ExceptionUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.util</a> &gt; <span class="el_source">ExceptionUtils.java</span></div><h1>ExceptionUtils.java</h1><pre class="source lang-java linenums">package org.threadly.util;
+
+import java.io.PrintWriter;
+import java.io.Writer;
+import java.lang.Thread.UncaughtExceptionHandler;
+
+/**
+ * Utilities for doing basic operations with exceptions.
+ * 
+ * @since 1.0.0
+ */
+<span class="nc" id="L12">public class ExceptionUtils {</span>
+  protected static final short INITIAL_BUFFER_PAD_AMOUNT_PER_TRACE_LINE = 16;
+  protected static final short INITIAL_BUFFER_PAD_AMOUNT_FOR_STACK = 64;
+  protected static final ThreadLocal&lt;ExceptionHandler&gt; THREAD_LOCAL_EXCEPTION_HANDLER;
+  protected static final InheritableThreadLocal&lt;ExceptionHandler&gt; INHERITED_EXCEPTION_HANDLER;
+<span class="fc" id="L17">  protected static volatile ExceptionHandler defaultExceptionHandler = null;</span>
+  
+  static {
+<span class="fc" id="L20">    THREAD_LOCAL_EXCEPTION_HANDLER = new ThreadLocal&lt;&gt;();</span>
+<span class="fc" id="L21">    INHERITED_EXCEPTION_HANDLER = new InheritableThreadLocal&lt;&gt;();</span>
+<span class="fc" id="L22">  }</span>
+  
+  /**
+   * Sets the {@link ExceptionHandler} for this thread.  This exception handler will be 
+   * called if this thread calls to {@link ExceptionUtils#handleException(Throwable)}.
+   * 
+   * @param exceptionHandler Exception handler instance, or {@code null} to remove any handler
+   */
+  public static void setThreadExceptionHandler(ExceptionHandler exceptionHandler) {
+<span class="fc" id="L31">    THREAD_LOCAL_EXCEPTION_HANDLER.set(exceptionHandler);</span>
+<span class="fc" id="L32">  }</span>
+  
+  /**
+   * Sets the {@link ExceptionHandler} for this thread, and any threads that spawn off of this 
+   * thread.  If this thread, or any children threads (that do not override their 
+   * {@link ExceptionHandler}), calls {@link ExceptionUtils#handleException(Throwable)}, 
+   * the provided interface will be called.
+   * 
+   * @param exceptionHandler Exception handler instance, or {@code null} to remove any handler
+   */
+  public static void setInheritableExceptionHandler(ExceptionHandler exceptionHandler) {
+<span class="fc" id="L43">    INHERITED_EXCEPTION_HANDLER.set(exceptionHandler);</span>
+<span class="fc" id="L44">  }</span>
+  
+  /**
+   * Sets the default {@link ExceptionHandler} to be used by all threads.  Assuming a threads 
+   * local, or inheritable {@link ExceptionHandler} has not been set, this default instance will 
+   * be relied on.
+   * 
+   * @param exceptionHandler Exception handler instance, or {@code null} to remove any handler
+   */
+  public static void setDefaultExceptionHandler(ExceptionHandler exceptionHandler) {
+<span class="fc" id="L54">    defaultExceptionHandler = exceptionHandler;</span>
+<span class="fc" id="L55">  }</span>
+
+  /**
+   * Gets the thread local {@link ExceptionHandler} if one is set, or {@code null} if none 
+   * is set.  Since {@link #getExceptionHandler()} prioritizes to the thread local handler, this can 
+   * be used to get a reference to the current handler before changing the thread local handler to 
+   * ensure that {@link #getExceptionHandler()} (and down stream use like 
+   * {@link #handleException(Throwable)}) invoke a handler of your choosing.  Once done you can then 
+   * choose to reset the original handler with the one returned from this invocation.
+   * 
+   * @return Thread local ExceptionHandler, or {@code null} if none is set
+   */
+  public static ExceptionHandler getThreadLocalExceptionHandler() {
+<span class="fc" id="L68">    return THREAD_LOCAL_EXCEPTION_HANDLER.get();</span>
+  }
+  
+  /**
+   * Gets the set {@link ExceptionHandler} if one is set, or {@code null} if none is set.  
+   * This prioritizes to the threads locally set handler, with the second priority being an inherited 
+   * handler, with the final option being the default handler.  If none of those are set, a 
+   * {@code null} is returned.
+   * 
+   * @return Handling instance for this thread, or {@code null} if none are available
+   */
+  public static ExceptionHandler getExceptionHandler() {
+<span class="fc" id="L80">    ExceptionHandler eh = THREAD_LOCAL_EXCEPTION_HANDLER.get();</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">    if (eh != null) {</span>
+<span class="fc" id="L82">      return eh;</span>
+    }
+<span class="fc" id="L84">    eh = INHERITED_EXCEPTION_HANDLER.get();</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    if (eh != null) {</span>
+<span class="fc" id="L86">      return eh;</span>
+    }
+<span class="fc" id="L88">    return defaultExceptionHandler;</span>
+  }
+  
+  /**
+   * Invokes {@link Runnable#run()} on the provided runnable on this thread, ensuring that no 
+   * throwables are thrown out of this invocation.  If any throwable's are thrown, they will be 
+   * provided to {@link #handleException(Throwable)}.
+   * 
+   * @deprecated Please use {@code SameThreadSubmitterExecutor.instance().execute(r)} as an alternative
+   * 
+   * @param r Runnable to invoke, can not be null
+   */
+  @Deprecated
+  public static void runRunnable(Runnable r) {
+    try {
+<span class="fc" id="L103">      r.run();</span>
+<span class="fc" id="L104">    } catch (Throwable t) {</span>
+<span class="fc" id="L105">      handleException(t);</span>
+<span class="fc" id="L106">    }</span>
+<span class="fc" id="L107">  }</span>
+  
+  /**
+   * This call handles an uncaught throwable.  If a default uncaught exception handler is set, 
+   * then that will be called to handle the uncaught exception.  If none is set, then the 
+   * exception will be printed out to standard error.
+   * 
+   * @param t throwable to handle
+   */
+  public static void handleException(Throwable t) {
+<span class="fc bfc" id="L117" title="All 2 branches covered.">    if (t == null) {</span>
+<span class="fc" id="L118">      return;</span>
+    }
+    
+    try {
+<span class="fc" id="L122">      ExceptionHandler ehi = getExceptionHandler();</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">      if (ehi != null) {</span>
+<span class="fc" id="L124">        ehi.handleException(t);</span>
+      } else {
+<span class="fc" id="L126">        Thread currentThread = Thread.currentThread();</span>
+<span class="fc" id="L127">        UncaughtExceptionHandler ueHandler = currentThread.getUncaughtExceptionHandler();</span>
+<span class="fc" id="L128">        ueHandler.uncaughtException(currentThread, t);</span>
+      }
+<span class="fc" id="L130">    } catch (Throwable handlerThrown) {</span>
+      try {
+<span class="fc" id="L132">        System.err.println(&quot;Error handling exception: &quot;);</span>
+<span class="fc" id="L133">        t.printStackTrace();</span>
+<span class="fc" id="L134">        System.err.println(&quot;Error thrown when handling exception: &quot;);</span>
+<span class="fc" id="L135">        handlerThrown.printStackTrace();</span>
+<span class="nc" id="L136">      } catch (Throwable ignored) {</span>
+        // sigh...I give up
+<span class="fc" id="L138">      }</span>
+<span class="fc" id="L139">    }</span>
+<span class="fc" id="L140">  }</span>
+  
+  /**
+   * Remove the top functions from the stack of the provided throwable.  
+   * &lt;p&gt;
+   * If you invoke this with the quantity of methods to remove being greater than or equal to the 
+   * length of the stack of the provided throwable then an IllegalStateException will be thrown.
+   * 
+   * @param t Throwable to modify
+   * @param methodsToRemove Number of top method calls to remove
+   */
+  protected static void trimStack(Throwable t, int methodsToRemove) {
+<span class="fc" id="L152">    StackTraceElement[] originalstack = t.getStackTrace();</span>
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">    if (originalstack.length &lt;= methodsToRemove) {</span>
+<span class="nc" id="L154">      throw new IllegalArgumentException(&quot;Can not remove entire stack&quot;);</span>
+    }
+<span class="fc" id="L156">    StackTraceElement[] newStack = new StackTraceElement[originalstack.length - methodsToRemove];</span>
+    
+<span class="fc" id="L158">    System.arraycopy(originalstack, methodsToRemove, newStack, 0, newStack.length);</span>
+    
+<span class="fc" id="L160">    t.setStackTrace(newStack);</span>
+<span class="fc" id="L161">  }</span>
+  
+  /**
+   * Makes a r{@link RuntimeException} if necessary.  If provided exception is already a 
+   * {@link RuntimeException} then it is just directly returned.  If it has to produce a new 
+   * exception the stack is updated to omit this call.
+   * &lt;p&gt;
+   * If the point of wrapping the stack is not useful in debugging consider providing a 
+   * {@code true} into. {@link #makeRuntime(Throwable, boolean)}.
+   * 
+   * @param t {@link Throwable} which may or may not be a runtimeException
+   * @return a {@link RuntimeException} based on provided {@link Throwable}
+   */
+  public static RuntimeException makeRuntime(Throwable t) {
+<span class="fc bfc" id="L175" title="All 2 branches covered.">    if (t instanceof RuntimeException) {</span>
+<span class="fc" id="L176">      return (RuntimeException)t;</span>
+    } else {
+      // code duplicated for simpler logic around modifying the stack
+<span class="fc" id="L179">      TransformedException result = new TransformedException(t);</span>
+<span class="fc" id="L180">      trimStack(result, 1);</span>
+      
+<span class="fc" id="L182">      return result;</span>
+    }
+  }
+
+  /**
+   * Makes a r{@link RuntimeException} if necessary.  If provided exception is already a 
+   * {@link RuntimeException} then it is just directly returned.  If it has to produce a new 
+   * exception, you can control if a stack is generated by providing a {@code true} to suppress the 
+   * generation (which in java can be fairly expensive).  If stack generation is not suppressed (ie 
+   * {@code false} is specified), then the stack will be modified to omit this call.
+   * 
+   * @param t {@link Throwable} which may or may not be a runtimeException
+   * @param suppressWrappedStack {@code true} to avoid generating a stack trace
+   * @return A {@link RuntimeException} based on provided {@link Throwable}
+   */
+  public static RuntimeException makeRuntime(Throwable t, boolean suppressWrappedStack) {
+<span class="fc bfc" id="L198" title="All 2 branches covered.">    if (t instanceof RuntimeException) {</span>
+<span class="fc" id="L199">      return (RuntimeException)t;</span>
+    } else {
+      RuntimeException result;
+<span class="fc bfc" id="L202" title="All 2 branches covered.">      if (suppressWrappedStack) {</span>
+<span class="fc" id="L203">        result = new TransformedSuppressedStackException(t);</span>
+      } else {
+        // code duplicated for simpler logic around modifying the stack
+<span class="fc" id="L206">        result = new TransformedException(t);</span>
+<span class="fc" id="L207">        trimStack(result, 1);</span>
+      }
+      
+<span class="fc" id="L210">      return result;</span>
+    }
+  }
+  
+  /**
+   * Gets the root cause of a provided {@link Throwable}.  If there is no cause for the 
+   * {@link Throwable} provided into this function, the original {@link Throwable} is returned.
+   * &lt;p&gt;
+   * This function does basic circular cause detection in that it will detect a cycle to the 
+   * originally provided {@link Throwable}.  But other circular chains of causes may result in an 
+   * infinite loop.
+   * 
+   * @param throwable starting {@link Throwable}
+   * @return root cause {@link Throwable}
+   */
+  public static Throwable getRootCause(Throwable throwable) {
+<span class="fc" id="L226">    ArgumentVerifier.assertNotNull(throwable, &quot;throwable&quot;);</span>
+    
+<span class="fc" id="L228">    Throwable result = throwable;</span>
+    Throwable cause;
+<span class="fc bfc" id="L230" title="All 4 branches covered.">    while ((cause = result.getCause()) != null &amp;&amp; cause != throwable) {</span>
+<span class="fc" id="L231">      result = cause;</span>
+    }
+    
+<span class="fc" id="L234">    return result;</span>
+  }
+  
+  /**
+   * Checks to see if the provided error, or any causes in the provided error matching the 
+   * provided type.  This can be useful when trying to truncate an exception chain to only the 
+   * relevant information.  If the goal is only to determine if it exists or not consider using 
+   * {@link #hasCauseOfTypes(Throwable, Iterable)}.  If you are only comparing against one exception 
+   * type {@link #getCauseOfType(Throwable, Class)} is a better option (and will return without the 
+   * need to cast, type thanks to generics).
+   * &lt;p&gt;
+   * This function does basic circular cause detection in that it will detect a cycle to the 
+   * originally provided {@link Throwable}.  But other circular chains of causes may result in an 
+   * infinite loop.
+   * 
+   * @param rootError Throwable to start search from
+   * @param types Types of throwable classes looking to match against
+   * @return Throwable that matches one of the provided types, or {@code null} if none was found
+   */
+  public static Throwable getCauseOfTypes(Throwable rootError, 
+                                          Iterable&lt;? extends Class&lt;? extends Throwable&gt;&gt; types) {
+<span class="fc" id="L255">    ArgumentVerifier.assertNotNull(types, &quot;types&quot;);</span>
+<span class="fc bfc" id="L256" title="All 2 branches covered.">    if (rootError == null) {</span>
+<span class="fc" id="L257">      return null;</span>
+    }
+    
+<span class="fc" id="L260">    Throwable t = rootError;</span>
+    do {
+<span class="fc bfc" id="L262" title="All 2 branches covered.">      for (Class&lt;?&gt; c : types) {</span>
+<span class="fc bfc" id="L263" title="All 2 branches covered.">        if (c.isInstance(t)) {</span>
+<span class="fc" id="L264">          return t;</span>
+        }
+<span class="fc" id="L266">      }</span>
+<span class="fc" id="L267">      t = t.getCause();</span>
+<span class="pc bpc" id="L268" title="1 of 4 branches missed.">    } while (t != null &amp;&amp; t != rootError);</span>
+<span class="fc" id="L269">    return null;</span>
+  }
+  
+  /**
+   * Checks to see if the provided error, or any causes in the provided error match the provided 
+   * type.  This can be useful when trying to detect conditions where the actual condition may not 
+   * be the head cause, nor the root cause (but buried somewhere in the chain).  If the actual 
+   * exception is needed consider using {@link #getCauseOfTypes(Throwable, Iterable)}.  If you are 
+   * only comparing against one exception type {@link #hasCauseOfType(Throwable, Class)} is a 
+   * better option.
+   * 
+   * @param rootError Throwable to start search from
+   * @param types Types of throwable classes looking to match against
+   * @return {@code true} if a match was found, false if no exception cause matches any provided types
+   */
+  public static boolean hasCauseOfTypes(Throwable rootError, 
+                                        Iterable&lt;? extends Class&lt;? extends Throwable&gt;&gt; types) {
+<span class="fc bfc" id="L286" title="All 2 branches covered.">    return getCauseOfTypes(rootError, types) != null;</span>
+  }
+  
+  /**
+   * Checks to see if the provided error, or any causes in the provided error matching the 
+   * provided type.  This can be useful when trying to truncate an exception chain to only the 
+   * relevant information.  If the goal is only to determine if it exists or not consider using 
+   * {@link #hasCauseOfType(Throwable, Class)}.
+   * &lt;p&gt;
+   * This function does basic circular cause detection in that it will detect a cycle to the 
+   * originally provided {@link Throwable}.  But other circular chains of causes may result in an 
+   * infinite loop.
+   * 
+   * @param rootError Throwable to start search from
+   * @param type Type of throwable classes looking to match against
+   * @param &lt;T&gt; Type of throwable to return (must equal or be super type of generic class provided)
+   * @return Throwable that matches one of the provided types, or {@code null} if none was found
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)  // verified by generics
+  public static &lt;T extends Throwable&gt; T getCauseOfType(Throwable rootError, 
+                                                       Class&lt;? extends T&gt; type) {
+<span class="fc" id="L307">    ArgumentVerifier.assertNotNull(type, &quot;type&quot;);</span>
+<span class="fc bfc" id="L308" title="All 2 branches covered.">    if (rootError == null) {</span>
+<span class="fc" id="L309">      return null;</span>
+    }
+    
+<span class="fc" id="L312">    Throwable t = rootError;</span>
+    do {
+<span class="fc bfc" id="L314" title="All 2 branches covered.">      if (type.isInstance(t)) {</span>
+<span class="fc" id="L315">        return (T)t;</span>
+      }
+<span class="fc" id="L317">      t = t.getCause();</span>
+<span class="fc bfc" id="L318" title="All 4 branches covered.">    } while (t != null &amp;&amp; t != rootError);</span>
+<span class="fc" id="L319">    return null;</span>
+  }
+  
+  /**
+   * Checks to see if the provided error, or any causes in the provided error match the provided 
+   * type.  This can be useful when trying to detect conditions where the actual condition may not 
+   * be the head cause, nor the root cause (but buried somewhere in the chain).  If the actual 
+   * exception is needed consider using {@link #getCauseOfType(Throwable, Class)}.
+   * 
+   * @param rootError Throwable to start search from
+   * @param type Type of throwable classes looking to match against
+   * @return {@code true} if a match was found, false if no exception cause matches any provided types
+   */
+  public static boolean hasCauseOfType(Throwable rootError, Class&lt;? extends Throwable&gt; type) {
+<span class="fc bfc" id="L333" title="All 2 branches covered.">    return getCauseOfType(rootError, type) != null;</span>
+  }
+  
+  /**
+   * Convert throwable's stack and message into a simple string.
+   * 
+   * @param t throwable which contains stack
+   * @return string which contains the throwable stack trace
+   */
+  public static String stackToString(Throwable t) {
+<span class="fc bfc" id="L343" title="All 2 branches covered.">    if (t == null) {</span>
+<span class="fc" id="L344">      return &quot;&quot;;</span>
+    }
+    
+<span class="fc" id="L347">    String msg = t.getMessage();</span>
+<span class="fc bfc" id="L348" title="All 2 branches covered.">    int msgLength = (msg == null ? 0 : msg.length());</span>
+<span class="fc" id="L349">    StringBuilder sb = new StringBuilder(msgLength + INITIAL_BUFFER_PAD_AMOUNT_FOR_STACK);</span>
+    
+<span class="fc" id="L351">    writeStackTo(t, sb);</span>
+    
+<span class="fc" id="L353">    return sb.toString();</span>
+  }
+  
+  /**
+   * Formats and writes a throwable's stack trace to a provided {@link StringBuilder}.
+   * 
+   * @param t {@link Throwable} which contains stack
+   * @param sb StringBuilder to write output to
+   */
+  @SuppressWarnings(&quot;resource&quot;)
+  public static void writeStackTo(Throwable t, StringBuilder sb) {
+<span class="fc" id="L364">    writeStackTo(t, new StringBuilderWriter(sb));</span>
+<span class="fc" id="L365">  }</span>
+  
+  /**
+   * Formats and writes a throwable's stack trace to a provided {@link StringBuffer}.
+   * 
+   * @param t {@link Throwable} which contains stack
+   * @param sb StringBuffer to write output to
+   */
+  @SuppressWarnings(&quot;resource&quot;)
+  public static void writeStackTo(Throwable t, StringBuffer sb) {
+<span class="fc" id="L375">    writeStackTo(t, new StringBufferWriter(sb));</span>
+<span class="fc" id="L376">  }</span>
+  
+  /**
+   * Formats and writes a throwable's stack trace to a provided {@link Writer}.
+   * 
+   * @param t {@link Throwable} which contains stack
+   * @param w Writer to write output to
+   */
+  public static void writeStackTo(Throwable t, Writer w) {
+<span class="fc bfc" id="L385" title="All 2 branches covered.">    if (t == null) {</span>
+<span class="fc" id="L386">      return;</span>
+    }
+    
+<span class="fc" id="L389">    PrintWriter pw = new PrintWriter(w);</span>
+    try {
+<span class="fc" id="L391">      t.printStackTrace(pw);</span>
+<span class="fc" id="L392">      pw.flush();</span>
+    } finally {
+<span class="fc" id="L394">      pw.close();</span>
+    }
+<span class="fc" id="L396">  }</span>
+  
+  /**
+   * Writes the stack trace array out to a string.  This produces a stack trace string in a very 
+   * similar way as the {@link #stackToString(Throwable)} from a throwable would.
+   * 
+   * @param stack Array of stack elements to build the string off of
+   * @return String which is the stack in a human readable format
+   */
+  public static String stackToString(StackTraceElement[] stack) {
+<span class="fc bfc" id="L406" title="All 2 branches covered.">    if (stack == null) {</span>
+<span class="fc" id="L407">      return &quot;&quot;;</span>
+    }
+    
+<span class="fc" id="L410">    StringBuilder sb = new StringBuilder(stack.length * INITIAL_BUFFER_PAD_AMOUNT_PER_TRACE_LINE);</span>
+<span class="fc" id="L411">    writeStackTo(stack, sb);</span>
+    
+<span class="fc" id="L413">    return sb.toString();</span>
+  }
+  
+  /**
+   * Writes the stack to the provided StringBuilder.  This produces a stack trace string in 
+   * a very similar way as the {@link #writeStackTo(Throwable, StringBuilder)} would.
+   * 
+   * @param stack Array of stack elements to build the string off of
+   * @param stringBuilder StringBuilder to write the stack out to
+   */
+  public static void writeStackTo(StackTraceElement[] stack, StringBuilder stringBuilder) {
+<span class="fc bfc" id="L424" title="All 2 branches covered.">    if (stack == null) {</span>
+<span class="fc" id="L425">      return;</span>
+    }
+<span class="fc" id="L427">    ArgumentVerifier.assertNotNull(stringBuilder, &quot;stringBuilder&quot;);</span>
+    
+<span class="fc bfc" id="L429" title="All 2 branches covered.">    for (StackTraceElement ste : stack) {</span>
+<span class="fc" id="L430">      stringBuilder.append(&quot;\t at &quot;).append(ste.toString()).append(System.lineSeparator());</span>
+    }
+<span class="fc" id="L432">  }</span>
+  
+  /**
+   * Exception which is constructed from {@link #makeRuntime(Throwable)} when the exception was 
+   * not a runtime exception.
+   * 
+   * @since 1.0.0
+   */
+  public static class TransformedException extends RuntimeException {
+    private static final long serialVersionUID = 4524467217814731188L;
+
+    /**
+     * Constructs a new TransformedException.
+     * 
+     * @param message message for exception
+     * @param t throwable cause
+     */
+    protected TransformedException(Throwable t) {
+<span class="fc bfc" id="L450" title="All 2 branches covered.">      super(t == null ? null : t.getMessage(), t);</span>
+<span class="fc" id="L451">    }</span>
+  }
+  
+  /**
+   * Exception which is constructed from {@link #makeRuntime(Throwable, boolean)} when the 
+   * exception was not a runtime exception, and stack is being suppressed.
+   * 
+   * @since 4.8.0
+   */
+  public static class TransformedSuppressedStackException extends SuppressedStackRuntimeException {
+    private static final long serialVersionUID = 6501962264714125183L;
+
+    /**
+     * Constructs a new TransformedSuppressedStackException.
+     * 
+     * @param message message for exception
+     * @param t throwable cause
+     */
+    protected TransformedSuppressedStackException(Throwable t) {
+<span class="pc bpc" id="L470" title="1 of 2 branches missed.">      super(t == null ? null : t.getMessage(), t);</span>
+<span class="fc" id="L471">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

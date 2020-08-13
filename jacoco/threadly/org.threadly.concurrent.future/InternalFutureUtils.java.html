@@ -1,0 +1,900 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>InternalFutureUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">InternalFutureUtils.java</span></div><h1>InternalFutureUtils.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import org.threadly.concurrent.SameThreadSubmitterExecutor;
+import org.threadly.concurrent.future.ListenableFuture.ListenerOptimizationStrategy;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.SuppressedStackRuntimeException;
+
+/**
+ * Package protected utility classes and functions for operating on Futures.  Implementation 
+ * heavily serves the functionality provided by {@link FutureUtils}.  This should not be depended 
+ * on externally as it's API's should be considered unstable.
+ * 
+ * @since 5.29
+ */
+<span class="nc" id="L29">class InternalFutureUtils {</span>
+  /**
+   * Transform a future's result into another future by applying the provided transformation 
+   * function.  If the future completed in error, then the mapper will not be invoked, and instead 
+   * the returned future will be completed in the same error state this future resulted in.  If the 
+   * mapper function itself throws an Exception, then the returned future will result in the error 
+   * thrown from the mapper.  
+   * &lt;p&gt;
+   * This can be easily used to chain together a series of operations, happening async until the 
+   * final result is actually needed.  Once the future completes the mapper function will be invoked 
+   * on the executor (if provided).  Because of that providing an executor can ensure this will 
+   * never block.  If an executor is not provided then the mapper may be invoked on the calling 
+   * thread (if the future is already complete), or on the same thread which the future completes 
+   * on.  If the mapper function is very fast and cheap to run then {@link #map(Function)} or 
+   * providing {@code null} for the executor can allow more efficient operation.
+   * 
+   * @since 5.0
+   * @param &lt;ST&gt; The source type for the object returned from the future and inputed into the mapper
+   * @param &lt;RT&gt; The result type for the object returned from the mapper
+   * @param sourceFuture Future to source input into transformation function
+   * @param mapper Function to apply result from future into returned future
+   * @param reportedTransformedExceptions {@code true} to indicate transformer is not expected to throw exception.
+   *                                          If any are thrown they will be delegated to 
+   *                                          {@link ExceptionUtils#handleException(Throwable)}.
+   * @param executor Executor to execute transformation function on, or {@code null}
+   * @param optimizeExecution Optionally optimize the execution on to the source futures thread if possible
+   * @return Future with result of transformation function or respective error
+   */
+  protected static &lt;ST, RT&gt; ListenableFuture&lt;RT&gt; transform(ListenableFuture&lt;ST&gt; sourceFuture, 
+                                                           Supplier&lt;String&gt; cancelationMessageProvider, 
+                                                           Function&lt;? super ST, ? extends RT&gt; mapper, 
+                                                           boolean reportedTransformedExceptions, 
+                                                           Executor executor, 
+                                                           ListenerOptimizationStrategy optimizeExecution) {
+<span class="pc bpc" id="L63" title="1 of 6 branches missed.">    if ((executor == null | optimizeExecution == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone) &amp;&amp; </span>
+<span class="fc bfc" id="L64" title="All 4 branches covered.">        sourceFuture.isDone() &amp;&amp; ! sourceFuture.isCancelled()) {</span>
+      try { // optimized path for already complete futures which we can now process in thread
+<span class="fc" id="L66">        return FutureUtils.immediateResultFuture(mapper.apply(sourceFuture.get()));</span>
+<span class="nc" id="L67">      } catch (InterruptedException e) {  // should not be possible</span>
+<span class="nc" id="L68">        throw new RuntimeException(e);</span>
+<span class="fc" id="L69">      } catch (ExecutionException e) { // failure in getting result from future, transfer failure</span>
+<span class="fc" id="L70">        return FutureUtils.immediateFailureFuture(e.getCause());</span>
+<span class="fc" id="L71">      } catch (Throwable t) {</span>
+<span class="fc bfc" id="L72" title="All 2 branches covered.">        if (reportedTransformedExceptions) {</span>
+          // failure calculating transformation, let handler get a chance to see the uncaught exception
+          // This makes the behavior closer to if the exception was thrown from a task submitted to the pool
+<span class="fc" id="L75">          ExceptionUtils.handleException(t);</span>
+        }
+        
+<span class="fc" id="L78">        return FutureUtils.immediateFailureFuture(t);</span>
+      }
+<span class="fc bfc" id="L80" title="All 2 branches covered.">    } else if (sourceFuture.isCancelled()) { // shortcut to avoid exception generation</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">      return new ImmediateCanceledListenableFuture&lt;&gt;(cancelationMessageProvider == null ? </span>
+<span class="fc" id="L82">                                                       null : cancelationMessageProvider.get());</span>
+    } else {
+<span class="fc" id="L84">      SettableListenableFuture&lt;RT&gt; slf = </span>
+          new CancelDelegateSettableListenableFuture&lt;&gt;(sourceFuture, executor);
+      // may still process in thread if future completed after check and executor is null
+<span class="fc" id="L87">      sourceFuture.addCallback(new FailurePropogatingFutureCallback&lt;ST&gt;(slf) {</span>
+        @Override
+        public void handleResult(ST result) {
+          try {
+<span class="fc" id="L91">            slf.setRunningThread(Thread.currentThread());</span>
+<span class="fc" id="L92">            slf.setResult(mapper.apply(result));</span>
+<span class="fc" id="L93">          } catch (Throwable t) {</span>
+<span class="fc bfc" id="L94" title="All 2 branches covered.">            if (reportedTransformedExceptions) {</span>
+              // failure calculating transformation, let handler get a chance to see the uncaught exception
+              // This makes the behavior closer to if the exception was thrown from a task submitted to the pool
+<span class="fc" id="L97">              ExceptionUtils.handleException(t);</span>
+            }
+            
+<span class="fc" id="L100">            slf.setFailure(t);</span>
+<span class="fc" id="L101">          }</span>
+<span class="fc" id="L102">        }</span>
+      }, executor, optimizeExecution);
+<span class="fc" id="L104">      return slf;</span>
+    }
+  }
+  
+  /**
+   * Similar to {@link #transform(ListenableFuture, Function, Executor, ListenerOptimizationStrategy)} 
+   * except designed to handle functions which return futures.  This will take what otherwise 
+   * would be {@code ListenableFuture&lt;ListenableFuture&lt;R&gt;&gt;}, and flattens it into a single future 
+   * which will resolve once the contained future is complete.
+   * 
+   * @since 5.0
+   * @param &lt;ST&gt; The source type for the object returned from the future and inputed into the mapper
+   * @param &lt;RT&gt; The result type for the object contained in the future returned from the mapper
+   * @param sourceFuture Future to source input into transformation function
+   * @param mapper Function to apply result from future into returned future
+   * @param executor Executor to execute transformation function on, or {@code null}
+   * @param optimizeExecution Optionally optimize the execution on to the source futures thread if possible
+   * @return Future with result of transformation function or respective error
+   */
+  protected static &lt;ST, RT&gt; ListenableFuture&lt;RT&gt; flatTransform(ListenableFuture&lt;? extends ST&gt; sourceFuture, 
+                                                               Supplier&lt;String&gt; cancelationMessageProvider, 
+                                                               Function&lt;? super ST, ListenableFuture&lt;RT&gt;&gt; mapper, 
+                                                               Executor executor, 
+                                                               ListenerOptimizationStrategy optimizeExecution) {
+<span class="pc bpc" id="L128" title="1 of 6 branches missed.">    if ((executor == null | optimizeExecution == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone) &amp;&amp; </span>
+<span class="fc bfc" id="L129" title="All 4 branches covered.">        sourceFuture.isDone() &amp;&amp; ! sourceFuture.isCancelled()) {</span>
+      try { // optimized path for already complete futures which we can now process in thread
+<span class="fc" id="L131">        return mapper.apply(sourceFuture.get());</span>
+<span class="nc" id="L132">      } catch (InterruptedException e) {  // should not be possible</span>
+<span class="nc" id="L133">        throw new RuntimeException(e);</span>
+<span class="fc" id="L134">      } catch (ExecutionException e) { // failure in getting result from future, transfer failure</span>
+<span class="fc" id="L135">        return FutureUtils.immediateFailureFuture(e.getCause());</span>
+<span class="fc" id="L136">      } catch (Throwable t) {</span>
+        // failure calculating transformation, let handler get a chance to see the uncaught exception
+        // This makes the behavior closer to if the exception was thrown from a task submitted to the pool
+<span class="fc" id="L139">        ExceptionUtils.handleException(t);</span>
+        
+<span class="fc" id="L141">        return FutureUtils.immediateFailureFuture(t);</span>
+      }
+<span class="fc bfc" id="L143" title="All 2 branches covered.">    } else if (sourceFuture.isCancelled()) { // shortcut to avoid exception generation</span>
+<span class="fc bfc" id="L144" title="All 2 branches covered.">      return new ImmediateCanceledListenableFuture&lt;&gt;(cancelationMessageProvider == null ? </span>
+<span class="fc" id="L145">                                                       null : cancelationMessageProvider.get());</span>
+    } else {
+<span class="fc" id="L147">      CancelDelegateSettableListenableFuture&lt;RT&gt; slf = </span>
+          new CancelDelegateSettableListenableFuture&lt;&gt;(sourceFuture, executor);
+<span class="fc" id="L149">      sourceFuture.addCallback(new FailurePropogatingFutureCallback&lt;ST&gt;(slf) {</span>
+        @Override
+        public void handleResult(ST result) {
+          try {
+<span class="fc" id="L153">            slf.setRunningThread(Thread.currentThread());</span>
+<span class="fc" id="L154">            ListenableFuture&lt;? extends RT&gt; mapFuture = mapper.apply(result);</span>
+<span class="fc" id="L155">            slf.updateDelegateFuture(mapFuture);</span>
+<span class="fc" id="L156">            mapFuture.addCallback(slf);</span>
+<span class="fc" id="L157">            slf.setRunningThread(null); // may be processing async now</span>
+<span class="fc" id="L158">          } catch (Throwable t) {</span>
+            // failure calculating transformation, let handler get a chance to see the uncaught exception
+            // This makes the behavior closer to if the exception was thrown from a task submitted to the pool
+<span class="fc" id="L161">            ExceptionUtils.handleException(t);</span>
+            
+<span class="fc" id="L163">            slf.setFailure(t);</span>
+<span class="fc" id="L164">          }</span>
+<span class="fc" id="L165">        }</span>
+      }, executor, optimizeExecution);
+<span class="fc" id="L167">      return slf;</span>
+    }
+  }
+
+  /**
+   * Transform a future's failure condition into another future by applying the transformation 
+   * function.  The mapper can then choose to either throw an exception, or convert the exception 
+   * back into a normal result.
+   * &lt;p&gt;
+   * This can be easily used to chain together a series of operations, happening async until the 
+   * final result is actually needed.  Once the future completes the mapper function will be invoked 
+   * on the executor (if provided).  Because of that providing an executor can ensure this will 
+   * never block.  If an executor is not provided then the mapper may be invoked on the calling 
+   * thread (if the future is already complete), or on the same thread which the future completes 
+   * on.
+   * 
+   * @since 5.17
+   * @param &lt;TT&gt; The type of throwable that should be handled
+   * @param &lt;RT&gt; The result type for the object returned from the mapper
+   * @param sourceFuture Future to source input into transformation function
+   * @param mapper Function to apply result from future into returned future
+   * @param throwableType The type of throwable that the {@code mapper} can accept
+   * @param executor Executor to execute transformation function on, or {@code null}
+   * @param optimizeExecution Optionally optimize the execution on to the source futures thread if possible
+   * @param cancelationMessageSupplier an optional supplier for a message when a cancel is generated
+   * @return Future with result of transformation function or respective error
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  protected static &lt;TT extends Throwable, RT&gt; ListenableFuture&lt;RT&gt; 
+      failureTransform(ListenableFuture&lt;RT&gt; sourceFuture, Supplier&lt;String&gt; cancelationMessageProvider,
+                       Function&lt;? super TT, ? extends RT&gt; mapper, Class&lt;TT&gt; throwableType, 
+                       Executor executor, ListenerOptimizationStrategy optimizeExecution) {
+<span class="pc bpc" id="L199" title="1 of 6 branches missed.">    if ((executor == null | optimizeExecution == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone) &amp;&amp; </span>
+<span class="fc bfc" id="L200" title="All 2 branches covered.">        sourceFuture.isDone()) { // optimized path for already complete futures which we can now process in thread</span>
+<span class="fc bfc" id="L201" title="All 2 branches covered.">      if (sourceFuture.isCancelled()) { // shortcut to avoid exception generation</span>
+<span class="pc bpc" id="L202" title="2 of 4 branches missed.">        if (throwableType == null || throwableType.isAssignableFrom(CancellationException.class)) {</span>
+          try {
+<span class="pc bpc" id="L204" title="1 of 2 branches missed.">            String msg = cancelationMessageProvider == null ? null : cancelationMessageProvider.get();</span>
+<span class="nc" id="L205">            return FutureUtils.immediateResultFuture(mapper.apply((TT)new CancellationException(msg)));</span>
+<span class="fc" id="L206">          } catch (Throwable t) {</span>
+<span class="fc" id="L207">            return FutureUtils.immediateFailureFuture(t);</span>
+          }
+        } else {
+<span class="nc" id="L210">          return sourceFuture;</span>
+        }
+      } else {
+        try {
+<span class="fc" id="L214">          sourceFuture.get();</span>
+<span class="fc" id="L215">          return sourceFuture;  // no error</span>
+<span class="nc" id="L216">        } catch (InterruptedException e) {  // should not be possible</span>
+<span class="nc" id="L217">          throw new RuntimeException(e);</span>
+<span class="fc" id="L218">        } catch (ExecutionException e) {</span>
+<span class="fc bfc" id="L219" title="All 4 branches covered.">          if (throwableType == null || throwableType.isAssignableFrom(e.getCause().getClass())) {</span>
+            try {
+<span class="fc" id="L221">              return FutureUtils.immediateResultFuture(mapper.apply((TT)e.getCause()));</span>
+<span class="fc" id="L222">            } catch (Throwable t) {</span>
+<span class="fc" id="L223">              return FutureUtils.immediateFailureFuture(t);</span>
+            }
+          } else {
+<span class="fc" id="L226">            return sourceFuture;</span>
+          }
+        }
+      }
+    }
+    
+<span class="fc" id="L232">    SettableListenableFuture&lt;RT&gt; slf = </span>
+        new CancelDelegateSettableListenableFuture&lt;&gt;(sourceFuture, executor);
+    // may still process in thread if future completed after check and executor is null
+<span class="fc" id="L235">    sourceFuture.addCallback(new FutureCallback&lt;RT&gt;() {</span>
+      @Override
+      public void handleResult(RT result) {
+<span class="fc" id="L238">        slf.setResult(result);</span>
+<span class="fc" id="L239">      }</span>
+      
+      @Override
+      public void handleFailure(Throwable t) {
+<span class="pc bpc" id="L243" title="1 of 4 branches missed.">        if (throwableType == null || throwableType.isAssignableFrom(t.getClass())) {</span>
+          try {
+<span class="fc" id="L245">            slf.setRunningThread(Thread.currentThread());</span>
+<span class="fc" id="L246">            slf.setResult(mapper.apply((TT)t));</span>
+<span class="fc" id="L247">          } catch (Throwable newT) {</span>
+<span class="fc" id="L248">            slf.setFailure(newT);</span>
+<span class="fc" id="L249">          }</span>
+        } else {
+<span class="fc" id="L251">          slf.setFailure(t);</span>
+        }
+<span class="fc" id="L253">      }</span>
+    }, executor, optimizeExecution);
+<span class="fc" id="L255">    return slf;</span>
+  }
+
+  /**
+   * Similar to {@link #failureTransform(ListenableFuture, Function, Executor)} except designed to 
+   * handle mapper functions which return futures.  This will take what otherwise would be 
+   * {@code ListenableFuture&lt;ListenableFuture&lt;R&gt;&gt;}, and flattens it into a single future which will 
+   * resolve once the contained future is complete.
+   * 
+   * @since 5.17
+   * @param &lt;TT&gt; The type of throwable that should be handled
+   * @param &lt;RT&gt; The result type for the object contained in the future returned from the mapper
+   * @param sourceFuture Future to source input into transformation function
+   * @param cancelationMessageSupplier an optional supplier for a message when a cancel is generated
+   * @param mapper Function to apply result from future into returned future
+   * @param throwableType The type of throwable that the {@code mapper} can accept
+   * @param executor Executor to execute transformation function on, or {@code null}
+   * @param optimizeExecution Optionally optimize the execution on to the source futures thread if possible
+   * @return Future with result of transformation function or respective error
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  protected static &lt;TT extends Throwable, RT&gt; ListenableFuture&lt;RT&gt; 
+      flatFailureTransform(ListenableFuture&lt;RT&gt; sourceFuture, Supplier&lt;String&gt; cancelationMessageSupplier,
+                           Function&lt;? super TT, ListenableFuture&lt;RT&gt;&gt; mapper, Class&lt;TT&gt; throwableType, 
+                           Executor executor, ListenerOptimizationStrategy optimizeExecution) {
+<span class="pc bpc" id="L280" title="1 of 6 branches missed.">    if ((executor == null | optimizeExecution == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone) &amp;&amp; </span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">        sourceFuture.isDone()) { // optimized path for already complete futures which we can now process in thread</span>
+<span class="fc bfc" id="L282" title="All 2 branches covered.">      if (sourceFuture.isCancelled()) { // shortcut to avoid exception generation</span>
+<span class="pc bpc" id="L283" title="2 of 4 branches missed.">        if (throwableType == null || throwableType.isAssignableFrom(CancellationException.class)) {</span>
+          try {
+<span class="pc bpc" id="L285" title="1 of 2 branches missed.">            String msg = cancelationMessageSupplier == null ? null : cancelationMessageSupplier.get();</span>
+<span class="fc" id="L286">            return mapper.apply((TT)new CancellationException(msg));</span>
+<span class="nc" id="L287">          } catch (Throwable t) {</span>
+<span class="nc" id="L288">            return FutureUtils.immediateFailureFuture(t);</span>
+          }
+        } else {
+<span class="nc" id="L291">          return sourceFuture;</span>
+        }
+      } else {
+        try {
+<span class="fc" id="L295">          sourceFuture.get();</span>
+<span class="fc" id="L296">          return sourceFuture;  // no error</span>
+<span class="nc" id="L297">        } catch (InterruptedException e) {  // should not be possible</span>
+<span class="nc" id="L298">          throw new RuntimeException(e);</span>
+<span class="fc" id="L299">        } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L300" title="1 of 4 branches missed.">          if (throwableType == null || throwableType.isAssignableFrom(e.getCause().getClass())) {</span>
+            try {
+<span class="fc" id="L302">              return mapper.apply((TT)e.getCause());</span>
+<span class="fc" id="L303">            } catch (Throwable t) {</span>
+<span class="fc" id="L304">              return FutureUtils.immediateFailureFuture(t);</span>
+            }
+          } else {
+<span class="fc" id="L307">            return sourceFuture;</span>
+          }
+        }
+      }
+    }
+    
+<span class="fc" id="L313">    CancelDelegateSettableListenableFuture&lt;RT&gt; slf = </span>
+        new CancelDelegateSettableListenableFuture&lt;&gt;(sourceFuture, executor);
+    // may still process in thread if future completed after check and executor is null
+<span class="fc" id="L316">    sourceFuture.addCallback(new FutureCallback&lt;RT&gt;() {</span>
+      @Override
+      public void handleResult(RT result) {
+<span class="fc" id="L319">        slf.setResult(result);</span>
+<span class="fc" id="L320">      }</span>
+      
+      @Override
+      public void handleFailure(Throwable t) {
+<span class="pc bpc" id="L324" title="1 of 4 branches missed.">        if (throwableType == null || throwableType.isAssignableFrom(t.getClass())) {</span>
+          try {
+<span class="fc" id="L326">            slf.setRunningThread(Thread.currentThread());</span>
+<span class="fc" id="L327">            ListenableFuture&lt;RT&gt; mapFuture = mapper.apply((TT)t);</span>
+<span class="fc" id="L328">            slf.updateDelegateFuture(mapFuture);</span>
+<span class="fc" id="L329">            mapFuture.addCallback(slf);</span>
+<span class="fc" id="L330">            slf.setRunningThread(null); // may be processing async now</span>
+<span class="fc" id="L331">          } catch (Throwable newT) {</span>
+<span class="fc" id="L332">            slf.setFailure(newT);</span>
+<span class="fc" id="L333">          }</span>
+        } else {
+<span class="fc" id="L335">          slf.setFailure(t);</span>
+        }
+<span class="fc" id="L337">      }</span>
+    }, executor, optimizeExecution);
+<span class="fc" id="L339">    return slf;</span>
+  }
+  
+  /**
+   * Class which will propagate a failure condition to a {@link SettableListenableFuture} from a 
+   * source future which this is added as a {@link FutureCallback} to.
+   * 
+   * @since 5.0
+   * @param &lt;T&gt; Type of result to be accepted by {@link FutureCallback}
+   */
+  protected abstract static class FailurePropogatingFutureCallback&lt;T&gt; implements FutureCallback&lt;T&gt; {
+    /**
+     * The instance of the only exception which this callback will not propagate.  It must be the 
+     * exact exception, and can not be hidden inside a cause chain.
+     */
+<span class="fc" id="L354">    protected static final RuntimeException IGNORED_FAILURE = new SuppressedStackRuntimeException();</span>
+    
+    private final SettableListenableFuture&lt;?&gt; settableFuture;
+    
+<span class="fc" id="L358">    protected FailurePropogatingFutureCallback(SettableListenableFuture&lt;?&gt; settableFuture) {</span>
+<span class="fc" id="L359">      this.settableFuture = settableFuture;</span>
+<span class="fc" id="L360">    }</span>
+    
+    @Override
+    public void handleFailure(Throwable t) {
+<span class="pc bpc" id="L364" title="1 of 2 branches missed.">      if (t == IGNORED_FAILURE) {</span>
+        // ignored
+      } else {
+<span class="fc" id="L367">        settableFuture.handleFailure(t);</span>
+      }
+<span class="fc" id="L369">    }</span>
+  }
+
+  /**
+   * Implementation of {@link SettableListenableFuture} which delegates it's cancel operation to a 
+   * parent future.
+   * 
+   * @since 4.1.0
+   * @param &lt;T&gt; The result object type returned from the futures
+   */
+  protected static class CancelDelegateSettableListenableFuture&lt;T&gt; extends SettableListenableFuture&lt;T&gt; {
+    private volatile ListenableFuture&lt;?&gt; delegateFuture;
+
+    protected CancelDelegateSettableListenableFuture(ListenableFuture&lt;?&gt; lf, 
+                                                     Executor executingExecutor) {
+<span class="fc" id="L384">      super(false, executingExecutor);</span>
+      
+<span class="fc" id="L386">      delegateFuture = lf;</span>
+<span class="fc" id="L387">    }</span>
+    
+    public void updateDelegateFuture(ListenableFuture&lt;?&gt; lf) {
+<span class="fc" id="L390">      this.delegateFuture = lf;</span>
+<span class="fc" id="L391">    }</span>
+    
+    @Override
+    protected boolean setDone(Throwable cause) {
+<span class="fc bfc" id="L395" title="All 2 branches covered.">      if (super.setDone(cause)) {</span>
+<span class="fc" id="L396">        delegateFuture = null;</span>
+<span class="fc" id="L397">        return true;</span>
+      } else {
+<span class="fc" id="L399">        return false;</span>
+      }
+    }
+
+    @Override
+    public StackTraceElement[] getRunningStackTrace() {
+<span class="fc" id="L405">      ListenableFuture&lt;?&gt; delegateFuture = this.delegateFuture;</span>
+<span class="fc bfc" id="L406" title="All 2 branches covered.">      if (delegateFuture != null) {</span>
+<span class="fc" id="L407">        StackTraceElement[] result = delegateFuture.getRunningStackTrace();</span>
+<span class="fc bfc" id="L408" title="All 2 branches covered.">        if (result != null) {</span>
+<span class="fc" id="L409">          return result;</span>
+        }
+      }
+<span class="fc" id="L412">      return super.getRunningStackTrace();</span>
+    }
+    
+    protected boolean cancelRegardlessOfDelegateFutureState(boolean interruptThread) {
+<span class="fc" id="L416">      ListenableFuture&lt;?&gt; cancelDelegateFuture = this.delegateFuture;</span>
+<span class="pc bpc" id="L417" title="1 of 2 branches missed.">      if (super.cancel(interruptThread)) {</span>
+<span class="fc" id="L418">        cancelDelegateFuture.cancel(interruptThread);</span>
+<span class="fc" id="L419">        return true;</span>
+      } else {
+<span class="nc" id="L421">        return false;</span>
+      }
+    }
+
+    @Override
+    public boolean cancel(boolean interruptThread) {
+<span class="fc bfc" id="L427" title="All 2 branches covered.">      if (interruptThread) {</span>
+        // if we want to interrupt, we want to try to cancel ourselves even if our delegate has 
+        // already completed (in case there is processing associated to this future we can avoid)
+<span class="fc" id="L430">        return cancelRegardlessOfDelegateFutureState(true);</span>
+      }
+      /**
+       * The below code is inspired from the `super` implementation.  We must re-implement it in 
+       * order to handle the case where canceling the delegate future may cancel ourselves (due to 
+       * being a listener).  To solve this we synchronize the `resultLock` first, and know if we 
+       * transition to `done` while holding the lock, it must be because we are a listener.
+       * 
+       * A simple nieve implementation may look like:
+         if (cancelDelegateFuture.cancel(false)) {
+           super.cancel(false);
+           return true;
+         } else {
+           return false;
+         }
+       * This solves the listener problem by ignoring the need for `super` to cancel.  This likely 
+       * will work for most situations, but has the risk that this future may have completed 
+       * unexpectedly and we signal that it was canceled when really it completed with a result or 
+       * failure.
+       */
+<span class="pc bpc" id="L450" title="1 of 2 branches missed.">      if (isDone()) {</span>
+<span class="nc" id="L451">        return false;</span>
+      }
+      
+<span class="fc" id="L454">      boolean canceled = false;</span>
+<span class="fc" id="L455">      boolean callListeners = false;</span>
+<span class="fc" id="L456">      synchronized (resultLock) {</span>
+<span class="pc bpc" id="L457" title="1 of 2 branches missed.">        if (! isDone()) {</span>
+<span class="fc bfc" id="L458" title="All 2 branches covered.">          if (delegateFuture.cancel(false)) {</span>
+<span class="fc" id="L459">            canceled = true;</span>
+<span class="pc bpc" id="L460" title="1 of 2 branches missed.">            if (! isDone()) { // may have transitioned to canceled already as a listener (within lock)</span>
+<span class="nc" id="L461">              callListeners = true;</span>
+<span class="nc" id="L462">              setCanceled();</span>
+            }
+          }
+        }
+<span class="fc" id="L466">      }</span>
+      
+<span class="pc bpc" id="L468" title="1 of 2 branches missed.">      if (callListeners) {</span>
+        // call outside of lock
+<span class="nc" id="L470">        listenerHelper.callListeners();</span>
+<span class="nc" id="L471">        runningThread = null;</span>
+      }
+      
+<span class="fc" id="L474">      return canceled;</span>
+    }
+  }
+  
+  /**
+   * A future implementation that will return a List of futures as the result.  The future will 
+   * not be satisfied till all provided futures have completed.
+   * 
+   * @since 1.2.0
+   * @param &lt;T&gt; The result object type returned from the futures
+   */
+  protected abstract static class FutureCollection&lt;T&gt; 
+      extends SettableListenableFuture&lt;List&lt;ListenableFuture&lt;? extends T&gt;&gt;&gt; {
+    @SuppressWarnings(&quot;rawtypes&quot;)
+<span class="fc" id="L488">    private static final ListenableFuture[] EMPTY_ARRAY = new ListenableFuture[0];</span>
+    
+    protected final AtomicInteger remainingResult;
+    private ArrayList&lt;ListenableFuture&lt;? extends T&gt;&gt; futures;
+    protected ListenableFuture&lt;? extends T&gt;[] buildingResult;
+    
+    
+    @SuppressWarnings(&quot;unchecked&quot;)
+    protected FutureCollection(Iterable&lt;? extends ListenableFuture&lt;? extends T&gt;&gt; source) {
+<span class="fc" id="L497">      super(false);</span>
+      
+<span class="fc" id="L499">      remainingResult = new AtomicInteger(0); // may go negative if results finish before all are added</span>
+<span class="fc" id="L500">      futures = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L501">      buildingResult = EMPTY_ARRAY;</span>
+
+<span class="fc" id="L503">      int count = 0;</span>
+<span class="fc bfc" id="L504" title="All 2 branches covered.">      if (source != null) {</span>
+<span class="fc" id="L505">        Iterator&lt;? extends ListenableFuture&lt;? extends T&gt;&gt; it = source.iterator();</span>
+<span class="fc bfc" id="L506" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L507">          ListenableFuture&lt;? extends T&gt; f = it.next();</span>
+<span class="fc" id="L508">          futures.add(f);</span>
+<span class="fc" id="L509">          attachFutureDoneTask(f, count++);</span>
+<span class="fc" id="L510">        }</span>
+      }
+      
+<span class="fc" id="L513">      init(count);</span>
+      
+      // we need to verify that all futures have not already completed
+<span class="fc bfc" id="L516" title="All 2 branches covered.">      if (remainingResult.addAndGet(count) == 0) {</span>
+<span class="fc" id="L517">        setResult(getFinalResultList());</span>
+      } else {
+<span class="fc" id="L519">        futures.trimToSize();</span>
+      }
+      
+<span class="fc" id="L522">      addListener(() -&gt; futures = null);</span>
+<span class="fc" id="L523">    }</span>
+    
+    /**
+     * Called to inform expected future sizes.  {@link #attachFutureDoneTask(ListenableFuture, int)} 
+     * will be invoked BEFORE this.  In addition those futures may complete before init is invoked, 
+     * so this is more of a hint for future optimization.
+     * 
+     * @param futureCount Total number of futures in this collection
+     */
+    protected void init(int futureCount) {
+<span class="fc" id="L533">      synchronized (this) {</span>
+<span class="fc" id="L534">        ensureCapacity(futureCount);</span>
+<span class="fc" id="L535">      }</span>
+<span class="fc" id="L536">    }</span>
+    
+    // MUST synchronize `this` before calling
+    @SuppressWarnings(&quot;unchecked&quot;)
+    protected ListenableFuture&lt;? extends T&gt;[] ensureCapacity(int capacity) {
+<span class="fc bfc" id="L541" title="All 2 branches covered.">      if (buildingResult.length &lt; capacity) {</span>
+<span class="fc" id="L542">        buildingResult = Arrays.copyOf(buildingResult, capacity);</span>
+      }
+<span class="fc" id="L544">      return buildingResult;</span>
+    }
+    
+    /**
+     * Adds item to the result list.  This list may be lazily constructed and thus why you must add 
+     * through this function rather than directly on to the list.
+     */
+    protected void addResult(ListenableFuture&lt;? extends T&gt; f, int index) {
+<span class="fc" id="L552">      synchronized (this) {</span>
+<span class="fc" id="L553">        ensureCapacity(index + 1)[index] = f;</span>
+<span class="fc" id="L554">      }</span>
+<span class="fc" id="L555">    }</span>
+    
+    /**
+     * Attach a {@link FutureDoneTask} to the provided future.  This is necessary for tracking as 
+     * futures complete, failing to attach a task could result in this future never completing.  
+     * &lt;p&gt;
+     * This is provided as a separate function so it can be overriden to provide different 
+     * {@link FutureDoneTask} implementation.
+     * 
+     * @param f Future to attach to
+     * @param index The index associated to the future
+     */
+    protected void attachFutureDoneTask(ListenableFuture&lt;? extends T&gt; f, int index) {
+<span class="fc" id="L568">      f.addListener(new FutureDoneTask(f, index), SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L569">    }</span>
+    
+    @Override
+    public boolean cancel(boolean interrupt) {
+      // we need a copy in case canceling clears out the futures
+<span class="fc" id="L574">      ArrayList&lt;ListenableFuture&lt;? extends T&gt;&gt; futures = this.futures;</span>
+<span class="pc bpc" id="L575" title="1 of 2 branches missed.">      if (super.cancel(interrupt)) {</span>
+<span class="fc" id="L576">        FutureUtils.cancelIncompleteFutures(futures, interrupt);</span>
+<span class="fc" id="L577">        return true;</span>
+      } else {
+<span class="nc" id="L579">        return false;</span>
+      }
+    }
+    
+    /**
+     * Gives the implementing class the option to save or check the completed future.
+     * 
+     * @param f {@link ListenableFuture} that has completed
+     * @param index The index associated to the future
+     */
+    protected abstract void handleFutureDone(ListenableFuture&lt;? extends T&gt; f, int index);
+
+    /**
+     * Will only be called once, and all allocated resources can be freed after this point.
+     * 
+     * @return List to satisfy ListenableFuture result with
+     */
+    protected List&lt;ListenableFuture&lt;? extends T&gt;&gt; getFinalResultList() {
+<span class="fc bfc" id="L597" title="All 2 branches covered.">      if (buildingResult == EMPTY_ARRAY) {</span>
+<span class="fc" id="L598">        return Collections.emptyList();</span>
+      } else {
+<span class="fc" id="L600">        List&lt;ListenableFuture&lt;? extends T&gt;&gt; result = Arrays.asList(buildingResult);</span>
+<span class="fc" id="L601">        buildingResult = null;</span>
+<span class="fc" id="L602">        return result;</span>
+      }
+    }
+    
+    /**
+     * Task which is ran after a future completes.  This is used internally to track how many 
+     * outstanding tasks are remaining, as well as used to collect the results if desired.
+     * 
+     * @since 4.7.0
+     */
+    protected class FutureDoneTask implements Runnable {
+      private final ListenableFuture&lt;? extends T&gt; f;
+      private final int index;
+      
+<span class="fc" id="L616">      protected FutureDoneTask(ListenableFuture&lt;? extends T&gt; f, int index) {</span>
+<span class="fc" id="L617">        this.f = f;</span>
+<span class="fc" id="L618">        this.index = index;</span>
+<span class="fc" id="L619">      }</span>
+      
+      @Override
+      public void run() {
+        try {  // exceptions should not be possible, but done for robustness
+<span class="fc" id="L624">          handleFutureDone(f, index);</span>
+        } finally {
+          // all futures are now done
+<span class="fc bfc" id="L627" title="All 2 branches covered.">          if (remainingResult.decrementAndGet() == 0) {</span>
+<span class="fc" id="L628">            setResult(getFinalResultList());</span>
+          }
+        }
+<span class="fc" id="L631">      }</span>
+    }
+  }
+  
+  /**
+   * A future implementation that will be satisfied till all provided futures have completed.
+   * 
+   * @since 1.2.0
+   */
+  protected static class EmptyFutureCollection extends FutureCollection&lt;Object&gt; {
+    private Runnable doneTaskSingleton;
+    
+    protected EmptyFutureCollection(Iterable&lt;? extends ListenableFuture&lt;?&gt;&gt; source) {
+<span class="fc" id="L644">      super(source);</span>
+<span class="fc" id="L645">    }</span>
+    
+    @Override
+    protected void init(int futureCount) {
+      // don't init collection, result ignored
+<span class="fc" id="L650">    }</span>
+
+    @Override
+    protected void handleFutureDone(ListenableFuture&lt;?&gt; f, int index) {
+      // should not be invoked due to override attachFutureDoneTask
+<span class="nc" id="L655">      throw new UnsupportedOperationException();</span>
+    }
+    
+    @Override
+    protected List&lt;ListenableFuture&lt;?&gt;&gt; getFinalResultList() {
+<span class="fc" id="L660">      return null;</span>
+    }
+    
+    @Override
+    protected void attachFutureDoneTask(ListenableFuture&lt;?&gt; f, int index) {
+      // we don't care about the result of the future
+      // so to save a little memory we reuse the same task with no future provided
+      // must be lazily set due to being invoked from super constructor
+<span class="fc bfc" id="L668" title="All 2 branches covered.">      if (doneTaskSingleton == null) {</span>
+<span class="fc" id="L669">        doneTaskSingleton = () -&gt; {</span>
+<span class="fc bfc" id="L670" title="All 2 branches covered.">          if (remainingResult.decrementAndGet() == 0) {</span>
+<span class="fc" id="L671">            setResult(getFinalResultList());</span>
+          }
+<span class="fc" id="L673">        };</span>
+      }
+      
+<span class="fc" id="L676">      f.addListener(doneTaskSingleton, SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L677">    }</span>
+  }
+  
+  /**
+   * A future implementation that will return a List of futures as the result.  The future will 
+   * not be satisfied till all provided futures have completed.
+   * &lt;p&gt;
+   * This implementation will return a result of all the futures that completed.
+   * 
+   * @since 1.2.0
+   * @param &lt;T&gt; The result object type returned from the futures
+   */
+  protected static class AllFutureCollection&lt;T&gt; extends FutureCollection&lt;T&gt; {
+    protected AllFutureCollection(Iterable&lt;? extends ListenableFuture&lt;? extends T&gt;&gt; source) {
+<span class="fc" id="L691">      super(source);</span>
+<span class="fc" id="L692">    }</span>
+
+    @Override
+    protected void handleFutureDone(ListenableFuture&lt;? extends T&gt; f, int index) {
+<span class="fc" id="L696">      addResult(f, index);</span>
+<span class="fc" id="L697">    }</span>
+  }
+  
+  /**
+   * A future implementation that will return a List of futures as the result.  The future will 
+   * not be satisfied till all provided futures have completed.
+   * 
+   * @since 5.30
+   * @param &lt;T&gt; The result object type returned from the futures
+   */
+  protected abstract static class PartialFutureCollection&lt;T&gt; extends FutureCollection&lt;T&gt; {
+    protected PartialFutureCollection(Iterable&lt;? extends ListenableFuture&lt;? extends T&gt;&gt; source) {
+<span class="fc" id="L709">      super(source);</span>
+<span class="fc" id="L710">    }</span>
+    
+    @Override
+    protected List&lt;ListenableFuture&lt;? extends T&gt;&gt; getFinalResultList() {
+<span class="fc" id="L714">      List&lt;ListenableFuture&lt;? extends T&gt;&gt; superResult = super.getFinalResultList();</span>
+      
+<span class="fc bfc" id="L716" title="All 2 branches covered.">      for (int i = 0; i &lt; superResult.size(); i++) {  // should be RandomAccess list</span>
+<span class="fc bfc" id="L717" title="All 2 branches covered.">        if (superResult.get(i) == null) { // indicates we must manipulate list</span>
+<span class="fc bfc" id="L718" title="All 4 branches covered.">          for (i = i == 0 ? 1 : 0; i &lt; superResult.size(); i++) {</span>
+<span class="fc bfc" id="L719" title="All 2 branches covered.">            if (superResult.get(i) != null) { // found first item that must be included</span>
+<span class="fc" id="L720">              ArrayList&lt;ListenableFuture&lt;? extends T&gt;&gt; result = </span>
+<span class="fc" id="L721">                  new ArrayList&lt;&gt;(superResult.size() - Math.max(i, 1));</span>
+<span class="fc bfc" id="L722" title="All 2 branches covered.">              for (; i &lt; superResult.size(); i++) {</span>
+<span class="fc" id="L723">                ListenableFuture&lt;? extends T&gt; lf = superResult.get(i);</span>
+<span class="fc bfc" id="L724" title="All 2 branches covered.">                if (lf != null) {</span>
+<span class="fc" id="L725">                  result.add(lf);</span>
+                }
+              }
+<span class="fc" id="L728">              return result;</span>
+            }
+          }
+<span class="fc" id="L731">          return Collections.emptyList(); // all items were null</span>
+        }
+      }
+      
+<span class="fc" id="L735">      return superResult; // no null found</span>
+    }
+  }
+  
+  /**
+   * A future implementation that will return a List of futures as the result.  The future will 
+   * not be satisfied till all provided futures have completed.
+   * &lt;p&gt;
+   * This implementation will return a result of all the futures that completed successfully.  
+   * If the future was canceled or threw an exception it will not be included.
+   * 
+   * @since 1.2.0
+   * @param &lt;T&gt; The result object type returned from the futures
+   */
+  protected static class SuccessFutureCollection&lt;T&gt; extends PartialFutureCollection&lt;T&gt; {
+    protected SuccessFutureCollection(Iterable&lt;? extends ListenableFuture&lt;? extends T&gt;&gt; source) {
+<span class="fc" id="L751">      super(source);</span>
+<span class="fc" id="L752">    }</span>
+
+    @Override
+    protected void handleFutureDone(ListenableFuture&lt;? extends T&gt; f, int index) {
+<span class="fc bfc" id="L756" title="All 2 branches covered.">      if (f.isCancelled()) {</span>
+        // detect canceled conditions before an exception would have otherwise thrown
+        // canceled futures are ignored
+<span class="fc" id="L759">        return;</span>
+      }
+      try {
+<span class="fc" id="L762">        f.get();</span>
+<span class="fc" id="L763">        addResult(f, index);  // if no exception thrown, add future</span>
+<span class="nc" id="L764">      } catch (InterruptedException e) {</span>
+        // should not be possible since this should only be called once the future is already done
+<span class="nc" id="L766">        Thread.currentThread().interrupt();</span>
+<span class="fc" id="L767">      } catch (ExecutionException e) {</span>
+        // ignored
+<span class="nc" id="L769">      } catch (CancellationException e) {</span>
+        // should not be possible due check at start on what should be an already done future
+<span class="nc" id="L771">        throw e;</span>
+<span class="pc" id="L772">      }</span>
+<span class="fc" id="L773">    }</span>
+  }
+  
+  /**
+   *  future implementation that will return a List of futures as the result.  The future will 
+   * not be satisfied till all provided futures have completed.
+   * &lt;p&gt;
+   * This implementation will return a result of all the futures that either threw an exception 
+   * during computation, or was canceled.
+   * 
+   * @since 1.2.0
+   * @param &lt;T&gt; The result object type returned from the futures
+   */
+  protected static class FailureFutureCollection&lt;T&gt; extends PartialFutureCollection&lt;T&gt; {
+    protected FailureFutureCollection(Iterable&lt;? extends ListenableFuture&lt;? extends T&gt;&gt; source) {
+<span class="fc" id="L788">      super(source);</span>
+<span class="fc" id="L789">    }</span>
+    
+    @Override
+    protected void init(int futureCount) {
+      // don't init collection, optimize for failures being rare
+<span class="fc" id="L794">    }</span>
+
+    @Override
+    protected void handleFutureDone(ListenableFuture&lt;? extends T&gt; f, int index) {
+<span class="fc bfc" id="L798" title="All 2 branches covered.">      if (f.isCancelled()) {</span>
+        // detect canceled conditions before an exception would have otherwise thrown 
+<span class="fc" id="L800">        addResult(f, index);</span>
+<span class="fc" id="L801">        return;</span>
+      }
+      try {
+<span class="fc" id="L804">        f.get();</span>
+<span class="nc" id="L805">      } catch (InterruptedException e) {</span>
+        // should not be possible since this should only be called once the future is already done
+<span class="nc" id="L807">        Thread.currentThread().interrupt();</span>
+<span class="fc" id="L808">      } catch (ExecutionException e) {</span>
+<span class="fc" id="L809">        addResult(f, index); // failed so add it</span>
+<span class="nc" id="L810">      } catch (CancellationException e) {</span>
+        // should not be possible due check at start on what should be an already done future
+<span class="nc" id="L812">        throw e;</span>
+<span class="pc" id="L813">      }</span>
+<span class="fc" id="L814">    }</span>
+  }
+  
+  /**
+   * Future callback that on error condition will cancel all the provided futures.
+   * 
+   * @since 4.7.2
+   */
+  protected static class CancelOnErrorFutureCallback extends AbstractFutureCallbackFailureHandler {
+    private final Iterable&lt;? extends ListenableFuture&lt;?&gt;&gt; futures;
+    private final boolean interruptThread;
+    private final AtomicBoolean canceled;
+    
+    public CancelOnErrorFutureCallback(Iterable&lt;? extends ListenableFuture&lt;?&gt;&gt; futures, 
+<span class="fc" id="L828">                                       boolean interruptThread) {</span>
+<span class="fc" id="L829">      this.futures = futures;</span>
+<span class="fc" id="L830">      this.interruptThread = interruptThread;</span>
+<span class="fc" id="L831">      this.canceled = new AtomicBoolean(false);</span>
+<span class="fc" id="L832">    }</span>
+
+    @Override
+    public void handleFailure(Throwable t) {
+<span class="pc bpc" id="L836" title="1 of 4 branches missed.">      if (! canceled.get() &amp;&amp; canceled.compareAndSet(false, true)) {</span>
+<span class="fc" id="L837">        FutureUtils.cancelIncompleteFutures(futures, interruptThread);</span>
+      }
+<span class="fc" id="L839">    }</span>
+  }
+  
+  /**
+   * Similar to {@link ImmediateFailureListenableFuture} except that the state is as if the future 
+   * had been canceled.  This is an internal class due to no foreseeable need of this by users of 
+   * the library.  This is used mostly in communicating state / messages from other futures.
+   * 
+   * @since 5.32
+   * @param &lt;T&gt; The result object type returned by this future
+   */
+  protected static class ImmediateCanceledListenableFuture&lt;T&gt; extends AbstractImmediateListenableFuture&lt;T&gt; {
+    protected final String cancelMessage;
+    
+    /**
+     * Constructs a completed future in a canceled state.
+     * 
+     * @param cancelMessage to provide to the {@link CancellationException}
+     */
+<span class="fc" id="L858">    public ImmediateCanceledListenableFuture(String cancelMessage) {</span>
+<span class="fc" id="L859">      this.cancelMessage = cancelMessage;</span>
+<span class="fc" id="L860">    }</span>
+    
+    @Override
+    protected String getCancellationExceptionMessage() {
+<span class="nc" id="L864">      return cancelMessage;</span>
+    }
+    
+    @Override
+    public boolean isCancelled() {
+<span class="fc" id="L869">      return true;</span>
+    }
+
+    @Override
+    public void addCallback(FutureCallback&lt;? super T&gt; callback) {
+<span class="fc" id="L874">      callback.handleFailure(new CancellationException(cancelMessage));</span>
+<span class="fc" id="L875">    }</span>
+
+    @Override
+    public void addCallback(FutureCallback&lt;? super T&gt; callback, Executor executor, 
+                            ListenerOptimizationStrategy optimize) {
+<span class="nc" id="L880">      CancellationException e = new CancellationException(cancelMessage);</span>
+<span class="nc bnc" id="L881" title="All 6 branches missed.">      if (executor == null | </span>
+          optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone) {
+<span class="nc" id="L883">        callback.handleFailure(e);</span>
+      } else {
+<span class="nc" id="L885">        executor.execute(() -&gt; callback.handleFailure(e));</span>
+      }
+<span class="nc" id="L887">    }</span>
+
+    @Override
+    public T get() throws ExecutionException {
+<span class="fc" id="L891">      throw new CancellationException(cancelMessage);</span>
+    }
+
+    @Override
+    public T get(long timeout, TimeUnit unit) throws ExecutionException {
+<span class="nc" id="L896">      throw new CancellationException(cancelMessage);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

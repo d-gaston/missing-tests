@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ListenableFutureTask.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">ListenableFutureTask.java</span></div><h1>ListenableFutureTask.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import java.lang.reflect.Field;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
+import org.threadly.concurrent.CallableContainer;
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.event.RunnableListenerHelper;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.SuppressedStackRuntimeException;
+import org.threadly.util.UnsafeAccess;
+
+/**
+ * This is a future which can be executed.  Allowing you to construct the future with the interior 
+ * work, submit it to an {@link Executor}, and then return this future.
+ * 
+ * @since 1.0.0
+ * @param &lt;T&gt; The result object type returned by this future
+ */
+public class ListenableFutureTask&lt;T&gt; extends FutureTask&lt;T&gt; 
+                                     implements ListenableRunnableFuture&lt;T&gt;, 
+                                                CallableContainer&lt;T&gt; {
+
+  private static final Field RUNNING_THREAD_FIELD;
+  
+  static {
+<span class="fc" id="L28">    Field runningThreadField = null;</span>
+    try {
+<span class="fc" id="L30">      runningThreadField = FutureTask.class.getDeclaredField(&quot;runner&quot;);</span>
+<span class="fc" id="L31">      UnsafeAccess.setFieldToPublic(runningThreadField);</span>
+<span class="nc" id="L32">    } catch (NoSuchFieldException | SecurityException e) {</span>
+<span class="nc" id="L33">      ExceptionUtils.handleException(</span>
+          new RuntimeException(&quot;Unsupported JVM version, please update threadly or file an issue&quot; + 
+                                 &quot;...Can not get running thread reference&quot;, e));
+<span class="nc" id="L36">    } catch (RuntimeException e) {  // wrapped exception thrown from UnsafeAccess</span>
+<span class="nc" id="L37">      ExceptionUtils.handleException(e);</span>
+    } finally {
+<span class="fc" id="L39">      RUNNING_THREAD_FIELD = runningThreadField;</span>
+    }
+<span class="fc" id="L41">  }</span>
+  
+  protected final RunnableListenerHelper listenerHelper;
+  protected final boolean recurring;
+  protected Callable&lt;T&gt; callable;
+  private Executor executingExecutor;
+  
+  /**
+   * Constructs a runnable future with a runnable work unit.
+   * 
+   * @param recurring boolean to indicate if this task can run multiple times, and thus must be reset after each run
+   * @param task runnable to be run
+   */
+  public ListenableFutureTask(boolean recurring, Runnable task) {
+<span class="fc" id="L55">    this(recurring, task, null, null);</span>
+<span class="fc" id="L56">  }</span>
+  
+  /**
+   * Constructs a runnable future with a runnable work unit.
+   * 
+   * @param recurring boolean to indicate if this task can run multiple times, and thus must be reset after each run
+   * @param task runnable to be run
+   * @param result result to be provide after run has completed
+   */
+  public ListenableFutureTask(boolean recurring, Runnable task, T result) {
+<span class="fc" id="L66">    this(recurring, task, result, null);</span>
+<span class="fc" id="L67">  }</span>
+
+  /**
+   * Constructs a runnable future with a callable work unit.
+   * 
+   * @param recurring boolean to indicate if this task can run multiple times, and thus must be reset after each run
+   * @param task callable to be run
+   */
+  public ListenableFutureTask(boolean recurring, Callable&lt;T&gt; task) {
+<span class="fc" id="L76">    this(recurring, task, null);</span>
+<span class="fc" id="L77">  }</span>
+  
+  /**
+   * Constructs a runnable future with a runnable work unit.
+   * 
+   * @param recurring boolean to indicate if this task can run multiple times, and thus must be reset after each run
+   * @param task runnable to be run
+   * @param executingExecutor Executor task will be run on for possible listener optimization, or {@code null}
+   */
+  public ListenableFutureTask(boolean recurring, Runnable task, Executor executingExecutor) {
+<span class="fc" id="L87">    this(recurring, task, null, executingExecutor);</span>
+<span class="fc" id="L88">  }</span>
+  
+  /**
+   * Constructs a runnable future with a runnable work unit.
+   * 
+   * @param recurring boolean to indicate if this task can run multiple times, and thus must be reset after each run
+   * @param task runnable to be run
+   * @param result result to be provide after run has completed
+   * @param executingExecutor Executor task will be run on for possible listener optimization, or {@code null}
+   */
+  public ListenableFutureTask(boolean recurring, Runnable task, T result, Executor executingExecutor) {
+<span class="fc" id="L99">    this(recurring, RunnableCallableAdapter.adapt(task, result), executingExecutor);</span>
+<span class="fc" id="L100">  }</span>
+
+  /**
+   * Constructs a runnable future with a callable work unit.
+   * 
+   * @param recurring boolean to indicate if this task can run multiple times, and thus must be reset after each run
+   * @param task callable to be run
+   * @param executingExecutor Executor task will be run on for possible listener optimization, or {@code null}
+   */
+  public ListenableFutureTask(boolean recurring, Callable&lt;T&gt; task, Executor executingExecutor) {
+<span class="fc" id="L110">    super(task);</span>
+
+<span class="fc" id="L112">    this.listenerHelper = new RunnableListenerHelper(true);</span>
+<span class="fc" id="L113">    this.recurring = recurring;</span>
+<span class="fc" id="L114">    this.callable = task;</span>
+<span class="fc" id="L115">    this.executingExecutor = executingExecutor;</span>
+<span class="fc" id="L116">  }</span>
+  
+  @Override
+  public void run() {
+<span class="fc bfc" id="L120" title="All 2 branches covered.">    if (recurring) {</span>
+<span class="fc" id="L121">      super.runAndReset();</span>
+    } else {
+<span class="fc" id="L123">      super.run();</span>
+    }
+<span class="fc" id="L125">  }</span>
+
+  @Override
+  public void addListener(Runnable listener, Executor executor, 
+                          ListenerOptimizationStrategy optimize) {
+<span class="pc bpc" id="L130" title="3 of 10 branches missed.">    listenerHelper.addListener(listener, </span>
+                               executor == executingExecutor &amp;&amp; 
+                                   (optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone | 
+                                    optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatch) ? 
+                                 null : executor, 
+                               optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone ? 
+                                 null : executor);
+<span class="fc" id="L137">  }</span>
+  
+  /**
+   * Can not be overridden, please use {@link #addListener(Runnable)} as an alternative.
+   */
+  @Override
+  protected final void done() {
+<span class="fc" id="L144">    executingExecutor = null;</span>
+<span class="fc" id="L145">    callable = null;</span>
+    
+<span class="fc" id="L147">    listenerHelper.callListeners();</span>
+<span class="fc" id="L148">  }</span>
+
+  @Override
+  public Callable&lt;T&gt; getContainedCallable() {
+<span class="fc" id="L152">    return callable;</span>
+  }
+  
+  @Override
+  public StackTraceElement[] getRunningStackTrace() {
+    try {
+<span class="fc" id="L158">      Thread t = (Thread)RUNNING_THREAD_FIELD.get(this);</span>
+<span class="fc bfc" id="L159" title="All 2 branches covered.">      if (t == null) {</span>
+<span class="fc" id="L160">        return null;</span>
+      } else {
+<span class="fc" id="L162">        StackTraceElement[] stack = t.getStackTrace();</span>
+<span class="pc bpc" id="L163" title="2 of 4 branches missed.">        if (stack.length == 0 || t != (Thread)RUNNING_THREAD_FIELD.get(this)) {</span>
+<span class="nc" id="L164">          return null;</span>
+        } else {
+<span class="fc" id="L166">          return stack;</span>
+        }
+      }
+<span class="nc" id="L169">    } catch (RuntimeException | IllegalAccessException  e) {</span>
+<span class="nc" id="L170">      ExceptionUtils.handleException(</span>
+          new SuppressedStackRuntimeException(&quot;Stack access not supported, returning null&quot; + 
+                                                &quot;...Please see first exception for more details&quot;, e));
+<span class="nc" id="L173">      return null;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

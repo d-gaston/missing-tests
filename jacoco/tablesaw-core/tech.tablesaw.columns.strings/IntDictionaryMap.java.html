@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>IntDictionaryMap.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.columns.strings</a> &gt; <span class="el_source">IntDictionaryMap.java</span></div><h1>IntDictionaryMap.java</h1><pre class="source lang-java linenums">package tech.tablesaw.columns.strings;
+
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import it.unimi.dsi.fastutil.ints.IntListIterator;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectSet;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import tech.tablesaw.api.BooleanColumn;
+import tech.tablesaw.api.IntColumn;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.selection.BitmapBackedSelection;
+import tech.tablesaw.selection.Selection;
+
+/** A map that supports reversible key value pairs of int-String */
+public class IntDictionaryMap implements DictionaryMap {
+
+  // The maximum number of unique values or categories that I can hold. If the column has more
+  // unique values,
+  // use a TextColumn
+  private static final int MAX_UNIQUE = Integer.MAX_VALUE;
+
+  private static final int MISSING_VALUE = Integer.MAX_VALUE;
+
+  private static final int DEFAULT_RETURN_VALUE = Integer.MIN_VALUE;
+
+<span class="fc" id="L40">  private final IntComparator reverseDictionarySortComparator =</span>
+<span class="nc" id="L41">      (i, i1) -&gt; -getValueForKey(i).compareTo(getValueForKey(i1));</span>
+
+<span class="fc" id="L43">  private final IntComparator dictionarySortComparator =</span>
+<span class="nc" id="L44">      (i, i1) -&gt; getValueForKey(i).compareTo(getValueForKey(i1));</span>
+
+  // holds a key for each element in the column. the key can be used to lookup the backing string
+  // value
+<span class="fc" id="L48">  private IntArrayList values = new IntArrayList();</span>
+
+<span class="fc" id="L50">  private final AtomicInteger nextIndex = new AtomicInteger(DEFAULT_RETURN_VALUE);</span>
+
+  // we maintain 3 maps, one from strings to keys, one from keys to strings, and one from key to
+  // count of values
+<span class="fc" id="L54">  private final Int2ObjectMap&lt;String&gt; keyToValue = new Int2ObjectOpenHashMap&lt;&gt;();</span>
+
+<span class="fc" id="L56">  private final Object2IntOpenHashMap&lt;String&gt; valueToKey = new Object2IntOpenHashMap&lt;&gt;();</span>
+
+<span class="fc" id="L58">  private final Int2IntOpenHashMap keyToCount = new Int2IntOpenHashMap();</span>
+
+  /** Returns a new DictionaryMap that is a deep copy of the original */
+<span class="fc" id="L61">  IntDictionaryMap(DictionaryMap original) throws NoKeysAvailableException {</span>
+<span class="fc" id="L62">    valueToKey.defaultReturnValue(DEFAULT_RETURN_VALUE);</span>
+<span class="fc" id="L63">    keyToCount.defaultReturnValue(0);</span>
+
+<span class="fc bfc" id="L65" title="All 2 branches covered.">    for (int i = 0; i &lt; original.size(); i++) {</span>
+<span class="fc" id="L66">      String value = original.getValueForIndex(i);</span>
+<span class="fc" id="L67">      append(value);</span>
+    }
+<span class="fc" id="L69">  }</span>
+
+  private void put(int key, String value) {
+<span class="fc" id="L72">    keyToValue.put(key, value);</span>
+<span class="fc" id="L73">    valueToKey.put(value, key);</span>
+<span class="fc" id="L74">  }</span>
+
+  private int getKeyForValue(String value) {
+<span class="fc" id="L77">    return valueToKey.getInt(value);</span>
+  }
+
+  /**
+   * Returns the number of elements (a.k.a. rows or cells) in the column
+   *
+   * @return size as int
+   */
+  @Override
+  public int size() {
+<span class="nc" id="L87">    return values.size();</span>
+  }
+
+  @Override
+  public String getValueForIndex(int rowIndex) {
+<span class="nc" id="L92">    int k = values.getInt(rowIndex);</span>
+<span class="nc" id="L93">    return getValueForKey(k);</span>
+  }
+
+  ObjectSet&lt;Int2ObjectMap.Entry&lt;String&gt;&gt; getKeyValueEntries() {
+<span class="nc" id="L97">    return keyToValue.int2ObjectEntrySet();</span>
+  }
+
+  IntArrayList values() {
+<span class="nc" id="L101">    return values;</span>
+  }
+
+  @Override
+  public int getKeyForIndex(int rowIndex) {
+<span class="nc" id="L106">    return values.getInt(rowIndex);</span>
+  }
+
+  private Set&lt;String&gt; categories() {
+<span class="nc" id="L110">    return valueToKey.keySet();</span>
+  }
+
+  private Int2ObjectMap&lt;String&gt; keyToValueMap() {
+<span class="fc" id="L114">    return keyToValue;</span>
+  }
+
+  @Override
+  public void sortAscending() {
+<span class="nc" id="L119">    int[] elements = values.toIntArray();</span>
+<span class="nc" id="L120">    IntArrays.parallelQuickSort(elements, dictionarySortComparator);</span>
+<span class="nc" id="L121">    this.values = new IntArrayList(elements);</span>
+<span class="nc" id="L122">  }</span>
+
+  @Override
+  public String getValueForKey(int key) {
+<span class="nc" id="L126">    return keyToValue.get(key);</span>
+  }
+
+  @Override
+  public void sortDescending() {
+<span class="nc" id="L131">    int[] elements = values.toIntArray();</span>
+<span class="nc" id="L132">    IntArrays.parallelQuickSort(elements, reverseDictionarySortComparator);</span>
+<span class="nc" id="L133">    this.values = new IntArrayList(elements);</span>
+<span class="nc" id="L134">  }</span>
+
+  public int countOccurrences(String value) {
+<span class="nc" id="L137">    return keyToCount.get(getKeyForValue(value));</span>
+  }
+
+  public Set&lt;String&gt; asSet() {
+<span class="nc" id="L141">    return categories();</span>
+  }
+
+  public int firstIndexOf(String value) {
+<span class="nc" id="L145">    return values.indexOf(getKeyForValue(value));</span>
+  }
+
+  @Override
+  public String[] asObjectArray() {
+<span class="nc" id="L150">    final String[] output = new String[size()];</span>
+<span class="nc bnc" id="L151" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L152">      output[i] = getValueForIndex(i);</span>
+    }
+<span class="nc" id="L154">    return output;</span>
+  }
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L159">    return keyToValueMap().size();</span>
+  }
+
+  @Override
+  public Selection selectIsIn(String... strings) {
+<span class="nc" id="L164">    IntOpenHashSet keys = new IntOpenHashSet(strings.length);</span>
+<span class="nc bnc" id="L165" title="All 2 branches missed.">    for (String string : strings) {</span>
+<span class="nc" id="L166">      int key = getKeyForValue(string);</span>
+<span class="nc bnc" id="L167" title="All 2 branches missed.">      if (key != DEFAULT_RETURN_VALUE) {</span>
+<span class="nc" id="L168">        keys.add(key);</span>
+      }
+    }
+
+<span class="nc" id="L172">    Selection results = new BitmapBackedSelection();</span>
+<span class="nc bnc" id="L173" title="All 2 branches missed.">    for (int i = 0; i &lt; values.size(); i++) {</span>
+<span class="nc bnc" id="L174" title="All 2 branches missed.">      if (keys.contains(values.getInt(i))) {</span>
+<span class="nc" id="L175">        results.add(i);</span>
+      }
+    }
+<span class="nc" id="L178">    return results;</span>
+  }
+
+  @Override
+  public Selection selectIsIn(Collection&lt;String&gt; strings) {
+<span class="nc" id="L183">    IntOpenHashSet keys = new IntOpenHashSet(strings.size());</span>
+<span class="nc bnc" id="L184" title="All 2 branches missed.">    for (String string : strings) {</span>
+<span class="nc" id="L185">      int key = getKeyForValue(string);</span>
+<span class="nc bnc" id="L186" title="All 2 branches missed.">      if (key != DEFAULT_RETURN_VALUE) {</span>
+<span class="nc" id="L187">        keys.add(key);</span>
+      }
+<span class="nc" id="L189">    }</span>
+
+<span class="nc" id="L191">    Selection results = new BitmapBackedSelection();</span>
+<span class="nc bnc" id="L192" title="All 2 branches missed.">    for (int i = 0; i &lt; values.size(); i++) {</span>
+<span class="nc bnc" id="L193" title="All 2 branches missed.">      if (keys.contains(values.getInt(i))) {</span>
+<span class="nc" id="L194">        results.add(i);</span>
+      }
+    }
+<span class="nc" id="L197">    return results;</span>
+  }
+
+  @Override
+  public void append(String value) throws NoKeysAvailableException {
+    int key;
+<span class="pc bpc" id="L203" title="1 of 4 branches missed.">    if (value == null || StringColumnType.missingValueIndicator().equals(value)) {</span>
+<span class="fc" id="L204">      key = MISSING_VALUE;</span>
+<span class="fc" id="L205">      put(key, StringColumnType.missingValueIndicator());</span>
+    } else {
+<span class="fc" id="L207">      key = getKeyForValue(value);</span>
+    }
+<span class="fc bfc" id="L209" title="All 2 branches covered.">    if (key == DEFAULT_RETURN_VALUE) {</span>
+<span class="fc" id="L210">      key = getValueId();</span>
+<span class="fc" id="L211">      put(key, value);</span>
+    }
+<span class="fc" id="L213">    values.add(key);</span>
+<span class="fc" id="L214">    keyToCount.addTo(key, 1);</span>
+<span class="fc" id="L215">  }</span>
+
+  void updateMaps(int key, String value) {
+<span class="nc" id="L218">    put(key, value);</span>
+<span class="nc" id="L219">    keyToCount.addTo(key, 1);</span>
+<span class="nc" id="L220">  }</span>
+
+  void addValue(int key) {
+<span class="nc" id="L223">    values.add(key);</span>
+<span class="nc" id="L224">  }</span>
+
+  private int getValueId() throws NoKeysAvailableException {
+<span class="fc" id="L227">    int nextValue = nextIndex.incrementAndGet();</span>
+<span class="pc bpc" id="L228" title="1 of 2 branches missed.">    if (nextValue &gt;= Integer.MAX_VALUE) {</span>
+<span class="nc" id="L229">      String msg = String.format(&quot;String column can only contain %d unique values.&quot;, MAX_UNIQUE);</span>
+<span class="nc" id="L230">      throw new NoKeysAvailableException(msg);</span>
+    }
+<span class="fc" id="L232">    return nextValue;</span>
+  }
+
+  /**
+   * Given a key matching some string, add to the selection the index of every record that matches
+   * that key
+   */
+  private void addValuesToSelection(Selection results, int key) {
+<span class="nc bnc" id="L240" title="All 2 branches missed.">    if (key != DEFAULT_RETURN_VALUE) {</span>
+<span class="nc" id="L241">      int i = 0;</span>
+<span class="nc bnc" id="L242" title="All 2 branches missed.">      for (int next : values) {</span>
+<span class="nc bnc" id="L243" title="All 2 branches missed.">        if (key == next) {</span>
+<span class="nc" id="L244">          results.add(i);</span>
+        }
+<span class="nc" id="L246">        i++;</span>
+<span class="nc" id="L247">      }</span>
+    }
+<span class="nc" id="L249">  }</span>
+
+  @Override
+  public void set(int rowIndex, String stringValue) throws NoKeysAvailableException {
+<span class="fc" id="L253">    String str = StringColumnType.missingValueIndicator();</span>
+<span class="pc bpc" id="L254" title="1 of 2 branches missed.">    if (stringValue != null) {</span>
+<span class="fc" id="L255">      str = stringValue;</span>
+    }
+<span class="fc" id="L257">    int valueId = getKeyForValue(str);</span>
+<span class="pc bpc" id="L258" title="1 of 2 branches missed.">    if (valueId == DEFAULT_RETURN_VALUE) {</span>
+<span class="fc" id="L259">      valueId = getValueId();</span>
+<span class="fc" id="L260">      put(valueId, str);</span>
+    }
+<span class="fc" id="L262">    int oldKey = values.set(rowIndex, valueId);</span>
+<span class="fc" id="L263">    keyToCount.addTo(valueId, 1);</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    if (keyToCount.addTo(oldKey, -1) == 1) {</span>
+<span class="fc" id="L265">      String obsoleteValue = keyToValue.remove(oldKey);</span>
+<span class="fc" id="L266">      valueToKey.removeInt(obsoleteValue);</span>
+<span class="fc" id="L267">      keyToCount.remove(oldKey);</span>
+    }
+<span class="fc" id="L269">  }</span>
+
+  @Override
+  public void clear() {
+<span class="fc" id="L273">    values.clear();</span>
+<span class="fc" id="L274">    keyToValue.clear();</span>
+<span class="fc" id="L275">    valueToKey.clear();</span>
+<span class="fc" id="L276">    keyToCount.clear();</span>
+<span class="fc" id="L277">  }</span>
+
+  /** */
+  @Override
+  public Table countByCategory(String columnName) {
+<span class="nc" id="L282">    Table t = Table.create(&quot;Column: &quot; + columnName);</span>
+<span class="nc" id="L283">    StringColumn categories = StringColumn.create(&quot;Category&quot;);</span>
+<span class="nc" id="L284">    IntColumn counts = IntColumn.create(&quot;Count&quot;);</span>
+    // Now uses the keyToCount map
+<span class="nc bnc" id="L286" title="All 2 branches missed.">    for (Map.Entry&lt;Integer, Integer&gt; entry : keyToCount.int2IntEntrySet()) {</span>
+<span class="nc" id="L287">      categories.append(getValueForKey(entry.getKey()));</span>
+<span class="nc" id="L288">      counts.append(entry.getValue());</span>
+<span class="nc" id="L289">    }</span>
+<span class="nc" id="L290">    t.addColumns(categories);</span>
+<span class="nc" id="L291">    t.addColumns(counts);</span>
+<span class="nc" id="L292">    return t;</span>
+  }
+
+  @Override
+  public Selection isEqualTo(String string) {
+<span class="nc" id="L297">    Selection results = new BitmapBackedSelection();</span>
+<span class="nc" id="L298">    int key = getKeyForValue(string);</span>
+<span class="nc" id="L299">    addValuesToSelection(results, key);</span>
+<span class="nc" id="L300">    return results;</span>
+  }
+
+  /**
+   * Returns a list of boolean columns suitable for use as dummy variables in, for example,
+   * regression analysis, select a column of categorical data must be encoded as a list of columns,
+   * such that each column represents a single category and indicates whether it is present (1) or
+   * not present (0)
+   *
+   * @return a list of {@link BooleanColumn}
+   */
+  @Override
+  public List&lt;BooleanColumn&gt; getDummies() {
+<span class="nc" id="L313">    List&lt;BooleanColumn&gt; results = new ArrayList&lt;&gt;();</span>
+
+    // createFromCsv the necessary columns
+<span class="nc bnc" id="L316" title="All 2 branches missed.">    for (Int2ObjectMap.Entry&lt;String&gt; entry : keyToValueMap().int2ObjectEntrySet()) {</span>
+<span class="nc" id="L317">      BooleanColumn column = BooleanColumn.create(entry.getValue());</span>
+<span class="nc" id="L318">      results.add(column);</span>
+<span class="nc" id="L319">    }</span>
+
+    // iterate over the values, updating the dummy variable columns as appropriate
+<span class="nc bnc" id="L322" title="All 2 branches missed.">    for (int next : values) {</span>
+<span class="nc" id="L323">      String category = getValueForKey(next);</span>
+<span class="nc bnc" id="L324" title="All 2 branches missed.">      for (BooleanColumn column : results) {</span>
+<span class="nc bnc" id="L325" title="All 2 branches missed.">        if (category.equals(column.name())) {</span>
+          // TODO(lwhite): update the correct row more efficiently, by using set rather than add &amp;
+          // only
+          // updating true
+<span class="nc" id="L329">          column.append(true);</span>
+        } else {
+<span class="nc" id="L331">          column.append(false);</span>
+        }
+<span class="nc" id="L333">      }</span>
+<span class="nc" id="L334">    }</span>
+<span class="nc" id="L335">    return results;</span>
+  }
+
+  /** Returns the contents of the cell at rowNumber as a byte[] */
+  @Override
+  public byte[] asBytes(int rowNumber) {
+<span class="nc" id="L341">    return ByteBuffer.allocate(byteSize()).putInt(getKeyForIndex(rowNumber)).array();</span>
+  }
+
+  private int byteSize() {
+<span class="nc" id="L345">    return 4;</span>
+  }
+
+  /** Returns the count of missing values in this column */
+  @Override
+  public int countMissing() {
+<span class="fc" id="L351">    return keyToCount.get(MISSING_VALUE);</span>
+  }
+
+  @Override
+  public Iterator&lt;String&gt; iterator() {
+<span class="nc" id="L356">    return new Iterator&lt;String&gt;() {</span>
+
+<span class="nc" id="L358">      private final IntListIterator valuesIt = values.iterator();</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="nc" id="L362">        return valuesIt.hasNext();</span>
+      }
+
+      @Override
+      public String next() {
+<span class="nc" id="L367">        return getValueForKey(valuesIt.nextInt());</span>
+      }
+    };
+  }
+
+  @Override
+  public void appendMissing() {
+    try {
+<span class="nc" id="L375">      append(StringColumnType.missingValueIndicator());</span>
+<span class="nc" id="L376">    } catch (NoKeysAvailableException e) {</span>
+      // This can't happen because missing value key is the first one allocated
+<span class="nc" id="L378">      throw new IllegalStateException(e);</span>
+<span class="nc" id="L379">    }</span>
+<span class="nc" id="L380">  }</span>
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="nc bnc" id="L384" title="All 2 branches missed.">    return getKeyForIndex(rowNumber) == MISSING_VALUE;</span>
+  }
+
+  @Override
+  public DictionaryMap promoteYourself() {
+<span class="nc" id="L389">    return this;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

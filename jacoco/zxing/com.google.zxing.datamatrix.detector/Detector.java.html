@@ -1,0 +1,383 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Detector.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.datamatrix.detector</a> &gt; <span class="el_source">Detector.java</span></div><h1>Detector.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.datamatrix.detector;
+
+import com.google.zxing.NotFoundException;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.DetectorResult;
+import com.google.zxing.common.GridSampler;
+import com.google.zxing.common.detector.WhiteRectangleDetector;
+
+/**
+ * &lt;p&gt;Encapsulates logic that can detect a Data Matrix Code in an image, even if the Data Matrix Code
+ * is rotated or skewed, or partially obscured.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+public final class Detector {
+
+  private final BitMatrix image;
+  private final WhiteRectangleDetector rectangleDetector;
+
+<span class="fc" id="L37">  public Detector(BitMatrix image) throws NotFoundException {</span>
+<span class="fc" id="L38">    this.image = image;</span>
+<span class="fc" id="L39">    rectangleDetector = new WhiteRectangleDetector(image);</span>
+<span class="fc" id="L40">  }</span>
+
+  /**
+   * &lt;p&gt;Detects a Data Matrix Code in an image.&lt;/p&gt;
+   *
+   * @return {@link DetectorResult} encapsulating results of detecting a Data Matrix Code
+   * @throws NotFoundException if no Data Matrix Code can be found
+   */
+  public DetectorResult detect() throws NotFoundException {
+
+<span class="fc" id="L50">    ResultPoint[] cornerPoints = rectangleDetector.detect();</span>
+
+<span class="fc" id="L52">    ResultPoint[] points = detectSolid1(cornerPoints);</span>
+<span class="fc" id="L53">    points = detectSolid2(points);</span>
+<span class="fc" id="L54">    points[3] = correctTopRight(points);</span>
+<span class="fc bfc" id="L55" title="All 2 branches covered.">    if (points[3] == null) {</span>
+<span class="fc" id="L56">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L58">    points = shiftToModuleCenter(points);</span>
+
+<span class="fc" id="L60">    ResultPoint topLeft = points[0];</span>
+<span class="fc" id="L61">    ResultPoint bottomLeft = points[1];</span>
+<span class="fc" id="L62">    ResultPoint bottomRight = points[2];</span>
+<span class="fc" id="L63">    ResultPoint topRight = points[3];</span>
+
+<span class="fc" id="L65">    int dimensionTop = transitionsBetween(topLeft, topRight) + 1;</span>
+<span class="fc" id="L66">    int dimensionRight = transitionsBetween(bottomRight, topRight) + 1;</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">    if ((dimensionTop &amp; 0x01) == 1) {</span>
+<span class="fc" id="L68">      dimensionTop += 1;</span>
+    }
+<span class="fc bfc" id="L70" title="All 2 branches covered.">    if ((dimensionRight &amp; 0x01) == 1) {</span>
+<span class="fc" id="L71">      dimensionRight += 1;</span>
+    }
+
+<span class="fc bfc" id="L74" title="All 4 branches covered.">    if (4 * dimensionTop &lt; 7 * dimensionRight &amp;&amp; 4 * dimensionRight &lt; 7 * dimensionTop) {</span>
+      // The matrix is square
+<span class="fc" id="L76">      dimensionTop = dimensionRight = Math.max(dimensionTop, dimensionRight);</span>
+    }
+
+<span class="fc" id="L79">    BitMatrix bits = sampleGrid(image, </span>
+                                topLeft,
+                                bottomLeft,
+                                bottomRight,
+                                topRight,
+                                dimensionTop,
+                                dimensionRight);
+
+<span class="fc" id="L87">    return new DetectorResult(bits, new ResultPoint[]{topLeft, bottomLeft, bottomRight, topRight});</span>
+  }
+
+  private ResultPoint shiftPoint(ResultPoint point, ResultPoint to, int div) {
+<span class="fc" id="L91">    float x = (to.getX() - point.getX()) / (div + 1);</span>
+<span class="fc" id="L92">    float y = (to.getY() - point.getY()) / (div + 1);</span>
+<span class="fc" id="L93">    return new ResultPoint(point.getX() + x, point.getY() + y);</span>
+  }
+
+  private ResultPoint moveAway(ResultPoint point, float fromX, float fromY) {
+<span class="fc" id="L97">    float x = point.getX();</span>
+<span class="fc" id="L98">    float y = point.getY();</span>
+
+<span class="fc bfc" id="L100" title="All 2 branches covered.">    if (x &lt; fromX) {</span>
+<span class="fc" id="L101">      x -= 1;</span>
+    } else {
+<span class="fc" id="L103">      x += 1;</span>
+    }
+
+<span class="fc bfc" id="L106" title="All 2 branches covered.">    if (y &lt; fromY) {</span>
+<span class="fc" id="L107">      y -= 1;</span>
+    } else {
+<span class="fc" id="L109">      y += 1;</span>
+    }
+
+<span class="fc" id="L112">    return new ResultPoint(x, y);</span>
+  }
+
+  /**
+   * Detect a solid side which has minimum transition.
+   */
+  private ResultPoint[] detectSolid1(ResultPoint[] cornerPoints) {
+    // 0  2
+    // 1  3
+<span class="fc" id="L121">    ResultPoint pointA = cornerPoints[0];</span>
+<span class="fc" id="L122">    ResultPoint pointB = cornerPoints[1];</span>
+<span class="fc" id="L123">    ResultPoint pointC = cornerPoints[3];</span>
+<span class="fc" id="L124">    ResultPoint pointD = cornerPoints[2];</span>
+
+<span class="fc" id="L126">    int trAB = transitionsBetween(pointA, pointB);</span>
+<span class="fc" id="L127">    int trBC = transitionsBetween(pointB, pointC);</span>
+<span class="fc" id="L128">    int trCD = transitionsBetween(pointC, pointD);</span>
+<span class="fc" id="L129">    int trDA = transitionsBetween(pointD, pointA);</span>
+
+    // 0..3
+    // :  :
+    // 1--2
+<span class="fc" id="L134">    int min = trAB;</span>
+<span class="fc" id="L135">    ResultPoint[] points = {pointD, pointA, pointB, pointC};</span>
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    if (min &gt; trBC) {</span>
+<span class="fc" id="L137">      min = trBC;</span>
+<span class="fc" id="L138">      points[0] = pointA;</span>
+<span class="fc" id="L139">      points[1] = pointB;</span>
+<span class="fc" id="L140">      points[2] = pointC;</span>
+<span class="fc" id="L141">      points[3] = pointD;</span>
+    }
+<span class="fc bfc" id="L143" title="All 2 branches covered.">    if (min &gt; trCD) {</span>
+<span class="fc" id="L144">      min = trCD;</span>
+<span class="fc" id="L145">      points[0] = pointB;</span>
+<span class="fc" id="L146">      points[1] = pointC;</span>
+<span class="fc" id="L147">      points[2] = pointD;</span>
+<span class="fc" id="L148">      points[3] = pointA;</span>
+    }
+<span class="fc bfc" id="L150" title="All 2 branches covered.">    if (min &gt; trDA) {</span>
+<span class="fc" id="L151">      points[0] = pointC;</span>
+<span class="fc" id="L152">      points[1] = pointD;</span>
+<span class="fc" id="L153">      points[2] = pointA;</span>
+<span class="fc" id="L154">      points[3] = pointB;</span>
+    }
+
+<span class="fc" id="L157">    return points;</span>
+  }
+
+  /**
+   * Detect a second solid side next to first solid side.
+   */
+  private ResultPoint[] detectSolid2(ResultPoint[] points) {
+    // A..D
+    // :  :
+    // B--C
+<span class="fc" id="L167">    ResultPoint pointA = points[0];</span>
+<span class="fc" id="L168">    ResultPoint pointB = points[1];</span>
+<span class="fc" id="L169">    ResultPoint pointC = points[2];</span>
+<span class="fc" id="L170">    ResultPoint pointD = points[3];</span>
+
+    // Transition detection on the edge is not stable.
+    // To safely detect, shift the points to the module center.
+<span class="fc" id="L174">    int tr = transitionsBetween(pointA, pointD);</span>
+<span class="fc" id="L175">    ResultPoint pointBs = shiftPoint(pointB, pointC, (tr + 1) * 4);</span>
+<span class="fc" id="L176">    ResultPoint pointCs = shiftPoint(pointC, pointB, (tr + 1) * 4);</span>
+<span class="fc" id="L177">    int trBA = transitionsBetween(pointBs, pointA);</span>
+<span class="fc" id="L178">    int trCD = transitionsBetween(pointCs, pointD);</span>
+
+    // 0..3
+    // |  :
+    // 1--2
+<span class="fc bfc" id="L183" title="All 2 branches covered.">    if (trBA &lt; trCD) {</span>
+      // solid sides: A-B-C
+<span class="fc" id="L185">      points[0] = pointA;</span>
+<span class="fc" id="L186">      points[1] = pointB;</span>
+<span class="fc" id="L187">      points[2] = pointC;</span>
+<span class="fc" id="L188">      points[3] = pointD;</span>
+    } else {
+      // solid sides: B-C-D
+<span class="fc" id="L191">      points[0] = pointB;</span>
+<span class="fc" id="L192">      points[1] = pointC;</span>
+<span class="fc" id="L193">      points[2] = pointD;</span>
+<span class="fc" id="L194">      points[3] = pointA;</span>
+    }
+
+<span class="fc" id="L197">    return points;</span>
+  }
+
+  /**
+   * Calculates the corner position of the white top right module.
+   */
+  private ResultPoint correctTopRight(ResultPoint[] points) {
+    // A..D
+    // |  :
+    // B--C
+<span class="fc" id="L207">    ResultPoint pointA = points[0];</span>
+<span class="fc" id="L208">    ResultPoint pointB = points[1];</span>
+<span class="fc" id="L209">    ResultPoint pointC = points[2];</span>
+<span class="fc" id="L210">    ResultPoint pointD = points[3];</span>
+
+    // shift points for safe transition detection.
+<span class="fc" id="L213">    int trTop = transitionsBetween(pointA, pointD);</span>
+<span class="fc" id="L214">    int trRight = transitionsBetween(pointB, pointD);</span>
+<span class="fc" id="L215">    ResultPoint pointAs = shiftPoint(pointA, pointB, (trRight + 1) * 4);</span>
+<span class="fc" id="L216">    ResultPoint pointCs = shiftPoint(pointC, pointB, (trTop + 1) * 4);</span>
+
+<span class="fc" id="L218">    trTop = transitionsBetween(pointAs, pointD);</span>
+<span class="fc" id="L219">    trRight = transitionsBetween(pointCs, pointD);</span>
+
+<span class="fc" id="L221">    ResultPoint candidate1 = new ResultPoint(</span>
+<span class="fc" id="L222">      pointD.getX() + (pointC.getX() - pointB.getX()) / (trTop + 1),</span>
+<span class="fc" id="L223">      pointD.getY() + (pointC.getY() - pointB.getY()) / (trTop + 1));</span>
+<span class="fc" id="L224">    ResultPoint candidate2 = new ResultPoint(</span>
+<span class="fc" id="L225">      pointD.getX() + (pointA.getX() - pointB.getX()) / (trRight + 1),</span>
+<span class="fc" id="L226">      pointD.getY() + (pointA.getY() - pointB.getY()) / (trRight + 1));</span>
+
+<span class="fc bfc" id="L228" title="All 2 branches covered.">    if (!isValid(candidate1)) {</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">      if (isValid(candidate2)) {</span>
+<span class="fc" id="L230">        return candidate2;</span>
+      }
+<span class="fc" id="L232">      return null;</span>
+    }
+<span class="fc bfc" id="L234" title="All 2 branches covered.">    if (!isValid(candidate2)) {</span>
+<span class="fc" id="L235">      return candidate1;</span>
+    }
+
+<span class="fc" id="L238">    int sumc1 = transitionsBetween(pointAs, candidate1) + transitionsBetween(pointCs, candidate1);</span>
+<span class="fc" id="L239">    int sumc2 = transitionsBetween(pointAs, candidate2) + transitionsBetween(pointCs, candidate2);</span>
+
+<span class="fc bfc" id="L241" title="All 2 branches covered.">    if (sumc1 &gt; sumc2) {</span>
+<span class="fc" id="L242">      return candidate1;</span>
+    } else {
+<span class="fc" id="L244">      return candidate2;</span>
+    }
+  }
+
+  /**
+   * Shift the edge points to the module center.
+   */
+  private ResultPoint[] shiftToModuleCenter(ResultPoint[] points) {
+    // A..D
+    // |  :
+    // B--C
+<span class="fc" id="L255">    ResultPoint pointA = points[0];</span>
+<span class="fc" id="L256">    ResultPoint pointB = points[1];</span>
+<span class="fc" id="L257">    ResultPoint pointC = points[2];</span>
+<span class="fc" id="L258">    ResultPoint pointD = points[3];</span>
+
+    // calculate pseudo dimensions
+<span class="fc" id="L261">    int dimH = transitionsBetween(pointA, pointD) + 1;</span>
+<span class="fc" id="L262">    int dimV = transitionsBetween(pointC, pointD) + 1;</span>
+
+    // shift points for safe dimension detection
+<span class="fc" id="L265">    ResultPoint pointAs = shiftPoint(pointA, pointB, dimV * 4);</span>
+<span class="fc" id="L266">    ResultPoint pointCs = shiftPoint(pointC, pointB, dimH * 4);</span>
+
+    //  calculate more precise dimensions
+<span class="fc" id="L269">    dimH = transitionsBetween(pointAs, pointD) + 1;</span>
+<span class="fc" id="L270">    dimV = transitionsBetween(pointCs, pointD) + 1;</span>
+<span class="fc bfc" id="L271" title="All 2 branches covered.">    if ((dimH &amp; 0x01) == 1) {</span>
+<span class="fc" id="L272">      dimH += 1;</span>
+    }
+<span class="fc bfc" id="L274" title="All 2 branches covered.">    if ((dimV &amp; 0x01) == 1) {</span>
+<span class="fc" id="L275">      dimV += 1;</span>
+    }
+
+    // WhiteRectangleDetector returns points inside of the rectangle.
+    // I want points on the edges.
+<span class="fc" id="L280">    float centerX = (pointA.getX() + pointB.getX() + pointC.getX() + pointD.getX()) / 4;</span>
+<span class="fc" id="L281">    float centerY = (pointA.getY() + pointB.getY() + pointC.getY() + pointD.getY()) / 4;</span>
+<span class="fc" id="L282">    pointA = moveAway(pointA, centerX, centerY);</span>
+<span class="fc" id="L283">    pointB = moveAway(pointB, centerX, centerY);</span>
+<span class="fc" id="L284">    pointC = moveAway(pointC, centerX, centerY);</span>
+<span class="fc" id="L285">    pointD = moveAway(pointD, centerX, centerY);</span>
+
+    ResultPoint pointBs;
+    ResultPoint pointDs;
+
+    // shift points to the center of each modules
+<span class="fc" id="L291">    pointAs = shiftPoint(pointA, pointB, dimV * 4);</span>
+<span class="fc" id="L292">    pointAs = shiftPoint(pointAs, pointD, dimH * 4);</span>
+<span class="fc" id="L293">    pointBs = shiftPoint(pointB, pointA, dimV * 4);</span>
+<span class="fc" id="L294">    pointBs = shiftPoint(pointBs, pointC, dimH * 4);</span>
+<span class="fc" id="L295">    pointCs = shiftPoint(pointC, pointD, dimV * 4);</span>
+<span class="fc" id="L296">    pointCs = shiftPoint(pointCs, pointB, dimH * 4);</span>
+<span class="fc" id="L297">    pointDs = shiftPoint(pointD, pointC, dimV * 4);</span>
+<span class="fc" id="L298">    pointDs = shiftPoint(pointDs, pointA, dimH * 4);</span>
+
+<span class="fc" id="L300">    return new ResultPoint[]{pointAs, pointBs, pointCs, pointDs};</span>
+  }
+
+  private boolean isValid(ResultPoint p) {
+<span class="fc bfc" id="L304" title="All 8 branches covered.">    return p.getX() &gt;= 0 &amp;&amp; p.getX() &lt; image.getWidth() &amp;&amp; p.getY() &gt; 0 &amp;&amp; p.getY() &lt; image.getHeight();</span>
+  }
+
+  private static BitMatrix sampleGrid(BitMatrix image,
+                                      ResultPoint topLeft,
+                                      ResultPoint bottomLeft,
+                                      ResultPoint bottomRight,
+                                      ResultPoint topRight,
+                                      int dimensionX,
+                                      int dimensionY) throws NotFoundException {
+
+<span class="fc" id="L315">    GridSampler sampler = GridSampler.getInstance();</span>
+
+<span class="fc" id="L317">    return sampler.sampleGrid(image,</span>
+                              dimensionX,
+                              dimensionY,
+                              0.5f,
+                              0.5f,
+                              dimensionX - 0.5f,
+                              0.5f,
+                              dimensionX - 0.5f,
+                              dimensionY - 0.5f,
+                              0.5f,
+                              dimensionY - 0.5f,
+<span class="fc" id="L328">                              topLeft.getX(),</span>
+<span class="fc" id="L329">                              topLeft.getY(),</span>
+<span class="fc" id="L330">                              topRight.getX(),</span>
+<span class="fc" id="L331">                              topRight.getY(),</span>
+<span class="fc" id="L332">                              bottomRight.getX(),</span>
+<span class="fc" id="L333">                              bottomRight.getY(),</span>
+<span class="fc" id="L334">                              bottomLeft.getX(),</span>
+<span class="fc" id="L335">                              bottomLeft.getY());</span>
+  }
+
+  /**
+   * Counts the number of black/white transitions between two points, using something like Bresenham's algorithm.
+   */
+  private int transitionsBetween(ResultPoint from, ResultPoint to) {
+    // See QR Code Detector, sizeOfBlackWhiteBlackRun()
+<span class="fc" id="L343">    int fromX = (int) from.getX();</span>
+<span class="fc" id="L344">    int fromY = (int) from.getY();</span>
+<span class="fc" id="L345">    int toX = (int) to.getX();</span>
+<span class="fc" id="L346">    int toY = (int) to.getY();</span>
+<span class="fc bfc" id="L347" title="All 2 branches covered.">    boolean steep = Math.abs(toY - fromY) &gt; Math.abs(toX - fromX);</span>
+<span class="fc bfc" id="L348" title="All 2 branches covered.">    if (steep) {</span>
+<span class="fc" id="L349">      int temp = fromX;</span>
+<span class="fc" id="L350">      fromX = fromY;</span>
+<span class="fc" id="L351">      fromY = temp;</span>
+<span class="fc" id="L352">      temp = toX;</span>
+<span class="fc" id="L353">      toX = toY;</span>
+<span class="fc" id="L354">      toY = temp;</span>
+    }
+
+<span class="fc" id="L357">    int dx = Math.abs(toX - fromX);</span>
+<span class="fc" id="L358">    int dy = Math.abs(toY - fromY);</span>
+<span class="fc" id="L359">    int error = -dx / 2;</span>
+<span class="fc bfc" id="L360" title="All 2 branches covered.">    int ystep = fromY &lt; toY ? 1 : -1;</span>
+<span class="fc bfc" id="L361" title="All 2 branches covered.">    int xstep = fromX &lt; toX ? 1 : -1;</span>
+<span class="fc" id="L362">    int transitions = 0;</span>
+<span class="fc bfc" id="L363" title="All 4 branches covered.">    boolean inBlack = image.get(steep ? fromY : fromX, steep ? fromX : fromY);</span>
+<span class="fc bfc" id="L364" title="All 2 branches covered.">    for (int x = fromX, y = fromY; x != toX; x += xstep) {</span>
+<span class="fc bfc" id="L365" title="All 4 branches covered.">      boolean isBlack = image.get(steep ? y : x, steep ? x : y);</span>
+<span class="fc bfc" id="L366" title="All 2 branches covered.">      if (isBlack != inBlack) {</span>
+<span class="fc" id="L367">        transitions++;</span>
+<span class="fc" id="L368">        inBlack = isBlack;</span>
+      }
+<span class="fc" id="L370">      error += dy;</span>
+<span class="fc bfc" id="L371" title="All 2 branches covered.">      if (error &gt; 0) {</span>
+<span class="pc bpc" id="L372" title="1 of 2 branches missed.">        if (y == toY) {</span>
+<span class="nc" id="L373">          break;</span>
+        }
+<span class="fc" id="L375">        y += ystep;</span>
+<span class="fc" id="L376">        error -= dx;</span>
+      }
+    }
+<span class="fc" id="L379">    return transitions;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

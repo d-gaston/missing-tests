@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RunnableListenerHelper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.event</a> &gt; <span class="el_source">RunnableListenerHelper.java</span></div><h1>RunnableListenerHelper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.event;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.Executor;
+import org.threadly.concurrent.ContainerHelper;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.Pair;
+
+/**
+ * Class which assist with holding and calling to Runnable listeners.  In parallel designs it is 
+ * common to have things subscribe for actions to occur (to later be alerted once an action 
+ * occurs).  This class makes it easy to allow things to register as a listener.
+ * &lt;p&gt;
+ * For listener designs which are not using runnables, look at {@link ListenerHelper}.  
+ * {@link ListenerHelper} allows you to create similar designs while using any any interface to 
+ * call back on.
+ * 
+ * @since 2.2.0 (since 1.1.0 as org.threadly.concurrent.ListenerHelper)
+ */
+public class RunnableListenerHelper {
+  protected final Object listenersLock;
+  protected final boolean callOnce;
+  protected volatile boolean done;
+  protected List&lt;Runnable&gt; inThreadListeners;
+  protected List&lt;Pair&lt;Runnable, Executor&gt;&gt; executorListeners;
+  
+  /**
+   * Constructs a new {@link RunnableListenerHelper}.  This can call listeners only once, or every 
+   * time {@link #callListeners()} is called.
+   * 
+   * @param callListenersOnce {@code true} if listeners should only be called once
+   */
+<span class="fc" id="L36">  public RunnableListenerHelper(boolean callListenersOnce) {</span>
+<span class="fc" id="L37">    this.listenersLock = new Object();</span>
+<span class="fc" id="L38">    this.callOnce = callListenersOnce;</span>
+<span class="fc" id="L39">    this.done = false;</span>
+<span class="fc" id="L40">    this.inThreadListeners = null;</span>
+<span class="fc" id="L41">    this.executorListeners = null;</span>
+<span class="fc" id="L42">  }</span>
+  
+  /**
+   * Return a collection of the currently subscribed listener instances.  This returned collection 
+   * can NOT be modified.
+   * 
+   * @return A non-null collection of currently subscribed listeners
+   */
+  public Collection&lt;Runnable&gt; getSubscribedListeners() {
+<span class="fc" id="L51">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L52" title="All 4 branches covered.">      if (inThreadListeners == null &amp;&amp; executorListeners == null) {</span>
+<span class="fc" id="L53">        return Collections.emptyList();</span>
+<span class="fc bfc" id="L54" title="All 2 branches covered.">      } else if (inThreadListeners == null) {</span>
+<span class="fc" id="L55">        return Collections.unmodifiableList(Pair.collectLeft(executorListeners));</span>
+<span class="fc bfc" id="L56" title="All 2 branches covered.">      } else if (executorListeners == null) {</span>
+<span class="fc" id="L57">        return Collections.unmodifiableList(inThreadListeners);</span>
+      } else {
+<span class="fc" id="L59">        List&lt;Runnable&gt; listeners = Pair.collectLeft(executorListeners);</span>
+        // dependent on modifiable listeners, unit test verified
+<span class="fc" id="L61">        listeners.addAll(inThreadListeners);</span>
+<span class="fc" id="L62">        return Collections.unmodifiableList(listeners);</span>
+      }
+    }
+  }
+  
+  /**
+   * Will call all listeners that are registered with this helper.  If any listeners were provided 
+   * without an executor, they will execute in the calling thread.  No exceptions will be thrown 
+   * in this calling thread if any exceptions occur from the listeners.
+   * &lt;p&gt;
+   * If calling multiple times, this will only have an effect if constructed with a {@code false}, 
+   * indicating that listeners can expect to be called multiple times.  In which case all 
+   * listeners that have registered will be called again.  If this was constructed with the 
+   * expectation of only calling once an {@link IllegalStateException} will be thrown on 
+   * subsequent calls. 
+   */
+  public void callListeners() {
+<span class="fc" id="L79">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L80" title="All 2 branches covered.">      if (callOnce) {</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">        if (done) {</span>
+<span class="fc" id="L82">          throw new IllegalStateException(&quot;Already called listeners&quot;);</span>
+        } else {
+<span class="fc" id="L84">          done = true;</span>
+        }
+      }
+      
+<span class="fc" id="L88">      doCallListeners();</span>
+<span class="fc" id="L89">    }</span>
+<span class="fc" id="L90">  }</span>
+  
+  /**
+   * {@code listenersLock} MUST BE SYNCHRONIZED BEFORE INVOKING THIS.
+   * &lt;p&gt;
+   * This calls the listeners without any safety checks as to weather it is safe to do so or not.  
+   * It is expected that those checks occurred prior to calling this function (either in a 
+   * different thread, or at some point earlier to avoid breaking logic around construction with 
+   * call listeners once design).
+   */
+  protected void doCallListeners() {
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    if (executorListeners != null) {</span>
+<span class="fc" id="L102">      List&lt;Pair&lt;Runnable, Executor&gt;&gt; executorListeners = this.executorListeners;</span>
+      // only list types will be able to efficiently retrieve by index, avoid iterator creation
+<span class="fc bfc" id="L104" title="All 2 branches covered.">      for (int i = 0; i &lt; executorListeners.size(); i++) {</span>
+        try {
+<span class="fc" id="L106">          Pair&lt;Runnable, Executor&gt; listener = executorListeners.get(i);</span>
+<span class="fc" id="L107">          listener.getRight().execute(listener.getLeft());</span>
+<span class="nc" id="L108">        } catch (Throwable t) {</span>
+<span class="nc" id="L109">          ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L110">        }</span>
+      }
+    }
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    if (inThreadListeners != null) {</span>
+<span class="fc" id="L114">      List&lt;Runnable&gt; inThreadListeners = this.inThreadListeners;</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">      for (int i = 0; i &lt; inThreadListeners.size(); i++) {</span>
+        try {
+<span class="fc" id="L117">          inThreadListeners.get(i).run();</span>
+<span class="fc" id="L118">        } catch (Throwable t) {</span>
+<span class="fc" id="L119">          ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L120">        }</span>
+      }
+    }
+    
+<span class="fc bfc" id="L124" title="All 2 branches covered.">    if (callOnce) {</span>
+<span class="fc" id="L125">      executorListeners = null;</span>
+<span class="fc" id="L126">      inThreadListeners = null;</span>
+    }
+<span class="fc" id="L128">  }</span>
+
+  /**
+   * Adds a listener to be called.  If the {@link RunnableListenerHelper} was constructed with 
+   * {@code true} (listeners can only be called once) then this listener will be called 
+   * immediately.  This just defers to the other addListener call, providing null for the executor.  
+   * So when the listener runs, it will be on the same thread as the one invoking 
+   * {@link #callListeners()}.
+   * 
+   * @param listener runnable to call when trigger event called
+   */
+  public void addListener(Runnable listener) {
+<span class="fc" id="L140">    addListener(listener, null, null);</span>
+<span class="fc" id="L141">  }</span>
+
+  /**
+   * Adds a listener to be called.  If the {@link RunnableListenerHelper} was constructed with 
+   * {@code true} (listeners can only be called once) then this listener will be called 
+   * immediately.  If the executor is null it will be called either on this thread or the thread 
+   * calling {@link #callListeners()} (depending on the previous condition).
+   * &lt;p&gt;
+   * If an {@link Executor} is provided, and that Executor is NOT single threaded, the listener 
+   * may be called concurrently.  You can ensure this wont happen by using the 
+   * {@link org.threadly.concurrent.wrapper.KeyDistributedExecutor} to get an executor from a 
+   * single key, or by using the {@link org.threadly.concurrent.wrapper.limiter.ExecutorLimiter} 
+   * with a limit of one, or an instance of the 
+   * {@link org.threadly.concurrent.SingleThreadScheduler}.
+   * 
+   * @param listener runnable to call when trigger event called
+   * @param executor executor listener should run on, or {@code null}
+   */
+  public void addListener(Runnable listener, Executor executor) {
+<span class="fc" id="L160">    addListener(listener, executor, executor);</span>
+<span class="fc" id="L161">  }</span>
+
+  /**
+   * Adds a listener to be called.  If the {@link RunnableListenerHelper} was constructed with 
+   * {@code true} (listeners can only be called once) then this listener will be called 
+   * immediately.
+   * &lt;p&gt;
+   * This allows you to provide different executors to use depending on the state of this 
+   * {@link RunnableListenerHelper}.  This is typically used as an optimization inside the threadly 
+   * library only.  Most users will be looking for the {@link #addListener(Runnable, Executor)} 
+   * which just provides that executor to both arguments here.
+   * 
+   * @param listener runnable to call when trigger event called
+   * @param queueExecutor executor listener should run on if this has to queue, or {@code null}
+   * @param inThreadExecutionExecutor executor listener should run on if this helpers state has transitioned to done
+   */
+  public void addListener(Runnable listener, 
+                          Executor queueExecutor, Executor inThreadExecutionExecutor) {
+<span class="fc bfc" id="L179" title="All 2 branches covered.">    if (listener == null) {</span>
+<span class="fc" id="L180">      return;</span>
+    }
+    
+<span class="fc" id="L183">    boolean runListener = done;</span>
+<span class="fc bfc" id="L184" title="All 2 branches covered.">    if (! runListener) {</span>
+<span class="fc" id="L185">      boolean addingFromCallingThread = Thread.holdsLock(listenersLock);</span>
+<span class="fc" id="L186">      synchronized (listenersLock) {</span>
+        // done should only be set to true if we are only calling listeners once
+<span class="pc bpc" id="L188" title="1 of 2 branches missed.">        if (! (runListener = done)) {</span>
+<span class="fc bfc" id="L189" title="All 2 branches covered.">          if (queueExecutor != null) {</span>
+<span class="pc bpc" id="L190" title="1 of 4 branches missed.">            if (addingFromCallingThread &amp;&amp; executorListeners != null) {</span>
+              // copy to prevent a ConcurrentModificationException
+<span class="fc" id="L192">              executorListeners = copyAndAdd(executorListeners, new Pair&lt;&gt;(listener, queueExecutor));</span>
+            } else {
+<span class="fc bfc" id="L194" title="All 2 branches covered.">              if (executorListeners == null) {</span>
+<span class="fc" id="L195">                executorListeners = Collections.singletonList(new Pair&lt;&gt;(listener, queueExecutor));</span>
+<span class="fc bfc" id="L196" title="All 2 branches covered.">              } else if (executorListeners.size() == 1) {</span>
+<span class="fc" id="L197">                Pair&lt;Runnable, Executor&gt; firstP = executorListeners.get(0);</span>
+<span class="fc" id="L198">                executorListeners = new ArrayList&lt;&gt;(4);</span>
+<span class="fc" id="L199">                executorListeners.add(firstP);</span>
+<span class="fc" id="L200">                executorListeners.add(new Pair&lt;&gt;(listener, queueExecutor));</span>
+<span class="fc" id="L201">              } else {</span>
+<span class="fc" id="L202">                executorListeners.add(new Pair&lt;&gt;(listener, queueExecutor));</span>
+              }
+            }
+          } else {
+<span class="pc bpc" id="L206" title="1 of 4 branches missed.">            if (addingFromCallingThread &amp;&amp; inThreadListeners != null) {</span>
+              // copy to prevent a ConcurrentModificationException
+<span class="fc" id="L208">              inThreadListeners = copyAndAdd(inThreadListeners, listener);</span>
+            } else {
+<span class="fc bfc" id="L210" title="All 2 branches covered.">              if (inThreadListeners == null) {</span>
+<span class="fc" id="L211">                inThreadListeners = Collections.singletonList(listener);</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">              } else if (inThreadListeners.size() == 1) {</span>
+<span class="fc" id="L213">                Runnable firstListener = inThreadListeners.get(0);</span>
+<span class="fc" id="L214">                inThreadListeners = new ArrayList&lt;&gt;(4);</span>
+<span class="fc" id="L215">                inThreadListeners.add(firstListener);</span>
+<span class="fc" id="L216">                inThreadListeners.add(listener);</span>
+<span class="fc" id="L217">              } else {</span>
+<span class="fc" id="L218">                inThreadListeners.add(listener);</span>
+              }
+            }
+          }
+        }
+<span class="fc" id="L223">      }</span>
+    }
+    
+<span class="fc bfc" id="L226" title="All 2 branches covered.">    if (runListener) {</span>
+      // run listener outside of lock
+      try {
+<span class="fc bfc" id="L229" title="All 2 branches covered.">        if (inThreadExecutionExecutor != null) {</span>
+<span class="fc" id="L230">          inThreadExecutionExecutor.execute(listener);</span>
+        } else {
+<span class="fc" id="L232">          listener.run();</span>
+        }
+<span class="fc" id="L234">      } catch (Throwable t) {</span>
+<span class="fc" id="L235">        throw ExceptionUtils.makeRuntime(t);</span>
+<span class="fc" id="L236">      }</span>
+    }
+<span class="fc" id="L238">  }</span>
+  
+  private static &lt;T&gt; List&lt;T&gt; copyAndAdd(List&lt;T&gt; sourceList, T item) {
+<span class="fc" id="L241">    List&lt;T&gt; result = new ArrayList&lt;&gt;(sourceList.size() + 1);</span>
+<span class="fc" id="L242">    result.addAll(sourceList);</span>
+<span class="fc" id="L243">    result.add(item);</span>
+<span class="fc" id="L244">    return result;</span>
+  }
+  
+  /**
+   * Attempts to remove a listener waiting to be called.
+   * 
+   * @param listener listener instance to be removed
+   * @return {@code true} if the listener was removed
+   */
+  public boolean removeListener(Runnable listener) {
+<span class="fc" id="L254">    boolean removingFromCallingThread = Thread.holdsLock(listenersLock);</span>
+<span class="fc" id="L255">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L256" title="All 2 branches covered.">      if (executorListeners != null) {</span>
+<span class="fc bfc" id="L257" title="All 2 branches covered.">        if (executorListeners.size() == 1) {</span>
+<span class="fc bfc" id="L258" title="All 2 branches covered.">          if (ContainerHelper.isContained(executorListeners.get(0).getLeft(), listener)) {</span>
+<span class="fc" id="L259">            executorListeners = null;</span>
+<span class="fc" id="L260">            return true;</span>
+          } else {
+<span class="fc" id="L262">            return false;</span>
+          }
+        }
+        
+<span class="fc" id="L266">        int i = 0;</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">        for (Pair&lt;Runnable, Executor&gt; p : executorListeners) {</span>
+<span class="fc bfc" id="L268" title="All 2 branches covered.">          if (ContainerHelper.isContained(p.getLeft(), listener)) {</span>
+<span class="pc bpc" id="L269" title="1 of 2 branches missed.">            if (removingFromCallingThread) {</span>
+<span class="fc" id="L270">              executorListeners = new ArrayList&lt;&gt;(executorListeners);</span>
+            }
+<span class="fc" id="L272">            executorListeners.remove(i);</span>
+<span class="fc" id="L273">            return true;</span>
+          } else {
+<span class="fc" id="L275">            i++;  // try next index if there is one</span>
+          }
+<span class="fc" id="L277">        }</span>
+      }
+<span class="fc bfc" id="L279" title="All 2 branches covered.">      if (inThreadListeners != null) {</span>
+<span class="fc bfc" id="L280" title="All 2 branches covered.">        if (inThreadListeners.size() == 1) {</span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">          if (ContainerHelper.isContained(inThreadListeners.get(0), listener)) {</span>
+<span class="fc" id="L282">            inThreadListeners = null;</span>
+<span class="fc" id="L283">            return true;</span>
+          } else {
+<span class="fc" id="L285">            return false;</span>
+          }
+        }
+        
+<span class="fc" id="L289">        int i = 0;</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">        for (Runnable r : inThreadListeners) {</span>
+<span class="fc bfc" id="L291" title="All 2 branches covered.">          if (ContainerHelper.isContained(r, listener)) {</span>
+<span class="pc bpc" id="L292" title="1 of 2 branches missed.">            if (removingFromCallingThread) {</span>
+<span class="fc" id="L293">              inThreadListeners = new ArrayList&lt;&gt;(inThreadListeners);</span>
+            }
+<span class="fc" id="L295">            inThreadListeners.remove(i);</span>
+<span class="fc" id="L296">            return true;</span>
+          } else {
+<span class="fc" id="L298">            i++;  // try next index if there is one</span>
+          }
+<span class="fc" id="L300">        }</span>
+      }
+      
+<span class="fc" id="L303">      return false;</span>
+    }
+  }
+  
+  /**
+   * Removes all listeners currently registered. 
+   */
+  public void clearListeners() {
+<span class="fc" id="L311">    synchronized (listenersLock) {</span>
+<span class="fc" id="L312">      executorListeners = null;</span>
+<span class="fc" id="L313">      inThreadListeners = null;</span>
+<span class="fc" id="L314">    }</span>
+<span class="fc" id="L315">  }</span>
+  
+  /**
+   * Returns how many listeners were added, and will be ran on the next call to 
+   * {@code callListeners}.  If this was constructed to only run once, all listeners will be 
+   * removed after called, and thus this will report zero after callListeners has been invoked.
+   * 
+   * @return number of listeners registered to be called
+   */
+  public int registeredListenerCount() {
+<span class="fc" id="L325">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L326" title="All 4 branches covered.">      return (executorListeners == null ? 0 : executorListeners.size()) + </span>
+<span class="fc" id="L327">               (inThreadListeners == null ? 0 : inThreadListeners.size());</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

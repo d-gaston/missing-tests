@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ListenableFutureTaskTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">ListenableFutureTaskTest.java</span></div><h1>ListenableFutureTaskTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RunnableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.threadly.BlockingTestRunnable;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.SingleThreadScheduler;
+import org.threadly.concurrent.TestCallable;
+import org.threadly.concurrent.TestRuntimeFailureRunnable;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.util.SuppressedStackRuntimeException;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L26">public class ListenableFutureTaskTest extends ListenableRunnableFutureInterfaceTest {</span>
+  @BeforeClass
+  public static void setupClass() {
+<span class="fc" id="L29">    setIgnoreExceptionHandler();</span>
+<span class="fc" id="L30">  }</span>
+  
+  @Override
+  protected ExecuteOnGetFutureFactory makeFutureFactory() {
+<span class="fc" id="L34">    return new ListenableFutureTaskFactory();</span>
+  }
+  
+  protected &lt;T&gt; ListenableFutureTask&lt;T&gt; makeFutureTask(Runnable runnable, T result) {
+<span class="fc" id="L38">    return new ListenableFutureTask&lt;&gt;(false, runnable, result);</span>
+  }
+  
+  protected &lt;T&gt; ListenableFutureTask&lt;T&gt; makeFutureTask(Callable&lt;T&gt; task) {
+<span class="fc" id="L42">    return new ListenableFutureTask&lt;&gt;(false, task);</span>
+  }
+  
+  @Test
+  public void getContainedRunnableTest() {
+<span class="fc" id="L47">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L48">    ListenableFutureTask&lt;Object&gt; f = makeFutureTask(tr, null);</span>
+<span class="pc bpc" id="L49" title="1 of 2 branches missed.">    assertTrue(tr == ((RunnableContainer)f.getContainedCallable()).getContainedRunnable());</span>
+<span class="fc" id="L50">  }</span>
+  
+  @Test
+  public void addNullListenerTest() {
+<span class="fc" id="L54">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(DoNothingRunnable.instance(), null);</span>
+    
+<span class="fc" id="L56">    future.addListener(null);</span>
+    // no exception should have been thrown
+<span class="fc" id="L58">  }</span>
+  
+  @Test
+  public void listenerTest() {
+<span class="fc" id="L62">    TestRunnable tr = new TestRunnable();</span>
+    
+<span class="fc" id="L64">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(tr, null);</span>
+    
+<span class="fc" id="L66">    assertEquals(0, future.listenerHelper.registeredListenerCount()); // empty to start</span>
+    
+<span class="fc" id="L68">    TestRunnable listener = new TestRunnable();</span>
+    
+<span class="fc" id="L70">    future.addListener(listener);</span>
+    
+<span class="fc" id="L72">    assertEquals(1, future.listenerHelper.registeredListenerCount()); // should now have once now that the runnable has not run yet</span>
+    
+<span class="fc" id="L74">    future.run(); // this should call the listener</span>
+    
+<span class="fc" id="L76">    assertTrue(listener.ranOnce()); // verify listener was called</span>
+    
+<span class="fc" id="L78">    assertEquals(0, future.listenerHelper.registeredListenerCount()); // empty after listener calls</span>
+    
+<span class="fc" id="L80">    TestRunnable postRunListener = new TestRunnable();</span>
+    
+<span class="fc" id="L82">    future.addListener(postRunListener);</span>
+    
+<span class="fc" id="L84">    assertTrue(postRunListener.ranOnce()); // verify listener was called</span>
+    
+<span class="fc" id="L86">    assertEquals(0, future.listenerHelper.registeredListenerCount()); // still empty after future ran</span>
+    
+    // verify run on correct executor
+<span class="fc" id="L89">    TestRunnable executorListener = new TestRunnable();</span>
+<span class="fc" id="L90">    TestExecutor executor = new TestExecutor();</span>
+<span class="fc" id="L91">    future.addListener(executorListener, executor);</span>
+    
+<span class="fc" id="L93">    assertEquals(1, executor.providedRunnables.size());</span>
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">    assertTrue(executor.providedRunnables.get(0) == executorListener);</span>
+<span class="fc" id="L95">  }</span>
+  
+  @Test
+  public void cancelRunsListenersTest() {
+<span class="fc" id="L99">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L100">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(DoNothingRunnable.instance(), null);</span>
+<span class="fc" id="L101">    future.addListener(tr);</span>
+    
+<span class="fc" id="L103">    future.cancel(false);</span>
+    
+<span class="fc" id="L105">    assertTrue(tr.ranOnce());</span>
+<span class="fc" id="L106">  }</span>
+  
+  @Test
+  public void listenerExceptionAddBeforeRunTest() {
+<span class="fc" id="L110">    TestRunnable listener = new TestRuntimeFailureRunnable();</span>
+    
+<span class="fc" id="L112">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(DoNothingRunnable.instance(), null);</span>
+    
+<span class="fc" id="L114">    future.addListener(listener);</span>
+<span class="fc" id="L115">    future.run();</span>
+    
+<span class="fc" id="L117">    assertTrue(listener.ranOnce());</span>
+<span class="fc" id="L118">  }</span>
+  
+  @Test
+  public void listenerExceptionAddAfterRunTest() {
+<span class="fc" id="L122">    TestRunnable listener = new TestRuntimeFailureRunnable();</span>
+    
+<span class="fc" id="L124">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(DoNothingRunnable.instance(), null);</span>
+    
+<span class="fc" id="L126">    future.run();</span>
+    try {
+<span class="nc" id="L128">      future.addListener(listener);</span>
+<span class="nc" id="L129">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L130">    } catch (RuntimeException e) {</span>
+      // expected
+<span class="nc" id="L132">    }</span>
+    
+<span class="fc" id="L134">    assertTrue(listener.ranOnce());</span>
+<span class="fc" id="L135">  }</span>
+  
+  @Test
+  public void addCallbackTest() {
+<span class="fc" id="L139">    TestCallable tc = new TestCallable();</span>
+<span class="fc" id="L140">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(tc);</span>
+<span class="fc" id="L141">    TestFutureCallback tfc = new TestFutureCallback();</span>
+<span class="fc" id="L142">    future.addCallback(tfc);</span>
+    
+<span class="fc" id="L144">    assertEquals(0, tfc.getCallCount());</span>
+    
+<span class="fc" id="L146">    future.run();</span>
+    
+<span class="fc" id="L148">    assertEquals(1, tfc.getCallCount());</span>
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">    assertTrue(tc.getReturnedResult() == tfc.getLastResult());</span>
+<span class="fc" id="L150">  }</span>
+  
+  @Test
+  public void addCallbackExecutionExceptionTest() {
+<span class="fc" id="L154">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L155">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(new TestRuntimeFailureRunnable(failure), null);</span>
+<span class="fc" id="L156">    TestFutureCallback tfc = new TestFutureCallback();</span>
+<span class="fc" id="L157">    future.addCallback(tfc);</span>
+    
+<span class="fc" id="L159">    assertEquals(0, tfc.getCallCount());</span>
+    
+<span class="fc" id="L161">    future.run();</span>
+    
+<span class="fc" id="L163">    assertEquals(1, tfc.getCallCount());</span>
+<span class="pc bpc" id="L164" title="1 of 2 branches missed.">    assertTrue(failure == tfc.getLastFailure());</span>
+<span class="fc" id="L165">  }</span>
+  
+  @Test (expected = ExecutionException.class)
+  public void getExecutionExceptionTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L169">    TestRunnable tr = new TestRuntimeFailureRunnable();</span>
+    
+<span class="fc" id="L171">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(tr, null);</span>
+    
+<span class="fc" id="L173">    future.run();</span>
+<span class="nc" id="L174">    future.get();</span>
+<span class="nc" id="L175">  }</span>
+  
+  @Test (expected = ExecutionException.class)
+  public void getWithTimeoutExecutionExceptionTest() throws InterruptedException, ExecutionException, TimeoutException {
+<span class="fc" id="L179">    TestRunnable tr = new TestRuntimeFailureRunnable();</span>
+    
+<span class="fc" id="L181">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(tr, null);</span>
+    
+<span class="fc" id="L183">    future.run();</span>
+<span class="nc" id="L184">    future.get(100, TimeUnit.MILLISECONDS);</span>
+<span class="nc" id="L185">  }</span>
+  
+  @Test
+  public void cancelFlatMappedAsyncFutureTest() {
+<span class="fc" id="L189">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(DoNothingRunnable.instance(), null);</span>
+<span class="fc" id="L190">    SettableListenableFuture&lt;Void&gt; asyncSLF = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L191">    ListenableFuture&lt;Void&gt; mappedLF = future.flatMap(asyncSLF);</span>
+      
+<span class="fc" id="L193">    future.run();  // complete source future before cancel</span>
+<span class="fc" id="L194">    assertFalse(mappedLF.isDone());</span>
+<span class="fc" id="L195">    assertTrue(mappedLF.cancel(false)); // no interrupt needed, delegate future not started</span>
+<span class="fc" id="L196">    assertTrue(asyncSLF.isCancelled());</span>
+<span class="fc" id="L197">  }</span>
+  
+  @Test
+  public void getRunningStackTraceTest() {
+<span class="fc" id="L201">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L202">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L203">    ListenableFutureTask&lt;Object&gt; future = makeFutureTask(btr, null);</span>
+    
+    try {
+<span class="fc" id="L206">      assertNull(future.getRunningStackTrace());</span>
+      
+<span class="fc" id="L208">      sts.execute(future);</span>
+<span class="fc" id="L209">      btr.blockTillStarted();</span>
+
+<span class="fc" id="L211">      StackTraceElement[] stack = future.getRunningStackTrace();</span>
+<span class="fc" id="L212">      assertEquals(BlockingTestRunnable.class.getName(), stack[2].getClassName());</span>
+    } finally {
+<span class="fc" id="L214">      btr.unblock();</span>
+<span class="fc" id="L215">      sts.shutdown();</span>
+    }
+<span class="fc" id="L217">  }</span>
+  
+  @Test
+  public void getMappedRunningStackTraceTest() {
+<span class="fc" id="L221">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L222">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L223">    ListenableFutureTask&lt;Object&gt; futureTask = makeFutureTask(btr, null);</span>
+<span class="fc" id="L224">    ListenableFuture&lt;Object&gt; mappedFuture = futureTask.map((o) -&gt; o).map((o) -&gt; null);</span>
+    try {
+<span class="fc" id="L226">      assertNull(mappedFuture.getRunningStackTrace());</span>
+      
+<span class="fc" id="L228">      sts.execute(futureTask);</span>
+<span class="fc" id="L229">      btr.blockTillStarted();</span>
+
+<span class="fc" id="L231">      StackTraceElement[] stack = mappedFuture.getRunningStackTrace();</span>
+<span class="fc" id="L232">      assertEquals(BlockingTestRunnable.class.getName(), stack[2].getClassName());</span>
+    } finally {
+<span class="fc" id="L234">      btr.unblock();</span>
+<span class="fc" id="L235">      sts.shutdown();</span>
+    }
+<span class="fc" id="L237">  }</span>
+  
+  @Test
+  public void getFlatMappedRunningStackTraceTest() {
+<span class="fc" id="L241">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L242">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L243">    ListenableFutureTask&lt;Object&gt; futureTask = makeFutureTask(btr, null);</span>
+<span class="fc" id="L244">    ListenableFuture&lt;Object&gt; mappedFuture = </span>
+<span class="fc" id="L245">        futureTask.flatMap((o) -&gt; FutureUtils.immediateResultFuture(o))</span>
+<span class="fc" id="L246">                  .flatMap((o) -&gt; FutureUtils.immediateResultFuture(null));</span>
+    try {
+<span class="fc" id="L248">      assertNull(mappedFuture.getRunningStackTrace());</span>
+      
+<span class="fc" id="L250">      sts.execute(futureTask);</span>
+<span class="fc" id="L251">      btr.blockTillStarted();</span>
+
+<span class="fc" id="L253">      StackTraceElement[] stack = mappedFuture.getRunningStackTrace();</span>
+<span class="fc" id="L254">      assertEquals(BlockingTestRunnable.class.getName(), stack[2].getClassName());</span>
+    } finally {
+<span class="fc" id="L256">      btr.unblock();</span>
+<span class="fc" id="L257">      sts.shutdown();</span>
+    }
+<span class="fc" id="L259">  }</span>
+  
+<span class="fc" id="L261">  private class ListenableFutureTaskFactory implements ExecuteOnGetFutureFactory {</span>
+    @Override
+    public RunnableFuture&lt;?&gt; make(Runnable run) {
+<span class="fc" id="L264">      return new ListenableFutureTask&lt;&gt;(false, run);</span>
+    }
+
+    @Override
+    public &lt;T&gt; RunnableFuture&lt;T&gt; make(Runnable run, T result) {
+<span class="fc" id="L269">      return new ListenableFutureTask&lt;&gt;(false, run, result);</span>
+    }
+
+    @Override
+    public &lt;T&gt; RunnableFuture&lt;T&gt; make(Callable&lt;T&gt; callable) {
+<span class="fc" id="L274">      return new ListenableFutureTask&lt;&gt;(false, callable);</span>
+    }
+
+    @Override
+    public ListenableFuture&lt;?&gt; makeCanceled() {
+<span class="fc" id="L279">      ListenableFutureTask&lt;?&gt; lft = new ListenableFutureTask&lt;&gt;(false, DoNothingRunnable.instance());</span>
+<span class="fc" id="L280">      lft.cancel(false);</span>
+<span class="fc" id="L281">      return lft;</span>
+    }
+
+    @Override
+    public ListenableFuture&lt;Object&gt; makeWithFailure(Exception e) {
+<span class="fc" id="L286">      ListenableFutureTask&lt;Object&gt; lft = new ListenableFutureTask&lt;&gt;(false, () -&gt; { throw e; });</span>
+<span class="fc" id="L287">      lft.run();</span>
+<span class="fc" id="L288">      return lft;</span>
+    }
+
+    @Override
+    public &lt;T&gt; ListenableFuture&lt;T&gt; makeWithResult(T result) {
+<span class="fc" id="L293">      ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, () -&gt; result);</span>
+<span class="fc" id="L294">      lft.run();</span>
+<span class="fc" id="L295">      return lft;</span>
+    }
+  }
+  
+<span class="fc" id="L299">  private class TestExecutor implements Executor {</span>
+<span class="fc" id="L300">    public List&lt;Runnable&gt; providedRunnables = new ArrayList&lt;&gt;(2);</span>
+    
+    @Override
+    public void execute(Runnable command) {
+<span class="fc" id="L304">      providedRunnables.add(command);</span>
+<span class="fc" id="L305">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

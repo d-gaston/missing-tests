@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PropertiesComputer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.geometry.spherical.twod</a> &gt; <span class="el_source">PropertiesComputer.java</span></div><h1>PropertiesComputer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.geometry.spherical.twod;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.apache.commons.math4.exception.MathInternalError;
+import org.apache.commons.math4.geometry.euclidean.threed.Cartesian3D;
+import org.apache.commons.math4.geometry.partitioning.BSPTree;
+import org.apache.commons.math4.geometry.partitioning.BSPTreeVisitor;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.MathUtils;
+
+/** Visitor computing geometrical properties.
+ * @since 3.3
+ */
+class PropertiesComputer implements BSPTreeVisitor&lt;Sphere2D&gt; {
+
+    /** Tolerance below which points are consider to be identical. */
+    private final double tolerance;
+
+    /** Summed area. */
+    private double summedArea;
+
+    /** Summed barycenter. */
+    private Cartesian3D summedBarycenter;
+
+    /** List of points strictly inside convex cells. */
+    private final List&lt;Cartesian3D&gt; convexCellsInsidePoints;
+
+    /** Simple constructor.
+     * @param tolerance below which points are consider to be identical
+     */
+<span class="fc" id="L49">    PropertiesComputer(final double tolerance) {</span>
+<span class="fc" id="L50">        this.tolerance              = tolerance;</span>
+<span class="fc" id="L51">        this.summedArea             = 0;</span>
+<span class="fc" id="L52">        this.summedBarycenter       = Cartesian3D.ZERO;</span>
+<span class="fc" id="L53">        this.convexCellsInsidePoints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L54">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public Order visitOrder(final BSPTree&lt;Sphere2D&gt; node) {
+<span class="fc" id="L59">        return Order.MINUS_SUB_PLUS;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void visitInternalNode(final BSPTree&lt;Sphere2D&gt; node) {
+        // nothing to do here
+<span class="fc" id="L66">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public void visitLeafNode(final BSPTree&lt;Sphere2D&gt; node) {
+<span class="fc bfc" id="L71" title="All 2 branches covered.">        if ((Boolean) node.getAttribute()) {</span>
+
+            // transform this inside leaf cell into a simple convex polygon
+<span class="fc" id="L74">            final SphericalPolygonsSet convex =</span>
+<span class="fc" id="L75">                    new SphericalPolygonsSet(node.pruneAroundConvexCell(Boolean.TRUE,</span>
+                                                                        Boolean.FALSE,
+                                                                        null),
+                                             tolerance);
+
+            // extract the start of the single loop boundary of the convex cell
+<span class="fc" id="L81">            final List&lt;Vertex&gt; boundary = convex.getBoundaryLoops();</span>
+<span class="pc bpc" id="L82" title="1 of 2 branches missed.">            if (boundary.size() != 1) {</span>
+                // this should never happen
+<span class="nc" id="L84">                throw new MathInternalError();</span>
+            }
+
+            // compute the geometrical properties of the convex cell
+<span class="fc" id="L88">            final double area  = convexCellArea(boundary.get(0));</span>
+<span class="fc" id="L89">            final Cartesian3D barycenter = convexCellBarycenter(boundary.get(0));</span>
+<span class="fc" id="L90">            convexCellsInsidePoints.add(barycenter);</span>
+
+            // add the cell contribution to the global properties
+<span class="fc" id="L93">            summedArea      += area;</span>
+<span class="fc" id="L94">            summedBarycenter = new Cartesian3D(1, summedBarycenter, area, barycenter);</span>
+
+        }
+<span class="fc" id="L97">    }</span>
+
+    /** Compute convex cell area.
+     * @param start start vertex of the convex cell boundary
+     * @return area
+     */
+    private double convexCellArea(final Vertex start) {
+
+<span class="fc" id="L105">        int n = 0;</span>
+<span class="fc" id="L106">        double sum = 0;</span>
+
+        // loop around the cell
+<span class="fc bfc" id="L109" title="All 4 branches covered.">        for (Edge e = start.getOutgoing(); n == 0 || e.getStart() != start; e = e.getEnd().getOutgoing()) {</span>
+
+            // find path interior angle at vertex
+<span class="fc" id="L112">            final Cartesian3D previousPole = e.getCircle().getPole();</span>
+<span class="fc" id="L113">            final Cartesian3D nextPole     = e.getEnd().getOutgoing().getCircle().getPole();</span>
+<span class="fc" id="L114">            final Cartesian3D point        = e.getEnd().getLocation().getVector();</span>
+<span class="fc" id="L115">            double alpha = FastMath.atan2(Cartesian3D.dotProduct(nextPole, Cartesian3D.crossProduct(point, previousPole)),</span>
+<span class="fc" id="L116">                                          -Cartesian3D.dotProduct(nextPole, previousPole));</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">            if (alpha &lt; 0) {</span>
+<span class="nc" id="L118">                alpha += MathUtils.TWO_PI;</span>
+            }
+<span class="fc" id="L120">            sum += alpha;</span>
+<span class="fc" id="L121">            n++;</span>
+        }
+
+        // compute area using extended Girard theorem
+        // see Spherical Trigonometry: For the Use of Colleges and Schools by I. Todhunter
+        // article 99 in chapter VIII Area Of a Spherical Triangle. Spherical Excess.
+        // book available from project Gutenberg at http://www.gutenberg.org/ebooks/19770
+<span class="fc" id="L128">        return sum - (n - 2) * FastMath.PI;</span>
+
+    }
+
+    /** Compute convex cell barycenter.
+     * @param start start vertex of the convex cell boundary
+     * @return barycenter
+     */
+    private Cartesian3D convexCellBarycenter(final Vertex start) {
+
+<span class="fc" id="L138">        int n = 0;</span>
+<span class="fc" id="L139">        Cartesian3D sumB = Cartesian3D.ZERO;</span>
+
+        // loop around the cell
+<span class="fc bfc" id="L142" title="All 4 branches covered.">        for (Edge e = start.getOutgoing(); n == 0 || e.getStart() != start; e = e.getEnd().getOutgoing()) {</span>
+<span class="fc" id="L143">            sumB = new Cartesian3D(1, sumB, e.getLength(), e.getCircle().getPole());</span>
+<span class="fc" id="L144">            n++;</span>
+        }
+
+<span class="fc" id="L147">        return sumB.normalize();</span>
+
+    }
+
+    /** Get the area.
+     * @return area
+     */
+    public double getArea() {
+<span class="fc" id="L155">        return summedArea;</span>
+    }
+
+    /** Get the barycenter.
+     * @return barycenter
+     */
+    public S2Point getBarycenter() {
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">        if (summedBarycenter.getNormSq() == 0) {</span>
+<span class="nc" id="L163">            return S2Point.NaN;</span>
+        } else {
+<span class="fc" id="L165">            return new S2Point(summedBarycenter);</span>
+        }
+    }
+
+    /** Get the points strictly inside convex cells.
+     * @return points strictly inside convex cells
+     */
+    public List&lt;Cartesian3D&gt; getConvexCellsInsidePoints() {
+<span class="fc" id="L173">        return convexCellsInsidePoints;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BlockingQueueConsumerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">BlockingQueueConsumerTest.java</span></div><h1>BlockingQueueConsumerTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.SynchronousQueue;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.BlockingQueueConsumer.ConsumerAcceptor;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.TestExceptionHandler;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L19">public class BlockingQueueConsumerTest extends ThreadlyTester {</span>
+   private SynchronousQueue&lt;Object&gt; queue;
+   private TestAcceptor acceptor;
+   private BlockingQueueConsumer&lt;Object&gt; queueConsumer;
+   
+  @Before
+  public void setup() {
+<span class="fc" id="L26">    queue = new SynchronousQueue&lt;&gt;();</span>
+<span class="fc" id="L27">    acceptor = new TestAcceptor();</span>
+<span class="fc" id="L28">    queueConsumer = new BlockingQueueConsumer&lt;&gt;(new ConfigurableThreadFactory(), queue, acceptor);</span>
+<span class="fc" id="L29">  }</span>
+  
+  @After
+  public void cleanup() {
+<span class="fc" id="L33">    queueConsumer.stopIfRunning();</span>
+<span class="fc" id="L34">    queue = null;</span>
+<span class="fc" id="L35">    acceptor = null;</span>
+<span class="fc" id="L36">    queueConsumer = null;</span>
+<span class="fc" id="L37">  }</span>
+  
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test
+  public void constructorFail() {
+    try {
+<span class="nc" id="L43">      new BlockingQueueConsumer&lt;&gt;(null, new SynchronousQueue&lt;&gt;(), new TestAcceptor());</span>
+<span class="nc" id="L44">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L45">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L47">    }</span>
+    try {
+<span class="nc" id="L49">      new BlockingQueueConsumer&lt;&gt;(new ConfigurableThreadFactory(), new SynchronousQueue&lt;&gt;(), null);</span>
+<span class="nc" id="L50">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L51">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L53">    }</span>
+    try {
+<span class="nc" id="L55">      new BlockingQueueConsumer&lt;&gt;(new ConfigurableThreadFactory(), null, new TestAcceptor());</span>
+<span class="nc" id="L56">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L57">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L59">    }</span>
+<span class="fc" id="L60">  }</span>
+  
+  @Test
+  public void doubleStartTest() {
+    // start queue
+<span class="fc" id="L65">    queueConsumer.startIfNotStarted();</span>
+    
+<span class="fc" id="L67">    assertTrue(queueConsumer.isRunning());</span>
+    
+    // attempt to start again
+<span class="fc" id="L70">    queueConsumer.startIfNotStarted();</span>
+    // should still be running without exception
+<span class="fc" id="L72">    assertTrue(queueConsumer.isRunning());</span>
+<span class="fc" id="L73">  }</span>
+  
+  @Test (expected = IllegalThreadStateException.class)
+  public void startFail() {
+<span class="fc" id="L77">    StartingThreadFactory threadFactory = new StartingThreadFactory();</span>
+    try {
+<span class="fc" id="L79">      queueConsumer = new BlockingQueueConsumer&lt;&gt;(threadFactory, queue, acceptor);</span>
+<span class="nc" id="L80">      queueConsumer.start();</span>
+    } finally {
+<span class="fc" id="L82">      threadFactory.killThreads();</span>
+    }
+<span class="nc" id="L84">  }</span>
+  
+  @Test
+  public void doubleStopTest() {
+<span class="fc" id="L88">    queueConsumer.start();</span>
+<span class="fc" id="L89">    assertTrue(queueConsumer.isRunning());</span>
+    
+<span class="fc" id="L91">    queueConsumer.stopIfRunning();</span>
+<span class="fc" id="L92">    assertFalse(queueConsumer.isRunning());</span>
+    
+<span class="fc" id="L94">    queueConsumer.stopIfRunning();</span>
+<span class="fc" id="L95">    assertFalse(queueConsumer.isRunning());</span>
+<span class="fc" id="L96">  }</span>
+  
+  @Test
+  public void consumeTest() throws InterruptedException {
+<span class="fc" id="L100">    assertFalse(queueConsumer.isRunning());</span>
+    
+    // start queue
+<span class="fc" id="L103">    queueConsumer.start();</span>
+    
+<span class="fc" id="L105">    assertTrue(queueConsumer.isRunning());</span>
+    
+<span class="fc" id="L107">    Object item = new Object();</span>
+<span class="fc" id="L108">    queue.put(item);</span>
+    
+<span class="fc" id="L110">    acceptor.blockTillTrue(); // will throw exception if never got item</span>
+    
+<span class="pc bpc" id="L112" title="1 of 2 branches missed.">    assertTrue(acceptor.acceptedItems.get(0) == item);</span>
+<span class="fc" id="L113">  }</span>
+  
+  @Test
+  public void consumeExceptionTest() throws InterruptedException {
+<span class="fc" id="L117">    final TestExceptionHandler teh = new TestExceptionHandler();</span>
+<span class="fc" id="L118">    ExceptionUtils.setInheritableExceptionHandler(teh);</span>
+<span class="fc" id="L119">    final Exception e = new Exception();</span>
+<span class="fc" id="L120">    BlockingQueueConsumer&lt;Object&gt; queueConsumer = new BlockingQueueConsumer&lt;&gt;(new ConfigurableThreadFactory(), </span>
+<span class="fc" id="L121">                                                                              queue, new ConsumerAcceptor&lt;Object&gt;() {</span>
+      @Override
+      public void acceptConsumedItem(Object item) throws Exception {
+<span class="fc" id="L124">        throw e;</span>
+      }
+    });
+    try {
+<span class="fc" id="L128">      queueConsumer.start();</span>
+      
+<span class="fc" id="L130">      Object item = new Object();</span>
+<span class="fc" id="L131">      queue.put(item);</span>
+      
+      // will throw exception if test fails
+<span class="pc bpc" id="L134" title="1 of 2 branches missed.">      new TestCondition(teh::getLastThrowable, (t) -&gt; t == e).blockTillTrue();</span>
+      
+      // verify thread did not die
+<span class="fc" id="L137">      assertTrue(queueConsumer.runningThread.isAlive());</span>
+    } finally {
+<span class="fc" id="L139">      queueConsumer.stop();</span>
+    }
+<span class="fc" id="L141">  }</span>
+  
+<span class="fc" id="L143">  private static class TestAcceptor extends TestCondition implements ConsumerAcceptor&lt;Object&gt; {</span>
+<span class="fc" id="L144">    private final List&lt;Object&gt; acceptedItems = new LinkedList&lt;&gt;();</span>
+    
+    @Override
+    public void acceptConsumedItem(Object item) {
+<span class="fc" id="L148">      synchronized (this) {</span>
+<span class="fc" id="L149">        acceptedItems.add(item);</span>
+<span class="fc" id="L150">      }</span>
+<span class="fc" id="L151">    }</span>
+
+    @Override
+    public boolean get() {
+<span class="fc" id="L155">      synchronized (this) {</span>
+<span class="pc bpc" id="L156" title="1 of 2 branches missed.">        return ! acceptedItems.isEmpty();</span>
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

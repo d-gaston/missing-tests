@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CommitValidationTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.internal</a> &gt; <span class="el_source">CommitValidationTest.java</span></div><h1>CommitValidationTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.internal;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
+/**
+ * Validate commit message has proper structure.
+ *
+ * &lt;p&gt;Commits to check are resolved from different places according
+ * to type of commit in current HEAD. If current HEAD commit is
+ * non-merge commit , previous commits are resolved due to current
+ * HEAD commit. Otherwise if it is a merge commit, it will invoke
+ * resolving previous commits due to commits which was merged.&lt;/p&gt;
+ *
+ * &lt;p&gt;After calculating commits to start with ts resolves previous
+ * commits according to COMMITS_RESOLUTION_MODE variable.
+ * At default(BY_LAST_COMMIT_AUTHOR) it checks first commit author
+ * and return all consecutive commits with same author. Second
+ * mode(BY_COUNTER) makes returning first PREVIOUS_COMMITS_TO_CHECK_COUNT
+ * commits after starter commit.&lt;/p&gt;
+ *
+ * &lt;p&gt;Resolved commits are filtered according to author. If commit author
+ * belong to list USERS_EXCLUDED_FROM_VALIDATION then this commit will
+ * not be validated.&lt;/p&gt;
+ *
+ * &lt;p&gt;Filtered commit list is checked if their messages has proper structure.&lt;/p&gt;
+ *
+ */
+<span class="fc" id="L72">public class CommitValidationTest {</span>
+
+<span class="fc" id="L74">    private static final List&lt;String&gt; USERS_EXCLUDED_FROM_VALIDATION =</span>
+<span class="fc" id="L75">            Arrays.asList(&quot;Roman Ivanov&quot;, &quot;rnveach&quot;);</span>
+
+    private static final String ISSUE_COMMIT_MESSAGE_REGEX_PATTERN = &quot;^Issue #\\d+: .*$&quot;;
+    private static final String PR_COMMIT_MESSAGE_REGEX_PATTERN = &quot;^Pull #\\d+: .*$&quot;;
+    private static final String OTHER_COMMIT_MESSAGE_REGEX_PATTERN =
+            &quot;^(minor|config|infra|doc|spelling): .*$&quot;;
+
+    private static final String ACCEPTED_COMMIT_MESSAGE_REGEX_PATTERN =
+              &quot;(&quot; + ISSUE_COMMIT_MESSAGE_REGEX_PATTERN + &quot;)|&quot;
+              + &quot;(&quot; + PR_COMMIT_MESSAGE_REGEX_PATTERN + &quot;)|&quot;
+              + &quot;(&quot; + OTHER_COMMIT_MESSAGE_REGEX_PATTERN + &quot;)&quot;;
+
+<span class="fc" id="L87">    private static final Pattern ACCEPTED_COMMIT_MESSAGE_PATTERN =</span>
+<span class="fc" id="L88">            Pattern.compile(ACCEPTED_COMMIT_MESSAGE_REGEX_PATTERN);</span>
+
+<span class="fc" id="L90">    private static final Pattern INVALID_POSTFIX_PATTERN = Pattern.compile(&quot;^.*[. \\t]$&quot;);</span>
+
+    private static final int PREVIOUS_COMMITS_TO_CHECK_COUNT = 10;
+
+<span class="fc" id="L94">    private static final CommitsResolutionMode COMMITS_RESOLUTION_MODE =</span>
+            CommitsResolutionMode.BY_LAST_COMMIT_AUTHOR;
+
+    private static List&lt;RevCommit&gt; lastCommits;
+
+    @BeforeClass
+    public static void setUp() throws Exception {
+<span class="fc" id="L101">        lastCommits = getCommitsToCheck();</span>
+<span class="fc" id="L102">    }</span>
+
+    @Test
+    public void testHasCommits() {
+<span class="pc bpc" id="L106" title="1 of 2 branches missed.">        assertTrue(&quot;must have at least one commit to validate&quot;,</span>
+<span class="pc bpc" id="L107" title="1 of 2 branches missed.">                lastCommits != null &amp;&amp; !lastCommits.isEmpty());</span>
+<span class="fc" id="L108">    }</span>
+
+    @Test
+    public void testCommitMessage() {
+<span class="fc" id="L112">        assertEquals(&quot;should not accept commit message with periods on end&quot;, 3,</span>
+<span class="fc" id="L113">                validateCommitMessage(&quot;minor: Test. Test.&quot;));</span>
+<span class="fc" id="L114">        assertEquals(&quot;should not accept commit message with spaces on end&quot;, 3,</span>
+<span class="fc" id="L115">                validateCommitMessage(&quot;minor: Test. &quot;));</span>
+<span class="fc" id="L116">        assertEquals(&quot;should not accept commit message with tabs on end&quot;, 3,</span>
+<span class="fc" id="L117">                validateCommitMessage(&quot;minor: Test.\t&quot;));</span>
+<span class="fc" id="L118">        assertEquals(&quot;should not accept commit message with period on end, ignoring new line&quot;,</span>
+<span class="fc" id="L119">                3, validateCommitMessage(&quot;minor: Test.\n&quot;));</span>
+<span class="fc" id="L120">        assertEquals(&quot;should not accept commit message with missing prefix&quot;, 1,</span>
+<span class="fc" id="L121">                validateCommitMessage(&quot;Test. Test&quot;));</span>
+<span class="fc" id="L122">        assertEquals(&quot;should not accept commit message with missing prefix&quot;, 1,</span>
+<span class="fc" id="L123">                validateCommitMessage(&quot;Test. Test\n&quot;));</span>
+<span class="fc" id="L124">        assertEquals(&quot;should not accept commit message with multiple lines with text&quot;, 2,</span>
+<span class="fc" id="L125">                validateCommitMessage(&quot;minor: Test.\nTest&quot;));</span>
+<span class="fc" id="L126">        assertEquals(&quot;should accept commit message with a new line on end&quot;, 0,</span>
+<span class="fc" id="L127">                validateCommitMessage(&quot;minor: Test\n&quot;));</span>
+<span class="fc" id="L128">        assertEquals(&quot;should accept commit message with multiple new lines on end&quot;, 0,</span>
+<span class="fc" id="L129">                validateCommitMessage(&quot;minor: Test\n\n&quot;));</span>
+<span class="fc" id="L130">        assertEquals(&quot;should accept commit message that ends properly&quot;, 0,</span>
+<span class="fc" id="L131">                validateCommitMessage(&quot;minor: Test. Test&quot;));</span>
+<span class="fc" id="L132">        assertEquals(&quot;should accept commit message with less than or equal to 200 characters&quot;,</span>
+<span class="fc" id="L133">                4, validateCommitMessage(&quot;minor: Test Test Test Test Test&quot;</span>
+                + &quot;Test Test Test Test Test Test Test Test Test Test Test Test Test Test &quot;
+                + &quot;Test Test Test Test Test Test Test Test Test Test Test Test Test Test Test Test &quot;
+                + &quot;Test Test Test Test Test Test Test  Test Test Test Test Test Test&quot;));
+<span class="fc" id="L137">    }</span>
+
+    @Test
+    public void testCommitMessageHasProperStructure() {
+<span class="pc bpc" id="L141" title="1 of 2 branches missed.">        for (RevCommit commit : filterValidCommits(lastCommits)) {</span>
+<span class="nc" id="L142">            final String commitMessage = commit.getFullMessage();</span>
+<span class="nc" id="L143">            final int error = validateCommitMessage(commitMessage);</span>
+
+<span class="nc bnc" id="L145" title="All 2 branches missed.">            if (error != 0) {</span>
+<span class="nc" id="L146">                final String commitId = commit.getId().getName();</span>
+
+<span class="nc" id="L148">                fail(getInvalidCommitMessageFormattingError(commitId, commitMessage) + error);</span>
+            }
+<span class="nc" id="L150">        }</span>
+<span class="fc" id="L151">    }</span>
+
+    private static int validateCommitMessage(String commitMessage) {
+<span class="fc" id="L154">        final String message = commitMessage.replace(&quot;\r&quot;, &quot;&quot;).replace(&quot;\n&quot;, &quot;&quot;);</span>
+<span class="fc" id="L155">        final String trimRight = commitMessage.replaceAll(&quot;[\\r\\n]+$&quot;, &quot;&quot;);</span>
+        final int result;
+
+<span class="fc bfc" id="L158" title="All 2 branches covered.">        if (!ACCEPTED_COMMIT_MESSAGE_PATTERN.matcher(message).matches()) {</span>
+            // improper prefix
+<span class="fc" id="L160">            result = 1;</span>
+        }
+<span class="fc bfc" id="L162" title="All 2 branches covered.">        else if (!trimRight.equals(message)) {</span>
+            // single line of text (multiple new lines are allowed on end because of
+            // git (1 new line) and github's web ui (2 new lines))
+<span class="fc" id="L165">            result = 2;</span>
+        }
+<span class="fc bfc" id="L167" title="All 2 branches covered.">        else if (INVALID_POSTFIX_PATTERN.matcher(message).matches()) {</span>
+            // improper postfix
+<span class="fc" id="L169">            result = 3;</span>
+        }
+<span class="fc bfc" id="L171" title="All 2 branches covered.">        else if (message.length() &gt; 200) {</span>
+            // commit message has more than 200 characters
+<span class="fc" id="L173">            result = 4;</span>
+        }
+        else {
+<span class="fc" id="L176">            result = 0;</span>
+        }
+
+<span class="fc" id="L179">        return result;</span>
+    }
+
+    private static List&lt;RevCommit&gt; getCommitsToCheck() throws Exception {
+        final List&lt;RevCommit&gt; commits;
+<span class="fc" id="L184">        try (Repository repo = new FileRepositoryBuilder().findGitDir().build()) {</span>
+<span class="fc" id="L185">            final RevCommitsPair revCommitsPair = resolveRevCommitsPair(repo);</span>
+<span class="pc bpc" id="L186" title="1 of 2 branches missed.">            if (COMMITS_RESOLUTION_MODE == CommitsResolutionMode.BY_COUNTER) {</span>
+<span class="nc" id="L187">                commits = getCommitsByCounter(revCommitsPair.getFirst());</span>
+<span class="nc" id="L188">                commits.addAll(getCommitsByCounter(revCommitsPair.getSecond()));</span>
+            }
+            else {
+<span class="fc" id="L191">                commits = getCommitsByLastCommitAuthor(revCommitsPair.getFirst());</span>
+<span class="fc" id="L192">                commits.addAll(getCommitsByLastCommitAuthor(revCommitsPair.getSecond()));</span>
+            }
+        }
+<span class="fc" id="L195">        return commits;</span>
+    }
+
+    private static List&lt;RevCommit&gt; filterValidCommits(List&lt;RevCommit&gt; revCommits) {
+<span class="fc" id="L199">        final List&lt;RevCommit&gt; filteredCommits = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L200" title="All 2 branches covered.">        for (RevCommit commit : revCommits) {</span>
+<span class="fc" id="L201">            final String commitAuthor = commit.getAuthorIdent().getName();</span>
+<span class="pc bpc" id="L202" title="1 of 2 branches missed.">            if (!USERS_EXCLUDED_FROM_VALIDATION.contains(commitAuthor)) {</span>
+<span class="nc" id="L203">                filteredCommits.add(commit);</span>
+            }
+<span class="fc" id="L205">        }</span>
+<span class="fc" id="L206">        return filteredCommits;</span>
+    }
+
+    private static RevCommitsPair resolveRevCommitsPair(Repository repo) {
+        RevCommitsPair revCommitIteratorPair;
+
+<span class="fc" id="L212">        try (RevWalk revWalk = new RevWalk(repo);</span>
+<span class="fc" id="L213">             Git git = new Git(repo)) {</span>
+            final Iterator&lt;RevCommit&gt; first;
+            final Iterator&lt;RevCommit&gt; second;
+<span class="fc" id="L216">            final ObjectId headId = repo.resolve(Constants.HEAD);</span>
+<span class="fc" id="L217">            final RevCommit headCommit = revWalk.parseCommit(headId);</span>
+
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">            if (isMergeCommit(headCommit)) {</span>
+<span class="nc" id="L220">                final RevCommit firstParent = headCommit.getParent(0);</span>
+<span class="nc" id="L221">                final RevCommit secondParent = headCommit.getParent(1);</span>
+<span class="nc" id="L222">                first = git.log().add(firstParent).call().iterator();</span>
+<span class="nc" id="L223">                second = git.log().add(secondParent).call().iterator();</span>
+<span class="nc" id="L224">            }</span>
+            else {
+<span class="fc" id="L226">                first = git.log().call().iterator();</span>
+<span class="fc" id="L227">                second = Collections.emptyIterator();</span>
+            }
+
+<span class="fc" id="L230">            revCommitIteratorPair =</span>
+                    new RevCommitsPair(new OmitMergeCommitsIterator(first),
+                            new OmitMergeCommitsIterator(second));
+        }
+<span class="nc" id="L234">        catch (GitAPIException | IOException ignored) {</span>
+<span class="nc" id="L235">            revCommitIteratorPair = new RevCommitsPair();</span>
+<span class="fc" id="L236">        }</span>
+
+<span class="fc" id="L238">        return revCommitIteratorPair;</span>
+    }
+
+    private static boolean isMergeCommit(RevCommit currentCommit) {
+<span class="pc bpc" id="L242" title="1 of 2 branches missed.">        return currentCommit.getParentCount() &gt; 1;</span>
+    }
+
+    private static List&lt;RevCommit&gt; getCommitsByCounter(
+            Iterator&lt;RevCommit&gt; previousCommitsIterator) {
+<span class="nc" id="L247">        final Spliterator&lt;RevCommit&gt; spliterator =</span>
+<span class="nc" id="L248">            Spliterators.spliteratorUnknownSize(previousCommitsIterator, Spliterator.ORDERED);</span>
+<span class="nc" id="L249">        return StreamSupport.stream(spliterator, false).limit(PREVIOUS_COMMITS_TO_CHECK_COUNT)</span>
+<span class="nc" id="L250">            .collect(Collectors.toList());</span>
+    }
+
+    private static List&lt;RevCommit&gt; getCommitsByLastCommitAuthor(
+            Iterator&lt;RevCommit&gt; previousCommitsIterator) {
+<span class="fc" id="L255">        final List&lt;RevCommit&gt; commits = new LinkedList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L257" title="All 2 branches covered.">        if (previousCommitsIterator.hasNext()) {</span>
+<span class="fc" id="L258">            final RevCommit lastCommit = previousCommitsIterator.next();</span>
+<span class="fc" id="L259">            final String lastCommitAuthor = lastCommit.getAuthorIdent().getName();</span>
+<span class="fc" id="L260">            commits.add(lastCommit);</span>
+
+<span class="fc" id="L262">            boolean wasLastCheckedCommitAuthorSameAsLastCommit = true;</span>
+<span class="fc bfc" id="L263" title="All 2 branches covered.">            while (wasLastCheckedCommitAuthorSameAsLastCommit</span>
+<span class="pc bpc" id="L264" title="1 of 2 branches missed.">                    &amp;&amp; previousCommitsIterator.hasNext()) {</span>
+<span class="fc" id="L265">                final RevCommit currentCommit = previousCommitsIterator.next();</span>
+<span class="fc" id="L266">                final String currentCommitAuthor = currentCommit.getAuthorIdent().getName();</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">                if (currentCommitAuthor.equals(lastCommitAuthor)) {</span>
+<span class="fc" id="L268">                    commits.add(currentCommit);</span>
+                }
+                else {
+<span class="fc" id="L271">                    wasLastCheckedCommitAuthorSameAsLastCommit = false;</span>
+                }
+<span class="fc" id="L273">            }</span>
+        }
+
+<span class="fc" id="L276">        return commits;</span>
+    }
+
+    private static String getRulesForCommitMessageFormatting() {
+<span class="nc" id="L280">        return &quot;Proper commit message should adhere to the following rules:\n&quot;</span>
+                + &quot;    1) Must match one of the following patterns:\n&quot;
+                + &quot;        &quot; + ISSUE_COMMIT_MESSAGE_REGEX_PATTERN + &quot;\n&quot;
+                + &quot;        &quot; + PR_COMMIT_MESSAGE_REGEX_PATTERN + &quot;\n&quot;
+                + &quot;        &quot; + OTHER_COMMIT_MESSAGE_REGEX_PATTERN + &quot;\n&quot;
+                + &quot;    2) It contains only one line of text\n&quot;
+                + &quot;    3) Must not end with a period, space, or tab\n&quot;
+                + &quot;    4) Commit message should be less than or equal to 200 characters\n&quot;
+                + &quot;\n&quot;
+                + &quot;The rule broken was: &quot;;
+    }
+
+    private static String getInvalidCommitMessageFormattingError(String commitId,
+            String commitMessage) {
+<span class="nc" id="L294">        return &quot;Commit &quot; + commitId + &quot; message: \&quot;&quot;</span>
+<span class="nc" id="L295">                + commitMessage.replace(&quot;\r&quot;, &quot;\\r&quot;).replace(&quot;\n&quot;, &quot;\\n&quot;).replace(&quot;\t&quot;, &quot;\\t&quot;)</span>
+<span class="nc" id="L296">                + &quot;\&quot; is invalid\n&quot; + getRulesForCommitMessageFormatting();</span>
+    }
+
+<span class="fc" id="L299">    private enum CommitsResolutionMode {</span>
+
+<span class="fc" id="L301">        BY_COUNTER,</span>
+<span class="fc" id="L302">        BY_LAST_COMMIT_AUTHOR,</span>
+
+    }
+
+    private static class RevCommitsPair {
+
+        private final Iterator&lt;RevCommit&gt; first;
+        private final Iterator&lt;RevCommit&gt; second;
+
+<span class="nc" id="L311">        /* package */ RevCommitsPair() {</span>
+<span class="nc" id="L312">            first = Collections.emptyIterator();</span>
+<span class="nc" id="L313">            second = Collections.emptyIterator();</span>
+<span class="nc" id="L314">        }</span>
+
+<span class="fc" id="L316">        /* package */ RevCommitsPair(Iterator&lt;RevCommit&gt; first, Iterator&lt;RevCommit&gt; second) {</span>
+<span class="fc" id="L317">            this.first = first;</span>
+<span class="fc" id="L318">            this.second = second;</span>
+<span class="fc" id="L319">        }</span>
+
+        public Iterator&lt;RevCommit&gt; getFirst() {
+<span class="fc" id="L322">            return first;</span>
+        }
+
+        public Iterator&lt;RevCommit&gt; getSecond() {
+<span class="fc" id="L326">            return second;</span>
+        }
+
+    }
+
+    private static class OmitMergeCommitsIterator implements Iterator&lt;RevCommit&gt; {
+
+        private final Iterator&lt;RevCommit&gt; revCommitIterator;
+
+<span class="fc" id="L335">        /* package */ OmitMergeCommitsIterator(Iterator&lt;RevCommit&gt; revCommitIterator) {</span>
+<span class="fc" id="L336">            this.revCommitIterator = revCommitIterator;</span>
+<span class="fc" id="L337">        }</span>
+
+        @Override
+        public boolean hasNext() {
+<span class="fc" id="L341">            return revCommitIterator.hasNext();</span>
+        }
+
+        @Override
+        public RevCommit next() {
+<span class="fc" id="L346">            RevCommit currentCommit = revCommitIterator.next();</span>
+<span class="pc bpc" id="L347" title="1 of 2 branches missed.">            while (isMergeCommit(currentCommit)) {</span>
+<span class="nc" id="L348">                currentCommit = revCommitIterator.next();</span>
+            }
+<span class="fc" id="L350">            return currentCommit;</span>
+        }
+
+        @Override
+        public void remove() {
+<span class="nc" id="L355">            throw new UnsupportedOperationException(&quot;remove&quot;);</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

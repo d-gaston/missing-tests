@@ -1,0 +1,758 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DataFrameJoiner.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.joining</a> &gt; <span class="el_source">DataFrameJoiner.java</span></div><h1>DataFrameJoiner.java</h1><pre class="source lang-java linenums">package tech.tablesaw.joining;
+
+import com.google.common.collect.Streams;
+import com.google.common.primitives.Ints;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import tech.tablesaw.api.BooleanColumn;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.DateColumn;
+import tech.tablesaw.api.DateTimeColumn;
+import tech.tablesaw.api.DoubleColumn;
+import tech.tablesaw.api.FloatColumn;
+import tech.tablesaw.api.InstantColumn;
+import tech.tablesaw.api.IntColumn;
+import tech.tablesaw.api.LongColumn;
+import tech.tablesaw.api.Row;
+import tech.tablesaw.api.ShortColumn;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.api.TimeColumn;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.booleans.BooleanColumnType;
+import tech.tablesaw.columns.dates.DateColumnType;
+import tech.tablesaw.columns.datetimes.DateTimeColumnType;
+import tech.tablesaw.columns.instant.InstantColumnType;
+import tech.tablesaw.columns.numbers.DoubleColumnType;
+import tech.tablesaw.columns.numbers.FloatColumnType;
+import tech.tablesaw.columns.numbers.IntColumnType;
+import tech.tablesaw.columns.numbers.LongColumnType;
+import tech.tablesaw.columns.numbers.ShortColumnType;
+import tech.tablesaw.columns.strings.StringColumnType;
+import tech.tablesaw.columns.strings.TextColumnType;
+import tech.tablesaw.columns.times.TimeColumnType;
+import tech.tablesaw.index.ByteIndex;
+import tech.tablesaw.index.DoubleIndex;
+import tech.tablesaw.index.FloatIndex;
+import tech.tablesaw.index.Index;
+import tech.tablesaw.index.IntIndex;
+import tech.tablesaw.index.LongIndex;
+import tech.tablesaw.index.ShortIndex;
+import tech.tablesaw.index.StringIndex;
+import tech.tablesaw.selection.Selection;
+
+public class DataFrameJoiner {
+
+<span class="fc" id="L50">  private enum JoinType {</span>
+<span class="fc" id="L51">    INNER,</span>
+<span class="fc" id="L52">    LEFT_OUTER,</span>
+<span class="fc" id="L53">    RIGHT_OUTER,</span>
+<span class="fc" id="L54">    FULL_OUTER</span>
+  }
+
+  private static final String TABLE_ALIAS = &quot;T&quot;;
+
+  private final Table table;
+  private final String[] joinColumnNames;
+  private final List&lt;Integer&gt; joinColumnIndexes;
+<span class="fc" id="L62">  private final AtomicInteger joinTableId = new AtomicInteger(2);</span>
+
+  /**
+   * Constructor.
+   *
+   * @param table The table to join on.
+   * @param joinColumnNames The join column names to join on.
+   */
+<span class="fc" id="L70">  public DataFrameJoiner(Table table, String... joinColumnNames) {</span>
+<span class="fc" id="L71">    this.table = table;</span>
+<span class="fc" id="L72">    this.joinColumnNames = joinColumnNames;</span>
+<span class="fc" id="L73">    this.joinColumnIndexes = getJoinIndexes(table, joinColumnNames);</span>
+<span class="fc" id="L74">  }</span>
+
+  /**
+   * Finds the index of the columns corresponding to the columnNames. E.G. The column named &quot;ID&quot; is
+   * located at index 5 in table.
+   *
+   * @param table the table that contains the columns.
+   * @param columnNames the column names to find indexes of.
+   * @return a list of column indexes within the table.
+   */
+  private List&lt;Integer&gt; getJoinIndexes(Table table, String[] columnNames) {
+<span class="fc" id="L85">    return Arrays.stream(columnNames).map(table::columnIndex).collect(Collectors.toList());</span>
+  }
+
+  /**
+   * Joins to the given tables assuming that they have a column of the name we're joining on
+   *
+   * @param tables The tables to join with
+   */
+  public Table inner(Table... tables) {
+<span class="fc" id="L94">    return inner(false, tables);</span>
+  }
+
+  /**
+   * Joins to the given tables assuming that they have a column of the name we're joining on
+   *
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed*
+   * @param tables The tables to join with
+   */
+  public Table inner(boolean allowDuplicateColumnNames, Table... tables) {
+<span class="fc" id="L106">    Table joined = table;</span>
+
+<span class="fc bfc" id="L108" title="All 2 branches covered.">    for (Table currT : tables) {</span>
+<span class="fc" id="L109">      joined =</span>
+<span class="fc" id="L110">          joinInternal(joined, currT, JoinType.INNER, allowDuplicateColumnNames, joinColumnNames);</span>
+    }
+<span class="fc" id="L112">    return joined;</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given column for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Name The column to join on. If col2Name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table inner(Table table2, String col2Name) {
+<span class="fc" id="L125">    return inner(table2, false, col2Name);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table inner(Table table2, String[] col2Names) {
+<span class="fc" id="L138">    return inner(table2, false, col2Names);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given column for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Name The column to join on. If col2Name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed*
+   * @return The resulting table
+   */
+  public Table inner(Table table2, String col2Name, boolean allowDuplicateColumnNames) {
+<span class="fc" id="L154">    return inner(table2, allowDuplicateColumnNames, col2Name);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed*
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table inner(Table table2, boolean allowDuplicateColumnNames, String... col2Names) {
+    Table joinedTable;
+<span class="fc" id="L171">    joinedTable = joinInternal(table, table2, JoinType.INNER, allowDuplicateColumnNames, col2Names);</span>
+<span class="fc" id="L172">    return joinedTable;</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param outer True if this join is actually an outer join, left or right or full, otherwise
+   *     false.
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed*
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  @Deprecated
+  public Table inner(
+      Table table2, boolean outer, boolean allowDuplicateColumnNames, String... col2Names) {
+<span class="nc" id="L192">    JoinType joinType = JoinType.INNER;</span>
+<span class="nc bnc" id="L193" title="All 2 branches missed.">    if (outer) {</span>
+<span class="nc" id="L194">      joinType = JoinType.LEFT_OUTER;</span>
+    }
+
+    Table joinedTable;
+<span class="nc" id="L198">    joinedTable = joinInternal(table, table2, joinType, allowDuplicateColumnNames, col2Names);</span>
+<span class="nc" id="L199">    return joinedTable;</span>
+  }
+
+  /**
+   * Joins two tables.
+   *
+   * @param table1 the table on the left side of the join.
+   * @param table2 the table on the right side of the join.
+   * @param joinType the type of join.
+   * @param allowDuplicates if {@code false} the join will fail if any columns other than the join
+   *     column have the same name if {@code true} the join will succeed and duplicate columns are
+   *     renamed
+   * @param table2JoinColumnNames The names of the columns in table2 to join on.
+   */
+  private Table joinInternal(
+      Table table1,
+      Table table2,
+      JoinType joinType,
+      boolean allowDuplicates,
+      String... table2JoinColumnNames) {
+<span class="fc" id="L219">    List&lt;Integer&gt; table2JoinColumnIndexes = getJoinIndexes(table2, table2JoinColumnNames);</span>
+
+<span class="fc" id="L221">    Table result = Table.create(table1.name());</span>
+    // A set of column indexes in the result table that can be ignored. They are duplicate join
+    // keys.
+<span class="fc" id="L224">    Set&lt;Integer&gt; resultIgnoreColIndexes =</span>
+<span class="fc" id="L225">        emptyTableFromColumns(</span>
+            result, table1, table2, joinType, allowDuplicates, table2JoinColumnIndexes);
+
+<span class="fc" id="L228">    List&lt;Index&gt; table1Indexes = buildIndexesForJoinColumns(joinColumnIndexes, table1);</span>
+<span class="fc" id="L229">    List&lt;Index&gt; table2Indexes = buildIndexesForJoinColumns(table2JoinColumnIndexes, table2);</span>
+
+<span class="fc" id="L231">    Selection table1DoneRows = Selection.with();</span>
+<span class="fc" id="L232">    Selection table2DoneRows = Selection.with();</span>
+<span class="fc bfc" id="L233" title="All 2 branches covered.">    for (Row row : table1) {</span>
+<span class="fc" id="L234">      int ri = row.getRowNumber();</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">      if (table1DoneRows.contains(ri)) {</span>
+        // Already processed a selection of table1 that contained this row.
+<span class="fc" id="L237">        continue;</span>
+      }
+
+<span class="fc" id="L240">      Selection table1Rows = createMultiColSelection(table1, ri, table1Indexes, table1.rowCount());</span>
+<span class="fc" id="L241">      Selection table2Rows = createMultiColSelection(table1, ri, table2Indexes, table2.rowCount());</span>
+
+<span class="fc bfc" id="L243" title="All 4 branches covered.">      if ((joinType == JoinType.LEFT_OUTER || joinType == JoinType.FULL_OUTER)</span>
+<span class="fc bfc" id="L244" title="All 2 branches covered.">          &amp;&amp; table2Rows.isEmpty()) {</span>
+<span class="fc" id="L245">        withMissingLeftJoin(result, table1, table1Rows, resultIgnoreColIndexes);</span>
+      } else {
+<span class="fc" id="L247">        crossProduct(result, table1, table2, table1Rows, table2Rows, resultIgnoreColIndexes);</span>
+      }
+
+<span class="fc" id="L250">      table1DoneRows = table1DoneRows.or(table1Rows);</span>
+<span class="fc bfc" id="L251" title="All 4 branches covered.">      if (joinType == JoinType.FULL_OUTER || joinType == JoinType.RIGHT_OUTER) {</span>
+        // Update done rows in table2 for full Outer.
+<span class="fc" id="L253">        table2DoneRows = table2DoneRows.or(table2Rows);</span>
+<span class="fc bfc" id="L254" title="All 2 branches covered.">      } else if (table1DoneRows.size() == table1.rowCount()) {</span>
+        // Processed all the rows in table1 exit early.
+<span class="fc" id="L256">        result.removeColumns(Ints.toArray(resultIgnoreColIndexes));</span>
+<span class="fc" id="L257">        return result;</span>
+      }
+<span class="fc" id="L259">    }</span>
+
+    // Add all rows from table2 that were not handled already.
+<span class="fc" id="L262">    Selection table2Rows = table2DoneRows.flip(0, table2.rowCount());</span>
+<span class="fc" id="L263">    withMissingRight(</span>
+        result,
+<span class="fc" id="L265">        table1.columnCount(),</span>
+        table2,
+        table2Rows,
+        joinType,
+        table2JoinColumnIndexes,
+        resultIgnoreColIndexes);
+<span class="fc" id="L271">    result.removeColumns(Ints.toArray(resultIgnoreColIndexes));</span>
+<span class="fc" id="L272">    return result;</span>
+  }
+
+  /** Build a reverse index for every join column in the table. */
+  private List&lt;Index&gt; buildIndexesForJoinColumns(List&lt;Integer&gt; joinColumnIndexes, Table table) {
+<span class="fc" id="L277">    return joinColumnIndexes.stream().map(c -&gt; indexFor(table, c)).collect(Collectors.toList());</span>
+  }
+
+  /** Create a reverse index for a given column. */
+  private Index indexFor(Table table, int colIndex) {
+<span class="fc" id="L282">    ColumnType type = table.column(colIndex).type();</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">    if (type instanceof DateColumnType) {</span>
+<span class="fc" id="L284">      return new IntIndex(table.dateColumn(colIndex));</span>
+<span class="fc bfc" id="L285" title="All 2 branches covered.">    } else if (type instanceof DateTimeColumnType) {</span>
+<span class="fc" id="L286">      return new LongIndex(table.dateTimeColumn(colIndex));</span>
+<span class="pc bpc" id="L287" title="1 of 2 branches missed.">    } else if (type instanceof InstantColumnType) {</span>
+<span class="nc" id="L288">      return new LongIndex(table.instantColumn(colIndex));</span>
+<span class="fc bfc" id="L289" title="All 2 branches covered.">    } else if (type instanceof TimeColumnType) {</span>
+<span class="fc" id="L290">      return new IntIndex(table.timeColumn(colIndex));</span>
+<span class="pc bpc" id="L291" title="1 of 4 branches missed.">    } else if (type instanceof StringColumnType || type instanceof TextColumnType) {</span>
+<span class="fc" id="L292">      return new StringIndex(table.stringColumn(colIndex));</span>
+<span class="fc bfc" id="L293" title="All 2 branches covered.">    } else if (type instanceof IntColumnType) {</span>
+<span class="fc" id="L294">      return new IntIndex(table.intColumn(colIndex));</span>
+<span class="fc bfc" id="L295" title="All 2 branches covered.">    } else if (type instanceof LongColumnType) {</span>
+<span class="fc" id="L296">      return new LongIndex(table.longColumn(colIndex));</span>
+<span class="pc bpc" id="L297" title="1 of 2 branches missed.">    } else if (type instanceof ShortColumnType) {</span>
+<span class="nc" id="L298">      return new ShortIndex(table.shortColumn(colIndex));</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">    } else if (type instanceof BooleanColumnType) {</span>
+<span class="fc" id="L300">      return new ByteIndex(table.booleanColumn(colIndex));</span>
+<span class="pc bpc" id="L301" title="1 of 2 branches missed.">    } else if (type instanceof DoubleColumnType) {</span>
+<span class="fc" id="L302">      return new DoubleIndex(table.doubleColumn(colIndex));</span>
+<span class="nc bnc" id="L303" title="All 2 branches missed.">    } else if (type instanceof FloatColumnType) {</span>
+<span class="nc" id="L304">      return new FloatIndex(table.floatColumn(colIndex));</span>
+    }
+<span class="nc" id="L306">    throw new IllegalArgumentException(&quot;Joining attempted on unsupported column type &quot; + type);</span>
+  }
+
+  /**
+   * Given a reverse index find a selection of rows that have the same value as the supplied column
+   * does in the given row index.
+   */
+  private Selection selectionForColumn(Column&lt;?&gt; valueColumn, int rowIndex, Index rawIndex) {
+
+<span class="fc" id="L315">    ColumnType type = valueColumn.type();</span>
+<span class="fc" id="L316">    Selection selection = Selection.with();</span>
+<span class="fc bfc" id="L317" title="All 2 branches covered.">    if (type instanceof DateColumnType) {</span>
+<span class="fc" id="L318">      IntIndex index = (IntIndex) rawIndex;</span>
+<span class="fc" id="L319">      DateColumn typedValueColumn = (DateColumn) valueColumn;</span>
+<span class="fc" id="L320">      int value = typedValueColumn.getIntInternal(rowIndex);</span>
+<span class="fc" id="L321">      selection = index.get(value);</span>
+<span class="fc bfc" id="L322" title="All 2 branches covered.">    } else if (type instanceof TimeColumnType) {</span>
+<span class="fc" id="L323">      IntIndex index = (IntIndex) rawIndex;</span>
+<span class="fc" id="L324">      TimeColumn typedValueColumn = (TimeColumn) valueColumn;</span>
+<span class="fc" id="L325">      int value = typedValueColumn.getIntInternal(rowIndex);</span>
+<span class="fc" id="L326">      selection = index.get(value);</span>
+<span class="fc bfc" id="L327" title="All 2 branches covered.">    } else if (type instanceof DateTimeColumnType) {</span>
+<span class="fc" id="L328">      LongIndex index = (LongIndex) rawIndex;</span>
+<span class="fc" id="L329">      DateTimeColumn typedValueColumn = (DateTimeColumn) valueColumn;</span>
+<span class="fc" id="L330">      long value = typedValueColumn.getLongInternal(rowIndex);</span>
+<span class="fc" id="L331">      selection = index.get(value);</span>
+<span class="pc bpc" id="L332" title="1 of 2 branches missed.">    } else if (type instanceof InstantColumnType) {</span>
+<span class="nc" id="L333">      LongIndex index = (LongIndex) rawIndex;</span>
+<span class="nc" id="L334">      InstantColumn typedValueColumn = (InstantColumn) valueColumn;</span>
+<span class="nc" id="L335">      long value = typedValueColumn.getLongInternal(rowIndex);</span>
+<span class="nc" id="L336">      selection = index.get(value);</span>
+<span class="pc bpc" id="L337" title="1 of 4 branches missed.">    } else if (type instanceof StringColumnType || type instanceof TextColumnType) {</span>
+<span class="fc" id="L338">      StringIndex index = (StringIndex) rawIndex;</span>
+<span class="fc" id="L339">      StringColumn typedValueColumn = (StringColumn) valueColumn;</span>
+<span class="fc" id="L340">      String value = typedValueColumn.get(rowIndex);</span>
+<span class="fc" id="L341">      selection = index.get(value);</span>
+<span class="fc bfc" id="L342" title="All 2 branches covered.">    } else if (type instanceof IntColumnType) {</span>
+<span class="fc" id="L343">      IntIndex index = (IntIndex) rawIndex;</span>
+<span class="fc" id="L344">      IntColumn typedValueColumn = (IntColumn) valueColumn;</span>
+<span class="fc" id="L345">      int value = typedValueColumn.getInt(rowIndex);</span>
+<span class="fc" id="L346">      selection = index.get(value);</span>
+<span class="fc bfc" id="L347" title="All 2 branches covered.">    } else if (type instanceof LongColumnType) {</span>
+<span class="fc" id="L348">      LongIndex index = (LongIndex) rawIndex;</span>
+<span class="fc" id="L349">      LongColumn typedValueColumn = (LongColumn) valueColumn;</span>
+<span class="fc" id="L350">      long value = typedValueColumn.getLong(rowIndex);</span>
+<span class="fc" id="L351">      selection = index.get(value);</span>
+<span class="pc bpc" id="L352" title="1 of 2 branches missed.">    } else if (type instanceof ShortColumnType) {</span>
+<span class="nc" id="L353">      ShortIndex index = (ShortIndex) rawIndex;</span>
+<span class="nc" id="L354">      ShortColumn typedValueColumn = (ShortColumn) valueColumn;</span>
+<span class="nc" id="L355">      short value = typedValueColumn.getShort(rowIndex);</span>
+<span class="nc" id="L356">      selection = index.get(value);</span>
+<span class="pc bfc" id="L357" title="All 2 branches covered.">    } else if (type instanceof BooleanColumnType) {</span>
+<span class="fc" id="L358">      ByteIndex index = (ByteIndex) rawIndex;</span>
+<span class="fc" id="L359">      BooleanColumn typedValueColumn = (BooleanColumn) valueColumn;</span>
+<span class="fc" id="L360">      byte value = typedValueColumn.getByte(rowIndex);</span>
+<span class="fc" id="L361">      selection = index.get(value);</span>
+<span class="pc bpc" id="L362" title="1 of 2 branches missed.">    } else if (type instanceof DoubleColumnType) {</span>
+<span class="fc" id="L363">      DoubleIndex index = (DoubleIndex) rawIndex;</span>
+<span class="fc" id="L364">      DoubleColumn typedValueColumn = (DoubleColumn) valueColumn;</span>
+<span class="fc" id="L365">      double value = typedValueColumn.getDouble(rowIndex);</span>
+<span class="fc" id="L366">      selection = index.get(value);</span>
+<span class="pc bnc" id="L367" title="All 2 branches missed.">    } else if (type instanceof FloatColumnType) {</span>
+<span class="nc" id="L368">      FloatIndex index = (FloatIndex) rawIndex;</span>
+<span class="nc" id="L369">      FloatColumn typedValueColumn = (FloatColumn) valueColumn;</span>
+<span class="nc" id="L370">      float value = typedValueColumn.getFloat(rowIndex);</span>
+<span class="nc" id="L371">      selection = index.get(value);</span>
+<span class="nc" id="L372">    } else {</span>
+<span class="nc" id="L373">      throw new IllegalArgumentException(</span>
+          &quot;Joining is supported on numeric, string, and date-like columns. Column &quot;
+<span class="nc" id="L375">              + valueColumn.name()</span>
+              + &quot; is of type &quot;
+<span class="nc" id="L377">              + valueColumn.type());</span>
+    }
+<span class="fc" id="L379">    return selection;</span>
+  }
+
+  /** Create a big multicolumn selection for all join columns in the given table. */
+  private Selection createMultiColSelection(
+      Table table1, int ri, List&lt;Index&gt; indexes, int selectionSize) {
+<span class="fc" id="L385">    Selection multiColSelection = Selection.withRange(0, selectionSize);</span>
+<span class="fc" id="L386">    int i = 0;</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">    for (Integer joinColumnIndex : joinColumnIndexes) {</span>
+<span class="fc" id="L388">      Column&lt;?&gt; col = table1.column(joinColumnIndex);</span>
+<span class="fc" id="L389">      Selection oneColSelection = selectionForColumn(col, ri, indexes.get(i));</span>
+      // and the selections.
+<span class="fc" id="L391">      multiColSelection = multiColSelection.and(oneColSelection);</span>
+<span class="fc" id="L392">      i++;</span>
+<span class="fc" id="L393">    }</span>
+<span class="fc" id="L394">    return multiColSelection;</span>
+  }
+
+  private String newName(String table2Alias, String columnName) {
+<span class="fc" id="L398">    return table2Alias + &quot;.&quot; + columnName;</span>
+  }
+
+  /**
+   * Full outer join to the given tables assuming that they have a column of the name we're joining
+   * on
+   *
+   * @param tables The tables to join with
+   * @return The resulting table
+   */
+  public Table fullOuter(Table... tables) {
+<span class="fc" id="L409">    return fullOuter(false, tables);</span>
+  }
+
+  /**
+   * Full outer join to the given tables assuming that they have a column of the name we're joining
+   * on
+   *
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed*
+   * @param tables The tables to join with
+   * @return The resulting table
+   */
+  public Table fullOuter(boolean allowDuplicateColumnNames, Table... tables) {
+<span class="fc" id="L423">    Table joined = table;</span>
+
+<span class="fc bfc" id="L425" title="All 2 branches covered.">    for (Table currT : tables) {</span>
+<span class="fc" id="L426">      joined =</span>
+<span class="fc" id="L427">          joinInternal(</span>
+              joined, currT, JoinType.FULL_OUTER, allowDuplicateColumnNames, joinColumnNames);
+    }
+<span class="fc" id="L430">    return joined;</span>
+  }
+
+  /**
+   * Full outer join the joiner to the table2, using the given column for the second table and
+   * returns the resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Name The column to join on. If col2Name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table fullOuter(Table table2, String col2Name) {
+<span class="fc" id="L443">    return joinInternal(table, table2, JoinType.FULL_OUTER, false, col2Name);</span>
+  }
+
+  /**
+   * Joins to the given tables assuming that they have a column of the name we're joining on
+   *
+   * @param tables The tables to join with
+   * @return The resulting table
+   */
+  public Table leftOuter(Table... tables) {
+<span class="fc" id="L453">    return leftOuter(false, tables);</span>
+  }
+
+  /**
+   * Joins to the given tables assuming that they have a column of the name we're joining on
+   *
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed*
+   * @param tables The tables to join with
+   * @return The resulting table
+   */
+  public Table leftOuter(boolean allowDuplicateColumnNames, Table... tables) {
+<span class="fc" id="L466">    Table joined = table;</span>
+<span class="fc bfc" id="L467" title="All 2 branches covered.">    for (Table table2 : tables) {</span>
+<span class="fc" id="L468">      joined = leftOuter(table2, allowDuplicateColumnNames, joinColumnNames);</span>
+    }
+<span class="fc" id="L470">    return joined;</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table leftOuter(Table table2, String[] col2Names) {
+<span class="fc" id="L483">    return leftOuter(table2, false, col2Names);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given column for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Name The column to join on. If col2Name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table leftOuter(Table table2, String col2Name) {
+<span class="fc" id="L496">    return leftOuter(table2, false, col2Name);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table leftOuter(Table table2, boolean allowDuplicateColumnNames, String... col2Names) {
+<span class="fc" id="L512">    return joinInternal(table, table2, JoinType.LEFT_OUTER, allowDuplicateColumnNames, col2Names);</span>
+  }
+
+  /**
+   * Joins to the given tables assuming that they have a column of the name we're joining on
+   *
+   * @param tables The tables to join with
+   * @return The resulting table
+   */
+  public Table rightOuter(Table... tables) {
+<span class="fc" id="L522">    return rightOuter(false, tables);</span>
+  }
+
+  /**
+   * Joins to the given tables assuming that they have a column of the name we're joining on
+   *
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed
+   * @param tables The tables to join with
+   * @return The resulting table
+   */
+  public Table rightOuter(boolean allowDuplicateColumnNames, Table... tables) {
+<span class="fc" id="L535">    Table joined = table;</span>
+<span class="fc bfc" id="L536" title="All 2 branches covered.">    for (Table table2 : tables) {</span>
+<span class="fc" id="L537">      joined = rightOuter(table2, allowDuplicateColumnNames, joinColumnNames);</span>
+    }
+<span class="fc" id="L539">    return joined;</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given column for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Name The column to join on. If col2Name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table rightOuter(Table table2, String col2Name) {
+<span class="fc" id="L552">    return rightOuter(table2, false, col2Name);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table rightOuter(Table table2, String[] col2Names) {
+<span class="fc" id="L565">    return rightOuter(table2, false, col2Names);</span>
+  }
+
+  /**
+   * Joins the joiner to the table2, using the given columns for the second table and returns the
+   * resulting table
+   *
+   * @param table2 The table to join with
+   * @param allowDuplicateColumnNames if {@code false} the join will fail if any columns other than
+   *     the join column have the same name if {@code true} the join will succeed and duplicate
+   *     columns are renamed
+   * @param col2Names The columns to join on. If a name refers to a double column, the join is
+   *     performed after rounding to integers.
+   * @return The resulting table
+   */
+  public Table rightOuter(Table table2, boolean allowDuplicateColumnNames, String... col2Names) {
+<span class="fc" id="L581">    return joinInternal(table, table2, JoinType.RIGHT_OUTER, allowDuplicateColumnNames, col2Names);</span>
+  }
+
+  /**
+   * Adds empty columns to the destination table with the same type as columns in table1 and table2.
+   *
+   * &lt;p&gt;For inner, left and full outer join types the join columns in table2 are not needed and will
+   * be marked as placeholders. The indexes of those columns will be returned. The downstream logic
+   * is easier if we wait to remove the redundant columns until the last step.
+   *
+   * @param destination the table to fill up with columns. Will be mutated in place.
+   * @param table1 the table on left side of the join.
+   * @param table2 the table on the right side of the join.
+   * @param joinType the type of join.
+   * @param allowDuplicates whether to allow duplicates. If yes rename columns in table2 that have
+   *     the same name as columns in table1 with the exception of join columns in table2 when
+   *     performing a right join.
+   * @param table2JoinColumnIndexes the index locations of the table2 join columns.
+   * @return A
+   */
+  private Set&lt;Integer&gt; emptyTableFromColumns(
+      Table destination,
+      Table table1,
+      Table table2,
+      JoinType joinType,
+      boolean allowDuplicates,
+      List&lt;Integer&gt; table2JoinColumnIndexes) {
+
+<span class="fc" id="L609">    Column&lt;?&gt;[] cols =</span>
+<span class="fc" id="L610">        Streams.concat(table1.columns().stream(), table2.columns().stream())</span>
+<span class="fc" id="L611">            .map(Column::emptyCopy)</span>
+<span class="fc" id="L612">            .toArray(Column[]::new);</span>
+
+    // For inner join, left join and full outer join mark the join columns in table2 as
+    // placeholders.
+    // For right join mark the join columns in table1 as placeholders.
+    // Keep track of which join columns are placeholders so they can be ignored.
+<span class="fc" id="L618">    Set&lt;Integer&gt; ignoreColumns = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L619" title="All 2 branches covered.">    for (int c = 0; c &lt; cols.length; c++) {</span>
+<span class="fc bfc" id="L620" title="All 2 branches covered.">      if (joinType == JoinType.RIGHT_OUTER) {</span>
+<span class="fc bfc" id="L621" title="All 4 branches covered.">        if (c &lt; table1.columnCount() &amp;&amp; joinColumnIndexes.contains(c)) {</span>
+<span class="fc" id="L622">          cols[c].setName(&quot;Placeholder_&quot; + ignoreColumns.size());</span>
+<span class="fc" id="L623">          ignoreColumns.add(c);</span>
+        }
+      } else {
+<span class="fc" id="L626">        int table2Index = c - table1.columnCount();</span>
+<span class="fc bfc" id="L627" title="All 4 branches covered.">        if (c &gt;= table1.columnCount() &amp;&amp; table2JoinColumnIndexes.contains(table2Index)) {</span>
+<span class="fc" id="L628">          cols[c].setName(&quot;Placeholder_&quot; + ignoreColumns.size());</span>
+<span class="fc" id="L629">          ignoreColumns.add(c);</span>
+        }
+      }
+    }
+
+    // Rename duplicate columns in second table
+<span class="fc bfc" id="L635" title="All 2 branches covered.">    if (allowDuplicates) {</span>
+<span class="fc" id="L636">      Set&lt;String&gt; table1ColNames =</span>
+<span class="fc" id="L637">          Arrays.stream(cols)</span>
+<span class="fc" id="L638">              .map(Column::name)</span>
+<span class="fc" id="L639">              .map(String::toLowerCase)</span>
+<span class="fc" id="L640">              .limit(table1.columnCount())</span>
+<span class="fc" id="L641">              .collect(Collectors.toSet());</span>
+
+<span class="fc" id="L643">      String table2Alias = TABLE_ALIAS + joinTableId.getAndIncrement();</span>
+<span class="fc bfc" id="L644" title="All 2 branches covered.">      for (int c = table1.columnCount(); c &lt; cols.length; c++) {</span>
+<span class="fc" id="L645">        String columnName = cols[c].name();</span>
+<span class="fc bfc" id="L646" title="All 2 branches covered.">        if (table1ColNames.contains(columnName.toLowerCase())) {</span>
+<span class="fc" id="L647">          cols[c].setName(newName(table2Alias, columnName));</span>
+        }
+      }
+    }
+<span class="fc" id="L651">    destination.addColumns(cols);</span>
+<span class="fc" id="L652">    return ignoreColumns;</span>
+  }
+
+  /**
+   * Creates cross product for the selection of two tables.
+   *
+   * @param destination the destination table.
+   * @param table1 the table on left of join.
+   * @param table2 the table on right of join.
+   * @param table1Rows the selection of rows in table1.
+   * @param table2Rows the selection of rows in table2.
+   * @param ignoreColumns a set of column indexes in the result to ignore. They are redundant join
+   *     columns.
+   */
+  @SuppressWarnings({&quot;rawtypes&quot;, &quot;unchecked&quot;})
+  private void crossProduct(
+      Table destination,
+      Table table1,
+      Table table2,
+      Selection table1Rows,
+      Selection table2Rows,
+      Set&lt;Integer&gt; ignoreColumns) {
+<span class="fc bfc" id="L674" title="All 2 branches covered.">    for (int c = 0; c &lt; table1.columnCount() + table2.columnCount(); c++) {</span>
+<span class="fc bfc" id="L675" title="All 2 branches covered.">      if (ignoreColumns.contains(c)) {</span>
+<span class="fc" id="L676">        continue;</span>
+      }
+<span class="fc" id="L678">      int table2Index = c - table1.columnCount();</span>
+<span class="fc bfc" id="L679" title="All 2 branches covered.">      for (int r1 : table1Rows) {</span>
+<span class="fc bfc" id="L680" title="All 2 branches covered.">        for (int r2 : table2Rows) {</span>
+<span class="fc bfc" id="L681" title="All 2 branches covered.">          if (c &lt; table1.columnCount()) {</span>
+<span class="fc" id="L682">            Column t1Col = table1.column(c);</span>
+<span class="fc" id="L683">            destination.column(c).append(t1Col, r1);</span>
+<span class="fc" id="L684">          } else {</span>
+<span class="fc" id="L685">            Column t2Col = table2.column(table2Index);</span>
+<span class="fc" id="L686">            destination.column(c).append(t2Col, r2);</span>
+          }
+<span class="fc" id="L688">        }</span>
+<span class="fc" id="L689">      }</span>
+    }
+<span class="fc" id="L691">  }</span>
+
+  /**
+   * Adds rows to destination for each row in table1 with the columns from table2 added as missing
+   * values.
+   */
+  @SuppressWarnings({&quot;rawtypes&quot;, &quot;unchecked&quot;})
+  private void withMissingLeftJoin(
+      Table destination, Table table1, Selection table1Rows, Set&lt;Integer&gt; ignoreColumns) {
+<span class="fc bfc" id="L700" title="All 2 branches covered.">    for (int c = 0; c &lt; destination.columnCount(); c++) {</span>
+<span class="fc bfc" id="L701" title="All 2 branches covered.">      if (ignoreColumns.contains(c)) {</span>
+<span class="fc" id="L702">        continue;</span>
+      }
+<span class="fc bfc" id="L704" title="All 2 branches covered.">      if (c &lt; table1.columnCount()) {</span>
+<span class="fc" id="L705">        Column t1Col = table1.column(c);</span>
+<span class="fc bfc" id="L706" title="All 2 branches covered.">        for (int index : table1Rows) {</span>
+<span class="fc" id="L707">          destination.column(c).append(t1Col, index);</span>
+<span class="fc" id="L708">        }</span>
+<span class="fc" id="L709">      } else {</span>
+<span class="fc bfc" id="L710" title="All 2 branches covered.">        for (int r1 = 0; r1 &lt; table1Rows.size(); r1++) {</span>
+<span class="fc" id="L711">          destination.column(c).appendMissing();</span>
+        }
+      }
+    }
+<span class="fc" id="L715">  }</span>
+
+  /**
+   * Adds rows to destination for each row in table2 with the columns from table1 added as missing
+   * values.
+   */
+  @SuppressWarnings({&quot;rawtypes&quot;, &quot;unchecked&quot;})
+  private void withMissingRight(
+      Table destination,
+      int table1ColCount,
+      Table table2,
+      Selection table2Rows,
+      JoinType joinType,
+      List&lt;Integer&gt; col2Indexes,
+      Set&lt;Integer&gt; ignoreColumns) {
+
+    // Add index data from table2 into join column positions in table one.
+<span class="fc bfc" id="L732" title="All 2 branches covered.">    if (joinType == JoinType.FULL_OUTER) {</span>
+<span class="fc bfc" id="L733" title="All 2 branches covered.">      for (int i = 0; i &lt; col2Indexes.size(); i++) {</span>
+<span class="fc" id="L734">        Column t2Col = table2.column(col2Indexes.get(i));</span>
+<span class="fc bfc" id="L735" title="All 2 branches covered.">        for (int index : table2Rows) {</span>
+<span class="fc" id="L736">          destination.column(joinColumnIndexes.get(i)).append(t2Col, index);</span>
+<span class="fc" id="L737">        }</span>
+      }
+    }
+
+<span class="fc bfc" id="L741" title="All 2 branches covered.">    for (int c = 0; c &lt; destination.columnCount(); c++) {</span>
+<span class="fc bfc" id="L742" title="All 4 branches covered.">      if (ignoreColumns.contains(c) || joinColumnIndexes.contains(c)) {</span>
+<span class="fc" id="L743">        continue;</span>
+      }
+<span class="fc bfc" id="L745" title="All 2 branches covered.">      if (c &lt; table1ColCount) {</span>
+<span class="fc bfc" id="L746" title="All 2 branches covered.">        for (int r1 = 0; r1 &lt; table2Rows.size(); r1++) {</span>
+<span class="fc" id="L747">          destination.column(c).appendMissing();</span>
+        }
+      } else {
+<span class="fc" id="L750">        Column t2Col = table2.column(c - table1ColCount);</span>
+<span class="fc bfc" id="L751" title="All 2 branches covered.">        for (int index : table2Rows) {</span>
+<span class="fc" id="L752">          destination.column(c).append(t2Col, index);</span>
+<span class="fc" id="L753">        }</span>
+      }
+    }
+<span class="fc" id="L756">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

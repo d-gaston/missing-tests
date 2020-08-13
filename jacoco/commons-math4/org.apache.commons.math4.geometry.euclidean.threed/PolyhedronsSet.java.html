@@ -1,0 +1,726 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PolyhedronsSet.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.geometry.euclidean.threed</a> &gt; <span class="el_source">PolyhedronsSet.java</span></div><h1>PolyhedronsSet.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.geometry.euclidean.threed;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+
+import org.apache.commons.math4.exception.MathIllegalArgumentException;
+import org.apache.commons.math4.exception.NumberIsTooSmallException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.geometry.Point;
+import org.apache.commons.math4.geometry.euclidean.oned.Euclidean1D;
+import org.apache.commons.math4.geometry.euclidean.twod.Euclidean2D;
+import org.apache.commons.math4.geometry.euclidean.twod.PolygonsSet;
+import org.apache.commons.math4.geometry.euclidean.twod.SubLine;
+import org.apache.commons.math4.geometry.euclidean.twod.Cartesian2D;
+import org.apache.commons.math4.geometry.partitioning.AbstractRegion;
+import org.apache.commons.math4.geometry.partitioning.BSPTree;
+import org.apache.commons.math4.geometry.partitioning.BSPTreeVisitor;
+import org.apache.commons.math4.geometry.partitioning.BoundaryAttribute;
+import org.apache.commons.math4.geometry.partitioning.Hyperplane;
+import org.apache.commons.math4.geometry.partitioning.Region;
+import org.apache.commons.math4.geometry.partitioning.RegionFactory;
+import org.apache.commons.math4.geometry.partitioning.SubHyperplane;
+import org.apache.commons.math4.geometry.partitioning.Transform;
+import org.apache.commons.math4.util.FastMath;
+
+/** This class represents a 3D region: a set of polyhedrons.
+ * @since 3.0
+ */
+public class PolyhedronsSet extends AbstractRegion&lt;Euclidean3D, Euclidean2D&gt; {
+
+    /** Build a polyhedrons set representing the whole real line.
+     * @param tolerance tolerance below which points are considered identical
+     * @since 3.3
+     */
+    public PolyhedronsSet(final double tolerance) {
+<span class="fc" id="L54">        super(tolerance);</span>
+<span class="fc" id="L55">    }</span>
+
+    /** Build a polyhedrons set from a BSP tree.
+     * &lt;p&gt;The leaf nodes of the BSP tree &lt;em&gt;must&lt;/em&gt; have a
+     * {@code Boolean} attribute representing the inside status of
+     * the corresponding cell (true for inside cells, false for outside
+     * cells). In order to avoid building too many small objects, it is
+     * recommended to use the predefined constants
+     * {@code Boolean.TRUE} and {@code Boolean.FALSE}&lt;/p&gt;
+     * &lt;p&gt;
+     * This constructor is aimed at expert use, as building the tree may
+     * be a difficult task. It is not intended for general use and for
+     * performances reasons does not check thoroughly its input, as this would
+     * require walking the full tree each time. Failing to provide a tree with
+     * the proper attributes, &lt;em&gt;will&lt;/em&gt; therefore generate problems like
+     * {@link NullPointerException} or {@link ClassCastException} only later on.
+     * This limitation is known and explains why this constructor is for expert
+     * use only. The caller does have the responsibility to provided correct arguments.
+     * &lt;/p&gt;
+     * @param tree inside/outside BSP tree representing the region
+     * @param tolerance tolerance below which points are considered identical
+     * @since 3.3
+     */
+    public PolyhedronsSet(final BSPTree&lt;Euclidean3D&gt; tree, final double tolerance) {
+<span class="fc" id="L79">        super(tree, tolerance);</span>
+<span class="fc" id="L80">    }</span>
+
+    /** Build a polyhedrons set from a Boundary REPresentation (B-rep) specified by sub-hyperplanes.
+     * &lt;p&gt;The boundary is provided as a collection of {@link
+     * SubHyperplane sub-hyperplanes}. Each sub-hyperplane has the
+     * interior part of the region on its minus side and the exterior on
+     * its plus side.&lt;/p&gt;
+     * &lt;p&gt;The boundary elements can be in any order, and can form
+     * several non-connected sets (like for example polyhedrons with holes
+     * or a set of disjoint polyhedrons considered as a whole). In
+     * fact, the elements do not even need to be connected together
+     * (their topological connections are not used here). However, if the
+     * boundary does not really separate an inside open from an outside
+     * open (open having here its topological meaning), then subsequent
+     * calls to the {@link Region#checkPoint(Point) checkPoint} method will
+     * not be meaningful anymore.&lt;/p&gt;
+     * &lt;p&gt;If the boundary is empty, the region will represent the whole
+     * space.&lt;/p&gt;
+     * @param boundary collection of boundary elements, as a
+     * collection of {@link SubHyperplane SubHyperplane} objects
+     * @param tolerance tolerance below which points are considered identical
+     * @since 3.3
+     */
+    public PolyhedronsSet(final Collection&lt;SubHyperplane&lt;Euclidean3D&gt;&gt; boundary,
+                          final double tolerance) {
+<span class="fc" id="L105">        super(boundary, tolerance);</span>
+<span class="fc" id="L106">    }</span>
+
+    /** Build a polyhedrons set from a Boundary REPresentation (B-rep) specified by connected vertices.
+     * &lt;p&gt;
+     * The boundary is provided as a list of vertices and a list of facets.
+     * Each facet is specified as an integer array containing the arrays vertices
+     * indices in the vertices list. Each facet normal is oriented by right hand
+     * rule to the facet vertices list.
+     * &lt;/p&gt;
+     * &lt;p&gt;
+     * Some basic sanity checks are performed but not everything is thoroughly
+     * assessed, so it remains under caller responsibility to ensure the vertices
+     * and facets are consistent and properly define a polyhedrons set.
+     * &lt;/p&gt;
+     * @param vertices list of polyhedrons set vertices
+     * @param facets list of facets, as vertices indices in the vertices list
+     * @param tolerance tolerance below which points are considered identical
+     * @exception MathIllegalArgumentException if some basic sanity checks fail
+     * @since 3.5
+     */
+    public PolyhedronsSet(final List&lt;Cartesian3D&gt; vertices, final List&lt;int[]&gt; facets,
+                          final double tolerance) {
+<span class="fc" id="L128">        super(buildBoundary(vertices, facets, tolerance), tolerance);</span>
+<span class="fc" id="L129">    }</span>
+
+    /** Build a parallellepipedic box.
+     * @param xMin low bound along the x direction
+     * @param xMax high bound along the x direction
+     * @param yMin low bound along the y direction
+     * @param yMax high bound along the y direction
+     * @param zMin low bound along the z direction
+     * @param zMax high bound along the z direction
+     * @param tolerance tolerance below which points are considered identical
+     * @since 3.3
+     */
+    public PolyhedronsSet(final double xMin, final double xMax,
+                          final double yMin, final double yMax,
+                          final double zMin, final double zMax,
+                          final double tolerance) {
+<span class="fc" id="L145">        super(buildBoundary(xMin, xMax, yMin, yMax, zMin, zMax, tolerance), tolerance);</span>
+<span class="fc" id="L146">    }</span>
+
+    /** Build a parallellepipedic box boundary.
+     * @param xMin low bound along the x direction
+     * @param xMax high bound along the x direction
+     * @param yMin low bound along the y direction
+     * @param yMax high bound along the y direction
+     * @param zMin low bound along the z direction
+     * @param zMax high bound along the z direction
+     * @param tolerance tolerance below which points are considered identical
+     * @return boundary tree
+     * @since 3.3
+     */
+    private static BSPTree&lt;Euclidean3D&gt; buildBoundary(final double xMin, final double xMax,
+                                                      final double yMin, final double yMax,
+                                                      final double zMin, final double zMax,
+                                                      final double tolerance) {
+<span class="pc bpc" id="L163" title="2 of 6 branches missed.">        if ((xMin &gt;= xMax - tolerance) || (yMin &gt;= yMax - tolerance) || (zMin &gt;= zMax - tolerance)) {</span>
+            // too thin box, build an empty polygons set
+<span class="fc" id="L165">            return new BSPTree&lt;&gt;(Boolean.FALSE);</span>
+        }
+<span class="fc" id="L167">        final Plane pxMin = new Plane(new Cartesian3D(xMin, 0,    0),   Cartesian3D.MINUS_I, tolerance);</span>
+<span class="fc" id="L168">        final Plane pxMax = new Plane(new Cartesian3D(xMax, 0,    0),   Cartesian3D.PLUS_I,  tolerance);</span>
+<span class="fc" id="L169">        final Plane pyMin = new Plane(new Cartesian3D(0,    yMin, 0),   Cartesian3D.MINUS_J, tolerance);</span>
+<span class="fc" id="L170">        final Plane pyMax = new Plane(new Cartesian3D(0,    yMax, 0),   Cartesian3D.PLUS_J,  tolerance);</span>
+<span class="fc" id="L171">        final Plane pzMin = new Plane(new Cartesian3D(0,    0,   zMin), Cartesian3D.MINUS_K, tolerance);</span>
+<span class="fc" id="L172">        final Plane pzMax = new Plane(new Cartesian3D(0,    0,   zMax), Cartesian3D.PLUS_K,  tolerance);</span>
+<span class="fc" id="L173">        final Region&lt;Euclidean3D&gt; boundary =</span>
+<span class="fc" id="L174">        new RegionFactory&lt;Euclidean3D&gt;().buildConvex(pxMin, pxMax, pyMin, pyMax, pzMin, pzMax);</span>
+<span class="fc" id="L175">        return boundary.getTree(false);</span>
+    }
+
+    /** Build boundary from vertices and facets.
+     * @param vertices list of polyhedrons set vertices
+     * @param facets list of facets, as vertices indices in the vertices list
+     * @param tolerance tolerance below which points are considered identical
+     * @return boundary as a list of sub-hyperplanes
+     * @exception MathIllegalArgumentException if some basic sanity checks fail
+     * @since 3.5
+     */
+    private static List&lt;SubHyperplane&lt;Euclidean3D&gt;&gt; buildBoundary(final List&lt;Cartesian3D&gt; vertices,
+                                                                  final List&lt;int[]&gt; facets,
+                                                                  final double tolerance) {
+
+        // check vertices distances
+<span class="fc bfc" id="L191" title="All 2 branches covered.">        for (int i = 0; i &lt; vertices.size() - 1; ++i) {</span>
+<span class="fc" id="L192">            final Cartesian3D vi = vertices.get(i);</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">            for (int j = i + 1; j &lt; vertices.size(); ++j) {</span>
+<span class="fc bfc" id="L194" title="All 2 branches covered.">                if (Cartesian3D.distance(vi, vertices.get(j)) &lt;= tolerance) {</span>
+<span class="fc" id="L195">                    throw new MathIllegalArgumentException(LocalizedFormats.CLOSE_VERTICES,</span>
+<span class="fc" id="L196">                                                           vi.getX(), vi.getY(), vi.getZ());</span>
+                }
+            }
+        }
+
+        // find how vertices are referenced by facets
+<span class="fc" id="L202">        final int[][] references = findReferences(vertices, facets);</span>
+
+        // find how vertices are linked together by edges along the facets they belong to
+<span class="fc" id="L205">        final int[][] successors = successors(vertices, facets, references);</span>
+
+        // check edges orientations
+<span class="fc bfc" id="L208" title="All 2 branches covered.">        for (int vA = 0; vA &lt; vertices.size(); ++vA) {</span>
+<span class="fc bfc" id="L209" title="All 2 branches covered.">            for (final int vB : successors[vA]) {</span>
+
+<span class="fc bfc" id="L211" title="All 2 branches covered.">                if (vB &gt;= 0) {</span>
+                    // when facets are properly oriented, if vB is the successor of vA on facet f1,
+                    // then there must be an adjacent facet f2 where vA is the successor of vB
+<span class="fc" id="L214">                    boolean found = false;</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">                    for (final int v : successors[vB]) {</span>
+<span class="fc bfc" id="L216" title="All 4 branches covered.">                        found = found || (v == vA);</span>
+                    }
+<span class="fc bfc" id="L218" title="All 2 branches covered.">                    if (!found) {</span>
+<span class="fc" id="L219">                        final Cartesian3D start = vertices.get(vA);</span>
+<span class="fc" id="L220">                        final Cartesian3D end   = vertices.get(vB);</span>
+<span class="fc" id="L221">                        throw new MathIllegalArgumentException(LocalizedFormats.EDGE_CONNECTED_TO_ONE_FACET,</span>
+<span class="fc" id="L222">                                                               start.getX(), start.getY(), start.getZ(),</span>
+<span class="fc" id="L223">                                                               end.getX(),   end.getY(),   end.getZ());</span>
+                    }
+                }
+            }
+        }
+
+<span class="fc" id="L229">        final List&lt;SubHyperplane&lt;Euclidean3D&gt;&gt; boundary = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L231" title="All 2 branches covered.">        for (final int[] facet : facets) {</span>
+
+            // define facet plane from the first 3 points
+<span class="fc" id="L234">            Plane plane = new Plane(vertices.get(facet[0]), vertices.get(facet[1]), vertices.get(facet[2]),</span>
+                                    tolerance);
+
+            // check all points are in the plane
+<span class="fc" id="L238">            final Cartesian2D[] two2Points = new Cartesian2D[facet.length];</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">            for (int i = 0 ; i &lt; facet.length; ++i) {</span>
+<span class="fc" id="L240">                final Cartesian3D v = vertices.get(facet[i]);</span>
+<span class="fc bfc" id="L241" title="All 2 branches covered.">                if (!plane.contains(v)) {</span>
+<span class="fc" id="L242">                    throw new MathIllegalArgumentException(LocalizedFormats.OUT_OF_PLANE,</span>
+<span class="fc" id="L243">                                                           v.getX(), v.getY(), v.getZ());</span>
+                }
+<span class="fc" id="L245">                two2Points[i] = plane.toSubSpace(v);</span>
+            }
+
+            // create the polygonal facet
+<span class="fc" id="L249">            boundary.add(new SubPlane(plane, new PolygonsSet(tolerance, two2Points)));</span>
+
+<span class="fc" id="L251">        }</span>
+
+<span class="fc" id="L253">        return boundary;</span>
+
+    }
+
+    /** Find the facets that reference each edges.
+     * @param vertices list of polyhedrons set vertices
+     * @param facets list of facets, as vertices indices in the vertices list
+     * @return references array such that r[v][k] = f for some k if facet f contains vertex v
+     * @exception MathIllegalArgumentException if some facets have fewer than 3 vertices
+     * @since 3.5
+     */
+    private static int[][] findReferences(final List&lt;Cartesian3D&gt; vertices, final List&lt;int[]&gt; facets) {
+
+        // find the maximum number of facets a vertex belongs to
+<span class="fc" id="L267">        final int[] nbFacets = new int[vertices.size()];</span>
+<span class="fc" id="L268">        int maxFacets  = 0;</span>
+<span class="fc bfc" id="L269" title="All 2 branches covered.">        for (final int[] facet : facets) {</span>
+<span class="fc bfc" id="L270" title="All 2 branches covered.">            if (facet.length &lt; 3) {</span>
+<span class="fc" id="L271">                throw new NumberIsTooSmallException(LocalizedFormats.WRONG_NUMBER_OF_POINTS,</span>
+<span class="fc" id="L272">                                                    3, facet.length, true);</span>
+            }
+<span class="fc bfc" id="L274" title="All 2 branches covered.">            for (final int index : facet) {</span>
+<span class="fc" id="L275">                maxFacets = FastMath.max(maxFacets, ++nbFacets[index]);</span>
+            }
+<span class="fc" id="L277">        }</span>
+
+        // set up the references array
+<span class="fc" id="L280">        final int[][] references = new int[vertices.size()][maxFacets];</span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">        for (int[] r : references) {</span>
+<span class="fc" id="L282">            Arrays.fill(r, -1);</span>
+        }
+<span class="fc bfc" id="L284" title="All 2 branches covered.">        for (int f = 0; f &lt; facets.size(); ++f) {</span>
+<span class="fc bfc" id="L285" title="All 2 branches covered.">            for (final int v : facets.get(f)) {</span>
+                // vertex v is referenced by facet f
+<span class="fc" id="L287">                int k = 0;</span>
+<span class="pc bpc" id="L288" title="1 of 4 branches missed.">                while (k &lt; maxFacets &amp;&amp; references[v][k] &gt;= 0) {</span>
+<span class="fc" id="L289">                    ++k;</span>
+                }
+<span class="fc" id="L291">                references[v][k] = f;</span>
+            }
+        }
+
+<span class="fc" id="L295">        return references;</span>
+
+    }
+
+    /** Find the successors of all vertices among all facets they belong to.
+     * @param vertices list of polyhedrons set vertices
+     * @param facets list of facets, as vertices indices in the vertices list
+     * @param references facets references array
+     * @return indices of vertices that follow vertex v in some facet (the array
+     * may contain extra entries at the end, set to negative indices)
+     * @exception MathIllegalArgumentException if the same vertex appears more than
+     * once in the successors list (which means one facet orientation is wrong)
+     * @since 3.5
+     */
+    private static int[][] successors(final List&lt;Cartesian3D&gt; vertices, final List&lt;int[]&gt; facets,
+                                      final int[][] references) {
+
+        // create an array large enough
+<span class="fc" id="L313">        final int[][] successors = new int[vertices.size()][references[0].length];</span>
+<span class="fc bfc" id="L314" title="All 2 branches covered.">        for (final int[] s : successors) {</span>
+<span class="fc" id="L315">            Arrays.fill(s, -1);</span>
+        }
+
+<span class="fc bfc" id="L318" title="All 2 branches covered.">        for (int v = 0; v &lt; vertices.size(); ++v) {</span>
+<span class="fc bfc" id="L319" title="All 4 branches covered.">            for (int k = 0; k &lt; successors[v].length &amp;&amp; references[v][k] &gt;= 0; ++k) {</span>
+
+                // look for vertex v
+<span class="fc" id="L322">                final int[] facet = facets.get(references[v][k]);</span>
+<span class="fc" id="L323">                int i = 0;</span>
+<span class="pc bpc" id="L324" title="1 of 4 branches missed.">                while (i &lt; facet.length &amp;&amp; facet[i] != v) {</span>
+<span class="fc" id="L325">                    ++i;</span>
+                }
+
+                // we have found vertex v, we deduce its successor on current facet
+<span class="fc" id="L329">                successors[v][k] = facet[(i + 1) % facet.length];</span>
+<span class="fc bfc" id="L330" title="All 2 branches covered.">                for (int l = 0; l &lt; k; ++l) {</span>
+<span class="fc bfc" id="L331" title="All 2 branches covered.">                    if (successors[v][l] == successors[v][k]) {</span>
+<span class="fc" id="L332">                        final Cartesian3D start = vertices.get(v);</span>
+<span class="fc" id="L333">                        final Cartesian3D end   = vertices.get(successors[v][k]);</span>
+<span class="fc" id="L334">                        throw new MathIllegalArgumentException(LocalizedFormats.FACET_ORIENTATION_MISMATCH,</span>
+<span class="fc" id="L335">                                                               start.getX(), start.getY(), start.getZ(),</span>
+<span class="fc" id="L336">                                                               end.getX(),   end.getY(),   end.getZ());</span>
+                    }
+                }
+
+            }
+        }
+
+<span class="fc" id="L343">        return successors;</span>
+
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PolyhedronsSet buildNew(final BSPTree&lt;Euclidean3D&gt; tree) {
+<span class="fc" id="L350">        return new PolyhedronsSet(tree, getTolerance());</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    protected void computeGeometricalProperties() {
+        // check simple cases first
+<span class="fc bfc" id="L357" title="All 2 branches covered.">        if (isEmpty()) {</span>
+<span class="fc" id="L358">            setSize(0.0);</span>
+<span class="fc" id="L359">            setBarycenter((Point&lt;Euclidean3D&gt;) Cartesian3D.NaN);</span>
+        }
+<span class="fc bfc" id="L361" title="All 2 branches covered.">        else if (isFull()) {</span>
+<span class="fc" id="L362">            setSize(Double.POSITIVE_INFINITY);</span>
+<span class="fc" id="L363">            setBarycenter((Point&lt;Euclidean3D&gt;) Cartesian3D.NaN);</span>
+        }
+        else {
+            // not empty or full; compute the contribution of all boundary facets
+<span class="fc" id="L367">            final FacetsContributionVisitor contributionVisitor = new FacetsContributionVisitor();</span>
+<span class="fc" id="L368">            getTree(true).visit(contributionVisitor);</span>
+
+<span class="fc" id="L370">            final double size = contributionVisitor.getSize();</span>
+<span class="fc" id="L371">            final Cartesian3D barycenter = contributionVisitor.getBarycenter();</span>
+
+<span class="fc bfc" id="L373" title="All 2 branches covered.">            if (size &lt; 0) {</span>
+                // the polyhedrons set is a finite outside surrounded by an infinite inside
+<span class="fc" id="L375">                setSize(Double.POSITIVE_INFINITY);</span>
+<span class="fc" id="L376">                setBarycenter((Point&lt;Euclidean3D&gt;) Cartesian3D.NaN);</span>
+            } else {
+                // the polyhedrons set is finite
+<span class="fc" id="L379">                setSize(size);</span>
+<span class="fc" id="L380">                setBarycenter((Point&lt;Euclidean3D&gt;) barycenter);</span>
+            }
+        }
+<span class="fc" id="L383">    }</span>
+
+    /** Visitor computing polyhedron geometrical properties.
+     *  The volume of the polyhedron is computed using the equation
+     *  &lt;code&gt;V = (1/3)*&amp;Sigma;&lt;sub&gt;F&lt;/sub&gt;[(C&lt;sub&gt;F&lt;/sub&gt;&amp;sdot;N&lt;sub&gt;F&lt;/sub&gt;)*area(F)]&lt;/code&gt;,
+     *  where &lt;code&gt;F&lt;/code&gt; represents each face in the polyhedron, &lt;code&gt;C&lt;sub&gt;F&lt;/sub&gt;&lt;/code&gt;
+     *  represents the barycenter of the face, and &lt;code&gt;N&lt;sub&gt;F&lt;/sub&gt;&lt;/code&gt; represents the
+     *  normal of the face. (More details can be found in the article
+     *  &lt;a href=&quot;https://en.wikipedia.org/wiki/Polyhedron#Volume&quot;&gt;here&lt;/a&gt;.)
+     *  This essentially splits up the polyhedron into pyramids with a polyhedron
+     *  face forming the base of each pyramid.
+     *  The barycenter is computed in a similar way. The barycenter of each pyramid
+     *  is calculated using the fact that it is located 3/4 of the way along the
+     *  line from the apex to the base. The polyhedron barycenter then becomes
+     *  the volume-weighted average of these pyramid centers.
+     */
+<span class="fc" id="L399">    private static class FacetsContributionVisitor implements BSPTreeVisitor&lt;Euclidean3D&gt; {</span>
+
+        /** Accumulator for facet volume contributions. */
+        private double volumeSum;
+
+        /** Accumulator for barycenter contributions. */
+<span class="fc" id="L405">        private Cartesian3D barycenterSum = Cartesian3D.ZERO;</span>
+
+        /** Returns the total computed size (ie, volume) of the polyhedron.
+         * This value will be negative if the polyhedron is &quot;inside-out&quot;, meaning
+         * that it has a finite outside surrounded by an infinite inside.
+         * @return the volume.
+         */
+        public double getSize() {
+            // apply the 1/3 pyramid volume scaling factor
+<span class="fc" id="L414">            return volumeSum / 3.0;</span>
+        }
+
+        /** Returns the computed barycenter. This is the volume-weighted average
+         * of contributions from all facets. All coordinates will be NaN if the
+         * region is infinite.
+         * @return the barycenter.
+         */
+        public Cartesian3D getBarycenter() {
+            // Since the volume we used when adding together the facet contributions
+            // was 3x the actual pyramid size, we'll multiply by 1/4 here instead
+            // of 3/4 to adjust for the actual barycenter position in each pyramid.
+<span class="fc" id="L426">            return new Cartesian3D(1.0 / (4 * getSize()), barycenterSum);</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public Order visitOrder(final BSPTree&lt;Euclidean3D&gt; node) {
+<span class="fc" id="L432">            return Order.MINUS_SUB_PLUS;</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public void visitInternalNode(final BSPTree&lt;Euclidean3D&gt; node) {
+            @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc" id="L439">            final BoundaryAttribute&lt;Euclidean3D&gt; attribute =</span>
+<span class="fc" id="L440">                (BoundaryAttribute&lt;Euclidean3D&gt;) node.getAttribute();</span>
+<span class="fc bfc" id="L441" title="All 2 branches covered.">            if (attribute.getPlusOutside() != null) {</span>
+<span class="fc" id="L442">                addContribution(attribute.getPlusOutside(), false);</span>
+            }
+<span class="fc bfc" id="L444" title="All 2 branches covered.">            if (attribute.getPlusInside() != null) {</span>
+<span class="fc" id="L445">                addContribution(attribute.getPlusInside(), true);</span>
+            }
+<span class="fc" id="L447">        }</span>
+
+        /** {@inheritDoc} */
+        @Override
+        public void visitLeafNode(final BSPTree&lt;Euclidean3D&gt; node) {
+<span class="fc" id="L452">        }</span>
+
+        /** Add the contribution of a boundary facet.
+         * @param facet boundary facet
+         * @param reversed if true, the facet has the inside on its plus side
+         */
+        private void addContribution(final SubHyperplane&lt;Euclidean3D&gt; facet, final boolean reversed) {
+
+<span class="fc" id="L460">            final Region&lt;Euclidean2D&gt; polygon = ((SubPlane) facet).getRemainingRegion();</span>
+<span class="fc" id="L461">            final double area = polygon.getSize();</span>
+
+<span class="fc bfc" id="L463" title="All 2 branches covered.">            if (Double.isInfinite(area)) {</span>
+<span class="fc" id="L464">                volumeSum = Double.POSITIVE_INFINITY;</span>
+<span class="fc" id="L465">                barycenterSum = Cartesian3D.NaN;</span>
+            } else {
+<span class="fc" id="L467">                final Plane plane = (Plane) facet.getHyperplane();</span>
+<span class="fc" id="L468">                final Cartesian3D facetBarycenter = plane.toSpace(polygon.getBarycenter());</span>
+
+                // the volume here is actually 3x the actual pyramid volume; we'll apply
+                // the final scaling all at once at the end
+<span class="fc" id="L472">                double scaledVolume = area * facetBarycenter.dotProduct(plane.getNormal());</span>
+<span class="fc bfc" id="L473" title="All 2 branches covered.">                if (reversed) {</span>
+<span class="fc" id="L474">                    scaledVolume = -scaledVolume;</span>
+                }
+
+<span class="fc" id="L477">                volumeSum += scaledVolume;</span>
+<span class="fc" id="L478">                barycenterSum = new Cartesian3D(1.0, barycenterSum, scaledVolume, facetBarycenter);</span>
+            }
+<span class="fc" id="L480">        }</span>
+    }
+
+    /** Get the first sub-hyperplane crossed by a semi-infinite line.
+     * @param point start point of the part of the line considered
+     * @param line line to consider (contains point)
+     * @return the first sub-hyperplane crossed by the line after the
+     * given point, or null if the line does not intersect any
+     * sub-hyperplane
+     */
+    public SubHyperplane&lt;Euclidean3D&gt; firstIntersection(final Cartesian3D point, final Line line) {
+<span class="fc" id="L491">        return recurseFirstIntersection(getTree(true), point, line);</span>
+    }
+
+    /** Get the first sub-hyperplane crossed by a semi-infinite line.
+     * @param node current node
+     * @param point start point of the part of the line considered
+     * @param line line to consider (contains point)
+     * @return the first sub-hyperplane crossed by the line after the
+     * given point, or null if the line does not intersect any
+     * sub-hyperplane
+     */
+    private SubHyperplane&lt;Euclidean3D&gt; recurseFirstIntersection(final BSPTree&lt;Euclidean3D&gt; node,
+                                                                final Cartesian3D point,
+                                                                final Line line) {
+
+<span class="fc" id="L506">        final SubHyperplane&lt;Euclidean3D&gt; cut = node.getCut();</span>
+<span class="fc bfc" id="L507" title="All 2 branches covered.">        if (cut == null) {</span>
+<span class="fc" id="L508">            return null;</span>
+        }
+<span class="fc" id="L510">        final BSPTree&lt;Euclidean3D&gt; minus = node.getMinus();</span>
+<span class="fc" id="L511">        final BSPTree&lt;Euclidean3D&gt; plus  = node.getPlus();</span>
+<span class="fc" id="L512">        final Plane                plane = (Plane) cut.getHyperplane();</span>
+
+        // establish search order
+<span class="fc" id="L515">        final double offset = plane.getOffset(point);</span>
+<span class="fc bfc" id="L516" title="All 2 branches covered.">        final boolean in    = FastMath.abs(offset) &lt; getTolerance();</span>
+        final BSPTree&lt;Euclidean3D&gt; near;
+        final BSPTree&lt;Euclidean3D&gt; far;
+<span class="fc bfc" id="L519" title="All 2 branches covered.">        if (offset &lt; 0) {</span>
+<span class="fc" id="L520">            near = minus;</span>
+<span class="fc" id="L521">            far  = plus;</span>
+        } else {
+<span class="fc" id="L523">            near = plus;</span>
+<span class="fc" id="L524">            far  = minus;</span>
+        }
+
+<span class="fc bfc" id="L527" title="All 2 branches covered.">        if (in) {</span>
+            // search in the cut hyperplane
+<span class="fc" id="L529">            final SubHyperplane&lt;Euclidean3D&gt; facet = boundaryFacet(point, node);</span>
+<span class="pc bpc" id="L530" title="1 of 2 branches missed.">            if (facet != null) {</span>
+<span class="fc" id="L531">                return facet;</span>
+            }
+        }
+
+        // search in the near branch
+<span class="fc" id="L536">        final SubHyperplane&lt;Euclidean3D&gt; crossed = recurseFirstIntersection(near, point, line);</span>
+<span class="fc bfc" id="L537" title="All 2 branches covered.">        if (crossed != null) {</span>
+<span class="fc" id="L538">            return crossed;</span>
+        }
+
+<span class="pc bpc" id="L541" title="1 of 2 branches missed.">        if (!in) {</span>
+            // search in the cut hyperplane
+<span class="fc" id="L543">            final Cartesian3D hit3D = plane.intersection(line);</span>
+<span class="fc bfc" id="L544" title="All 4 branches covered.">            if (hit3D != null &amp;&amp; line.getAbscissa(hit3D) &gt; line.getAbscissa(point)) {</span>
+<span class="fc" id="L545">                final SubHyperplane&lt;Euclidean3D&gt; facet = boundaryFacet(hit3D, node);</span>
+<span class="fc bfc" id="L546" title="All 2 branches covered.">                if (facet != null) {</span>
+<span class="fc" id="L547">                    return facet;</span>
+                }
+            }
+        }
+
+        // search in the far branch
+<span class="fc" id="L553">        return recurseFirstIntersection(far, point, line);</span>
+
+    }
+
+    /** Check if a point belongs to the boundary part of a node.
+     * @param point point to check
+     * @param node node containing the boundary facet to check
+     * @return the boundary facet this points belongs to (or null if it
+     * does not belong to any boundary facet)
+     */
+    private SubHyperplane&lt;Euclidean3D&gt; boundaryFacet(final Cartesian3D point,
+                                                     final BSPTree&lt;Euclidean3D&gt; node) {
+<span class="fc" id="L565">        final Cartesian2D point2D = ((Plane) node.getCut().getHyperplane()).toSubSpace(point);</span>
+        @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc" id="L567">        final BoundaryAttribute&lt;Euclidean3D&gt; attribute =</span>
+<span class="fc" id="L568">            (BoundaryAttribute&lt;Euclidean3D&gt;) node.getAttribute();</span>
+<span class="pc bpc" id="L569" title="1 of 2 branches missed.">        if ((attribute.getPlusOutside() != null) &amp;&amp;</span>
+<span class="fc bfc" id="L570" title="All 2 branches covered.">            (((SubPlane) attribute.getPlusOutside()).getRemainingRegion().checkPoint(point2D) == Location.INSIDE)) {</span>
+<span class="fc" id="L571">            return attribute.getPlusOutside();</span>
+        }
+<span class="pc bpc" id="L573" title="1 of 2 branches missed.">        if ((attribute.getPlusInside() != null) &amp;&amp;</span>
+<span class="nc bnc" id="L574" title="All 2 branches missed.">            (((SubPlane) attribute.getPlusInside()).getRemainingRegion().checkPoint(point2D) == Location.INSIDE)) {</span>
+<span class="nc" id="L575">            return attribute.getPlusInside();</span>
+        }
+<span class="fc" id="L577">        return null;</span>
+    }
+
+    /** Rotate the region around the specified point.
+     * &lt;p&gt;The instance is not modified, a new instance is created.&lt;/p&gt;
+     * @param center rotation center
+     * @param rotation vectorial rotation operator
+     * @return a new instance representing the rotated region
+     */
+    public PolyhedronsSet rotate(final Cartesian3D center, final Rotation rotation) {
+<span class="fc" id="L587">        return (PolyhedronsSet) applyTransform(new RotationTransform(center, rotation));</span>
+    }
+
+    /** 3D rotation as a Transform. */
+    private static class RotationTransform implements Transform&lt;Euclidean3D, Euclidean2D&gt; {
+
+        /** Center point of the rotation. */
+        private final Cartesian3D   center;
+
+        /** Vectorial rotation. */
+        private final Rotation   rotation;
+
+        /** Cached original hyperplane. */
+        private Plane cachedOriginal;
+
+        /** Cached 2D transform valid inside the cached original hyperplane. */
+        private Transform&lt;Euclidean2D, Euclidean1D&gt;  cachedTransform;
+
+        /** Build a rotation transform.
+         * @param center center point of the rotation
+         * @param rotation vectorial rotation
+         */
+<span class="fc" id="L609">        RotationTransform(final Cartesian3D center, final Rotation rotation) {</span>
+<span class="fc" id="L610">            this.center   = center;</span>
+<span class="fc" id="L611">            this.rotation = rotation;</span>
+<span class="fc" id="L612">        }</span>
+
+        /** {@inheritDoc} */
+        @Override
+        public Cartesian3D apply(final Point&lt;Euclidean3D&gt; point) {
+<span class="fc" id="L617">            final Cartesian3D delta = ((Cartesian3D) point).subtract(center);</span>
+<span class="fc" id="L618">            return new Cartesian3D(1.0, center, 1.0, rotation.applyTo(delta));</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public Plane apply(final Hyperplane&lt;Euclidean3D&gt; hyperplane) {
+<span class="fc" id="L624">            return ((Plane) hyperplane).rotate(center, rotation);</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public SubHyperplane&lt;Euclidean2D&gt; apply(final SubHyperplane&lt;Euclidean2D&gt; sub,
+                                                final Hyperplane&lt;Euclidean3D&gt; original,
+                                                final Hyperplane&lt;Euclidean3D&gt; transformed) {
+<span class="fc bfc" id="L632" title="All 2 branches covered.">            if (original != cachedOriginal) {</span>
+                // we have changed hyperplane, reset the in-hyperplane transform
+
+<span class="fc" id="L635">                final Plane    oPlane = (Plane) original;</span>
+<span class="fc" id="L636">                final Plane    tPlane = (Plane) transformed;</span>
+<span class="fc" id="L637">                final Cartesian3D p00    = oPlane.getOrigin();</span>
+<span class="fc" id="L638">                final Cartesian3D p10    = oPlane.toSpace(new Cartesian2D(1.0, 0.0));</span>
+<span class="fc" id="L639">                final Cartesian3D p01    = oPlane.toSpace(new Cartesian2D(0.0, 1.0));</span>
+<span class="fc" id="L640">                final Cartesian2D tP00   = tPlane.toSubSpace(apply(p00));</span>
+<span class="fc" id="L641">                final Cartesian2D tP10   = tPlane.toSubSpace(apply(p10));</span>
+<span class="fc" id="L642">                final Cartesian2D tP01   = tPlane.toSubSpace(apply(p01));</span>
+
+<span class="fc" id="L644">                cachedOriginal  = (Plane) original;</span>
+<span class="fc" id="L645">                cachedTransform =</span>
+<span class="fc" id="L646">                        org.apache.commons.math4.geometry.euclidean.twod.Line.getTransform(tP10.getX() - tP00.getX(),</span>
+<span class="fc" id="L647">                                                                                           tP10.getY() - tP00.getY(),</span>
+<span class="fc" id="L648">                                                                                           tP01.getX() - tP00.getX(),</span>
+<span class="fc" id="L649">                                                                                           tP01.getY() - tP00.getY(),</span>
+<span class="fc" id="L650">                                                                                           tP00.getX(),</span>
+<span class="fc" id="L651">                                                                                           tP00.getY());</span>
+
+            }
+<span class="fc" id="L654">            return ((SubLine) sub).applyTransform(cachedTransform);</span>
+        }
+
+    }
+
+    /** Translate the region by the specified amount.
+     * &lt;p&gt;The instance is not modified, a new instance is created.&lt;/p&gt;
+     * @param translation translation to apply
+     * @return a new instance representing the translated region
+     */
+    public PolyhedronsSet translate(final Cartesian3D translation) {
+<span class="fc" id="L665">        return (PolyhedronsSet) applyTransform(new TranslationTransform(translation));</span>
+    }
+
+    /** 3D translation as a transform. */
+    private static class TranslationTransform implements Transform&lt;Euclidean3D, Euclidean2D&gt; {
+
+        /** Translation vector. */
+        private final Cartesian3D   translation;
+
+        /** Cached original hyperplane. */
+        private Plane cachedOriginal;
+
+        /** Cached 2D transform valid inside the cached original hyperplane. */
+        private Transform&lt;Euclidean2D, Euclidean1D&gt;  cachedTransform;
+
+        /** Build a translation transform.
+         * @param translation translation vector
+         */
+<span class="fc" id="L683">        TranslationTransform(final Cartesian3D translation) {</span>
+<span class="fc" id="L684">            this.translation = translation;</span>
+<span class="fc" id="L685">        }</span>
+
+        /** {@inheritDoc} */
+        @Override
+        public Cartesian3D apply(final Point&lt;Euclidean3D&gt; point) {
+<span class="fc" id="L690">            return new Cartesian3D(1.0, (Cartesian3D) point, 1.0, translation);</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public Plane apply(final Hyperplane&lt;Euclidean3D&gt; hyperplane) {
+<span class="fc" id="L696">            return ((Plane) hyperplane).translate(translation);</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public SubHyperplane&lt;Euclidean2D&gt; apply(final SubHyperplane&lt;Euclidean2D&gt; sub,
+                                                final Hyperplane&lt;Euclidean3D&gt; original,
+                                                final Hyperplane&lt;Euclidean3D&gt; transformed) {
+<span class="fc bfc" id="L704" title="All 2 branches covered.">            if (original != cachedOriginal) {</span>
+                // we have changed hyperplane, reset the in-hyperplane transform
+
+<span class="fc" id="L707">                final Plane   oPlane = (Plane) original;</span>
+<span class="fc" id="L708">                final Plane   tPlane = (Plane) transformed;</span>
+<span class="fc" id="L709">                final Cartesian2D shift  = tPlane.toSubSpace(apply(oPlane.getOrigin()));</span>
+
+<span class="fc" id="L711">                cachedOriginal  = (Plane) original;</span>
+<span class="fc" id="L712">                cachedTransform =</span>
+<span class="fc" id="L713">                        org.apache.commons.math4.geometry.euclidean.twod.Line.getTransform(1, 0, 0, 1,</span>
+<span class="fc" id="L714">                                                                                           shift.getX(),</span>
+<span class="fc" id="L715">                                                                                           shift.getY());</span>
+
+            }
+
+<span class="fc" id="L719">            return ((SubLine) sub).applyTransform(cachedTransform);</span>
+
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

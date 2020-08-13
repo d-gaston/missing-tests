@@ -1,0 +1,1534 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MainTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle</a> &gt; <span class="el_source">MainTest.java</span></div><h1>MainTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle;
+
+import static com.puppycrawl.tools.checkstyle.internal.utils.TestUtil.isUtilsClassHasPrivateConstructor;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.contrib.java.lang.system.ExpectedSystemExit;
+import org.junit.contrib.java.lang.system.SystemErrRule;
+import org.junit.contrib.java.lang.system.SystemOutRule;
+import org.junit.rules.TemporaryFolder;
+import org.powermock.reflect.Whitebox;
+
+import com.puppycrawl.tools.checkstyle.api.AuditListener;
+import com.puppycrawl.tools.checkstyle.api.AutomaticBean;
+import com.puppycrawl.tools.checkstyle.api.CheckstyleException;
+import com.puppycrawl.tools.checkstyle.api.Configuration;
+import com.puppycrawl.tools.checkstyle.api.LocalizedMessage;
+import com.puppycrawl.tools.checkstyle.internal.testmodules.TestRootModuleChecker;
+
+<span class="fc" id="L63">public class MainTest {</span>
+
+<span class="fc" id="L65">    private static final String SHORT_USAGE = String.format(Locale.ROOT,</span>
+            &quot;Usage: checkstyle [OPTIONS]... FILES...%n&quot;
+            + &quot;Try 'checkstyle --help' for more information.%n&quot;);
+
+<span class="fc" id="L69">    private static final String USAGE = String.format(Locale.ROOT,</span>
+          &quot;Usage: checkstyle [-dEghjJtTV] [-c=&lt;configurationFile&gt;] [-C=&lt;checkerThreadsNumber&gt;]&quot;
+          + &quot; [-f=&lt;format&gt;]%n&quot;
+          + &quot;                  [-o=&lt;outputPath&gt;] [-p=&lt;propertiesFile&gt;]&quot;
+          + &quot; [-s=&lt;suppressionLineColumnNumber&gt;]%n&quot;
+          + &quot;                  [-w=&lt;tabWidth&gt;] [-W=&lt;treeWalkerThreadsNumber&gt;]&quot;
+          + &quot; [-e=&lt;exclude&gt;]...%n&quot;
+          + &quot;                  [-x=&lt;excludeRegex&gt;]...&quot;
+          + &quot; &lt;files&gt;...%n&quot;
+          + &quot;Checkstyle verifies that the specified source code files adhere to the specified&quot;
+          + &quot; rules. By default%n&quot;
+          + &quot;errors are reported to standard out in plain format. Checkstyle requires a&quot;
+          + &quot; configuration XML file%n&quot;
+          + &quot;that configures the checks to apply.%n&quot;
+          + &quot;      &lt;files&gt;...            One or more source files to verify%n&quot;
+          + &quot;  -c=&lt;configurationFile&gt;    Sets the check configuration file to use.%n&quot;
+          + &quot;  -C, --checker-threads-number=&lt;checkerThreadsNumber&gt;%n&quot;
+          + &quot;                            (experimental) The number of Checker threads (must be&quot;
+          + &quot; greater than zero)%n&quot;
+          + &quot;  -d, --debug               Print all debug logging of CheckStyle utility%n&quot;
+          + &quot;  -e, --exclude=&lt;exclude&gt;   Directory/File path to exclude from CheckStyle%n&quot;
+          + &quot;  -E, --executeIgnoredModules%n&quot;
+          + &quot;                            Allows ignored modules to be run.%n&quot;
+          + &quot;  -f=&lt;format&gt;               Sets the output format. Valid values: xml, plain.&quot;
+          + &quot; Defaults to plain%n&quot;
+          + &quot;  -g, --generate-xpath-suppression%n&quot;
+          + &quot;                            Generates to output a suppression xml to use to suppress&quot;
+          + &quot; all violations%n&quot;
+          + &quot;                              from user's config%n&quot;
+          + &quot;  -h, --help                Show this help message and exit.%n&quot;
+          + &quot;  -j, --javadocTree         Print Parse tree of the Javadoc comment%n&quot;
+          + &quot;  -J, --treeWithJavadoc     Print full Abstract Syntax Tree of the file%n&quot;
+          + &quot;  -o=&lt;outputPath&gt;           Sets the output file. Defaults to stdout%n&quot;
+          + &quot;  -p=&lt;propertiesFile&gt;       Loads the properties file%n&quot;
+          + &quot;  -s=&lt;suppressionLineColumnNumber&gt;%n&quot;
+          + &quot;                            Print xpath suppressions at the file's line and column&quot;
+          + &quot; position.%n&quot;
+          + &quot;                              Argument is the line and column number (separated by&quot;
+          + &quot; a : ) in the%n&quot;
+          + &quot;                              file that the suppression should be generated for%n&quot;
+          + &quot;  -t, --tree                Print Abstract Syntax Tree(AST) of the file%n&quot;
+          + &quot;  -T, --treeWithComments    Print Abstract Syntax Tree(AST) of the file including&quot;
+          + &quot; comments%n&quot;
+          + &quot;  -V, --version             Print version information and exit.%n&quot;
+          + &quot;  -w, --tabWidth=&lt;tabWidth&gt; Sets the length of the tab character. Used only with&quot;
+          + &quot; \&quot;-s\&quot; option.%n&quot;
+          + &quot;                              Default value is 8%n&quot;
+          + &quot;  -W, --tree-walker-threads-number=&lt;treeWalkerThreadsNumber&gt;%n&quot;
+          + &quot;                            (experimental) The number of TreeWalker threads (must be&quot;
+          + &quot; greater than%n&quot;
+          + &quot;                              zero)%n&quot;
+          + &quot;  -x, --exclude-regexp=&lt;excludeRegex&gt;%n&quot;
+          + &quot;                            Regular expression of directory/file to exclude from&quot;
+          + &quot; CheckStyle%n&quot;);
+
+<span class="fc" id="L124">    private static final Logger LOG = Logger.getLogger(MainTest.class.getName()).getParent();</span>
+<span class="fc" id="L125">    private static final Handler[] HANDLERS = LOG.getHandlers();</span>
+<span class="fc" id="L126">    private static final Level ORIGINAL_LOG_LEVEL = LOG.getLevel();</span>
+
+<span class="fc" id="L128">    private static final String EOL = System.getProperty(&quot;line.separator&quot;);</span>
+
+<span class="fc" id="L130">    @Rule</span>
+    public final TemporaryFolder temporaryFolder = new TemporaryFolder();
+<span class="fc" id="L132">    @Rule</span>
+<span class="fc" id="L133">    public final ExpectedSystemExit exit = ExpectedSystemExit.none();</span>
+<span class="fc" id="L134">    @Rule</span>
+<span class="fc" id="L135">    public final SystemErrRule systemErr = new SystemErrRule().enableLog().mute();</span>
+<span class="fc" id="L136">    @Rule</span>
+<span class="fc" id="L137">    public final SystemOutRule systemOut = new SystemOutRule().enableLog().mute();</span>
+
+<span class="fc" id="L139">    private final LocalizedMessage auditStartMessage = new LocalizedMessage(1,</span>
+            Definitions.CHECKSTYLE_BUNDLE, &quot;DefaultLogger.auditStarted&quot;, null, null,
+<span class="fc" id="L141">            getClass(), null);</span>
+
+<span class="fc" id="L143">    private final LocalizedMessage auditFinishMessage = new LocalizedMessage(1,</span>
+            Definitions.CHECKSTYLE_BUNDLE, &quot;DefaultLogger.auditFinished&quot;, null, null,
+<span class="fc" id="L145">            getClass(), null);</span>
+
+    private static String getPath(String filename) {
+<span class="fc" id="L148">        return &quot;src/test/resources/com/puppycrawl/tools/checkstyle/main/&quot; + filename;</span>
+    }
+
+    private static String getNonCompilablePath(String filename) {
+<span class="fc" id="L152">        return &quot;src/test/resources-noncompilable/com/puppycrawl/tools/checkstyle/main/&quot; + filename;</span>
+    }
+
+    private static String getFilePath(String filename) throws IOException {
+<span class="fc" id="L156">        return new File(getPath(filename)).getCanonicalPath();</span>
+    }
+
+    @Before
+    public void setUp() {
+        // restore original logging level and HANDLERS to prevent bleeding into other tests
+
+<span class="fc" id="L163">        LOG.setLevel(ORIGINAL_LOG_LEVEL);</span>
+
+<span class="fc bfc" id="L165" title="All 2 branches covered.">        for (Handler handler : LOG.getHandlers()) {</span>
+<span class="fc" id="L166">            boolean found = false;</span>
+
+<span class="fc bfc" id="L168" title="All 2 branches covered.">            for (Handler savedHandler : HANDLERS) {</span>
+<span class="fc bfc" id="L169" title="All 2 branches covered.">                if (handler == savedHandler) {</span>
+<span class="fc" id="L170">                    found = true;</span>
+<span class="fc" id="L171">                    break;</span>
+                }
+            }
+
+<span class="fc bfc" id="L175" title="All 2 branches covered.">            if (!found) {</span>
+<span class="fc" id="L176">                LOG.removeHandler(handler);</span>
+            }
+        }
+<span class="fc" id="L179">    }</span>
+
+    @Test
+    public void testIsProperUtilsClass() throws ReflectiveOperationException {
+<span class="fc" id="L183">        assertTrue(&quot;Constructor is not private&quot;,</span>
+<span class="fc" id="L184">                isUtilsClassHasPrivateConstructor(Main.class, false));</span>
+<span class="fc" id="L185">    }</span>
+
+    @Test
+    public void testVersionPrint()
+            throws Exception {
+<span class="fc" id="L190">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L191">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L192">                    &quot;Checkstyle version: null&quot; + System.lineSeparator(),</span>
+<span class="fc" id="L193">                    systemOut.getLog());</span>
+<span class="fc" id="L194">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L195">        });</span>
+<span class="fc" id="L196">        Main.main(&quot;-V&quot;);</span>
+<span class="fc" id="L197">    }</span>
+
+    @Test
+    public void testUsageHelpPrint()
+            throws Exception {
+<span class="fc" id="L202">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L203">            assertEquals(&quot;Unexpected output log&quot;,</span>
+                    USAGE,
+<span class="fc" id="L205">                    systemOut.getLog());</span>
+<span class="fc" id="L206">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L207">        });</span>
+<span class="fc" id="L208">        Main.main(&quot;-h&quot;);</span>
+<span class="fc" id="L209">    }</span>
+
+    @Test
+    public void testWrongArgument()
+            throws Exception {
+<span class="fc" id="L214">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L215">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L216">            final String usage = &quot;Unknown option: '-q'&quot; + EOL</span>
+                    + SHORT_USAGE;
+<span class="fc" id="L218">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L219">            assertEquals(&quot;Unexpected system error log&quot;, usage, systemErr.getLog());</span>
+<span class="fc" id="L220">        });</span>
+        // need to specify a file:
+        // &lt;files&gt; is defined as a required positional param;
+        // picocli verifies required parameters before checking unknown options
+<span class="nc" id="L224">        Main.main(&quot;-q&quot;, &quot;file&quot;);</span>
+<span class="nc" id="L225">    }</span>
+
+    @Test
+    public void testWrongArgumentMissingFiles()
+            throws Exception {
+<span class="fc" id="L230">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L231">        exit.checkAssertionAfterwards(() -&gt; {</span>
+            // files is defined as a required positional param;
+            // picocli verifies required parameters before checking unknown options
+<span class="fc" id="L234">            final String usage = &quot;Missing required parameter: &lt;files&gt;&quot; + EOL</span>
+                    + SHORT_USAGE;
+<span class="fc" id="L236">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L237">            assertEquals(&quot;Unexpected system error log&quot;, usage, systemErr.getLog());</span>
+<span class="fc" id="L238">        });</span>
+<span class="nc" id="L239">        Main.main(&quot;-q&quot;);</span>
+<span class="nc" id="L240">    }</span>
+
+    @Test
+    public void testNoConfigSpecified()
+            throws Exception {
+<span class="fc" id="L245">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L246">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L247">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L248">                    &quot;Must specify a config XML file.&quot; + System.lineSeparator(),</span>
+<span class="fc" id="L249">                    systemOut.getLog());</span>
+<span class="fc" id="L250">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L251">        });</span>
+<span class="nc" id="L252">        Main.main(getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L253">    }</span>
+
+    @Test
+    public void testNonExistentTargetFile()
+            throws Exception {
+<span class="fc" id="L258">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L259">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L260">            assertEquals(&quot;Unexpected output log&quot;, &quot;Files to process must be specified, found 0.&quot;</span>
+<span class="fc" id="L261">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L262">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L263">        });</span>
+<span class="nc" id="L264">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, &quot;NonExistentFile.java&quot;);</span>
+<span class="nc" id="L265">    }</span>
+
+    @Test
+    public void testExistingTargetFileButWithoutReadAccess()
+            throws Exception {
+<span class="fc" id="L270">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L271">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L272">            assertEquals(&quot;Unexpected output log&quot;, &quot;Files to process must be specified, found 0.&quot;</span>
+<span class="fc" id="L273">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L274">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L275">        });</span>
+<span class="nc" id="L276">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, &quot;/etc/sudoers&quot;);</span>
+<span class="nc" id="L277">    }</span>
+
+    @Test
+    public void testNonExistentConfigFile()
+            throws Exception {
+<span class="fc" id="L282">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L283">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L284">            assertEquals(&quot;Unexpected output log&quot;, &quot;Could not find config XML file &quot;</span>
+                        + &quot;'src/main/resources/non_existent_config.xml'.&quot; + EOL,
+<span class="fc" id="L286">                    systemOut.getLog());</span>
+<span class="fc" id="L287">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L288">        });</span>
+<span class="pc" id="L289">        Main.main(&quot;-c&quot;, &quot;src/main/resources/non_existent_config.xml&quot;,</span>
+<span class="fc" id="L290">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L291">    }</span>
+
+    @Test
+    public void testNonExistentOutputFormat() throws Exception {
+<span class="fc" id="L295">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L296">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L297">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L298">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+                    &quot;Invalid value for option '-f': expected one of [XML, PLAIN]&quot;
+                        + &quot; (case-insensitive) but was 'xmlp'&quot;
+<span class="fc" id="L301">                    + EOL + SHORT_USAGE, systemErr.getLog());</span>
+<span class="fc" id="L302">        });</span>
+<span class="pc" id="L303">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, &quot;-f&quot;, &quot;xmlp&quot;,</span>
+<span class="fc" id="L304">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L305">    }</span>
+
+    @Test
+    public void testNonExistentClass() throws Exception {
+<span class="fc" id="L309">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L310">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L311">            final String cause = &quot;com.puppycrawl.tools.checkstyle.api.CheckstyleException:&quot;</span>
+                    + &quot; cannot initialize module TreeWalker - &quot;;
+<span class="fc" id="L313">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().startsWith(cause));</span>
+<span class="fc" id="L314">        });</span>
+
+<span class="pc" id="L316">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-non-existent-classname.xml&quot;),</span>
+<span class="fc" id="L317">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L318">    }</span>
+
+    @Test
+    public void testExistingTargetFile() throws Exception {
+<span class="fc" id="L322">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L323">            assertEquals(&quot;Unexpected output log&quot;, auditStartMessage.getMessage() + EOL</span>
+<span class="fc" id="L324">                    + auditFinishMessage.getMessage() + EOL,</span>
+<span class="fc" id="L325">                    systemOut.getLog());</span>
+<span class="fc" id="L326">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L327">        });</span>
+<span class="fc" id="L328">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+<span class="fc" id="L329">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L330">    }</span>
+
+    @Test
+    public void testExistingTargetFileXmlOutput() throws Exception {
+<span class="fc" id="L334">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L335">            final String expectedPath = getFilePath(&quot;InputMain.java&quot;);</span>
+<span class="fc" id="L336">            final String version = Main.class.getPackage().getImplementationVersion();</span>
+<span class="fc" id="L337">            assertEquals(&quot;Unexpected output log&quot;, &quot;&lt;?xml version=\&quot;1.0\&quot; encoding=\&quot;UTF-8\&quot;?&gt;&quot; + EOL</span>
+                    + &quot;&lt;checkstyle version=\&quot;&quot; + version + &quot;\&quot;&gt;&quot; + EOL
+                    + &quot;&lt;file name=\&quot;&quot; + expectedPath + &quot;\&quot;&gt;&quot; + EOL
+                    + &quot;&lt;/file&gt;&quot; + EOL
+<span class="fc" id="L341">                    + &quot;&lt;/checkstyle&gt;&quot; + EOL, systemOut.getLog());</span>
+<span class="fc" id="L342">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L343">        });</span>
+<span class="fc" id="L344">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+                &quot;-f&quot;, &quot;xml&quot;,
+<span class="fc" id="L346">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L347">    }</span>
+
+    @Test
+    public void testExistingTargetFilePlainOutput() throws Exception {
+<span class="fc" id="L351">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L352">            assertEquals(&quot;Unexpected output log&quot;, auditStartMessage.getMessage() + EOL</span>
+<span class="fc" id="L353">                    + auditFinishMessage.getMessage() + EOL, systemOut.getLog());</span>
+<span class="fc" id="L354">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L355">        });</span>
+<span class="fc" id="L356">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+                &quot;-f&quot;, &quot;plain&quot;,
+<span class="fc" id="L358">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L359">    }</span>
+
+    @Test
+    public void testExistingTargetFileWithViolations() throws Exception {
+<span class="fc" id="L363">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L364">            final LocalizedMessage invalidPatternMessageMain = new LocalizedMessage(1,</span>
+                    &quot;com.puppycrawl.tools.checkstyle.checks.naming.messages&quot;,
+                    &quot;name.invalidPattern&quot;, new String[] {&quot;InputMain&quot;, &quot;^[a-z0-9]*$&quot;},
+<span class="fc" id="L367">                    null, getClass(), null);</span>
+<span class="fc" id="L368">            final LocalizedMessage invalidPatternMessageMainInner = new LocalizedMessage(1,</span>
+                    &quot;com.puppycrawl.tools.checkstyle.checks.naming.messages&quot;,
+                    &quot;name.invalidPattern&quot;, new String[] {&quot;InputMainInner&quot;, &quot;^[a-z0-9]*$&quot;},
+<span class="fc" id="L371">                    null, getClass(), null);</span>
+<span class="fc" id="L372">            final String expectedPath = getFilePath(&quot;InputMain.java&quot;);</span>
+<span class="fc" id="L373">            assertEquals(&quot;Unexpected output log&quot;, auditStartMessage.getMessage() + EOL</span>
+                            + &quot;[WARN] &quot; + expectedPath + &quot;:3:14: &quot;
+<span class="fc" id="L375">                            + invalidPatternMessageMain.getMessage()</span>
+                            + &quot; [TypeName]&quot; + EOL
+                            + &quot;[WARN] &quot; + expectedPath + &quot;:5:7: &quot;
+<span class="fc" id="L378">                            + invalidPatternMessageMainInner.getMessage()</span>
+                            + &quot; [TypeName]&quot; + EOL
+<span class="fc" id="L380">                            + auditFinishMessage.getMessage() + EOL, systemOut.getLog());</span>
+<span class="fc" id="L381">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L382">        });</span>
+<span class="fc" id="L383">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname2.xml&quot;),</span>
+<span class="fc" id="L384">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L385">    }</span>
+
+    @Test
+    public void testExistingTargetFileWithError()
+            throws Exception {
+<span class="fc" id="L390">        exit.expectSystemExitWithStatus(2);</span>
+<span class="fc" id="L391">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L392">            final LocalizedMessage errorCounterTwoMessage = new LocalizedMessage(1,</span>
+                    Definitions.CHECKSTYLE_BUNDLE, Main.ERROR_COUNTER,
+<span class="fc" id="L394">                    new String[] {String.valueOf(2)}, null, getClass(), null);</span>
+<span class="fc" id="L395">            final LocalizedMessage invalidPatternMessageMain = new LocalizedMessage(1,</span>
+                    &quot;com.puppycrawl.tools.checkstyle.checks.naming.messages&quot;,
+                    &quot;name.invalidPattern&quot;, new String[] {&quot;InputMain&quot;, &quot;^[a-z0-9]*$&quot;},
+<span class="fc" id="L398">                    null, getClass(), null);</span>
+<span class="fc" id="L399">            final LocalizedMessage invalidPatternMessageMainInner = new LocalizedMessage(1,</span>
+                    &quot;com.puppycrawl.tools.checkstyle.checks.naming.messages&quot;,
+                    &quot;name.invalidPattern&quot;, new String[] {&quot;InputMainInner&quot;, &quot;^[a-z0-9]*$&quot;},
+<span class="fc" id="L402">                    null, getClass(), null);</span>
+<span class="fc" id="L403">            final String expectedPath = getFilePath(&quot;InputMain.java&quot;);</span>
+<span class="fc" id="L404">            assertEquals(&quot;Unexpected output log&quot;, auditStartMessage.getMessage() + EOL</span>
+                    + &quot;[ERROR] &quot; + expectedPath + &quot;:3:14: &quot;
+<span class="fc" id="L406">                    + invalidPatternMessageMain.getMessage() + &quot; [TypeName]&quot; + EOL</span>
+                    + &quot;[ERROR] &quot; + expectedPath + &quot;:5:7: &quot;
+<span class="fc" id="L408">                    + invalidPatternMessageMainInner.getMessage() + &quot; [TypeName]&quot; + EOL</span>
+<span class="fc" id="L409">                    + auditFinishMessage.getMessage() + EOL, systemOut.getLog());</span>
+<span class="fc" id="L410">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L411">                    errorCounterTwoMessage.getMessage() + EOL, systemErr.getLog());</span>
+<span class="fc" id="L412">        });</span>
+<span class="pc" id="L413">        Main.main(&quot;-c&quot;,</span>
+<span class="fc" id="L414">                getPath(&quot;InputMainConfig-classname2-error.xml&quot;),</span>
+<span class="fc" id="L415">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L416">    }</span>
+
+    /**
+     * Similar test to {@link #testExistingTargetFileWithError}, but for PIT mutation tests:
+     * this test fails if the boundary condition is changed from {@code if (exitStatus &gt; 0)}
+     * to {@code if (exitStatus &gt; 1)}.
+     * @throws Exception should not throw anything
+     */
+    @Test
+    public void testExistingTargetFileWithOneError()
+            throws Exception {
+<span class="fc" id="L427">        exit.expectSystemExitWithStatus(1);</span>
+<span class="fc" id="L428">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L429">            final LocalizedMessage errorCounterTwoMessage = new LocalizedMessage(1,</span>
+                    Definitions.CHECKSTYLE_BUNDLE, Main.ERROR_COUNTER,
+<span class="fc" id="L431">                    new String[] {String.valueOf(1)}, null, getClass(), null);</span>
+<span class="fc" id="L432">            final LocalizedMessage invalidPatternMessageMain = new LocalizedMessage(1,</span>
+                    &quot;com.puppycrawl.tools.checkstyle.checks.naming.messages&quot;,
+                    &quot;name.invalidPattern&quot;, new String[] {&quot;InputMain1&quot;, &quot;^[a-z0-9]*$&quot;},
+<span class="fc" id="L435">                    null, getClass(), null);</span>
+<span class="fc" id="L436">            final String expectedPath = getFilePath(&quot;InputMain1.java&quot;);</span>
+<span class="fc" id="L437">            assertEquals(&quot;Unexpected output log&quot;, auditStartMessage.getMessage() + EOL</span>
+                    + &quot;[ERROR] &quot; + expectedPath + &quot;:3:14: &quot;
+<span class="fc" id="L439">                    + invalidPatternMessageMain.getMessage() + &quot; [TypeName]&quot; + EOL</span>
+<span class="fc" id="L440">                    + auditFinishMessage.getMessage() + EOL, systemOut.getLog());</span>
+<span class="fc" id="L441">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L442">                    errorCounterTwoMessage.getMessage() + EOL, systemErr.getLog());</span>
+<span class="fc" id="L443">        });</span>
+<span class="pc" id="L444">        Main.main(&quot;-c&quot;,</span>
+<span class="fc" id="L445">                getPath(&quot;InputMainConfig-classname2-error.xml&quot;),</span>
+<span class="fc" id="L446">                getPath(&quot;InputMain1.java&quot;));</span>
+<span class="nc" id="L447">    }</span>
+
+    @Test
+    public void testExistentTargetFilePlainOutputToNonExistentFile()
+            throws Exception {
+<span class="fc" id="L452">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L453">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L454">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L455">        });</span>
+<span class="fc" id="L456">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+                &quot;-f&quot;, &quot;plain&quot;,
+<span class="fc" id="L458">                &quot;-o&quot;, temporaryFolder.getRoot() + &quot;/output.txt&quot;,</span>
+<span class="fc" id="L459">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L460">    }</span>
+
+    @Test
+    public void testExistingTargetFilePlainOutputToFile()
+            throws Exception {
+<span class="fc" id="L465">        final File file = temporaryFolder.newFile(&quot;file.output&quot;);</span>
+<span class="fc" id="L466">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L467">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L468">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L469">        });</span>
+<span class="fc" id="L470">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+                &quot;-f&quot;, &quot;plain&quot;,
+<span class="fc" id="L472">                &quot;-o&quot;, file.getCanonicalPath(),</span>
+<span class="fc" id="L473">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L474">    }</span>
+
+    @Test
+    public void testCreateNonExistentOutputFile() throws Exception {
+<span class="fc" id="L478">        final String outputFile = temporaryFolder.getRoot().getCanonicalPath() + &quot;nonexistent.out&quot;;</span>
+<span class="fc" id="L479">        assertFalse(&quot;File must not exist&quot;, new File(outputFile).exists());</span>
+<span class="fc" id="L480">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+                &quot;-f&quot;, &quot;plain&quot;,
+                &quot;-o&quot;, outputFile,
+<span class="fc" id="L483">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L484">        assertTrue(&quot;File must exist&quot;, new File(outputFile).exists());</span>
+<span class="fc" id="L485">    }</span>
+
+    @Test
+    public void testExistingTargetFilePlainOutputProperties() throws Exception {
+        //exit.expectSystemExitWithStatus(0);
+<span class="fc" id="L490">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L491">            assertEquals(&quot;Unexpected output log&quot;, auditStartMessage.getMessage() + EOL</span>
+<span class="fc" id="L492">                    + auditFinishMessage.getMessage() + EOL, systemOut.getLog());</span>
+<span class="fc" id="L493">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L494">        });</span>
+<span class="fc" id="L495">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname-prop.xml&quot;),</span>
+<span class="fc" id="L496">                &quot;-p&quot;, getPath(&quot;InputMainMycheckstyle.properties&quot;),</span>
+<span class="fc" id="L497">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L498">    }</span>
+
+    @Test
+    public void testExistingTargetFilePlainOutputNonexistentProperties()
+            throws Exception {
+<span class="fc" id="L503">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L504">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L505">            assertEquals(&quot;Unexpected output log&quot;, &quot;Could not find file 'nonexistent.properties'.&quot;</span>
+<span class="fc" id="L506">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L507">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L508">        });</span>
+<span class="pc" id="L509">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname-prop.xml&quot;),</span>
+                &quot;-p&quot;, &quot;nonexistent.properties&quot;,
+<span class="fc" id="L511">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L512">    }</span>
+
+    @Test
+    public void testExistingIncorrectConfigFile()
+            throws Exception {
+<span class="fc" id="L517">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L518">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L519">            final String errorOutput = &quot;com.puppycrawl.tools.checkstyle.api.&quot;</span>
+                + &quot;CheckstyleException: unable to parse configuration stream - &quot;;
+<span class="fc" id="L521">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().startsWith(errorOutput));</span>
+<span class="fc" id="L522">        });</span>
+<span class="pc" id="L523">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-Incorrect.xml&quot;),</span>
+<span class="fc" id="L524">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L525">    }</span>
+
+    @Test
+    public void testExistingIncorrectChildrenInConfigFile()
+            throws Exception {
+<span class="fc" id="L530">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L531">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L532">            final String errorOutput = &quot;com.puppycrawl.tools.checkstyle.api.&quot;</span>
+                    + &quot;CheckstyleException: cannot initialize module RegexpSingleline&quot;
+                    + &quot; - RegexpSingleline is not allowed as a child in RegexpSingleline&quot;;
+<span class="fc" id="L535">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().startsWith(errorOutput));</span>
+<span class="fc" id="L536">        });</span>
+<span class="pc" id="L537">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-incorrectChildren.xml&quot;),</span>
+<span class="fc" id="L538">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L539">    }</span>
+
+    @Test
+    public void testExistingIncorrectChildrenInConfigFile2()
+            throws Exception {
+<span class="fc" id="L544">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L545">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L546">            final String errorOutput = &quot;com.puppycrawl.tools.checkstyle.api.&quot;</span>
+                    + &quot;CheckstyleException: cannot initialize module TreeWalker - &quot;
+                    + &quot;cannot initialize module JavadocMethod - &quot;
+                    + &quot;JavadocVariable is not allowed as a child in JavadocMethod&quot;;
+<span class="fc" id="L550">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().startsWith(errorOutput));</span>
+<span class="fc" id="L551">        });</span>
+<span class="pc" id="L552">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-incorrectChildren2.xml&quot;),</span>
+<span class="fc" id="L553">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L554">    }</span>
+
+    @Test
+    public void testLoadPropertiesIoException() throws Exception {
+<span class="fc" id="L558">        final Class&lt;?&gt;[] param = new Class&lt;?&gt;[1];</span>
+<span class="fc" id="L559">        param[0] = File.class;</span>
+<span class="fc" id="L560">        final Class&lt;?&gt; cliOptionsClass = Class.forName(Main.class.getName());</span>
+<span class="fc" id="L561">        final Method method = cliOptionsClass.getDeclaredMethod(&quot;loadProperties&quot;, param);</span>
+<span class="fc" id="L562">        method.setAccessible(true);</span>
+        try {
+<span class="nc" id="L564">            method.invoke(null, new File(&quot;.&quot;));</span>
+<span class="nc" id="L565">            fail(&quot;Exception was expected&quot;);</span>
+        }
+<span class="fc" id="L567">        catch (InvocationTargetException ex) {</span>
+<span class="fc" id="L568">            assertTrue(&quot;Invalid error cause&quot;,</span>
+<span class="fc" id="L569">                    ex.getCause() instanceof CheckstyleException);</span>
+            // We do separate validation for message as in Windows
+            // disk drive letter appear in message,
+            // so we skip that drive letter for compatibility issues
+<span class="fc" id="L573">            final LocalizedMessage loadPropertiesMessage = new LocalizedMessage(1,</span>
+                    Definitions.CHECKSTYLE_BUNDLE, Main.LOAD_PROPERTIES_EXCEPTION,
+<span class="fc" id="L575">                    new String[] {&quot;&quot;}, null, getClass(), null);</span>
+<span class="fc" id="L576">            final String causeMessage = ex.getCause().getLocalizedMessage();</span>
+<span class="fc" id="L577">            final String localizedMessage = loadPropertiesMessage.getMessage();</span>
+<span class="fc" id="L578">            final boolean samePrefix = causeMessage.substring(0, causeMessage.indexOf(' '))</span>
+<span class="fc" id="L579">                    .equals(localizedMessage</span>
+<span class="fc" id="L580">                            .substring(0, localizedMessage.indexOf(' ')));</span>
+<span class="fc" id="L581">            final boolean sameSuffix =</span>
+<span class="fc" id="L582">                    causeMessage.substring(causeMessage.lastIndexOf(' '))</span>
+<span class="fc" id="L583">                    .equals(localizedMessage</span>
+<span class="fc" id="L584">                            .substring(localizedMessage.lastIndexOf(' ')));</span>
+<span class="pc bpc" id="L585" title="3 of 4 branches missed.">            assertTrue(&quot;Invalid error message&quot;, samePrefix || sameSuffix);</span>
+<span class="fc" id="L586">            assertTrue(&quot;Invalid error message&quot;, causeMessage.contains(&quot;.'&quot;));</span>
+<span class="nc" id="L587">        }</span>
+<span class="fc" id="L588">    }</span>
+
+    @Test
+    public void testExistingDirectoryWithViolations() throws Exception {
+        // we just reference there all violations
+<span class="fc" id="L593">        final String[][] outputValues = {</span>
+                {&quot;InputMainComplexityOverflow&quot;, &quot;1&quot;, &quot;172&quot;},
+        };
+
+<span class="fc" id="L597">        final int allowedLength = 170;</span>
+<span class="fc" id="L598">        final String msgKey = &quot;maxLen.file&quot;;</span>
+<span class="fc" id="L599">        final String bundle = &quot;com.puppycrawl.tools.checkstyle.checks.sizes.messages&quot;;</span>
+
+<span class="fc" id="L601">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L602">            final String expectedPath = getFilePath(&quot;&quot;) + File.separator;</span>
+<span class="fc" id="L603">            final StringBuilder sb = new StringBuilder(28);</span>
+<span class="fc" id="L604">            sb.append(auditStartMessage.getMessage())</span>
+<span class="fc" id="L605">                    .append(EOL);</span>
+<span class="fc" id="L606">            final String format = &quot;[WARN] &quot; + expectedPath + outputValues[0][0] + &quot;.java:&quot;</span>
+                    + outputValues[0][1] + &quot;: &quot;;
+<span class="fc bfc" id="L608" title="All 2 branches covered.">            for (String[] outputValue : outputValues) {</span>
+<span class="fc" id="L609">                final String localizedMessage = new LocalizedMessage(1, bundle,</span>
+<span class="fc" id="L610">                        msgKey, new Integer[] {Integer.valueOf(outputValue[2]), allowedLength},</span>
+<span class="fc" id="L611">                        null, getClass(), null).getMessage();</span>
+<span class="fc" id="L612">                final String line = format + localizedMessage + &quot; [FileLength]&quot;;</span>
+<span class="fc" id="L613">                sb.append(line).append(EOL);</span>
+            }
+<span class="fc" id="L615">            sb.append(auditFinishMessage.getMessage())</span>
+<span class="fc" id="L616">                    .append(EOL);</span>
+<span class="fc" id="L617">            assertEquals(&quot;Unexpected output log&quot;, sb.toString(), systemOut.getLog());</span>
+<span class="fc" id="L618">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L619">        });</span>
+
+<span class="fc" id="L621">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-filelength.xml&quot;),</span>
+<span class="fc" id="L622">                getPath(&quot;&quot;));</span>
+<span class="fc" id="L623">    }</span>
+
+    /**
+     * Test doesn't need to be serialized.
+     * @noinspection SerializableInnerClassWithNonSerializableOuterClass
+     */
+    @Test
+    public void testListFilesNotFile() throws Exception {
+<span class="fc" id="L631">        final File fileMock = new File(&quot;&quot;) {</span>
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public boolean canRead() {
+<span class="fc" id="L636">                return true;</span>
+            }
+
+            @Override
+            public boolean isDirectory() {
+<span class="fc" id="L641">                return false;</span>
+            }
+
+            @Override
+            public boolean isFile() {
+<span class="fc" id="L646">                return false;</span>
+            }
+        };
+
+<span class="fc" id="L650">        final List&lt;File&gt; result = Whitebox.invokeMethod(Main.class, &quot;listFiles&quot;,</span>
+                fileMock, new ArrayList&lt;Pattern&gt;());
+<span class="fc" id="L652">        assertEquals(&quot;Invalid result size&quot;, 0, result.size());</span>
+<span class="fc" id="L653">    }</span>
+
+    /**
+     * Test doesn't need to be serialized.
+     * @noinspection SerializableInnerClassWithNonSerializableOuterClass
+     */
+    @Test
+    public void testListFilesDirectoryWithNull() throws Exception {
+<span class="fc" id="L661">        final File[] nullResult = null;</span>
+<span class="fc" id="L662">        final File fileMock = new File(&quot;&quot;) {</span>
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public boolean canRead() {
+<span class="fc" id="L667">                return true;</span>
+            }
+
+            @Override
+            public boolean isDirectory() {
+<span class="fc" id="L672">                return true;</span>
+            }
+
+            @Override
+            public File[] listFiles() {
+<span class="fc" id="L677">                return nullResult;</span>
+            }
+        };
+
+<span class="fc" id="L681">        final List&lt;File&gt; result = Whitebox.invokeMethod(Main.class, &quot;listFiles&quot;,</span>
+                fileMock, new ArrayList&lt;Pattern&gt;());
+<span class="fc" id="L683">        assertEquals(&quot;Invalid result size&quot;, 0, result.size());</span>
+<span class="fc" id="L684">    }</span>
+
+    @Test
+    public void testFileReferenceDuringException() throws Exception {
+<span class="fc" id="L688">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L689">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L690">            final String exceptionFirstLine = &quot;com.puppycrawl.tools.checkstyle.api.&quot;</span>
+                    + &quot;CheckstyleException: Exception was thrown while processing &quot;
+<span class="fc" id="L692">                    + new File(getNonCompilablePath(&quot;InputMainIncorrectClass.java&quot;)).getPath()</span>
+                    + EOL;
+<span class="fc" id="L694">            assertTrue(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L695">                    systemErr.getLog().startsWith(exceptionFirstLine));</span>
+<span class="fc" id="L696">        });</span>
+
+        // We put xml as source to cause parse exception
+<span class="pc" id="L699">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-classname.xml&quot;),</span>
+<span class="fc" id="L700">                getNonCompilablePath(&quot;InputMainIncorrectClass.java&quot;));</span>
+<span class="nc" id="L701">    }</span>
+
+    @Test
+    public void testPrintTreeOnMoreThanOneFile() throws Exception {
+<span class="fc" id="L705">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L706">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L707">            assertEquals(&quot;Unexpected output log&quot;, &quot;Printing AST is allowed for only one file.&quot;</span>
+<span class="fc" id="L708">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L709">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L710">        });</span>
+
+<span class="nc" id="L712">        Main.main(&quot;-t&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L713">    }</span>
+
+    @Test
+    public void testPrintTreeOption() throws Exception {
+<span class="fc" id="L717">        final String expected = &quot;PACKAGE_DEF -&gt; package [1:0]&quot; + EOL</span>
+            + &quot;|--ANNOTATIONS -&gt; ANNOTATIONS [1:39]&quot; + EOL
+            + &quot;|--DOT -&gt; . [1:39]&quot; + EOL
+            + &quot;|   |--DOT -&gt; . [1:28]&quot; + EOL
+            + &quot;|   |   |--DOT -&gt; . [1:22]&quot; + EOL
+            + &quot;|   |   |   |--DOT -&gt; . [1:11]&quot; + EOL
+            + &quot;|   |   |   |   |--IDENT -&gt; com [1:8]&quot; + EOL
+            + &quot;|   |   |   |   `--IDENT -&gt; puppycrawl [1:12]&quot; + EOL
+            + &quot;|   |   |   `--IDENT -&gt; tools [1:23]&quot; + EOL
+            + &quot;|   |   `--IDENT -&gt; checkstyle [1:29]&quot; + EOL
+            + &quot;|   `--IDENT -&gt; main [1:40]&quot; + EOL
+            + &quot;`--SEMI -&gt; ; [1:44]&quot; + EOL
+            + &quot;CLASS_DEF -&gt; CLASS_DEF [3:0]&quot; + EOL
+            + &quot;|--MODIFIERS -&gt; MODIFIERS [3:0]&quot; + EOL
+            + &quot;|   `--LITERAL_PUBLIC -&gt; public [3:0]&quot; + EOL
+            + &quot;|--LITERAL_CLASS -&gt; class [3:7]&quot; + EOL
+            + &quot;|--IDENT -&gt; InputMain [3:13]&quot; + EOL
+            + &quot;`--OBJBLOCK -&gt; OBJBLOCK [3:23]&quot; + EOL
+            + &quot;    |--LCURLY -&gt; { [3:23]&quot; + EOL
+            + &quot;    `--RCURLY -&gt; } [4:0]&quot; + EOL
+            + &quot;CLASS_DEF -&gt; CLASS_DEF [5:0]&quot; + EOL
+            + &quot;|--MODIFIERS -&gt; MODIFIERS [5:0]&quot; + EOL
+            + &quot;|--LITERAL_CLASS -&gt; class [5:0]&quot; + EOL
+            + &quot;|--IDENT -&gt; InputMainInner [5:6]&quot; + EOL
+            + &quot;`--OBJBLOCK -&gt; OBJBLOCK [5:21]&quot; + EOL
+            + &quot;    |--LCURLY -&gt; { [5:21]&quot; + EOL
+            + &quot;    `--RCURLY -&gt; } [6:0]&quot; + EOL;
+
+<span class="fc" id="L745">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L746">            assertEquals(&quot;Unexpected output log&quot;, expected, systemOut.getLog());</span>
+<span class="fc" id="L747">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L748">        });</span>
+<span class="fc" id="L749">        Main.main(&quot;-t&quot;, getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L750">    }</span>
+
+    @Test
+    public void testPrintTreeCommentsOption() throws Exception {
+<span class="fc" id="L754">        final String expected = &quot;PACKAGE_DEF -&gt; package [1:0]&quot; + EOL</span>
+            + &quot;|--ANNOTATIONS -&gt; ANNOTATIONS [1:39]&quot; + EOL
+            + &quot;|--DOT -&gt; . [1:39]&quot; + EOL
+            + &quot;|   |--DOT -&gt; . [1:28]&quot; + EOL
+            + &quot;|   |   |--DOT -&gt; . [1:22]&quot; + EOL
+            + &quot;|   |   |   |--DOT -&gt; . [1:11]&quot; + EOL
+            + &quot;|   |   |   |   |--IDENT -&gt; com [1:8]&quot; + EOL
+            + &quot;|   |   |   |   `--IDENT -&gt; puppycrawl [1:12]&quot; + EOL
+            + &quot;|   |   |   `--IDENT -&gt; tools [1:23]&quot; + EOL
+            + &quot;|   |   `--IDENT -&gt; checkstyle [1:29]&quot; + EOL
+            + &quot;|   `--IDENT -&gt; main [1:40]&quot; + EOL
+            + &quot;`--SEMI -&gt; ; [1:44]&quot; + EOL
+            + &quot;CLASS_DEF -&gt; CLASS_DEF [3:0]&quot; + EOL
+            + &quot;|--MODIFIERS -&gt; MODIFIERS [3:0]&quot; + EOL
+            + &quot;|   |--BLOCK_COMMENT_BEGIN -&gt; /* [2:0]&quot; + EOL
+            + &quot;|   |   |--COMMENT_CONTENT -&gt; comment [2:2]&quot; + EOL
+            + &quot;|   |   `--BLOCK_COMMENT_END -&gt; */ [2:8]&quot; + EOL
+            + &quot;|   `--LITERAL_PUBLIC -&gt; public [3:0]&quot; + EOL
+            + &quot;|--LITERAL_CLASS -&gt; class [3:7]&quot; + EOL
+            + &quot;|--IDENT -&gt; InputMain [3:13]&quot; + EOL
+            + &quot;`--OBJBLOCK -&gt; OBJBLOCK [3:23]&quot; + EOL
+            + &quot;    |--LCURLY -&gt; { [3:23]&quot; + EOL
+            + &quot;    `--RCURLY -&gt; } [4:0]&quot; + EOL
+            + &quot;CLASS_DEF -&gt; CLASS_DEF [5:0]&quot; + EOL
+            + &quot;|--MODIFIERS -&gt; MODIFIERS [5:0]&quot; + EOL
+            + &quot;|--LITERAL_CLASS -&gt; class [5:0]&quot; + EOL
+            + &quot;|--IDENT -&gt; InputMainInner [5:6]&quot; + EOL
+            + &quot;`--OBJBLOCK -&gt; OBJBLOCK [5:21]&quot; + EOL
+            + &quot;    |--LCURLY -&gt; { [5:21]&quot; + EOL
+            + &quot;    `--RCURLY -&gt; } [6:0]&quot; + EOL;
+
+<span class="fc" id="L785">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L786">            assertEquals(&quot;Unexpected output log&quot;, expected, systemOut.getLog());</span>
+<span class="fc" id="L787">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L788">        });</span>
+<span class="fc" id="L789">        Main.main(&quot;-T&quot;, getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L790">    }</span>
+
+    @Test
+    public void testPrintTreeJavadocOption() throws Exception {
+<span class="fc" id="L794">        final String expected = new String(Files.readAllBytes(Paths.get(</span>
+<span class="fc" id="L795">            getPath(&quot;InputMainExpectedInputJavadocComment.txt&quot;))), StandardCharsets.UTF_8)</span>
+<span class="fc" id="L796">            .replaceAll(&quot;\\\\r\\\\n&quot;, &quot;\\\\n&quot;).replaceAll(&quot;\r\n&quot;, &quot;\n&quot;);</span>
+
+<span class="fc" id="L798">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L799">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L800">                    expected, systemOut.getLog().replaceAll(&quot;\\\\r\\\\n&quot;, &quot;\\\\n&quot;)</span>
+<span class="fc" id="L801">                            .replaceAll(&quot;\r\n&quot;, &quot;\n&quot;));</span>
+<span class="fc" id="L802">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L803">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L804">        });</span>
+<span class="fc" id="L805">        Main.main(&quot;-j&quot;, getPath(&quot;InputMainJavadocComment.javadoc&quot;));</span>
+<span class="fc" id="L806">    }</span>
+
+    @Test
+    public void testPrintSuppressionOption() throws Exception {
+<span class="fc" id="L810">        final String expected = &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]&quot;</span>
+                + EOL
+                + &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]/MODIFIERS&quot; + EOL
+                + &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]/LITERAL_CLASS&quot;
+                + EOL;
+
+<span class="fc" id="L816">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L817">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L818">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L819">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L820">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L821">        });</span>
+<span class="fc" id="L822">        Main.main(getPath(&quot;InputMainSuppressionsStringPrinter.java&quot;),</span>
+                &quot;-s&quot;, &quot;3:1&quot;);
+<span class="fc" id="L824">    }</span>
+
+    @Test
+    public void testPrintSuppressionAndTabWidthOption() throws Exception {
+<span class="fc" id="L828">        final String expected = &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]&quot;</span>
+                + &quot;/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='getName']]/SLIST/VARIABLE_DEF[./IDENT[@text='var']]&quot;
+                + EOL
+                + &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='getName']]/SLIST/VARIABLE_DEF[./IDENT[@text='var']]&quot;
+                + &quot;/MODIFIERS&quot; + EOL
+                + &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='getName']]/SLIST/VARIABLE_DEF[./IDENT[@text='var']]&quot;
+                + &quot;/TYPE&quot; + EOL
+                + &quot;/CLASS_DEF[./IDENT[@text='InputMainSuppressionsStringPrinter']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='getName']]/SLIST/VARIABLE_DEF[./IDENT[@text='var']]&quot;
+                + &quot;/TYPE/LITERAL_INT&quot;
+                + EOL;
+
+<span class="fc" id="L843">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L844">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L845">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L846">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L847">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L848">        });</span>
+<span class="fc" id="L849">        Main.main(getPath(&quot;InputMainSuppressionsStringPrinter.java&quot;),</span>
+                &quot;-s&quot;, &quot;7:9&quot;, &quot;--tabWidth&quot;, &quot;2&quot;);
+<span class="fc" id="L851">    }</span>
+
+    @Test
+    public void testPrintSuppressionConflictingOptionsTvsC() throws Exception {
+<span class="fc" id="L855">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L856">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L857">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-s' cannot be used with other options.&quot;</span>
+<span class="fc" id="L858">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L859">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L860">        });</span>
+
+<span class="pc" id="L862">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;,</span>
+<span class="fc" id="L863">                getPath(&quot;&quot;), &quot;-s&quot;, &quot;2:4&quot;);</span>
+<span class="nc" id="L864">    }</span>
+
+    @Test
+    public void testPrintSuppressionConflictingOptionsTvsP() throws Exception {
+<span class="fc" id="L868">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L869">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L870">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-s' cannot be used with other options.&quot;</span>
+<span class="fc" id="L871">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L872">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L873">        });</span>
+
+<span class="nc" id="L875">        Main.main(&quot;-p&quot;, getPath(&quot;InputMainMycheckstyle.properties&quot;), &quot;-s&quot;, &quot;2:4&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L876">    }</span>
+
+    @Test
+    public void testPrintSuppressionConflictingOptionsTvsF() throws Exception {
+<span class="fc" id="L880">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L881">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L882">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-s' cannot be used with other options.&quot;</span>
+<span class="fc" id="L883">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L884">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L885">        });</span>
+
+<span class="nc" id="L887">        Main.main(&quot;-f&quot;, &quot;plain&quot;, &quot;-s&quot;, &quot;2:4&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L888">    }</span>
+
+    @Test
+    public void testPrintSuppressionConflictingOptionsTvsO() throws Exception {
+<span class="fc" id="L892">        final File file = temporaryFolder.newFile(&quot;file.output&quot;);</span>
+
+<span class="fc" id="L894">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L895">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L896">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-s' cannot be used with other options.&quot;</span>
+<span class="fc" id="L897">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L898">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L899">        });</span>
+
+<span class="nc" id="L901">        Main.main(&quot;-o&quot;, file.getCanonicalPath(), &quot;-s&quot;, &quot;2:4&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L902">    }</span>
+
+    @Test
+    public void testPrintSuppressionOnMoreThanOneFile() throws Exception {
+<span class="fc" id="L906">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L907">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L908">            assertEquals(&quot;Unexpected output log&quot;, &quot;Printing xpath suppressions is allowed for &quot;</span>
+                    + &quot;only one file.&quot;
+<span class="fc" id="L910">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L911">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L912">        });</span>
+
+<span class="nc" id="L914">        Main.main(&quot;-s&quot;, &quot;2:4&quot;, getPath(&quot;&quot;), getPath(&quot;&quot;));</span>
+<span class="nc" id="L915">    }</span>
+
+    @Test
+    public void testGenerateXpathSuppressionOptionOne() throws Exception {
+<span class="fc" id="L919">        final String expected = &quot;&lt;?xml version=\&quot;1.0\&quot; encoding=\&quot;UTF-8\&quot;?&gt;&quot; + EOL</span>
+                + &quot;&lt;!DOCTYPE suppressions PUBLIC&quot; + EOL
+                + &quot;    \&quot;-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration 1.2&quot;
+                + &quot;//EN\&quot;&quot; + EOL
+                + &quot;    \&quot;https://checkstyle.org/dtds/suppressions_1_2_xpath_experimental.dtd\&quot;&gt;&quot;
+                + EOL
+                + &quot;&lt;suppressions&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;MissingJavadocMethodCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;LeftCurlyCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainComplexityOverflow.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;EmptyBlockCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainComplexityOverflow']]/OBJBLOCK&quot;
+                + &quot;/METHOD_DEF[./IDENT[@text='provokeNpathIntegerOverflow']]/SLIST/LITERAL_IF/SLIST&quot;
+                + &quot;/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST/LITERAL_IF&quot;
+                + &quot;/SLIST/LITERAL_IF/SLIST/LITERAL_IF/SLIST\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;/suppressions&gt;&quot; + EOL;
+
+<span class="fc" id="L1008">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1009">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L1010">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L1011">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1012">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1013">        });</span>
+<span class="fc" id="L1014">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, &quot;--generate-xpath-suppression&quot;,</span>
+<span class="fc" id="L1015">                getPath(&quot;InputMainComplexityOverflow.java&quot;));</span>
+<span class="fc" id="L1016">    }</span>
+
+    @Test
+    public void testGenerateXpathSuppressionOptionTwo() throws Exception {
+<span class="fc" id="L1020">        final String expected = &quot;&lt;?xml version=\&quot;1.0\&quot; encoding=\&quot;UTF-8\&quot;?&gt;&quot; + EOL</span>
+            + &quot;&lt;!DOCTYPE suppressions PUBLIC&quot; + EOL
+            + &quot;    \&quot;-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration 1.2&quot;
+            + &quot;//EN\&quot;&quot; + EOL
+            + &quot;    \&quot;https://checkstyle.org/dtds/suppressions_1_2_xpath_experimental.dtd\&quot;&gt;&quot; + EOL
+            + &quot;&lt;suppressions&gt;&quot; + EOL
+            + &quot;&lt;suppress-xpath&quot; + EOL
+            + &quot;       files=\&quot;InputMainGenerateXpathSuppressions.java\&quot;&quot; + EOL
+            + &quot;       checks=\&quot;ExplicitInitializationCheck\&quot;&quot; + EOL
+            + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainGenerateXpathSuppressions']]&quot;
+            + &quot;/OBJBLOCK/VARIABLE_DEF/IDENT[@text='low']\&quot;/&gt;&quot; + EOL
+            + &quot;&lt;suppress-xpath&quot; + EOL
+            + &quot;       files=\&quot;InputMainGenerateXpathSuppressions.java\&quot;&quot; + EOL
+            + &quot;       checks=\&quot;IllegalThrowsCheck\&quot;&quot; + EOL
+            + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainGenerateXpathSuppressions']]&quot;
+            + &quot;/OBJBLOCK/METHOD_DEF[./IDENT[@text='test']]/LITERAL_THROWS&quot;
+            + &quot;/IDENT[@text='RuntimeException']\&quot;/&gt;&quot; + EOL
+            + &quot;&lt;suppress-xpath&quot; + EOL
+            + &quot;       files=\&quot;InputMainGenerateXpathSuppressions.java\&quot;&quot; + EOL
+            + &quot;       checks=\&quot;NestedForDepthCheck\&quot;&quot; + EOL
+            + &quot;       query=\&quot;/CLASS_DEF[./IDENT[@text='InputMainGenerateXpathSuppressions']]&quot;
+            + &quot;/OBJBLOCK/METHOD_DEF[./IDENT[@text='test']]/SLIST/LITERAL_FOR/SLIST&quot;
+            + &quot;/LITERAL_FOR/SLIST&quot;
+            + &quot;/LITERAL_FOR\&quot;/&gt;&quot; + EOL
+            + &quot;&lt;/suppressions&gt;&quot; + EOL;
+
+<span class="fc" id="L1046">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1047">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L1048">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L1049">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1050">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1051">        });</span>
+<span class="fc" id="L1052">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-xpath-suppressions.xml&quot;),</span>
+                &quot;--generate-xpath-suppression&quot;,
+<span class="fc" id="L1054">                getPath(&quot;InputMainGenerateXpathSuppressions.java&quot;));</span>
+<span class="fc" id="L1055">    }</span>
+
+    @Test
+    public void testGenerateXpathSuppressionOptionEmptyConfig() throws Exception {
+<span class="fc" id="L1059">        final String expected = &quot;&quot;;</span>
+
+<span class="fc" id="L1061">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1062">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L1063">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L1064">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1065">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1066">        });</span>
+<span class="fc" id="L1067">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-empty.xml&quot;), &quot;--generate-xpath-suppression&quot;,</span>
+<span class="fc" id="L1068">                getPath(&quot;InputMainComplexityOverflow.java&quot;));</span>
+<span class="fc" id="L1069">    }</span>
+
+    @Test
+    public void testGenerateXpathSuppressionOptionCustomOutput() throws Exception {
+<span class="fc" id="L1073">        final String expected = &quot;&lt;?xml version=\&quot;1.0\&quot; encoding=\&quot;UTF-8\&quot;?&gt;&quot; + EOL</span>
+                + &quot;&lt;!DOCTYPE suppressions PUBLIC&quot; + EOL
+                + &quot;    \&quot;-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration 1.2&quot;
+                + &quot;//EN\&quot;&quot; + EOL
+                + &quot;    \&quot;https://checkstyle.org/dtds/suppressions_1_2_xpath_experimental.dtd\&quot;&gt;&quot;
+                + EOL
+                + &quot;&lt;suppressions&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainGenerateXpathSuppressionsTabWidth.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;ExplicitInitializationCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[&quot;
+                + &quot;@text='InputMainGenerateXpathSuppressionsTabWidth']]&quot;
+                + &quot;/OBJBLOCK/VARIABLE_DEF/IDENT[@text='low']\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;/suppressions&gt;&quot; + EOL;
+<span class="fc" id="L1087">        final File file = temporaryFolder.newFile();</span>
+<span class="fc" id="L1088">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1089">            try (BufferedReader br = Files.newBufferedReader(file.toPath())) {</span>
+<span class="fc" id="L1090">                final String fileContent = br.lines().collect(Collectors.joining(EOL)) + EOL;</span>
+<span class="fc" id="L1091">                assertEquals(&quot;Unexpected output log&quot;,</span>
+                        expected, fileContent);
+<span class="fc" id="L1093">                assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1094">                        &quot;&quot;, systemErr.getLog());</span>
+            }
+<span class="fc" id="L1096">        });</span>
+<span class="fc" id="L1097">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-xpath-suppressions.xml&quot;),</span>
+<span class="fc" id="L1098">                &quot;-o&quot;, file.getPath(),</span>
+                &quot;--generate-xpath-suppression&quot;,
+<span class="fc" id="L1100">                getPath(&quot;InputMainGenerateXpathSuppressionsTabWidth.java&quot;));</span>
+<span class="fc" id="L1101">    }</span>
+
+    @Test
+    public void testGenerateXpathSuppressionOptionDefaultTabWidth() throws Exception {
+<span class="fc" id="L1105">        final String expected = &quot;&lt;?xml version=\&quot;1.0\&quot; encoding=\&quot;UTF-8\&quot;?&gt;&quot; + EOL</span>
+                + &quot;&lt;!DOCTYPE suppressions PUBLIC&quot; + EOL
+                + &quot;    \&quot;-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration 1.2&quot;
+                + &quot;//EN\&quot;&quot; + EOL
+                + &quot;    \&quot;https://checkstyle.org/dtds/suppressions_1_2_xpath_experimental.dtd\&quot;&gt;&quot;
+                + EOL
+                + &quot;&lt;suppressions&gt;&quot; + EOL
+                + &quot;&lt;suppress-xpath&quot; + EOL
+                + &quot;       files=\&quot;InputMainGenerateXpathSuppressionsTabWidth.java\&quot;&quot; + EOL
+                + &quot;       checks=\&quot;ExplicitInitializationCheck\&quot;&quot; + EOL
+                + &quot;       query=\&quot;/CLASS_DEF[./IDENT[&quot;
+                + &quot;@text='InputMainGenerateXpathSuppressionsTabWidth']]&quot;
+                + &quot;/OBJBLOCK/VARIABLE_DEF/IDENT[@text='low']\&quot;/&gt;&quot; + EOL
+                + &quot;&lt;/suppressions&gt;&quot; + EOL;
+
+<span class="fc" id="L1120">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1121">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L1122">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L1123">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1124">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1125">        });</span>
+<span class="fc" id="L1126">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-xpath-suppressions.xml&quot;),</span>
+                &quot;--generate-xpath-suppression&quot;,
+<span class="fc" id="L1128">                getPath(&quot;InputMainGenerateXpathSuppressionsTabWidth.java&quot;));</span>
+<span class="fc" id="L1129">    }</span>
+
+    @Test
+    public void testGenerateXpathSuppressionOptionCustomTabWidth() throws Exception {
+<span class="fc" id="L1133">        final String expected = &quot;&quot;;</span>
+
+<span class="fc" id="L1135">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1136">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L1137">                    expected, systemOut.getLog());</span>
+<span class="fc" id="L1138">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1139">                    &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1140">        });</span>
+<span class="fc" id="L1141">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-xpath-suppressions.xml&quot;),</span>
+                &quot;--generate-xpath-suppression&quot;,
+                &quot;--tabWidth&quot;, &quot;20&quot;,
+<span class="fc" id="L1144">                getPath(&quot;InputMainGenerateXpathSuppressionsTabWidth.java&quot;));</span>
+<span class="fc" id="L1145">    }</span>
+
+    @Test
+    public void testPrintFullTreeOption() throws Exception {
+<span class="fc" id="L1149">        final String expected = new String(Files.readAllBytes(Paths.get(</span>
+<span class="fc" id="L1150">            getPath(&quot;InputMainExpectedInputAstTreeStringPrinterJavadoc.txt&quot;))),</span>
+<span class="fc" id="L1151">            StandardCharsets.UTF_8).replaceAll(&quot;\\\\r\\\\n&quot;, &quot;\\\\n&quot;)</span>
+<span class="fc" id="L1152">                .replaceAll(&quot;\r\n&quot;, &quot;\n&quot;);</span>
+
+<span class="fc" id="L1154">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1155">            assertEquals(&quot;Unexpected output log&quot;,</span>
+<span class="fc" id="L1156">                    expected, systemOut.getLog().replaceAll(&quot;\\\\r\\\\n&quot;, &quot;\\\\n&quot;)</span>
+<span class="fc" id="L1157">                            .replaceAll(&quot;\r\n&quot;, &quot;\n&quot;));</span>
+<span class="fc" id="L1158">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1159">        });</span>
+<span class="fc" id="L1160">        Main.main(&quot;-J&quot;, getPath(&quot;InputMainAstTreeStringPrinterJavadoc.java&quot;));</span>
+<span class="fc" id="L1161">    }</span>
+
+    @Test
+    public void testConflictingOptionsTvsC() throws Exception {
+<span class="fc" id="L1165">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1166">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1167">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-t' cannot be used with other options.&quot;</span>
+<span class="fc" id="L1168">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1169">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1170">        });</span>
+
+<span class="nc" id="L1172">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, &quot;-t&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L1173">    }</span>
+
+    @Test
+    public void testConflictingOptionsTvsP() throws Exception {
+<span class="fc" id="L1177">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1178">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1179">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-t' cannot be used with other options.&quot;</span>
+<span class="fc" id="L1180">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1181">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1182">        });</span>
+
+<span class="nc" id="L1184">        Main.main(&quot;-p&quot;, getPath(&quot;InputMainMycheckstyle.properties&quot;), &quot;-t&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L1185">    }</span>
+
+    @Test
+    public void testConflictingOptionsTvsF() throws Exception {
+<span class="fc" id="L1189">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1190">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1191">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-t' cannot be used with other options.&quot;</span>
+<span class="fc" id="L1192">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1193">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1194">        });</span>
+
+<span class="nc" id="L1196">        Main.main(&quot;-f&quot;, &quot;plain&quot;, &quot;-t&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L1197">    }</span>
+
+    @Test
+    public void testConflictingOptionsTvsS() throws Exception {
+<span class="fc" id="L1201">        final File file = temporaryFolder.newFile(&quot;file.output&quot;);</span>
+
+<span class="fc" id="L1203">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1204">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1205">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-t' cannot be used with other options.&quot;</span>
+<span class="fc" id="L1206">                    + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1207">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1208">        });</span>
+
+<span class="nc" id="L1210">        Main.main(&quot;-s&quot;, file.getCanonicalPath(), &quot;-t&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L1211">    }</span>
+
+    @Test
+    public void testConflictingOptionsTvsO() throws Exception {
+<span class="fc" id="L1215">        final File file = temporaryFolder.newFile(&quot;file.output&quot;);</span>
+
+<span class="fc" id="L1217">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1218">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1219">            assertEquals(&quot;Unexpected output log&quot;, &quot;Option '-t' cannot be used with other options.&quot;</span>
+<span class="fc" id="L1220">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1221">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1222">        });</span>
+
+<span class="nc" id="L1224">        Main.main(&quot;-o&quot;, file.getCanonicalPath(), &quot;-t&quot;, getPath(&quot;&quot;));</span>
+<span class="nc" id="L1225">    }</span>
+
+    @Test
+    public void testDebugOption() throws Exception {
+<span class="fc" id="L1229">        exit.checkAssertionAfterwards(</span>
+<span class="fc" id="L1230">            () -&gt; assertNotEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog()));</span>
+<span class="fc" id="L1231">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, getPath(&quot;InputMain.java&quot;), &quot;-d&quot;);</span>
+<span class="fc" id="L1232">    }</span>
+
+    @Test
+    public void testExcludeOption() throws Exception {
+<span class="fc" id="L1236">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1237">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1238">            assertEquals(&quot;Unexpected output log&quot;, &quot;Files to process must be specified, found 0.&quot;</span>
+<span class="fc" id="L1239">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1240">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1241">        });</span>
+<span class="nc" id="L1242">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, getFilePath(&quot;&quot;), &quot;-e&quot;, getFilePath(&quot;&quot;));</span>
+<span class="nc" id="L1243">    }</span>
+
+    @Test
+    public void testExcludeOptionFile() throws Exception {
+<span class="fc" id="L1247">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1248">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1249">            assertEquals(&quot;Unexpected output log&quot;, &quot;Files to process must be specified, found 0.&quot;</span>
+<span class="fc" id="L1250">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1251">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1252">        });</span>
+<span class="pc" id="L1253">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, getFilePath(&quot;InputMain.java&quot;), &quot;-e&quot;,</span>
+<span class="fc" id="L1254">                getFilePath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1255">    }</span>
+
+    @Test
+    public void testExcludeRegexpOption() throws Exception {
+<span class="fc" id="L1259">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1260">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1261">            assertEquals(&quot;Unexpected output log&quot;, &quot;Files to process must be specified, found 0.&quot;</span>
+<span class="fc" id="L1262">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1263">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1264">        });</span>
+<span class="nc" id="L1265">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, getFilePath(&quot;&quot;), &quot;-x&quot;, &quot;.&quot;);</span>
+<span class="nc" id="L1266">    }</span>
+
+    @Test
+    public void testExcludeRegexpOptionFile() throws Exception {
+<span class="fc" id="L1270">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1271">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1272">            assertEquals(&quot;Unexpected output log&quot;, &quot;Files to process must be specified, found 0.&quot;</span>
+<span class="fc" id="L1273">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1274">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1275">        });</span>
+<span class="nc" id="L1276">        Main.main(&quot;-c&quot;, &quot;/google_checks.xml&quot;, getFilePath(&quot;InputMain.java&quot;), &quot;-x&quot;, &quot;.&quot;);</span>
+<span class="nc" id="L1277">    }</span>
+
+    @Test
+    @SuppressWarnings(&quot;unchecked&quot;)
+    public void testExcludeDirectoryNotMatch() throws Exception {
+<span class="fc" id="L1282">        final Class&lt;?&gt; optionsClass = Class.forName(Main.class.getName());</span>
+<span class="fc" id="L1283">        final Method method = optionsClass.getDeclaredMethod(&quot;listFiles&quot;, File.class, List.class);</span>
+<span class="fc" id="L1284">        method.setAccessible(true);</span>
+<span class="fc" id="L1285">        final List&lt;Pattern&gt; list = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L1286">        list.add(Pattern.compile(&quot;BAD_PATH&quot;));</span>
+
+<span class="fc" id="L1288">        final List&lt;File&gt; result = (List&lt;File&gt;) method.invoke(null, new File(getFilePath(&quot;&quot;)),</span>
+                list);
+<span class="fc" id="L1290">        assertNotEquals(&quot;Invalid result size&quot;, 0, result.size());</span>
+<span class="fc" id="L1291">    }</span>
+
+    @Test
+    public void testCustomRootModule() throws Exception {
+<span class="fc" id="L1295">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L1297">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1298">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1299">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1300">            assertTrue(&quot;Invalid Checker state&quot;, TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L1301">        });</span>
+<span class="fc" id="L1302">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-custom-root-module.xml&quot;),</span>
+<span class="fc" id="L1303">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L1304">        assertTrue(&quot;RootModule should be destroyed&quot;, TestRootModuleChecker.isDestroyed());</span>
+<span class="fc" id="L1305">    }</span>
+
+    @Test
+    public void testCustomSimpleRootModule() throws Exception {
+<span class="fc" id="L1309">        TestRootModuleChecker.reset();</span>
+<span class="fc" id="L1310">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L1311">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1312">            final String checkstylePackage = &quot;com.puppycrawl.tools.checkstyle.&quot;;</span>
+<span class="fc" id="L1313">            final LocalizedMessage unableToInstantiateExceptionMessage = new LocalizedMessage(1,</span>
+                    Definitions.CHECKSTYLE_BUNDLE,
+                    &quot;PackageObjectFactory.unableToInstantiateExceptionMessage&quot;,
+                    new String[] {&quot;TestRootModuleChecker&quot;, checkstylePackage
+                            + &quot;TestRootModuleChecker, &quot;
+                            + &quot;TestRootModuleCheckerCheck, &quot; + checkstylePackage
+                            + &quot;TestRootModuleCheckerCheck&quot;},
+<span class="fc" id="L1320">                    null, getClass(), null);</span>
+<span class="fc" id="L1321">            assertTrue(&quot;Unexpected system error log&quot;,</span>
+<span class="fc" id="L1322">                    systemErr.getLog().startsWith(checkstylePackage + &quot;api.CheckstyleException: &quot;</span>
+<span class="fc" id="L1323">                    + unableToInstantiateExceptionMessage.getMessage()));</span>
+<span class="fc" id="L1324">            assertFalse(&quot;Invalid checker state&quot;, TestRootModuleChecker.isProcessed());</span>
+<span class="fc" id="L1325">        });</span>
+<span class="pc" id="L1326">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-custom-simple-root-module.xml&quot;),</span>
+<span class="fc" id="L1327">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1328">    }</span>
+
+    @Test
+    public void testExceptionOnExecuteIgnoredModuleWithUnknownModuleName() throws Exception {
+<span class="fc" id="L1332">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L1333">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1334">            final String cause = &quot;com.puppycrawl.tools.checkstyle.api.CheckstyleException:&quot;</span>
+                    + &quot; cannot initialize module TreeWalker - &quot;;
+<span class="fc" id="L1336">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().startsWith(cause));</span>
+<span class="fc" id="L1337">        });</span>
+
+<span class="pc" id="L1339">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-non-existent-classname-ignore.xml&quot;),</span>
+                &quot;--executeIgnoredModules&quot;,
+<span class="fc" id="L1341">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1342">    }</span>
+
+    @Test
+    public void testExceptionOnExecuteIgnoredModuleWithBadPropertyValue() throws Exception {
+<span class="fc" id="L1346">        exit.expectSystemExitWithStatus(-2);</span>
+<span class="fc" id="L1347">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1348">            final String cause = &quot;com.puppycrawl.tools.checkstyle.api.CheckstyleException:&quot;</span>
+                    + &quot; cannot initialize module TreeWalker - &quot;;
+<span class="fc" id="L1350">            final String causeDetail = &quot;it is not a boolean&quot;;</span>
+<span class="fc" id="L1351">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().startsWith(cause));</span>
+<span class="fc" id="L1352">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().contains(causeDetail));</span>
+<span class="fc" id="L1353">        });</span>
+
+<span class="pc" id="L1355">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-TypeName-bad-value.xml&quot;),</span>
+                &quot;--executeIgnoredModules&quot;,
+<span class="fc" id="L1357">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1358">    }</span>
+
+    @Test
+    public void testNoProblemOnExecuteIgnoredModuleWithBadPropertyValue() throws Exception {
+<span class="fc" id="L1362">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1363">            assertTrue(&quot;Unexpected system error log&quot;, systemErr.getLog().isEmpty());</span>
+<span class="fc" id="L1364">        });</span>
+
+<span class="fc" id="L1366">        Main.main(&quot;-c&quot;, getPath(&quot;InputMainConfig-TypeName-bad-value.xml&quot;),</span>
+                &quot;&quot;,
+<span class="fc" id="L1368">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L1369">    }</span>
+
+    @Test
+    public void testInvalidCheckerThreadsNumber() throws Exception {
+<span class="fc" id="L1373">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1374">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1375">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1376">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+                    &quot;Invalid value for option '--checker-threads-number': 'invalid' is not an int&quot;
+<span class="fc" id="L1378">                    + EOL + SHORT_USAGE, systemErr.getLog());</span>
+<span class="fc" id="L1379">        });</span>
+<span class="nc" id="L1380">        Main.main(&quot;-C&quot;, &quot;invalid&quot;, &quot;-c&quot;, &quot;/google_checks.xml&quot;, getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1381">    }</span>
+
+    @Test
+    public void testInvalidTreeWalkerThreadsNumber() throws Exception {
+<span class="fc" id="L1385">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1386">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1387">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1388">            assertEquals(&quot;Unexpected system error log&quot;,</span>
+                    &quot;Invalid value for option '--tree-walker-threads-number': &quot;
+<span class="fc" id="L1390">                    + &quot;'invalid' is not an int&quot; + EOL + SHORT_USAGE, systemErr.getLog());</span>
+<span class="fc" id="L1391">        });</span>
+<span class="nc" id="L1392">        Main.main(&quot;-W&quot;, &quot;invalid&quot;, &quot;-c&quot;, &quot;/google_checks.xml&quot;, getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1393">    }</span>
+
+    @Test
+    public void testZeroCheckerThreadsNumber() throws Exception {
+<span class="fc" id="L1397">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1398">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1399">            assertEquals(&quot;Unexpected output log&quot;, &quot;Checker threads number must be greater than zero&quot;</span>
+<span class="fc" id="L1400">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1401">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1402">        });</span>
+<span class="nc" id="L1403">        Main.main(&quot;-C&quot;, &quot;0&quot;, &quot;-c&quot;, &quot;/google_checks.xml&quot;, getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1404">    }</span>
+
+    @Test
+    public void testZeroTreeWalkerThreadsNumber() throws Exception {
+<span class="fc" id="L1408">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1409">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1410">            assertEquals(&quot;Unexpected output log&quot;,</span>
+                    &quot;TreeWalker threads number must be greater than zero&quot;
+<span class="fc" id="L1412">                + System.lineSeparator(), systemOut.getLog());</span>
+<span class="fc" id="L1413">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1414">        });</span>
+<span class="nc" id="L1415">        Main.main(&quot;-W&quot;, &quot;0&quot;, &quot;-c&quot;, &quot;/google_checks.xml&quot;, getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1416">    }</span>
+
+    @Test
+    public void testCheckerThreadsNumber() throws Exception {
+<span class="fc" id="L1420">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L1422">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1423">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1424">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1425">            assertTrue(&quot;Invalid checker state&quot;, TestRootModuleChecker.isProcessed());</span>
+            final DefaultConfiguration config =
+<span class="fc" id="L1427">                    (DefaultConfiguration) TestRootModuleChecker.getConfig();</span>
+<span class="fc" id="L1428">            final ThreadModeSettings multiThreadModeSettings = config.getThreadModeSettings();</span>
+<span class="fc" id="L1429">            assertEquals(&quot;Invalid checker thread number&quot;,</span>
+<span class="fc" id="L1430">                    4, multiThreadModeSettings.getCheckerThreadsNumber());</span>
+<span class="fc" id="L1431">            assertEquals(&quot;Invalid checker thread number&quot;,</span>
+<span class="fc" id="L1432">                    1, multiThreadModeSettings.getTreeWalkerThreadsNumber());</span>
+<span class="fc" id="L1433">        });</span>
+<span class="fc" id="L1434">        Main.main(&quot;-C&quot;, &quot;4&quot;, &quot;-c&quot;, getPath(&quot;InputMainConfig-custom-root-module.xml&quot;),</span>
+<span class="fc" id="L1435">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L1436">    }</span>
+
+    @Test
+    public void testTreeWalkerThreadsNumber() throws Exception {
+<span class="fc" id="L1440">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L1442">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1443">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1444">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1445">            assertTrue(&quot;Invalid checker state&quot;, TestRootModuleChecker.isProcessed());</span>
+            final DefaultConfiguration config =
+<span class="fc" id="L1447">                    (DefaultConfiguration) TestRootModuleChecker.getConfig();</span>
+<span class="fc" id="L1448">            final ThreadModeSettings multiThreadModeSettings = config.getThreadModeSettings();</span>
+<span class="fc" id="L1449">            assertEquals(&quot;Invalid checker thread number&quot;,</span>
+<span class="fc" id="L1450">                    1, multiThreadModeSettings.getCheckerThreadsNumber());</span>
+<span class="fc" id="L1451">            assertEquals(&quot;Invalid checker thread number&quot;,</span>
+<span class="fc" id="L1452">                    4, multiThreadModeSettings.getTreeWalkerThreadsNumber());</span>
+<span class="fc" id="L1453">        });</span>
+<span class="fc" id="L1454">        Main.main(&quot;-W&quot;, &quot;4&quot;, &quot;-c&quot;, getPath(&quot;InputMainConfig-custom-root-module.xml&quot;),</span>
+<span class="fc" id="L1455">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L1456">    }</span>
+
+    @Test
+    public void testModuleNameInSingleThreadMode() throws Exception {
+<span class="fc" id="L1460">        TestRootModuleChecker.reset();</span>
+
+<span class="fc" id="L1462">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1463">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1464">            assertEquals(&quot;Unexpected system error log&quot;, &quot;&quot;, systemErr.getLog());</span>
+<span class="fc" id="L1465">            assertTrue(&quot;Invalid checker state&quot;, TestRootModuleChecker.isProcessed());</span>
+            final DefaultConfiguration config =
+<span class="fc" id="L1467">                    (DefaultConfiguration) TestRootModuleChecker.getConfig();</span>
+<span class="fc" id="L1468">            final ThreadModeSettings multiThreadModeSettings =</span>
+<span class="fc" id="L1469">                config.getThreadModeSettings();</span>
+<span class="fc" id="L1470">            assertEquals(&quot;Invalid checker thread number&quot;,</span>
+<span class="fc" id="L1471">                    1, multiThreadModeSettings.getCheckerThreadsNumber());</span>
+<span class="fc" id="L1472">            assertEquals(&quot;Invalid checker thread number&quot;,</span>
+<span class="fc" id="L1473">                    1, multiThreadModeSettings.getTreeWalkerThreadsNumber());</span>
+<span class="fc" id="L1474">            final Configuration checkerConfiguration = config</span>
+<span class="fc" id="L1475">                .getChildren()[0];</span>
+<span class="fc" id="L1476">            assertEquals(&quot;Invalid checker name&quot;, &quot;Checker&quot;, checkerConfiguration.getName());</span>
+<span class="fc" id="L1477">            final Configuration treeWalkerConfig = checkerConfiguration.getChildren()[0];</span>
+<span class="fc" id="L1478">            assertEquals(&quot;Invalid checker children name&quot;, &quot;TreeWalker&quot;, treeWalkerConfig.getName());</span>
+<span class="fc" id="L1479">        });</span>
+<span class="fc" id="L1480">        Main.main(&quot;-C&quot;, &quot;1&quot;, &quot;-W&quot;, &quot;1&quot;, &quot;-c&quot;, getPath(&quot;InputMainConfig-multi-thread-mode.xml&quot;),</span>
+<span class="fc" id="L1481">            getPath(&quot;InputMain.java&quot;));</span>
+<span class="fc" id="L1482">    }</span>
+
+    @Test
+    public void testModuleNameInMultiThreadMode() throws Exception {
+<span class="fc" id="L1486">        TestRootModuleChecker.reset();</span>
+
+        try {
+<span class="pc" id="L1489">            Main.main(&quot;-C&quot;, &quot;4&quot;, &quot;-W&quot;, &quot;4&quot;, &quot;-c&quot;, getPath(&quot;InputMainConfig-multi-thread-mode.xml&quot;),</span>
+<span class="fc" id="L1490">                getPath(&quot;InputMain.java&quot;));</span>
+<span class="nc" id="L1491">            fail(&quot;An exception is expected&quot;);</span>
+        }
+<span class="fc" id="L1493">        catch (IllegalArgumentException ex) {</span>
+<span class="fc" id="L1494">            assertEquals(&quot;Invalid error message&quot;,</span>
+                    &quot;Multi thread mode for Checker module is not implemented&quot;,
+<span class="fc" id="L1496">                ex.getMessage());</span>
+<span class="nc" id="L1497">        }</span>
+<span class="fc" id="L1498">    }</span>
+
+    @Test
+    public void testMissingFiles() throws Exception {
+<span class="fc" id="L1502">        exit.expectSystemExitWithStatus(-1);</span>
+<span class="fc" id="L1503">        exit.checkAssertionAfterwards(() -&gt; {</span>
+<span class="fc" id="L1504">            final String usage = &quot;Missing required parameter: &lt;files&gt;&quot; + EOL + SHORT_USAGE;</span>
+<span class="fc" id="L1505">            assertEquals(&quot;Unexpected output log&quot;, &quot;&quot;, systemOut.getLog());</span>
+<span class="fc" id="L1506">            assertEquals(&quot;Unexpected system error log&quot;, usage, systemErr.getLog());</span>
+<span class="fc" id="L1507">        });</span>
+<span class="nc" id="L1508">        Main.main();</span>
+<span class="nc" id="L1509">    }</span>
+
+    @Test
+    public void testOutputFormatToStringLowercase() {
+<span class="fc" id="L1513">        assertEquals(&quot;expected xml&quot;, &quot;xml&quot;, Main.OutputFormat.XML.toString());</span>
+<span class="fc" id="L1514">        assertEquals(&quot;expected plain&quot;, &quot;plain&quot;, Main.OutputFormat.PLAIN.toString());</span>
+<span class="fc" id="L1515">    }</span>
+
+    @Test
+    public void testXmlOutputFormatCreateListener() {
+<span class="fc" id="L1519">        final ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L1520">        final AuditListener listener = Main.OutputFormat.XML.createListener(out,</span>
+                AutomaticBean.OutputStreamOptions.CLOSE);
+<span class="fc" id="L1522">        assertTrue(&quot;listener is XMLLogger&quot;, listener instanceof XMLLogger);</span>
+<span class="fc" id="L1523">    }</span>
+
+    @Test
+    public void testPlainOutputFormatCreateListener() {
+<span class="fc" id="L1527">        final ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L1528">        final AuditListener listener = Main.OutputFormat.PLAIN.createListener(out,</span>
+                AutomaticBean.OutputStreamOptions.CLOSE);
+<span class="fc" id="L1530">        assertTrue(&quot;listener is DefaultLogger&quot;, listener instanceof DefaultLogger);</span>
+<span class="fc" id="L1531">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

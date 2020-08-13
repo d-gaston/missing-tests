@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>HighLevelEncoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.datamatrix.encoder</a> &gt; <span class="el_source">HighLevelEncoder.java</span></div><h1>HighLevelEncoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2006-2007 Jeremias Maerki.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.datamatrix.encoder;
+
+import com.google.zxing.Dimension;
+
+import java.util.Arrays;
+
+/**
+ * DataMatrix ECC 200 data encoder following the algorithm described in ISO/IEC 16022:200(E) in
+ * annex S.
+ */
+public final class HighLevelEncoder {
+
+  /**
+   * Padding character
+   */
+  private static final char PAD = 129;
+  /**
+   * mode latch to C40 encodation mode
+   */
+  static final char LATCH_TO_C40 = 230;
+  /**
+   * mode latch to Base 256 encodation mode
+   */
+  static final char LATCH_TO_BASE256 = 231;
+  /**
+   * FNC1 Codeword
+   */
+  //private static final char FNC1 = 232;
+  /**
+   * Structured Append Codeword
+   */
+  //private static final char STRUCTURED_APPEND = 233;
+  /**
+   * Reader Programming
+   */
+  //private static final char READER_PROGRAMMING = 234;
+  /**
+   * Upper Shift
+   */
+  static final char UPPER_SHIFT = 235;
+  /**
+   * 05 Macro
+   */
+  private static final char MACRO_05 = 236;
+  /**
+   * 06 Macro
+   */
+  private static final char MACRO_06 = 237;
+  /**
+   * mode latch to ANSI X.12 encodation mode
+   */
+  static final char LATCH_TO_ANSIX12 = 238;
+  /**
+   * mode latch to Text encodation mode
+   */
+  static final char LATCH_TO_TEXT = 239;
+  /**
+   * mode latch to EDIFACT encodation mode
+   */
+  static final char LATCH_TO_EDIFACT = 240;
+  /**
+   * ECI character (Extended Channel Interpretation)
+   */
+  //private static final char ECI = 241;
+
+  /**
+   * Unlatch from C40 encodation
+   */
+  static final char C40_UNLATCH = 254;
+  /**
+   * Unlatch from X12 encodation
+   */
+  static final char X12_UNLATCH = 254;
+
+  /**
+   * 05 Macro header
+   */
+  private static final String MACRO_05_HEADER = &quot;[)&gt;\u001E05\u001D&quot;;
+  /**
+   * 06 Macro header
+   */
+  private static final String MACRO_06_HEADER = &quot;[)&gt;\u001E06\u001D&quot;;
+  /**
+   * Macro trailer
+   */
+  private static final String MACRO_TRAILER = &quot;\u001E\u0004&quot;;
+
+  static final int ASCII_ENCODATION = 0;
+  static final int C40_ENCODATION = 1;
+  static final int TEXT_ENCODATION = 2;
+  static final int X12_ENCODATION = 3;
+  static final int EDIFACT_ENCODATION = 4;
+  static final int BASE256_ENCODATION = 5;
+
+  private HighLevelEncoder() {
+  }
+
+  /*
+   * Converts the message to a byte array using the default encoding (cp437) as defined by the
+   * specification
+   *
+   * @param msg the message
+   * @return the byte array of the message
+   */
+
+  /*
+  public static byte[] getBytesForMessage(String msg) {
+    return msg.getBytes(Charset.forName(&quot;cp437&quot;)); //See 4.4.3 and annex B of ISO/IEC 15438:2001(E)
+  }
+   */
+
+  private static char randomize253State(char ch, int codewordPosition) {
+<span class="fc" id="L129">    int pseudoRandom = ((149 * codewordPosition) % 253) + 1;</span>
+<span class="fc" id="L130">    int tempVariable = ch + pseudoRandom;</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">    return (char) (tempVariable &lt;= 254 ? tempVariable : tempVariable - 254);</span>
+  }
+
+  /**
+   * Performs message encoding of a DataMatrix message using the algorithm described in annex P
+   * of ISO/IEC 16022:2000(E).
+   *
+   * @param msg the message
+   * @return the encoded message (the char values range from 0 to 255)
+   */
+  public static String encodeHighLevel(String msg) {
+<span class="fc" id="L142">    return encodeHighLevel(msg, SymbolShapeHint.FORCE_NONE, null, null);</span>
+  }
+
+  /**
+   * Performs message encoding of a DataMatrix message using the algorithm described in annex P
+   * of ISO/IEC 16022:2000(E).
+   *
+   * @param msg     the message
+   * @param shape   requested shape. May be {@code SymbolShapeHint.FORCE_NONE},
+   *                {@code SymbolShapeHint.FORCE_SQUARE} or {@code SymbolShapeHint.FORCE_RECTANGLE}.
+   * @param minSize the minimum symbol size constraint or null for no constraint
+   * @param maxSize the maximum symbol size constraint or null for no constraint
+   * @return the encoded message (the char values range from 0 to 255)
+   */
+  public static String encodeHighLevel(String msg,
+                                       SymbolShapeHint shape,
+                                       Dimension minSize,
+                                       Dimension maxSize) {
+    //the codewords 0..255 are encoded as Unicode characters
+<span class="fc" id="L161">    Encoder[] encoders = {</span>
+        new ASCIIEncoder(), new C40Encoder(), new TextEncoder(),
+        new X12Encoder(), new EdifactEncoder(),  new Base256Encoder()
+    };
+
+<span class="fc" id="L166">    EncoderContext context = new EncoderContext(msg);</span>
+<span class="fc" id="L167">    context.setSymbolShape(shape);</span>
+<span class="fc" id="L168">    context.setSizeConstraints(minSize, maxSize);</span>
+
+<span class="pc bpc" id="L170" title="1 of 4 branches missed.">    if (msg.startsWith(MACRO_05_HEADER) &amp;&amp; msg.endsWith(MACRO_TRAILER)) {</span>
+<span class="fc" id="L171">      context.writeCodeword(MACRO_05);</span>
+<span class="fc" id="L172">      context.setSkipAtEnd(2);</span>
+<span class="fc" id="L173">      context.pos += MACRO_05_HEADER.length();</span>
+<span class="pc bpc" id="L174" title="3 of 4 branches missed.">    } else if (msg.startsWith(MACRO_06_HEADER) &amp;&amp; msg.endsWith(MACRO_TRAILER)) {</span>
+<span class="nc" id="L175">      context.writeCodeword(MACRO_06);</span>
+<span class="nc" id="L176">      context.setSkipAtEnd(2);</span>
+<span class="nc" id="L177">      context.pos += MACRO_06_HEADER.length();</span>
+    }
+
+<span class="fc" id="L180">    int encodingMode = ASCII_ENCODATION; //Default mode</span>
+<span class="fc bfc" id="L181" title="All 2 branches covered.">    while (context.hasMoreCharacters()) {</span>
+<span class="fc" id="L182">      encoders[encodingMode].encode(context);</span>
+<span class="fc bfc" id="L183" title="All 2 branches covered.">      if (context.getNewEncoding() &gt;= 0) {</span>
+<span class="fc" id="L184">        encodingMode = context.getNewEncoding();</span>
+<span class="fc" id="L185">        context.resetEncoderSignal();</span>
+      }
+    }
+<span class="fc" id="L188">    int len = context.getCodewordCount();</span>
+<span class="fc" id="L189">    context.updateSymbolInfo();</span>
+<span class="fc" id="L190">    int capacity = context.getSymbolInfo().getDataCapacity();</span>
+<span class="pc bpc" id="L191" title="3 of 8 branches missed.">    if (len &lt; capacity &amp;&amp;</span>
+        encodingMode != ASCII_ENCODATION &amp;&amp;
+        encodingMode != BASE256_ENCODATION &amp;&amp;
+        encodingMode != EDIFACT_ENCODATION) {
+<span class="nc" id="L195">      context.writeCodeword('\u00fe'); //Unlatch (254)</span>
+    }
+    //Padding
+<span class="fc" id="L198">    StringBuilder codewords = context.getCodewords();</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    if (codewords.length() &lt; capacity) {</span>
+<span class="fc" id="L200">      codewords.append(PAD);</span>
+    }
+<span class="fc bfc" id="L202" title="All 2 branches covered.">    while (codewords.length() &lt; capacity) {</span>
+<span class="fc" id="L203">      codewords.append(randomize253State(PAD, codewords.length() + 1));</span>
+    }
+
+<span class="fc" id="L206">    return context.getCodewords().toString();</span>
+  }
+
+  static int lookAheadTest(CharSequence msg, int startpos, int currentMode) {
+<span class="fc bfc" id="L210" title="All 2 branches covered.">    if (startpos &gt;= msg.length()) {</span>
+<span class="fc" id="L211">      return currentMode;</span>
+    }
+    float[] charCounts;
+    //step J
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    if (currentMode == ASCII_ENCODATION) {</span>
+<span class="fc" id="L216">      charCounts = new float[]{0, 1, 1, 1, 1, 1.25f};</span>
+    } else {
+<span class="fc" id="L218">      charCounts = new float[]{1, 2, 2, 2, 2, 2.25f};</span>
+<span class="fc" id="L219">      charCounts[currentMode] = 0;</span>
+    }
+
+<span class="fc" id="L222">    int charsProcessed = 0;</span>
+    while (true) {
+      //step K
+<span class="fc bfc" id="L225" title="All 2 branches covered.">      if ((startpos + charsProcessed) == msg.length()) {</span>
+<span class="fc" id="L226">        int min = Integer.MAX_VALUE;</span>
+<span class="fc" id="L227">        byte[] mins = new byte[6];</span>
+<span class="fc" id="L228">        int[] intCharCounts = new int[6];</span>
+<span class="fc" id="L229">        min = findMinimums(charCounts, intCharCounts, min, mins);</span>
+<span class="fc" id="L230">        int minCount = getMinimumCount(mins);</span>
+
+<span class="fc bfc" id="L232" title="All 2 branches covered.">        if (intCharCounts[ASCII_ENCODATION] == min) {</span>
+<span class="fc" id="L233">          return ASCII_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L235" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[BASE256_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L236">          return BASE256_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L238" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[EDIFACT_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L239">          return EDIFACT_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L241" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[TEXT_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L242">          return TEXT_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L244" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[X12_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L245">          return X12_ENCODATION;</span>
+        }
+<span class="fc" id="L247">        return C40_ENCODATION;</span>
+      }
+
+<span class="fc" id="L250">      char c = msg.charAt(startpos + charsProcessed);</span>
+<span class="fc" id="L251">      charsProcessed++;</span>
+
+      //step L
+<span class="fc bfc" id="L254" title="All 2 branches covered.">      if (isDigit(c)) {</span>
+<span class="fc" id="L255">        charCounts[ASCII_ENCODATION] += 0.5f;</span>
+<span class="fc bfc" id="L256" title="All 2 branches covered.">      } else if (isExtendedASCII(c)) {</span>
+<span class="fc" id="L257">        charCounts[ASCII_ENCODATION] = (float) Math.ceil(charCounts[ASCII_ENCODATION]);</span>
+<span class="fc" id="L258">        charCounts[ASCII_ENCODATION] += 2.0f;</span>
+      } else {
+<span class="fc" id="L260">        charCounts[ASCII_ENCODATION] = (float) Math.ceil(charCounts[ASCII_ENCODATION]);</span>
+<span class="fc" id="L261">        charCounts[ASCII_ENCODATION]++;</span>
+      }
+
+      //step M
+<span class="fc bfc" id="L265" title="All 2 branches covered.">      if (isNativeC40(c)) {</span>
+<span class="fc" id="L266">        charCounts[C40_ENCODATION] += 2.0f / 3.0f;</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">      } else if (isExtendedASCII(c)) {</span>
+<span class="fc" id="L268">        charCounts[C40_ENCODATION] += 8.0f / 3.0f;</span>
+      } else {
+<span class="fc" id="L270">        charCounts[C40_ENCODATION] += 4.0f / 3.0f;</span>
+      }
+
+      //step N
+<span class="fc bfc" id="L274" title="All 2 branches covered.">      if (isNativeText(c)) {</span>
+<span class="fc" id="L275">        charCounts[TEXT_ENCODATION] += 2.0f / 3.0f;</span>
+<span class="fc bfc" id="L276" title="All 2 branches covered.">      } else if (isExtendedASCII(c)) {</span>
+<span class="fc" id="L277">        charCounts[TEXT_ENCODATION] += 8.0f / 3.0f;</span>
+      } else {
+<span class="fc" id="L279">        charCounts[TEXT_ENCODATION] += 4.0f / 3.0f;</span>
+      }
+
+      //step O
+<span class="fc bfc" id="L283" title="All 2 branches covered.">      if (isNativeX12(c)) {</span>
+<span class="fc" id="L284">        charCounts[X12_ENCODATION] += 2.0f / 3.0f;</span>
+<span class="fc bfc" id="L285" title="All 2 branches covered.">      } else if (isExtendedASCII(c)) {</span>
+<span class="fc" id="L286">        charCounts[X12_ENCODATION] += 13.0f / 3.0f;</span>
+      } else {
+<span class="fc" id="L288">        charCounts[X12_ENCODATION] += 10.0f / 3.0f;</span>
+      }
+
+      //step P
+<span class="fc bfc" id="L292" title="All 2 branches covered.">      if (isNativeEDIFACT(c)) {</span>
+<span class="fc" id="L293">        charCounts[EDIFACT_ENCODATION] += 3.0f / 4.0f;</span>
+<span class="fc bfc" id="L294" title="All 2 branches covered.">      } else if (isExtendedASCII(c)) {</span>
+<span class="fc" id="L295">        charCounts[EDIFACT_ENCODATION] += 17.0f / 4.0f;</span>
+      } else {
+<span class="fc" id="L297">        charCounts[EDIFACT_ENCODATION] += 13.0f / 4.0f;</span>
+      }
+
+      // step Q
+<span class="pc bpc" id="L301" title="1 of 2 branches missed.">      if (isSpecialB256(c)) {</span>
+<span class="nc" id="L302">        charCounts[BASE256_ENCODATION] += 4.0f;</span>
+      } else {
+<span class="fc" id="L304">        charCounts[BASE256_ENCODATION]++;</span>
+      }
+
+      //step R
+<span class="fc bfc" id="L308" title="All 2 branches covered.">      if (charsProcessed &gt;= 4) {</span>
+<span class="fc" id="L309">        int[] intCharCounts = new int[6];</span>
+<span class="fc" id="L310">        byte[] mins = new byte[6];</span>
+<span class="fc" id="L311">        findMinimums(charCounts, intCharCounts, Integer.MAX_VALUE, mins);</span>
+<span class="fc" id="L312">        int minCount = getMinimumCount(mins);</span>
+
+<span class="fc bfc" id="L314" title="All 10 branches covered.">        if (intCharCounts[ASCII_ENCODATION] &lt; intCharCounts[BASE256_ENCODATION]</span>
+            &amp;&amp; intCharCounts[ASCII_ENCODATION] &lt; intCharCounts[C40_ENCODATION]
+            &amp;&amp; intCharCounts[ASCII_ENCODATION] &lt; intCharCounts[TEXT_ENCODATION]
+            &amp;&amp; intCharCounts[ASCII_ENCODATION] &lt; intCharCounts[X12_ENCODATION]
+            &amp;&amp; intCharCounts[ASCII_ENCODATION] &lt; intCharCounts[EDIFACT_ENCODATION]) {
+<span class="fc" id="L319">          return ASCII_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L321" title="All 4 branches covered.">        if (intCharCounts[BASE256_ENCODATION] &lt; intCharCounts[ASCII_ENCODATION]</span>
+            || (mins[C40_ENCODATION] + mins[TEXT_ENCODATION] + mins[X12_ENCODATION] + mins[EDIFACT_ENCODATION]) == 0) {
+<span class="fc" id="L323">          return BASE256_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L325" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[EDIFACT_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L326">          return EDIFACT_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L328" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[TEXT_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L329">          return TEXT_ENCODATION;</span>
+        }
+<span class="fc bfc" id="L331" title="All 4 branches covered.">        if (minCount == 1 &amp;&amp; mins[X12_ENCODATION] &gt; 0) {</span>
+<span class="fc" id="L332">          return X12_ENCODATION;</span>
+        }
+<span class="pc bpc" id="L334" title="2 of 8 branches missed.">        if (intCharCounts[C40_ENCODATION] + 1 &lt; intCharCounts[ASCII_ENCODATION]</span>
+            &amp;&amp; intCharCounts[C40_ENCODATION] + 1 &lt; intCharCounts[BASE256_ENCODATION]
+            &amp;&amp; intCharCounts[C40_ENCODATION] + 1 &lt; intCharCounts[EDIFACT_ENCODATION]
+            &amp;&amp; intCharCounts[C40_ENCODATION] + 1 &lt; intCharCounts[TEXT_ENCODATION]) {
+<span class="fc bfc" id="L338" title="All 2 branches covered.">          if (intCharCounts[C40_ENCODATION] &lt; intCharCounts[X12_ENCODATION]) {</span>
+<span class="fc" id="L339">            return C40_ENCODATION;</span>
+          }
+<span class="pc bpc" id="L341" title="1 of 2 branches missed.">          if (intCharCounts[C40_ENCODATION] == intCharCounts[X12_ENCODATION]) {</span>
+<span class="fc" id="L342">            int p = startpos + charsProcessed + 1;</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">            while (p &lt; msg.length()) {</span>
+<span class="fc" id="L344">              char tc = msg.charAt(p);</span>
+<span class="pc bpc" id="L345" title="1 of 2 branches missed.">              if (isX12TermSep(tc)) {</span>
+<span class="nc" id="L346">                return X12_ENCODATION;</span>
+              }
+<span class="pc bpc" id="L348" title="1 of 2 branches missed.">              if (!isNativeX12(tc)) {</span>
+<span class="nc" id="L349">                break;</span>
+              }
+<span class="fc" id="L351">              p++;</span>
+<span class="fc" id="L352">            }</span>
+<span class="fc" id="L353">            return C40_ENCODATION;</span>
+          }
+        }
+      }
+<span class="fc" id="L357">    }</span>
+  }
+
+  private static int findMinimums(float[] charCounts, int[] intCharCounts, int min, byte[] mins) {
+<span class="fc" id="L361">    Arrays.fill(mins, (byte) 0);</span>
+<span class="fc bfc" id="L362" title="All 2 branches covered.">    for (int i = 0; i &lt; 6; i++) {</span>
+<span class="fc" id="L363">      intCharCounts[i] = (int) Math.ceil(charCounts[i]);</span>
+<span class="fc" id="L364">      int current = intCharCounts[i];</span>
+<span class="fc bfc" id="L365" title="All 2 branches covered.">      if (min &gt; current) {</span>
+<span class="fc" id="L366">        min = current;</span>
+<span class="fc" id="L367">        Arrays.fill(mins, (byte) 0);</span>
+      }
+<span class="fc bfc" id="L369" title="All 2 branches covered.">      if (min == current) {</span>
+<span class="fc" id="L370">        mins[i]++;</span>
+
+      }
+    }
+<span class="fc" id="L374">    return min;</span>
+  }
+
+  private static int getMinimumCount(byte[] mins) {
+<span class="fc" id="L378">    int minCount = 0;</span>
+<span class="fc bfc" id="L379" title="All 2 branches covered.">    for (int i = 0; i &lt; 6; i++) {</span>
+<span class="fc" id="L380">      minCount += mins[i];</span>
+    }
+<span class="fc" id="L382">    return minCount;</span>
+  }
+
+  static boolean isDigit(char ch) {
+<span class="fc bfc" id="L386" title="All 4 branches covered.">    return ch &gt;= '0' &amp;&amp; ch &lt;= '9';</span>
+  }
+
+  static boolean isExtendedASCII(char ch) {
+<span class="pc bpc" id="L390" title="1 of 4 branches missed.">    return ch &gt;= 128 &amp;&amp; ch &lt;= 255;</span>
+  }
+
+  private static boolean isNativeC40(char ch) {
+<span class="fc bfc" id="L394" title="All 10 branches covered.">    return (ch == ' ') || (ch &gt;= '0' &amp;&amp; ch &lt;= '9') || (ch &gt;= 'A' &amp;&amp; ch &lt;= 'Z');</span>
+  }
+
+  private static boolean isNativeText(char ch) {
+<span class="fc bfc" id="L398" title="All 10 branches covered.">    return (ch == ' ') || (ch &gt;= '0' &amp;&amp; ch &lt;= '9') || (ch &gt;= 'a' &amp;&amp; ch &lt;= 'z');</span>
+  }
+
+  private static boolean isNativeX12(char ch) {
+<span class="fc bfc" id="L402" title="All 12 branches covered.">    return isX12TermSep(ch) || (ch == ' ') || (ch &gt;= '0' &amp;&amp; ch &lt;= '9') || (ch &gt;= 'A' &amp;&amp; ch &lt;= 'Z');</span>
+  }
+
+  private static boolean isX12TermSep(char ch) {
+<span class="pc bpc" id="L406" title="1 of 6 branches missed.">    return (ch == '\r') //CR</span>
+        || (ch == '*')
+        || (ch == '&gt;');
+  }
+
+  private static boolean isNativeEDIFACT(char ch) {
+<span class="fc bfc" id="L412" title="All 4 branches covered.">    return ch &gt;= ' ' &amp;&amp; ch &lt;= '^';</span>
+  }
+
+  private static boolean isSpecialB256(char ch) {
+<span class="fc" id="L416">    return false; //TODO NOT IMPLEMENTED YET!!!</span>
+  }
+
+  /**
+   * Determines the number of consecutive characters that are encodable using numeric compaction.
+   *
+   * @param msg      the message
+   * @param startpos the start position within the message
+   * @return the requested character count
+   */
+  public static int determineConsecutiveDigitCount(CharSequence msg, int startpos) {
+<span class="fc" id="L427">    int count = 0;</span>
+<span class="fc" id="L428">    int len = msg.length();</span>
+<span class="fc" id="L429">    int idx = startpos;</span>
+<span class="pc bpc" id="L430" title="1 of 2 branches missed.">    if (idx &lt; len) {</span>
+<span class="fc" id="L431">      char ch = msg.charAt(idx);</span>
+<span class="fc bfc" id="L432" title="All 4 branches covered.">      while (isDigit(ch) &amp;&amp; idx &lt; len) {</span>
+<span class="fc" id="L433">        count++;</span>
+<span class="fc" id="L434">        idx++;</span>
+<span class="fc bfc" id="L435" title="All 2 branches covered.">        if (idx &lt; len) {</span>
+<span class="fc" id="L436">          ch = msg.charAt(idx);</span>
+        }
+      }
+    }
+<span class="fc" id="L440">    return count;</span>
+  }
+
+  static void illegalCharacter(char c) {
+<span class="nc" id="L444">    String hex = Integer.toHexString(c);</span>
+<span class="nc" id="L445">    hex = &quot;0000&quot;.substring(0, 4 - hex.length()) + hex;</span>
+<span class="nc" id="L446">    throw new IllegalArgumentException(&quot;Illegal character: &quot; + c + &quot; (0x&quot; + hex + ')');</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

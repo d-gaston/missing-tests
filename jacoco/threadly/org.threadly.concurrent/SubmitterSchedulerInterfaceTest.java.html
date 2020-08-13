@@ -1,0 +1,461 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SubmitterSchedulerInterfaceTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">SubmitterSchedulerInterfaceTest.java</span></div><h1>SubmitterSchedulerInterfaceTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.junit.Test;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestRunnable;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L20">public abstract class SubmitterSchedulerInterfaceTest extends SubmitterExecutorInterfaceTest {</span>
+  protected abstract SubmitterSchedulerFactory getSubmitterSchedulerFactory();
+  
+  protected abstract boolean isSingleThreaded();
+
+  @Override
+  protected SubmitterExecutorFactory getSubmitterExecutorFactory() {
+<span class="fc" id="L27">    return getSubmitterSchedulerFactory();</span>
+  }
+  
+  @Test
+  @Override
+  public void executeInOrderTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L33">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L35">      SubmitterScheduler executor = factory.makeSubmitterScheduler(1, false);</span>
+<span class="fc" id="L36">      final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L37">      TestRunnable lastRun = null;</span>
+<span class="fc" id="L38">      long startTime = System.currentTimeMillis();</span>
+<span class="fc" id="L39">      int testQty = 0;</span>
+<span class="fc bfc" id="L40" title="All 4 branches covered.">      while (testQty &lt; TEST_QTY || System.currentTimeMillis() - startTime &lt; 100) {</span>
+<span class="fc" id="L41">        testQty++;</span>
+<span class="fc" id="L42">        final TestRunnable fLastRun = lastRun;</span>
+<span class="fc" id="L43">        lastRun = new TestRunnable() {</span>
+          @Override
+          public void handleRunStart() {
+<span class="fc bfc" id="L46" title="All 2 branches covered.">            if (fLastRun != null) {</span>
+<span class="fc" id="L47">              av.assertTrue(fLastRun.ranOnce());</span>
+            }
+<span class="fc" id="L49">            av.signalComplete();</span>
+<span class="fc" id="L50">          }</span>
+        };
+<span class="fc" id="L52">        executor.schedule(DoNothingRunnable.instance(), 5);</span>
+<span class="fc" id="L53">        executor.execute(lastRun);</span>
+<span class="fc" id="L54">      }</span>
+      
+<span class="fc" id="L56">      av.waitForTest(10 * 1000, testQty);</span>
+    } finally {
+<span class="fc" id="L58">      factory.shutdown();</span>
+    }
+<span class="fc" id="L60">  }</span>
+  
+  @Test
+  public void scheduleInOrderTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L64">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L66">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(1, false);</span>
+<span class="fc" id="L67">      final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L68">      TestRunnable lastRun = null;</span>
+<span class="fc" id="L69">      int testQty = 0;</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">      while (testQty &lt; TEST_QTY) {</span>
+<span class="fc" id="L71">        testQty++;</span>
+<span class="fc" id="L72">        final TestRunnable fLastRun = lastRun;</span>
+<span class="fc" id="L73">        lastRun = new TestRunnable() {</span>
+          @Override
+          public void handleRunStart() {
+<span class="fc bfc" id="L76" title="All 2 branches covered.">            if (fLastRun != null) {</span>
+<span class="fc" id="L77">              av.assertTrue(fLastRun.ranOnce());</span>
+            }
+<span class="fc" id="L79">            av.signalComplete();</span>
+<span class="fc" id="L80">          }</span>
+        };
+        
+        // TODO - can we adjust the DELAY_TIME so that we are more likely to have collisions?
+<span class="fc" id="L84">        scheduler.schedule(lastRun, DELAY_TIME);</span>
+<span class="fc" id="L85">      }</span>
+      
+<span class="fc" id="L87">      av.waitForTest(10 * 1000, testQty);</span>
+    } finally {
+<span class="fc" id="L89">      factory.shutdown();</span>
+    }
+<span class="fc" id="L91">  }</span>
+  
+  @Test
+  public void scheduleTest() {
+<span class="fc" id="L95">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L97">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L99">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L100" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L101">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L102">        scheduler.schedule(tr, DELAY_TIME);</span>
+<span class="fc" id="L103">        runnables.add(tr);</span>
+      }
+      
+      // verify execution and execution times
+<span class="fc" id="L107">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L109">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L110">        long executionDelay = tr.getDelayTillFirstRun();</span>
+<span class="pc bpc" id="L111" title="1 of 2 branches missed.">        assertTrue(executionDelay &gt;= DELAY_TIME);</span>
+        // should be very timely with a core pool size that matches runnable count
+<span class="pc bpc" id="L113" title="2 of 4 branches missed.">        assertTrue(executionDelay &lt;= (DELAY_TIME + (SLOW_MACHINE ? 2000 : 1000)));</span>
+<span class="fc" id="L114">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L115">      }</span>
+    } finally {
+<span class="fc" id="L117">      factory.shutdown();</span>
+    }
+<span class="fc" id="L119">  }</span>
+  
+  @Test
+  public void scheduleNoDelayTest() {
+<span class="fc" id="L123">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L125">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L127">      TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L128">      scheduler.schedule(tr, 0);</span>
+<span class="fc" id="L129">      tr.blockTillStarted();</span>
+<span class="fc" id="L130">      assertEquals(1, tr.getRunCount());</span>
+    } finally {
+<span class="fc" id="L132">      factory.shutdown();</span>
+    }
+<span class="fc" id="L134">  }</span>
+  
+  @Test
+  public void submitScheduledRunnableNoDelayTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L138">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L140">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L142">      TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L143">      ListenableFuture&lt;?&gt; f = scheduler.submitScheduled(tr, 0);</span>
+<span class="fc" id="L144">      assertNotNull(f);</span>
+<span class="fc" id="L145">      tr.blockTillFinished();</span>
+<span class="fc" id="L146">      assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L147">      assertNull(f.get());</span>
+    } finally {
+<span class="fc" id="L149">      factory.shutdown();</span>
+    }
+<span class="fc" id="L151">  }</span>
+  
+  @Test
+  public void submitScheduledCallableNoDelayTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L155">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L157">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L159">      TestCallable tc = new TestCallable(0);</span>
+<span class="fc" id="L160">      ListenableFuture&lt;?&gt; f = scheduler.submitScheduled(tc, 0);</span>
+<span class="fc" id="L161">      assertNotNull(f);</span>
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">      assertTrue(tc.getReturnedResult() == f.get());</span>
+    } finally {
+<span class="fc" id="L164">      factory.shutdown();</span>
+    }
+<span class="fc" id="L166">  }</span>
+  
+  @Test
+  public void scheduleFail() {
+<span class="fc" id="L170">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L172">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(1, false);</span>
+      try {
+<span class="nc" id="L174">        scheduler.schedule(null, 1000);</span>
+<span class="nc" id="L175">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L176">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L178">      }</span>
+      try {
+<span class="nc" id="L180">        scheduler.schedule(DoNothingRunnable.instance(), -1);</span>
+<span class="nc" id="L181">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L182">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L184">      }</span>
+    } finally {
+<span class="fc" id="L186">      factory.shutdown();</span>
+    }
+<span class="fc" id="L188">  }</span>
+  
+  @Test
+  public void scheduleWithFixedDelayTest() {
+<span class="fc" id="L192">    recurringExecutionTest(false, true);</span>
+<span class="fc" id="L193">  }</span>
+  
+  @Test
+  public void scheduleWithFixedDelayInitialDelayTest() {
+<span class="fc" id="L197">    recurringExecutionTest(true, true);</span>
+<span class="fc" id="L198">  }</span>
+  
+  @Test
+  public void scheduleAtFixedRateTest() {
+<span class="fc" id="L202">    recurringExecutionTest(false, false);</span>
+<span class="fc" id="L203">  }</span>
+  
+  @Test
+  public void scheduleAtFixedRateInitialDelayTest() {
+<span class="fc" id="L207">    recurringExecutionTest(true, false);</span>
+<span class="fc" id="L208">  }</span>
+  
+  protected void recurringExecutionTest(boolean initialDelay, boolean fixedDelay) {
+<span class="fc bfc" id="L211" title="All 2 branches covered.">    final int initialDelayInMillis = initialDelay ? DELAY_TIME : 0;</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">    final int expectedMinimumDelay = DELAY_TIME * (CYCLE_COUNT - (initialDelay ? 0 : 1));</span>
+<span class="fc" id="L213">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L215">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L217">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">        TestRunnable tr = new TestRunnable(fixedDelay ? 0 : DELAY_TIME);</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">        if (fixedDelay) {</span>
+<span class="fc" id="L221">          scheduler.scheduleWithFixedDelay(tr, initialDelayInMillis, DELAY_TIME);</span>
+        } else {
+<span class="fc" id="L223">          scheduler.scheduleAtFixedRate(tr, initialDelayInMillis, DELAY_TIME);</span>
+        }
+<span class="fc" id="L225">        runnables.add(tr);</span>
+      }
+      
+      // verify execution and execution times
+<span class="fc" id="L229">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L230" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L231">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L232">        tr.blockTillFinished((TEST_QTY * (expectedMinimumDelay + 5000)), CYCLE_COUNT);</span>
+<span class="fc bfc" id="L233" title="All 2 branches covered.">        if (initialDelay) {</span>
+<span class="fc" id="L234">          long executionDelay = tr.getDelayTillFirstRun();</span>
+<span class="pc bpc" id="L235" title="1 of 2 branches missed.">          assertTrue(executionDelay &gt;= DELAY_TIME);</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">          if (! isSingleThreaded()) {</span>
+            // should be very timely with a core pool size that matches runnable count
+<span class="pc bpc" id="L238" title="2 of 4 branches missed.">            assertTrue(executionDelay &lt;= DELAY_TIME + (SLOW_MACHINE ? 10_000 : 2_000));</span>
+          }
+        }
+        
+<span class="fc" id="L242">        long executionDelay = tr.getDelayTillRun(CYCLE_COUNT);</span>
+<span class="pc bpc" id="L243" title="1 of 2 branches missed.">        assertTrue(executionDelay &gt;= expectedMinimumDelay);</span>
+        // should be very timely with a core pool size that matches runnable count
+<span class="fc bfc" id="L245" title="All 2 branches covered.">        if (! isSingleThreaded()) {</span>
+<span class="pc bpc" id="L246" title="2 of 4 branches missed.">          assertTrue(executionDelay &lt;= expectedMinimumDelay + (SLOW_MACHINE ? 10_000 : 2_000));</span>
+        }
+<span class="fc" id="L248">      }</span>
+    } finally {
+<span class="fc" id="L250">      factory.shutdown();</span>
+    }
+<span class="fc" id="L252">  }</span>
+  
+  @Test
+  public void recurringExecutionFail() {
+<span class="fc" id="L256">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L258">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(1, false);</span>
+      try {
+<span class="nc" id="L260">        scheduler.scheduleWithFixedDelay(null, 1000, 1000);</span>
+<span class="nc" id="L261">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L262">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L264">      }</span>
+      try {
+<span class="nc" id="L266">        scheduler.scheduleWithFixedDelay(DoNothingRunnable.instance(), -1, 1000);</span>
+<span class="nc" id="L267">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L268">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L270">      }</span>
+      try {
+<span class="nc" id="L272">        scheduler.scheduleWithFixedDelay(DoNothingRunnable.instance(), 1000, -1);</span>
+<span class="nc" id="L273">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L274">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L276">      }</span>
+    } finally {
+<span class="fc" id="L278">      factory.shutdown();</span>
+    }
+<span class="fc" id="L280">  }</span>
+  
+  @Test
+  public void submitScheduledRunnableTest() throws InterruptedException, ExecutionException, TimeoutException {
+<span class="fc" id="L284">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L286">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L288">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc" id="L289">      List&lt;Future&lt;?&gt;&gt; futures = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L291">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L292">        Future&lt;?&gt; future = scheduler.submitScheduled(tr, DELAY_TIME);</span>
+<span class="fc" id="L293">        assertNotNull(future);</span>
+<span class="fc" id="L294">        runnables.add(tr);</span>
+<span class="fc" id="L295">        futures.add(future);</span>
+      }
+      
+      // verify execution and execution times
+<span class="fc" id="L299">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L300" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L301">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L302">        long executionDelay = tr.getDelayTillFirstRun();</span>
+<span class="pc bpc" id="L303" title="1 of 2 branches missed.">        assertTrue(executionDelay &gt;= DELAY_TIME);</span>
+        // should be very timely with a core pool size that matches runnable count
+<span class="pc bpc" id="L305" title="1 of 2 branches missed.">        assertTrue(executionDelay &lt;= (DELAY_TIME + 2000));  </span>
+<span class="fc" id="L306">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L307">      }</span>
+      
+<span class="fc" id="L309">      Iterator&lt;Future&lt;?&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L310" title="All 2 branches covered.">      while (futureIt.hasNext()) {</span>
+<span class="fc" id="L311">        Future&lt;?&gt; future = futureIt.next();</span>
+        // future should basically be done already, but we set a bit of a timeout in case of slow systems
+<span class="fc" id="L313">        assertNull(future.get(10, TimeUnit.SECONDS));</span>
+<span class="fc" id="L314">        assertTrue(future.isDone());</span>
+<span class="fc" id="L315">      }</span>
+    } finally {
+<span class="fc" id="L317">      factory.shutdown();</span>
+    }
+<span class="fc" id="L319">  }</span>
+  
+  @Test
+  public void submitScheduledRunnableWithResultTest() throws InterruptedException, ExecutionException, TimeoutException {
+<span class="fc" id="L323">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L325">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L327">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc" id="L328">      List&lt;Future&lt;TestRunnable&gt;&gt; futures = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L329" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L330">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L331">        Future&lt;TestRunnable&gt; future = scheduler.submitScheduled(tr, tr, DELAY_TIME);</span>
+<span class="fc" id="L332">        assertNotNull(future);</span>
+<span class="fc" id="L333">        runnables.add(tr);</span>
+<span class="fc" id="L334">        futures.add(future);</span>
+      }
+      
+      // verify execution and execution times
+<span class="fc" id="L338">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L339" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L340">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L341">        long executionDelay = tr.getDelayTillFirstRun();</span>
+<span class="pc bpc" id="L342" title="1 of 2 branches missed.">        assertTrue(executionDelay &gt;= DELAY_TIME);</span>
+        // should be very timely with a core pool size that matches runnable count
+<span class="pc bpc" id="L344" title="2 of 4 branches missed.">        assertTrue(executionDelay &lt;= (DELAY_TIME + (SLOW_MACHINE ? 2000 : 1000)));  </span>
+<span class="fc" id="L345">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L346">      }</span>
+      
+<span class="fc" id="L348">      it = runnables.iterator();</span>
+<span class="fc" id="L349">      Iterator&lt;Future&lt;TestRunnable&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L350" title="All 2 branches covered.">      while (futureIt.hasNext()) {</span>
+<span class="fc" id="L351">        Future&lt;?&gt; future = futureIt.next();</span>
+<span class="pc bpc" id="L352" title="1 of 2 branches missed.">        assertTrue(future.get(10, TimeUnit.SECONDS) == it.next());</span>
+<span class="fc" id="L353">        assertTrue(future.isDone());</span>
+<span class="fc" id="L354">      }</span>
+    } finally {
+<span class="fc" id="L356">      factory.shutdown();</span>
+    }
+<span class="fc" id="L358">  }</span>
+  
+  @Test
+  public void submitScheduledCallableTest() throws InterruptedException, ExecutionException, TimeoutException {
+<span class="fc" id="L362">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L364">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(TEST_QTY, true);</span>
+      
+<span class="fc" id="L366">      List&lt;TestCallable&gt; callables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc" id="L367">      List&lt;Future&lt;Object&gt;&gt; futures = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L368" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L369">        TestCallable tc = new TestCallable(0);</span>
+<span class="fc" id="L370">        Future&lt;Object&gt; future = scheduler.submitScheduled(tc, DELAY_TIME);</span>
+<span class="fc" id="L371">        assertNotNull(future);</span>
+<span class="fc" id="L372">        callables.add(tc);</span>
+<span class="fc" id="L373">        futures.add(future);</span>
+      }
+      
+      // verify execution and execution times
+<span class="fc" id="L377">      Iterator&lt;TestCallable&gt; it = callables.iterator();</span>
+<span class="fc" id="L378">      Iterator&lt;Future&lt;Object&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L379" title="All 2 branches covered.">      while (futureIt.hasNext()) {</span>
+<span class="fc" id="L380">        Future&lt;Object&gt; future = futureIt.next();</span>
+<span class="fc" id="L381">        TestCallable tc = it.next();</span>
+  
+<span class="pc bpc" id="L383" title="1 of 2 branches missed.">        assertTrue(tc.getReturnedResult() == future.get(10, TimeUnit.SECONDS));</span>
+<span class="fc" id="L384">        assertTrue(future.isDone());</span>
+        
+<span class="fc" id="L386">        long executionDelay = tc.getDelayTillFirstRun();</span>
+<span class="pc bpc" id="L387" title="1 of 2 branches missed.">        assertTrue(executionDelay &gt;= DELAY_TIME);</span>
+        // should be very timely with a core pool size that matches runnable count
+<span class="pc bpc" id="L389" title="2 of 4 branches missed.">        assertTrue(executionDelay &lt;= (DELAY_TIME + (SLOW_MACHINE ? 2000 : 1000)));</span>
+<span class="fc" id="L390">      }</span>
+    } finally {
+<span class="fc" id="L392">      factory.shutdown();</span>
+    }
+<span class="fc" id="L394">  }</span>
+  
+  @Test
+  public void submitScheduledRunnableFail() {
+<span class="fc" id="L398">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L400">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(1, false);</span>
+      try {
+<span class="nc" id="L402">        scheduler.submitScheduled((Runnable)null, 1000);</span>
+<span class="nc" id="L403">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L404">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L406">      }</span>
+      try {
+<span class="nc" id="L408">        scheduler.submitScheduled((Runnable)null, null, 1000);</span>
+<span class="nc" id="L409">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L410">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L412">      }</span>
+      try {
+<span class="nc" id="L414">        scheduler.submitScheduled(DoNothingRunnable.instance(), -1);</span>
+<span class="nc" id="L415">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L416">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L418">      }</span>
+      try {
+<span class="nc" id="L420">        scheduler.submitScheduled(DoNothingRunnable.instance(), null, -1);</span>
+<span class="nc" id="L421">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L422">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L424">      }</span>
+    } finally {
+<span class="fc" id="L426">      factory.shutdown();</span>
+    }
+<span class="fc" id="L428">  }</span>
+  
+  @Test
+  public void submitScheduledCallableFail() {
+<span class="fc" id="L432">    SubmitterSchedulerFactory factory = getSubmitterSchedulerFactory();</span>
+    try {
+<span class="fc" id="L434">      SubmitterScheduler scheduler = factory.makeSubmitterScheduler(1, false);</span>
+      try {
+<span class="nc" id="L436">        scheduler.submitScheduled((Callable&lt;Void&gt;)null, 1000);</span>
+<span class="nc" id="L437">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L438">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L440">      }</span>
+      try {
+<span class="nc" id="L442">        scheduler.submitScheduled(new TestCallable(0), -1);</span>
+<span class="nc" id="L443">        fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L444">      } catch (IllegalArgumentException e) {</span>
+        // expected
+<span class="nc" id="L446">      }</span>
+    } finally {
+<span class="fc" id="L448">      factory.shutdown();</span>
+    }
+<span class="fc" id="L450">  }</span>
+  
+  public interface SubmitterSchedulerFactory extends SubmitterExecutorFactory {
+    public SubmitterScheduler makeSubmitterScheduler(int poolSize, boolean prestartIfAvailable);
+    
+    @Override
+    public default SubmitterExecutor makeSubmitterExecutor(int poolSize, boolean prestartIfAvailable) {
+<span class="fc" id="L457">      return makeSubmitterScheduler(poolSize, prestartIfAvailable);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

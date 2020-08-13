@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>GlobalHistogramBinarizer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common</a> &gt; <span class="el_source">GlobalHistogramBinarizer.java</span></div><h1>GlobalHistogramBinarizer.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2009 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common;
+
+import com.google.zxing.Binarizer;
+import com.google.zxing.LuminanceSource;
+import com.google.zxing.NotFoundException;
+
+/**
+ * This Binarizer implementation uses the old ZXing global histogram approach. It is suitable
+ * for low-end mobile devices which don't have enough CPU or memory to use a local thresholding
+ * algorithm. However, because it picks a global black point, it cannot handle difficult shadows
+ * and gradients.
+ *
+ * Faster mobile devices and all desktop applications should probably use HybridBinarizer instead.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ * @author Sean Owen
+ */
+public class GlobalHistogramBinarizer extends Binarizer {
+
+  private static final int LUMINANCE_BITS = 5;
+  private static final int LUMINANCE_SHIFT = 8 - LUMINANCE_BITS;
+  private static final int LUMINANCE_BUCKETS = 1 &lt;&lt; LUMINANCE_BITS;
+<span class="fc" id="L39">  private static final byte[] EMPTY = new byte[0];</span>
+
+  private byte[] luminances;
+  private final int[] buckets;
+
+  public GlobalHistogramBinarizer(LuminanceSource source) {
+<span class="fc" id="L45">    super(source);</span>
+<span class="fc" id="L46">    luminances = EMPTY;</span>
+<span class="fc" id="L47">    buckets = new int[LUMINANCE_BUCKETS];</span>
+<span class="fc" id="L48">  }</span>
+
+  // Applies simple sharpening to the row data to improve performance of the 1D Readers.
+  @Override
+  public BitArray getBlackRow(int y, BitArray row) throws NotFoundException {
+<span class="fc" id="L53">    LuminanceSource source = getLuminanceSource();</span>
+<span class="fc" id="L54">    int width = source.getWidth();</span>
+<span class="pc bpc" id="L55" title="1 of 4 branches missed.">    if (row == null || row.getSize() &lt; width) {</span>
+<span class="fc" id="L56">      row = new BitArray(width);</span>
+    } else {
+<span class="fc" id="L58">      row.clear();</span>
+    }
+
+<span class="fc" id="L61">    initArrays(width);</span>
+<span class="fc" id="L62">    byte[] localLuminances = source.getRow(y, luminances);</span>
+<span class="fc" id="L63">    int[] localBuckets = buckets;</span>
+<span class="fc bfc" id="L64" title="All 2 branches covered.">    for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc" id="L65">      localBuckets[(localLuminances[x] &amp; 0xff) &gt;&gt; LUMINANCE_SHIFT]++;</span>
+    }
+<span class="fc" id="L67">    int blackPoint = estimateBlackPoint(localBuckets);</span>
+
+<span class="pc bpc" id="L69" title="1 of 2 branches missed.">    if (width &lt; 3) {</span>
+      // Special case for very small images
+<span class="nc bnc" id="L71" title="All 2 branches missed.">      for (int x = 0; x &lt; width; x++) {</span>
+<span class="nc bnc" id="L72" title="All 2 branches missed.">        if ((localLuminances[x] &amp; 0xff) &lt; blackPoint) {</span>
+<span class="nc" id="L73">          row.set(x);</span>
+        }
+      }
+    } else {
+<span class="fc" id="L77">      int left = localLuminances[0] &amp; 0xff;</span>
+<span class="fc" id="L78">      int center = localLuminances[1] &amp; 0xff;</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      for (int x = 1; x &lt; width - 1; x++) {</span>
+<span class="fc" id="L80">        int right = localLuminances[x + 1] &amp; 0xff;</span>
+        // A simple -1 4 -1 box filter with a weight of 2.
+<span class="fc bfc" id="L82" title="All 2 branches covered.">        if (((center * 4) - left - right) / 2 &lt; blackPoint) {</span>
+<span class="fc" id="L83">          row.set(x);</span>
+        }
+<span class="fc" id="L85">        left = center;</span>
+<span class="fc" id="L86">        center = right;</span>
+      }
+    }
+<span class="fc" id="L89">    return row;</span>
+  }
+
+  // Does not sharpen the data, as this call is intended to only be used by 2D Readers.
+  @Override
+  public BitMatrix getBlackMatrix() throws NotFoundException {
+<span class="fc" id="L95">    LuminanceSource source = getLuminanceSource();</span>
+<span class="fc" id="L96">    int width = source.getWidth();</span>
+<span class="fc" id="L97">    int height = source.getHeight();</span>
+<span class="fc" id="L98">    BitMatrix matrix = new BitMatrix(width, height);</span>
+
+    // Quickly calculates the histogram by sampling four rows from the image. This proved to be
+    // more robust on the blackbox tests than sampling a diagonal as we used to do.
+<span class="fc" id="L102">    initArrays(width);</span>
+<span class="fc" id="L103">    int[] localBuckets = buckets;</span>
+<span class="fc bfc" id="L104" title="All 2 branches covered.">    for (int y = 1; y &lt; 5; y++) {</span>
+<span class="fc" id="L105">      int row = height * y / 5;</span>
+<span class="fc" id="L106">      byte[] localLuminances = source.getRow(row, luminances);</span>
+<span class="fc" id="L107">      int right = (width * 4) / 5;</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">      for (int x = width / 5; x &lt; right; x++) {</span>
+<span class="fc" id="L109">        int pixel = localLuminances[x] &amp; 0xff;</span>
+<span class="fc" id="L110">        localBuckets[pixel &gt;&gt; LUMINANCE_SHIFT]++;</span>
+      }
+    }
+<span class="fc" id="L113">    int blackPoint = estimateBlackPoint(localBuckets);</span>
+
+    // We delay reading the entire image luminance until the black point estimation succeeds.
+    // Although we end up reading four rows twice, it is consistent with our motto of
+    // &quot;fail quickly&quot; which is necessary for continuous scanning.
+<span class="fc" id="L118">    byte[] localLuminances = source.getMatrix();</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc" id="L120">      int offset = y * width;</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">      for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc" id="L122">        int pixel = localLuminances[offset + x] &amp; 0xff;</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">        if (pixel &lt; blackPoint) {</span>
+<span class="fc" id="L124">          matrix.set(x, y);</span>
+        }
+      }
+    }
+
+<span class="fc" id="L129">    return matrix;</span>
+  }
+
+  @Override
+  public Binarizer createBinarizer(LuminanceSource source) {
+<span class="nc" id="L134">    return new GlobalHistogramBinarizer(source);</span>
+  }
+
+  private void initArrays(int luminanceSize) {
+<span class="fc bfc" id="L138" title="All 2 branches covered.">    if (luminances.length &lt; luminanceSize) {</span>
+<span class="fc" id="L139">      luminances = new byte[luminanceSize];</span>
+    }
+<span class="fc bfc" id="L141" title="All 2 branches covered.">    for (int x = 0; x &lt; LUMINANCE_BUCKETS; x++) {</span>
+<span class="fc" id="L142">      buckets[x] = 0;</span>
+    }
+<span class="fc" id="L144">  }</span>
+
+  private static int estimateBlackPoint(int[] buckets) throws NotFoundException {
+    // Find the tallest peak in the histogram.
+<span class="fc" id="L148">    int numBuckets = buckets.length;</span>
+<span class="fc" id="L149">    int maxBucketCount = 0;</span>
+<span class="fc" id="L150">    int firstPeak = 0;</span>
+<span class="fc" id="L151">    int firstPeakSize = 0;</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">    for (int x = 0; x &lt; numBuckets; x++) {</span>
+<span class="fc bfc" id="L153" title="All 2 branches covered.">      if (buckets[x] &gt; firstPeakSize) {</span>
+<span class="fc" id="L154">        firstPeak = x;</span>
+<span class="fc" id="L155">        firstPeakSize = buckets[x];</span>
+      }
+<span class="fc bfc" id="L157" title="All 2 branches covered.">      if (buckets[x] &gt; maxBucketCount) {</span>
+<span class="fc" id="L158">        maxBucketCount = buckets[x];</span>
+      }
+    }
+
+    // Find the second-tallest peak which is somewhat far from the tallest peak.
+<span class="fc" id="L163">    int secondPeak = 0;</span>
+<span class="fc" id="L164">    int secondPeakScore = 0;</span>
+<span class="fc bfc" id="L165" title="All 2 branches covered.">    for (int x = 0; x &lt; numBuckets; x++) {</span>
+<span class="fc" id="L166">      int distanceToBiggest = x - firstPeak;</span>
+      // Encourage more distant second peaks by multiplying by square of distance.
+<span class="fc" id="L168">      int score = buckets[x] * distanceToBiggest * distanceToBiggest;</span>
+<span class="fc bfc" id="L169" title="All 2 branches covered.">      if (score &gt; secondPeakScore) {</span>
+<span class="fc" id="L170">        secondPeak = x;</span>
+<span class="fc" id="L171">        secondPeakScore = score;</span>
+      }
+    }
+
+    // Make sure firstPeak corresponds to the black peak.
+<span class="fc bfc" id="L176" title="All 2 branches covered.">    if (firstPeak &gt; secondPeak) {</span>
+<span class="fc" id="L177">      int temp = firstPeak;</span>
+<span class="fc" id="L178">      firstPeak = secondPeak;</span>
+<span class="fc" id="L179">      secondPeak = temp;</span>
+    }
+
+    // If there is too little contrast in the image to pick a meaningful black point, throw rather
+    // than waste time trying to decode the image, and risk false positives.
+<span class="fc bfc" id="L184" title="All 2 branches covered.">    if (secondPeak - firstPeak &lt;= numBuckets / 16) {</span>
+<span class="fc" id="L185">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+    // Find a valley between them that is low and closer to the white peak.
+<span class="fc" id="L189">    int bestValley = secondPeak - 1;</span>
+<span class="fc" id="L190">    int bestValleyScore = -1;</span>
+<span class="fc bfc" id="L191" title="All 2 branches covered.">    for (int x = secondPeak - 1; x &gt; firstPeak; x--) {</span>
+<span class="fc" id="L192">      int fromFirst = x - firstPeak;</span>
+<span class="fc" id="L193">      int score = fromFirst * fromFirst * (secondPeak - x) * (maxBucketCount - buckets[x]);</span>
+<span class="fc bfc" id="L194" title="All 2 branches covered.">      if (score &gt; bestValleyScore) {</span>
+<span class="fc" id="L195">        bestValley = x;</span>
+<span class="fc" id="L196">        bestValleyScore = score;</span>
+      }
+    }
+
+<span class="fc" id="L200">    return bestValley &lt;&lt; LUMINANCE_SHIFT;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

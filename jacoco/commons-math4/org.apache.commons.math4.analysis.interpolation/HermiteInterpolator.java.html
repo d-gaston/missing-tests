@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>HermiteInterpolator.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.analysis.interpolation</a> &gt; <span class="el_source">HermiteInterpolator.java</span></div><h1>HermiteInterpolator.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.analysis.interpolation;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import org.apache.commons.math4.analysis.differentiation.DerivativeStructure;
+import org.apache.commons.math4.analysis.differentiation.UnivariateDifferentiableVectorFunction;
+import org.apache.commons.math4.analysis.polynomials.PolynomialFunction;
+import org.apache.commons.math4.exception.MathArithmeticException;
+import org.apache.commons.math4.exception.NoDataException;
+import org.apache.commons.math4.exception.ZeroException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.numbers.combinatorics.Factorial;
+
+/** Polynomial interpolator using both sample values and sample derivatives.
+ * &lt;p&gt;
+ * The interpolation polynomials match all sample points, including both values
+ * and provided derivatives. There is one polynomial for each component of
+ * the values vector. All polynomials have the same degree. The degree of the
+ * polynomials depends on the number of points and number of derivatives at each
+ * point. For example the interpolation polynomials for n sample points without
+ * any derivatives all have degree n-1. The interpolation polynomials for n
+ * sample points with the two extreme points having value and first derivative
+ * and the remaining points having value only all have degree n+1. The
+ * interpolation polynomial for n sample points with value, first and second
+ * derivative for all points all have degree 3n-1.
+ * &lt;/p&gt;
+ *
+ * @since 3.1
+ */
+public class HermiteInterpolator implements UnivariateDifferentiableVectorFunction {
+
+    /** Sample abscissae. */
+    private final List&lt;Double&gt; abscissae;
+
+    /** Top diagonal of the divided differences array. */
+    private final List&lt;double[]&gt; topDiagonal;
+
+    /** Bottom diagonal of the divided differences array. */
+    private final List&lt;double[]&gt; bottomDiagonal;
+
+    /** Create an empty interpolator.
+     */
+<span class="fc" id="L61">    public HermiteInterpolator() {</span>
+<span class="fc" id="L62">        this.abscissae      = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L63">        this.topDiagonal    = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L64">        this.bottomDiagonal = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L65">    }</span>
+
+    /** Add a sample point.
+     * &lt;p&gt;
+     * This method must be called once for each sample point. It is allowed to
+     * mix some calls with values only with calls with values and first
+     * derivatives.
+     * &lt;/p&gt;
+     * &lt;p&gt;
+     * The point abscissae for all calls &lt;em&gt;must&lt;/em&gt; be different.
+     * &lt;/p&gt;
+     * @param x abscissa of the sample point
+     * @param value value and derivatives of the sample point
+     * (if only one row is passed, it is the value, if two rows are
+     * passed the first one is the value and the second the derivative
+     * and so on)
+     * @exception ZeroException if the abscissa difference between added point
+     * and a previous point is zero (i.e. the two points are at same abscissa)
+     * @exception MathArithmeticException if the number of derivatives is larger
+     * than 20, which prevents computation of a factorial
+     */
+    public void addSamplePoint(final double x, final double[] ... value)
+        throws ZeroException, MathArithmeticException {
+
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">        if (value.length &gt; 20) {</span>
+<span class="nc" id="L90">            throw new MathArithmeticException(LocalizedFormats.NUMBER_TOO_LARGE, value.length, 20);</span>
+        }
+<span class="fc bfc" id="L92" title="All 2 branches covered.">        for (int i = 0; i &lt; value.length; ++i) {</span>
+<span class="fc" id="L93">            final double[] y = value[i].clone();</span>
+<span class="fc bfc" id="L94" title="All 2 branches covered.">            if (i &gt; 1) {</span>
+<span class="fc" id="L95">                double inv = 1.0 / Factorial.value(i);</span>
+<span class="fc bfc" id="L96" title="All 2 branches covered.">                for (int j = 0; j &lt; y.length; ++j) {</span>
+<span class="fc" id="L97">                    y[j] *= inv;</span>
+                }
+            }
+
+            // update the bottom diagonal of the divided differences array
+<span class="fc" id="L102">            final int n = abscissae.size();</span>
+<span class="fc" id="L103">            bottomDiagonal.add(n - i, y);</span>
+<span class="fc" id="L104">            double[] bottom0 = y;</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">            for (int j = i; j &lt; n; ++j) {</span>
+<span class="fc" id="L106">                final double[] bottom1 = bottomDiagonal.get(n - (j + 1));</span>
+<span class="fc" id="L107">                final double inv = 1.0 / (x - abscissae.get(n - (j + 1)));</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">                if (Double.isInfinite(inv)) {</span>
+<span class="fc" id="L109">                    throw new ZeroException(LocalizedFormats.DUPLICATED_ABSCISSA_DIVISION_BY_ZERO, x);</span>
+                }
+<span class="fc bfc" id="L111" title="All 2 branches covered.">                for (int k = 0; k &lt; y.length; ++k) {</span>
+<span class="fc" id="L112">                    bottom1[k] = inv * (bottom0[k] - bottom1[k]);</span>
+                }
+<span class="fc" id="L114">                bottom0 = bottom1;</span>
+            }
+
+            // update the top diagonal of the divided differences array
+<span class="fc" id="L118">            topDiagonal.add(bottom0.clone());</span>
+
+            // update the abscissae array
+<span class="fc" id="L121">            abscissae.add(x);</span>
+
+        }
+
+<span class="fc" id="L125">    }</span>
+
+    /** Compute the interpolation polynomials.
+     * @return interpolation polynomials array
+     * @exception NoDataException if sample is empty
+     */
+    public PolynomialFunction[] getPolynomials()
+        throws NoDataException {
+
+        // safety check
+<span class="fc" id="L135">        checkInterpolation();</span>
+
+        // iteration initialization
+<span class="fc" id="L138">        final PolynomialFunction zero = polynomial(0);</span>
+<span class="fc" id="L139">        PolynomialFunction[] polynomials = new PolynomialFunction[topDiagonal.get(0).length];</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">        for (int i = 0; i &lt; polynomials.length; ++i) {</span>
+<span class="fc" id="L141">            polynomials[i] = zero;</span>
+        }
+<span class="fc" id="L143">        PolynomialFunction coeff = polynomial(1);</span>
+
+        // build the polynomials by iterating on the top diagonal of the divided differences array
+<span class="fc bfc" id="L146" title="All 2 branches covered.">        for (int i = 0; i &lt; topDiagonal.size(); ++i) {</span>
+<span class="fc" id="L147">            double[] tdi = topDiagonal.get(i);</span>
+<span class="fc bfc" id="L148" title="All 2 branches covered.">            for (int k = 0; k &lt; polynomials.length; ++k) {</span>
+<span class="fc" id="L149">                polynomials[k] = polynomials[k].add(coeff.multiply(polynomial(tdi[k])));</span>
+            }
+<span class="fc" id="L151">            coeff = coeff.multiply(polynomial(-abscissae.get(i), 1.0));</span>
+        }
+
+<span class="fc" id="L154">        return polynomials;</span>
+
+    }
+
+    /** Interpolate value at a specified abscissa.
+     * &lt;p&gt;
+     * Calling this method is equivalent to call the {@link PolynomialFunction#value(double)
+     * value} methods of all polynomials returned by {@link #getPolynomials() getPolynomials},
+     * except it does not build the intermediate polynomials, so this method is faster and
+     * numerically more stable.
+     * &lt;/p&gt;
+     * @param x interpolation abscissa
+     * @return interpolated value
+     * @exception NoDataException if sample is empty
+     */
+    @Override
+    public double[] value(double x) throws NoDataException {
+
+        // safety check
+<span class="fc" id="L173">        checkInterpolation();</span>
+
+<span class="fc" id="L175">        final double[] value = new double[topDiagonal.get(0).length];</span>
+<span class="fc" id="L176">        double valueCoeff = 1;</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">        for (int i = 0; i &lt; topDiagonal.size(); ++i) {</span>
+<span class="fc" id="L178">            double[] dividedDifference = topDiagonal.get(i);</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">            for (int k = 0; k &lt; value.length; ++k) {</span>
+<span class="fc" id="L180">                value[k] += dividedDifference[k] * valueCoeff;</span>
+            }
+<span class="fc" id="L182">            final double deltaX = x - abscissae.get(i);</span>
+<span class="fc" id="L183">            valueCoeff *= deltaX;</span>
+        }
+
+<span class="fc" id="L186">        return value;</span>
+
+    }
+
+    /** Interpolate value at a specified abscissa.
+     * &lt;p&gt;
+     * Calling this method is equivalent to call the {@link
+     * PolynomialFunction#value(DerivativeStructure) value} methods of all polynomials
+     * returned by {@link #getPolynomials() getPolynomials}, except it does not build the
+     * intermediate polynomials, so this method is faster and numerically more stable.
+     * &lt;/p&gt;
+     * @param x interpolation abscissa
+     * @return interpolated value
+     * @exception NoDataException if sample is empty
+     */
+    @Override
+    public DerivativeStructure[] value(final DerivativeStructure x)
+        throws NoDataException {
+
+        // safety check
+<span class="fc" id="L206">        checkInterpolation();</span>
+
+<span class="fc" id="L208">        final DerivativeStructure[] value = new DerivativeStructure[topDiagonal.get(0).length];</span>
+<span class="fc" id="L209">        Arrays.fill(value, x.getField().getZero());</span>
+<span class="fc" id="L210">        DerivativeStructure valueCoeff = x.getField().getOne();</span>
+<span class="fc bfc" id="L211" title="All 2 branches covered.">        for (int i = 0; i &lt; topDiagonal.size(); ++i) {</span>
+<span class="fc" id="L212">            double[] dividedDifference = topDiagonal.get(i);</span>
+<span class="fc bfc" id="L213" title="All 2 branches covered.">            for (int k = 0; k &lt; value.length; ++k) {</span>
+<span class="fc" id="L214">                value[k] = value[k].add(valueCoeff.multiply(dividedDifference[k]));</span>
+            }
+<span class="fc" id="L216">            final DerivativeStructure deltaX = x.subtract(abscissae.get(i));</span>
+<span class="fc" id="L217">            valueCoeff = valueCoeff.multiply(deltaX);</span>
+        }
+
+<span class="fc" id="L220">        return value;</span>
+
+    }
+
+    /** Check interpolation can be performed.
+     * @exception NoDataException if interpolation cannot be performed
+     * because sample is empty
+     */
+    private void checkInterpolation() throws NoDataException {
+<span class="fc bfc" id="L229" title="All 2 branches covered.">        if (abscissae.isEmpty()) {</span>
+<span class="fc" id="L230">            throw new NoDataException(LocalizedFormats.EMPTY_INTERPOLATION_SAMPLE);</span>
+        }
+<span class="fc" id="L232">    }</span>
+
+    /** Create a polynomial from its coefficients.
+     * @param c polynomials coefficients
+     * @return polynomial
+     */
+    private PolynomialFunction polynomial(double ... c) {
+<span class="fc" id="L239">        return new PolynomialFunction(c);</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

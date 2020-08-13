@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>WatchdogTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">WatchdogTest.java</span></div><h1>WatchdogTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import static org.junit.Assert.*;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.NoThreadScheduler;
+import org.threadly.test.concurrent.TestUtils;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L13">public class WatchdogTest extends ThreadlyTester {</span>
+  private static final int TIMEOUT = 1;
+  
+  private NoThreadScheduler scheduler;
+  private Watchdog watchdog;
+  
+  @Before
+  public void setup() {
+<span class="fc" id="L21">    scheduler = new NoThreadScheduler();</span>
+<span class="fc" id="L22">    watchdog = new Watchdog(scheduler, TIMEOUT, true);</span>
+<span class="fc" id="L23">  }</span>
+  
+  @After
+  public void cleanup() {
+<span class="fc" id="L27">    scheduler = null;</span>
+<span class="fc" id="L28">    watchdog = null;</span>
+<span class="fc" id="L29">  }</span>
+  
+  @Test
+  public void getTimeoutInMillisTest() {
+<span class="fc" id="L33">    assertEquals(TIMEOUT, watchdog.getTimeoutInMillis());</span>
+<span class="fc" id="L34">  }</span>
+  
+  @Test
+  public void isActiveTest() {
+<span class="fc" id="L38">    assertFalse(watchdog.isActive());</span>
+    
+<span class="fc" id="L40">    ListenableFuture&lt;?&gt; future = FutureUtils.immediateResultFuture(null);</span>
+<span class="fc" id="L41">    watchdog.watch(future);</span>
+    
+<span class="fc" id="L43">    assertFalse(watchdog.isActive());</span>
+    
+<span class="fc" id="L45">    SettableListenableFuture&lt;?&gt; slf = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L46">    watchdog.watch(slf);</span>
+
+<span class="fc" id="L48">    assertTrue(watchdog.isActive());</span>
+    
+<span class="fc" id="L50">    TestUtils.blockTillClockAdvances();</span>
+<span class="fc" id="L51">    assertEquals(1, scheduler.tick(null));</span>
+    
+<span class="fc" id="L53">    assertFalse(watchdog.isActive());</span>
+<span class="fc" id="L54">  }</span>
+  
+  @Test
+  public void alreadyDoneFutureWatchTest() {
+<span class="fc" id="L58">    ListenableFuture&lt;?&gt; future = FutureUtils.immediateResultFuture(null);</span>
+<span class="fc" id="L59">    watchdog.watch(future);</span>
+    
+<span class="fc" id="L61">    assertTrue(watchdog.futures.isEmpty());</span>
+<span class="fc" id="L62">  }</span>
+  
+  @Test
+  public void futureFinishTest() {
+<span class="fc" id="L66">    SettableListenableFuture&lt;?&gt; slf = new SettableListenableFuture&lt;&gt;();</span>
+    
+<span class="fc" id="L68">    watchdog.watch(slf);</span>
+    
+<span class="fc" id="L70">    assertEquals(1, watchdog.futures.size());</span>
+    
+<span class="fc" id="L72">    slf.setResult(null);</span>
+    
+<span class="fc" id="L74">    assertTrue(watchdog.futures.isEmpty());</span>
+<span class="fc" id="L75">  }</span>
+  
+  @Test
+  public void expiredFutureTest() {
+<span class="fc" id="L79">    SettableListenableFuture&lt;?&gt; slf = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L80">    watchdog.watch(slf);</span>
+    
+<span class="fc" id="L82">    TestUtils.blockTillClockAdvances();</span>
+    
+<span class="fc" id="L84">    assertEquals(1, scheduler.tick(null));</span>
+    
+<span class="fc" id="L86">    assertTrue(slf.isCancelled());</span>
+<span class="fc" id="L87">    assertTrue(watchdog.futures.isEmpty());</span>
+<span class="fc" id="L88">  }</span>
+  
+  @Test
+  public void rescheduledFutureCheckTest() throws InterruptedException {
+<span class="fc" id="L92">    long delayTime = 100; // longer than constants DELAY_TIME to ensure we can tick BEFORE the second future times out</span>
+<span class="fc" id="L93">    watchdog = new Watchdog(scheduler, delayTime * 2, true);</span>
+<span class="fc" id="L94">    SettableListenableFuture&lt;?&gt; slf1 = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L95">    watchdog.watch(slf1);</span>
+<span class="fc" id="L96">    TestUtils.sleep(delayTime);</span>
+<span class="fc" id="L97">    SettableListenableFuture&lt;?&gt; slf2 = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L98">    watchdog.watch(slf2);</span>
+    
+<span class="fc" id="L100">    assertEquals(1, scheduler.blockingTick(null));</span>
+<span class="fc" id="L101">    assertTrue(slf1.isCancelled());</span>
+<span class="fc" id="L102">    assertFalse(slf2.isCancelled());</span>
+    
+<span class="fc" id="L104">    assertEquals(1, scheduler.blockingTick(null));</span>
+<span class="fc" id="L105">    assertTrue(slf1.isCancelled());</span>
+<span class="fc" id="L106">    assertTrue(slf2.isCancelled());</span>
+<span class="fc" id="L107">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

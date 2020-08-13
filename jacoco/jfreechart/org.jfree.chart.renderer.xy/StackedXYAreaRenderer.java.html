@@ -1,0 +1,704 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>StackedXYAreaRenderer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">jfreechart$All_in_jfreechart.exec</a> &gt; <a href="index.source.html" class="el_package">org.jfree.chart.renderer.xy</a> &gt; <span class="el_source">StackedXYAreaRenderer.java</span></div><h1>StackedXYAreaRenderer.java</h1><pre class="source lang-java linenums">/* ===========================================================
+ * JFreeChart : a free chart library for the Java(tm) platform
+ * ===========================================================
+ *
+ * (C) Copyright 2000-2017, by Object Refinery Limited and Contributors.
+ *
+ * Project Info:  http://www.jfree.org/jfreechart/index.html
+ *
+ * This library is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2.1 of the License, or
+ * (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+ * USA.
+ *
+ * [Oracle and Java are registered trademarks of Oracle and/or its affiliates. 
+ * Other names may be trademarks of their respective owners.]
+ *
+ * --------------------------
+ * StackedXYAreaRenderer.java
+ * --------------------------
+ * (C) Copyright 2003-2017, by Richard Atkinson and Contributors.
+ *
+ * Original Author:  Richard Atkinson;
+ * Contributor(s):   Christian W. Zuckschwerdt;
+ *                   David Gilbert (for Object Refinery Limited);
+ *                   Ulrich Voigt (patch #312);
+ *
+ * Changes:
+ * --------
+ * 27-Jul-2003 : Initial version (RA);
+ * 30-Jul-2003 : Modified entity constructor (CZ);
+ * 18-Aug-2003 : Now handles null values (RA);
+ * 20-Aug-2003 : Implemented Cloneable, PublicCloneable and Serializable (DG);
+ * 22-Sep-2003 : Changed to be a two pass renderer with optional shape Paint
+ *               and Stroke (RA);
+ * 07-Oct-2003 : Added renderer state (DG);
+ * 10-Feb-2004 : Updated state object and changed drawItem() method to make
+ *               overriding easier (DG);
+ * 25-Feb-2004 : Replaced CrosshairInfo with CrosshairState.  Renamed
+ *               XYToolTipGenerator --&gt; XYItemLabelGenerator (DG);
+ * 15-Jul-2004 : Switched getX() with getXValue() and getY() with
+ *               getYValue() (DG);
+ * 10-Sep-2004 : Removed getRangeType() method (DG);
+ * 11-Nov-2004 : Now uses ShapeUtilities to translate shapes (DG);
+ * 06-Jan-2005 : Override equals() (DG);
+ * 07-Jan-2005 : Update for method name changes in DatasetUtilities (DG);
+ * 28-Mar-2005 : Use getXValue() and getYValue() from dataset (DG);
+ * 06-Jun-2005 : Fixed null pointer exception, plus problems with equals() and
+ *               serialization (DG);
+ * ------------- JFREECHART 1.0.x ---------------------------------------------
+ * 10-Nov-2006 : Fixed bug 1593156, NullPointerException with line
+ *               plotting (DG);
+ * 02-Feb-2007 : Fixed bug 1649686, crosshairs don't stack y-values (DG);
+ * 06-Feb-2007 : Fixed bug 1086307, crosshairs with multiple axes (DG);
+ * 22-Mar-2007 : Fire change events in setShapePaint() and setShapeStroke()
+ *               methods (DG);
+ * 20-Apr-2007 : Updated getLegendItem() for renderer change (DG);
+ * 04-Aug-2014 : Fix entity hotspot (patch #312) (UV);
+ * 18-Feb-2017 : Updates for crosshairs (bug #36) (DG);
+ *
+ */
+
+package org.jfree.chart.renderer.xy;
+
+import java.awt.Graphics2D;
+import java.awt.Paint;
+import java.awt.Point;
+import java.awt.Polygon;
+import java.awt.Shape;
+import java.awt.Stroke;
+import java.awt.geom.Area;
+import java.awt.geom.Line2D;
+import java.awt.geom.Rectangle2D;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.util.Stack;
+
+import org.jfree.chart.axis.ValueAxis;
+import org.jfree.chart.entity.EntityCollection;
+import org.jfree.chart.entity.XYItemEntity;
+import org.jfree.chart.event.RendererChangeEvent;
+import org.jfree.chart.labels.XYToolTipGenerator;
+import org.jfree.chart.plot.CrosshairState;
+import org.jfree.chart.plot.PlotOrientation;
+import org.jfree.chart.plot.PlotRenderingInfo;
+import org.jfree.chart.plot.XYPlot;
+import org.jfree.chart.urls.XYURLGenerator;
+import org.jfree.chart.util.ObjectUtils;
+import org.jfree.chart.util.PaintUtils;
+import org.jfree.chart.util.PublicCloneable;
+import org.jfree.chart.util.SerialUtils;
+import org.jfree.chart.util.ShapeUtils;
+import org.jfree.data.Range;
+import org.jfree.data.general.DatasetUtils;
+import org.jfree.data.xy.TableXYDataset;
+import org.jfree.data.xy.XYDataset;
+
+/**
+ * A stacked area renderer for the {@link XYPlot} class.
+ * &lt;br&gt;&lt;br&gt;
+ * The example shown here is generated by the
+ * {@code StackedXYAreaRendererDemo1.java} program included in the
+ * JFreeChart demo collection:
+ * &lt;br&gt;&lt;br&gt;
+ * &lt;img src=&quot;../../../../../images/StackedXYAreaRendererSample.png&quot;
+ * alt=&quot;StackedXYAreaRendererSample.png&quot;&gt;
+ * &lt;br&gt;&lt;br&gt;
+ * SPECIAL NOTE:  This renderer does not currently handle negative data values
+ * correctly.  This should get fixed at some point, but the current workaround
+ * is to use the {@link StackedXYAreaRenderer2} class instead.
+ */
+public class StackedXYAreaRenderer extends XYAreaRenderer
+        implements Cloneable, PublicCloneable, Serializable {
+
+    /** For serialization. */
+    private static final long serialVersionUID = 5217394318178570889L;
+
+     /**
+     * A state object for use by this renderer.
+     */
+    static class StackedXYAreaRendererState extends XYItemRendererState {
+
+        /** The area for the current series. */
+        private Polygon seriesArea;
+
+        /** The line. */
+        private Line2D line;
+
+        /** The points from the last series. */
+        private Stack lastSeriesPoints;
+
+        /** The points for the current series. */
+        private Stack currentSeriesPoints;
+
+        /**
+         * Creates a new state for the renderer.
+         *
+         * @param info  the plot rendering info.
+         */
+        public StackedXYAreaRendererState(PlotRenderingInfo info) {
+<span class="fc" id="L152">            super(info);</span>
+<span class="fc" id="L153">            this.seriesArea = null;</span>
+<span class="fc" id="L154">            this.line = new Line2D.Double();</span>
+<span class="fc" id="L155">            this.lastSeriesPoints = new Stack();</span>
+<span class="fc" id="L156">            this.currentSeriesPoints = new Stack();</span>
+<span class="fc" id="L157">        }</span>
+
+        /**
+         * Returns the series area.
+         *
+         * @return The series area.
+         */
+        public Polygon getSeriesArea() {
+<span class="fc" id="L165">            return this.seriesArea;</span>
+        }
+
+        /**
+         * Sets the series area.
+         *
+         * @param area  the area.
+         */
+        public void setSeriesArea(Polygon area) {
+<span class="fc" id="L174">            this.seriesArea = area;</span>
+<span class="fc" id="L175">        }</span>
+
+        /**
+         * Returns the working line.
+         *
+         * @return The working line.
+         */
+        public Line2D getLine() {
+<span class="fc" id="L183">            return this.line;</span>
+        }
+
+        /**
+         * Returns the current series points.
+         *
+         * @return The current series points.
+         */
+        public Stack getCurrentSeriesPoints() {
+<span class="fc" id="L192">            return this.currentSeriesPoints;</span>
+        }
+
+        /**
+         * Sets the current series points.
+         *
+         * @param points  the points.
+         */
+        public void setCurrentSeriesPoints(Stack points) {
+<span class="fc" id="L201">            this.currentSeriesPoints = points;</span>
+<span class="fc" id="L202">        }</span>
+
+        /**
+         * Returns the last series points.
+         *
+         * @return The last series points.
+         */
+        public Stack getLastSeriesPoints() {
+<span class="fc" id="L210">            return this.lastSeriesPoints;</span>
+        }
+
+        /**
+         * Sets the last series points.
+         *
+         * @param points  the points.
+         */
+        public void setLastSeriesPoints(Stack points) {
+<span class="fc" id="L219">            this.lastSeriesPoints = points;</span>
+<span class="fc" id="L220">        }</span>
+
+    }
+
+    /**
+     * Custom Paint for drawing all shapes, if null defaults to series shapes
+     */
+<span class="fc" id="L227">    private transient Paint shapePaint = null;</span>
+
+    /**
+     * Custom Stroke for drawing all shapes, if null defaults to series
+     * strokes.
+     */
+<span class="fc" id="L233">    private transient Stroke shapeStroke = null;</span>
+
+    /**
+     * Creates a new renderer.
+     */
+    public StackedXYAreaRenderer() {
+<span class="fc" id="L239">        this(AREA);</span>
+<span class="fc" id="L240">    }</span>
+
+    /**
+     * Constructs a new renderer.
+     *
+     * @param type  the type of the renderer.
+     */
+    public StackedXYAreaRenderer(int type) {
+<span class="fc" id="L248">        this(type, null, null);</span>
+<span class="fc" id="L249">    }</span>
+
+    /**
+     * Constructs a new renderer.  To specify the type of renderer, use one of
+     * the constants: {@code SHAPES}, {@code LINES}, {@code SHAPES_AND_LINES}, 
+     * {@code AREA} or {@code AREA_AND_SHAPES}.
+     *
+     * @param type  the type of renderer.
+     * @param labelGenerator  the tool tip generator ({@code null} permitted).
+     * @param urlGenerator  the URL generator ({@code null} permitted).
+     */
+    public StackedXYAreaRenderer(int type, XYToolTipGenerator labelGenerator,
+            XYURLGenerator urlGenerator) {
+<span class="fc" id="L262">        super(type, labelGenerator, urlGenerator);</span>
+<span class="fc" id="L263">    }</span>
+
+    /**
+     * Returns the paint used for rendering shapes, or {@code null} if
+     * using series paints.
+     *
+     * @return The paint (possibly {@code null}).
+     *
+     * @see #setShapePaint(Paint)
+     */
+    public Paint getShapePaint() {
+<span class="nc" id="L274">        return this.shapePaint;</span>
+    }
+
+    /**
+     * Sets the paint for rendering shapes and sends a
+     * {@link RendererChangeEvent} to all registered listeners.
+     *
+     * @param shapePaint  the paint ({@code null} permitted).
+     *
+     * @see #getShapePaint()
+     */
+    public void setShapePaint(Paint shapePaint) {
+<span class="fc" id="L286">        this.shapePaint = shapePaint;</span>
+<span class="fc" id="L287">        fireChangeEvent();</span>
+<span class="fc" id="L288">    }</span>
+
+    /**
+     * Returns the stroke used for rendering shapes, or {@code null} if
+     * using series strokes.
+     *
+     * @return The stroke (possibly {@code null}).
+     *
+     * @see #setShapeStroke(Stroke)
+     */
+    public Stroke getShapeStroke() {
+<span class="nc" id="L299">        return this.shapeStroke;</span>
+    }
+
+    /**
+     * Sets the stroke for rendering shapes and sends a
+     * {@link RendererChangeEvent} to all registered listeners.
+     *
+     * @param shapeStroke  the stroke ({@code null} permitted).
+     *
+     * @see #getShapeStroke()
+     */
+    public void setShapeStroke(Stroke shapeStroke) {
+<span class="fc" id="L311">        this.shapeStroke = shapeStroke;</span>
+<span class="fc" id="L312">        fireChangeEvent();</span>
+<span class="fc" id="L313">    }</span>
+
+    /**
+     * Initialises the renderer. This method will be called before the first
+     * item is rendered, giving the renderer an opportunity to initialise any
+     * state information it wants to maintain.
+     *
+     * @param g2  the graphics device.
+     * @param dataArea  the area inside the axes.
+     * @param plot  the plot.
+     * @param data  the data.
+     * @param info  an optional info collection object to return data back to
+     *              the caller.
+     *
+     * @return A state object that should be passed to subsequent calls to the
+     *         drawItem() method.
+     */
+    @Override
+    public XYItemRendererState initialise(Graphics2D g2, Rectangle2D dataArea,
+            XYPlot plot, XYDataset data, PlotRenderingInfo info) {
+
+<span class="fc" id="L334">        XYItemRendererState state = new StackedXYAreaRendererState(info);</span>
+        // in the rendering process, there is special handling for item
+        // zero, so we can't support processing of visible data items only
+<span class="fc" id="L337">        state.setProcessVisibleItemsOnly(false);</span>
+<span class="fc" id="L338">        return state;</span>
+    }
+
+    /**
+     * Returns the number of passes required by the renderer.
+     *
+     * @return 2.
+     */
+    @Override
+    public int getPassCount() {
+<span class="fc" id="L348">        return 2;</span>
+    }
+
+    /**
+     * Returns the range of values the renderer requires to display all the
+     * items from the specified dataset.
+     *
+     * @param dataset  the dataset ({@code null} permitted).
+     *
+     * @return The range ([0.0, 0.0] if the dataset contains no values, and
+     *         {@code null} if the dataset is {@code null}).
+     *
+     * @throws ClassCastException if {@code dataset} is not an instance
+     *         of {@link TableXYDataset}.
+     */
+    @Override
+    public Range findRangeBounds(XYDataset dataset) {
+<span class="pc bpc" id="L365" title="1 of 2 branches missed.">        if (dataset != null) {</span>
+<span class="fc" id="L366">            return DatasetUtils.findStackedRangeBounds(</span>
+                (TableXYDataset) dataset);
+        }
+        else {
+<span class="nc" id="L370">            return null;</span>
+        }
+    }
+
+    /**
+     * Draws the visual representation of a single data item.
+     *
+     * @param g2  the graphics device.
+     * @param state  the renderer state.
+     * @param dataArea  the area within which the data is being drawn.
+     * @param info  collects information about the drawing.
+     * @param plot  the plot (can be used to obtain standard color information
+     *              etc).
+     * @param domainAxis  the domain axis.
+     * @param rangeAxis  the range axis.
+     * @param dataset  the dataset.
+     * @param series  the series index (zero-based).
+     * @param item  the item index (zero-based).
+     * @param crosshairState  information about crosshairs on a plot.
+     * @param pass  the pass index.
+     *
+     * @throws ClassCastException if {@code state} is not an instance of
+     *         {@code StackedXYAreaRendererState} or {@code dataset}
+     *         is not an instance of {@link TableXYDataset}.
+     */
+    @Override
+    public void drawItem(Graphics2D g2, XYItemRendererState state,
+            Rectangle2D dataArea, PlotRenderingInfo info, XYPlot plot,
+            ValueAxis domainAxis, ValueAxis rangeAxis, XYDataset dataset,
+            int series, int item, CrosshairState crosshairState, int pass) {
+
+<span class="fc" id="L401">        PlotOrientation orientation = plot.getOrientation();</span>
+<span class="fc" id="L402">        StackedXYAreaRendererState areaState</span>
+            = (StackedXYAreaRendererState) state;
+        // Get the item count for the series, so that we can know which is the
+        // end of the series.
+<span class="fc" id="L406">        TableXYDataset tdataset = (TableXYDataset) dataset;</span>
+<span class="fc" id="L407">        int itemCount = tdataset.getItemCount();</span>
+
+        // get the data point...
+<span class="fc" id="L410">        double x1 = dataset.getXValue(series, item);</span>
+<span class="fc" id="L411">        double y1 = dataset.getYValue(series, item);</span>
+<span class="fc" id="L412">        boolean nullPoint = false;</span>
+<span class="pc bpc" id="L413" title="1 of 2 branches missed.">        if (Double.isNaN(y1)) {</span>
+<span class="nc" id="L414">            y1 = 0.0;</span>
+<span class="nc" id="L415">            nullPoint = true;</span>
+        }
+
+        //  Get height adjustment based on stack and translate to Java2D values
+<span class="fc" id="L419">        double ph1 = getPreviousHeight(tdataset, series, item);</span>
+<span class="fc" id="L420">        double transX1 = domainAxis.valueToJava2D(x1, dataArea,</span>
+<span class="fc" id="L421">                plot.getDomainAxisEdge());</span>
+<span class="fc" id="L422">        double transY1 = rangeAxis.valueToJava2D(y1 + ph1, dataArea,</span>
+<span class="fc" id="L423">                plot.getRangeAxisEdge());</span>
+
+        //  Get series Paint and Stroke
+<span class="fc" id="L426">        Paint seriesPaint = getItemPaint(series, item);</span>
+<span class="fc" id="L427">        Paint seriesFillPaint = seriesPaint;</span>
+<span class="pc bpc" id="L428" title="1 of 2 branches missed.">        if (getUseFillPaint()) {</span>
+<span class="nc" id="L429">            seriesFillPaint = getItemFillPaint(series, item);</span>
+        }
+<span class="fc" id="L431">        Stroke seriesStroke = getItemStroke(series, item);</span>
+
+<span class="fc bfc" id="L433" title="All 2 branches covered.">        if (pass == 0) {</span>
+            //  On first pass render the areas, line and outlines
+
+<span class="fc bfc" id="L436" title="All 2 branches covered.">            if (item == 0) {</span>
+                // Create a new Area for the series
+<span class="fc" id="L438">                areaState.setSeriesArea(new Polygon());</span>
+<span class="fc" id="L439">                areaState.setLastSeriesPoints(</span>
+<span class="fc" id="L440">                        areaState.getCurrentSeriesPoints());</span>
+<span class="fc" id="L441">                areaState.setCurrentSeriesPoints(new Stack());</span>
+
+                // start from previous height (ph1)
+<span class="fc" id="L444">                double transY2 = rangeAxis.valueToJava2D(ph1, dataArea,</span>
+<span class="fc" id="L445">                        plot.getRangeAxisEdge());</span>
+
+                // The first point is (x, 0)
+<span class="pc bpc" id="L448" title="1 of 2 branches missed.">                if (orientation == PlotOrientation.VERTICAL) {</span>
+<span class="fc" id="L449">                    areaState.getSeriesArea().addPoint((int) transX1,</span>
+                            (int) transY2);
+                }
+<span class="nc bnc" id="L452" title="All 2 branches missed.">                else if (orientation == PlotOrientation.HORIZONTAL) {</span>
+<span class="nc" id="L453">                    areaState.getSeriesArea().addPoint((int) transY2,</span>
+                            (int) transX1);
+                }
+            }
+
+            // Add each point to Area (x, y)
+<span class="pc bpc" id="L459" title="1 of 2 branches missed.">            if (orientation == PlotOrientation.VERTICAL) {</span>
+<span class="fc" id="L460">                Point point = new Point((int) transX1, (int) transY1);</span>
+<span class="fc" id="L461">                areaState.getSeriesArea().addPoint((int) point.getX(),</span>
+<span class="fc" id="L462">                        (int) point.getY());</span>
+<span class="fc" id="L463">                areaState.getCurrentSeriesPoints().push(point);</span>
+<span class="fc" id="L464">            }</span>
+<span class="nc bnc" id="L465" title="All 2 branches missed.">            else if (orientation == PlotOrientation.HORIZONTAL) {</span>
+<span class="nc" id="L466">                areaState.getSeriesArea().addPoint((int) transY1,</span>
+                        (int) transX1);
+            }
+
+<span class="fc bfc" id="L470" title="All 2 branches covered.">            if (getPlotLines()) {</span>
+<span class="fc bfc" id="L471" title="All 2 branches covered.">                if (item &gt; 0) {</span>
+                    // get the previous data point...
+<span class="fc" id="L473">                    double x0 = dataset.getXValue(series, item - 1);</span>
+<span class="fc" id="L474">                    double y0 = dataset.getYValue(series, item - 1);</span>
+<span class="fc" id="L475">                    double ph0 = getPreviousHeight(tdataset, series, item - 1);</span>
+<span class="fc" id="L476">                    double transX0 = domainAxis.valueToJava2D(x0, dataArea,</span>
+<span class="fc" id="L477">                            plot.getDomainAxisEdge());</span>
+<span class="fc" id="L478">                    double transY0 = rangeAxis.valueToJava2D(y0 + ph0,</span>
+<span class="fc" id="L479">                            dataArea, plot.getRangeAxisEdge());</span>
+
+<span class="pc bpc" id="L481" title="1 of 2 branches missed.">                    if (orientation == PlotOrientation.VERTICAL) {</span>
+<span class="fc" id="L482">                        areaState.getLine().setLine(transX0, transY0, transX1,</span>
+                                transY1);
+                    }
+<span class="nc bnc" id="L485" title="All 2 branches missed.">                    else if (orientation == PlotOrientation.HORIZONTAL) {</span>
+<span class="nc" id="L486">                        areaState.getLine().setLine(transY0, transX0, transY1,</span>
+                                transX1);
+                    }
+<span class="fc" id="L489">                    g2.setPaint(seriesPaint);</span>
+<span class="fc" id="L490">                    g2.setStroke(seriesStroke);</span>
+<span class="fc" id="L491">                    g2.draw(areaState.getLine());</span>
+                }
+            }
+
+            // Check if the item is the last item for the series and number of
+            // items &gt; 0.  We can't draw an area for a single point.
+<span class="fc bfc" id="L497" title="All 6 branches covered.">            if (getPlotArea() &amp;&amp; item &gt; 0 &amp;&amp; item == (itemCount - 1)) {</span>
+
+<span class="fc" id="L499">                double transY2 = rangeAxis.valueToJava2D(ph1, dataArea,</span>
+<span class="fc" id="L500">                        plot.getRangeAxisEdge());</span>
+
+<span class="pc bpc" id="L502" title="1 of 2 branches missed.">                if (orientation == PlotOrientation.VERTICAL) {</span>
+                    // Add the last point (x,0)
+<span class="fc" id="L504">                    areaState.getSeriesArea().addPoint((int) transX1,</span>
+                            (int) transY2);
+                }
+<span class="nc bnc" id="L507" title="All 2 branches missed.">                else if (orientation == PlotOrientation.HORIZONTAL) {</span>
+                    // Add the last point (x,0)
+<span class="nc" id="L509">                    areaState.getSeriesArea().addPoint((int) transY2,</span>
+                            (int) transX1);
+                }
+
+                // Add points from last series to complete the base of the
+                // polygon
+<span class="fc bfc" id="L515" title="All 2 branches covered.">                if (series != 0) {</span>
+<span class="fc" id="L516">                    Stack points = areaState.getLastSeriesPoints();</span>
+<span class="pc bpc" id="L517" title="1 of 2 branches missed.">                    while (!points.empty()) {</span>
+<span class="nc" id="L518">                        Point point = (Point) points.pop();</span>
+<span class="nc" id="L519">                        areaState.getSeriesArea().addPoint((int) point.getX(),</span>
+<span class="nc" id="L520">                                (int) point.getY());</span>
+<span class="nc" id="L521">                    }</span>
+                }
+
+                //  Fill the polygon
+<span class="fc" id="L525">                g2.setPaint(seriesFillPaint);</span>
+<span class="fc" id="L526">                g2.setStroke(seriesStroke);</span>
+<span class="fc" id="L527">                g2.fill(areaState.getSeriesArea());</span>
+
+                //  Draw an outline around the Area.
+<span class="pc bpc" id="L530" title="1 of 2 branches missed.">                if (isOutline()) {</span>
+<span class="nc" id="L531">                    g2.setStroke(lookupSeriesOutlineStroke(series));</span>
+<span class="nc" id="L532">                    g2.setPaint(lookupSeriesOutlinePaint(series));</span>
+<span class="nc" id="L533">                    g2.draw(areaState.getSeriesArea());</span>
+                }
+            }
+
+<span class="fc" id="L537">            int datasetIndex = plot.indexOf(dataset);</span>
+<span class="fc" id="L538">            updateCrosshairValues(crosshairState, x1, ph1 + y1, datasetIndex,</span>
+                    transX1, transY1, orientation);
+
+<span class="fc" id="L541">        }</span>
+<span class="pc bpc" id="L542" title="1 of 2 branches missed.">        else if (pass == 1) {</span>
+            // On second pass render shapes and collect entity and tooltip
+            // information
+
+<span class="fc" id="L546">            Shape shape = null;</span>
+<span class="pc bpc" id="L547" title="1 of 2 branches missed.">            if (getPlotShapes()) {</span>
+<span class="nc" id="L548">                shape = getItemShape(series, item);</span>
+<span class="nc bnc" id="L549" title="All 2 branches missed.">                if (plot.getOrientation() == PlotOrientation.VERTICAL) {</span>
+<span class="nc" id="L550">                    shape = ShapeUtils.createTranslatedShape(shape,</span>
+                            transX1, transY1);
+                }
+<span class="nc bnc" id="L553" title="All 2 branches missed.">                else if (plot.getOrientation() == PlotOrientation.HORIZONTAL) {</span>
+<span class="nc" id="L554">                    shape = ShapeUtils.createTranslatedShape(shape,</span>
+                            transY1, transX1);
+                }
+<span class="nc bnc" id="L557" title="All 2 branches missed.">                if (!nullPoint) {</span>
+<span class="nc bnc" id="L558" title="All 2 branches missed.">                    if (getShapePaint() != null) {</span>
+<span class="nc" id="L559">                        g2.setPaint(getShapePaint());</span>
+                    }
+                    else {
+<span class="nc" id="L562">                        g2.setPaint(seriesPaint);</span>
+                    }
+<span class="nc bnc" id="L564" title="All 2 branches missed.">                    if (getShapeStroke() != null) {</span>
+<span class="nc" id="L565">                        g2.setStroke(getShapeStroke());</span>
+                    }
+                    else {
+<span class="nc" id="L568">                        g2.setStroke(seriesStroke);</span>
+                    }
+<span class="nc" id="L570">                    g2.draw(shape);</span>
+                }
+            }
+            else {
+<span class="pc bpc" id="L574" title="1 of 2 branches missed.">                if (plot.getOrientation() == PlotOrientation.VERTICAL) {</span>
+<span class="fc" id="L575">                    shape = new Rectangle2D.Double(transX1 - 3, transY1 - 3,</span>
+                            6.0, 6.0);
+                }
+<span class="nc bnc" id="L578" title="All 2 branches missed.">                else if (plot.getOrientation() == PlotOrientation.HORIZONTAL) {</span>
+<span class="nc" id="L579">                    shape = new Rectangle2D.Double(transY1 - 3, transX1 - 3,</span>
+                            6.0, 6.0);
+                }
+            }
+
+            // collect entity and tool tip information...
+<span class="pc bpc" id="L585" title="1 of 2 branches missed.">            if (state.getInfo() != null) {</span>
+<span class="nc" id="L586">                EntityCollection entities = state.getEntityCollection();</span>
+<span class="nc bnc" id="L587" title="All 6 branches missed.">                if (entities != null &amp;&amp; shape != null &amp;&amp; !nullPoint) {</span>
+                    // limit the entity hotspot area to the data area
+<span class="nc" id="L589">                    Area dataAreaHotspot = new Area(shape);</span>
+<span class="nc" id="L590">                    dataAreaHotspot.intersect(new Area(dataArea));</span>
+<span class="nc bnc" id="L591" title="All 2 branches missed.">                    if (!dataAreaHotspot.isEmpty()) {</span>
+<span class="nc" id="L592">                        String tip = null;</span>
+<span class="nc" id="L593">                        XYToolTipGenerator generator = getToolTipGenerator(</span>
+                                series, item);
+<span class="nc bnc" id="L595" title="All 2 branches missed.">                        if (generator != null) {</span>
+<span class="nc" id="L596">                            tip = generator.generateToolTip(dataset, series, </span>
+                                    item);
+                        }
+<span class="nc" id="L599">                        String url = null;</span>
+<span class="nc bnc" id="L600" title="All 2 branches missed.">                        if (getURLGenerator() != null) {</span>
+<span class="nc" id="L601">                            url = getURLGenerator().generateURL(dataset, series, </span>
+                                    item);
+                        }
+<span class="nc" id="L604">                        XYItemEntity entity = new XYItemEntity(dataAreaHotspot, </span>
+                                dataset, series, item, tip, url);
+<span class="nc" id="L606">                        entities.add(entity);</span>
+                    }
+                }
+            }
+
+        }
+<span class="fc" id="L612">    }</span>
+
+    /**
+     * Calculates the stacked value of the all series up to, but not including
+     * {@code series} for the specified item. It returns 0.0 if
+     * {@code series} is the first series, i.e. 0.
+     *
+     * @param dataset  the dataset.
+     * @param series  the series.
+     * @param index  the index.
+     *
+     * @return The cumulative value for all series' values up to but excluding
+     *         {@code series} for {@code index}.
+     */
+    protected double getPreviousHeight(TableXYDataset dataset,
+                                       int series, int index) {
+<span class="fc" id="L628">        double result = 0.0;</span>
+<span class="fc bfc" id="L629" title="All 2 branches covered.">        for (int i = 0; i &lt; series; i++) {</span>
+<span class="fc" id="L630">            double value = dataset.getYValue(i, index);</span>
+<span class="pc bpc" id="L631" title="1 of 2 branches missed.">            if (!Double.isNaN(value)) {</span>
+<span class="fc" id="L632">                result += value;</span>
+            }
+        }
+<span class="fc" id="L635">        return result;</span>
+    }
+
+    /**
+     * Tests the renderer for equality with an arbitrary object.
+     *
+     * @param obj  the object ({@code null} permitted).
+     *
+     * @return A boolean.
+     */
+    @Override
+    public boolean equals(Object obj) {
+<span class="pc bpc" id="L647" title="1 of 2 branches missed.">        if (obj == this) {</span>
+<span class="nc" id="L648">            return true;</span>
+        }
+<span class="pc bpc" id="L650" title="2 of 4 branches missed.">        if (!(obj instanceof StackedXYAreaRenderer) || !super.equals(obj)) {</span>
+<span class="nc" id="L651">            return false;</span>
+        }
+<span class="fc" id="L653">        StackedXYAreaRenderer that = (StackedXYAreaRenderer) obj;</span>
+<span class="fc bfc" id="L654" title="All 2 branches covered.">        if (!PaintUtils.equal(this.shapePaint, that.shapePaint)) {</span>
+<span class="fc" id="L655">            return false;</span>
+        }
+<span class="fc bfc" id="L657" title="All 2 branches covered.">        if (!ObjectUtils.equal(this.shapeStroke, that.shapeStroke)) {</span>
+<span class="fc" id="L658">            return false;</span>
+        }
+<span class="fc" id="L660">        return true;</span>
+    }
+
+    /**
+     * Returns a clone of the renderer.
+     *
+     * @return A clone.
+     *
+     * @throws CloneNotSupportedException if the renderer cannot be cloned.
+     */
+    @Override
+    public Object clone() throws CloneNotSupportedException {
+<span class="fc" id="L672">        return super.clone();</span>
+    }
+
+    /**
+     * Provides serialization support.
+     *
+     * @param stream  the input stream.
+     *
+     * @throws IOException  if there is an I/O error.
+     * @throws ClassNotFoundException  if there is a classpath problem.
+     */
+    private void readObject(ObjectInputStream stream)
+            throws IOException, ClassNotFoundException {
+<span class="fc" id="L685">        stream.defaultReadObject();</span>
+<span class="fc" id="L686">        this.shapePaint = SerialUtils.readPaint(stream);</span>
+<span class="fc" id="L687">        this.shapeStroke = SerialUtils.readStroke(stream);</span>
+<span class="fc" id="L688">    }</span>
+
+    /**
+     * Provides serialization support.
+     *
+     * @param stream  the output stream.
+     *
+     * @throws IOException  if there is an I/O error.
+     */
+    private void writeObject(ObjectOutputStream stream) throws IOException {
+<span class="fc" id="L698">        stream.defaultWriteObject();</span>
+<span class="fc" id="L699">        SerialUtils.writePaint(this.shapePaint, stream);</span>
+<span class="fc" id="L700">        SerialUtils.writeStroke(this.shapeStroke, stream);</span>
+<span class="fc" id="L701">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,621 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Encoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.encoder</a> &gt; <span class="el_source">Encoder.java</span></div><h1>Encoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.encoder;
+
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.WriterException;
+import com.google.zxing.common.BitArray;
+import com.google.zxing.common.CharacterSetECI;
+import com.google.zxing.common.reedsolomon.GenericGF;
+import com.google.zxing.common.reedsolomon.ReedSolomonEncoder;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
+import com.google.zxing.qrcode.decoder.Mode;
+import com.google.zxing.qrcode.decoder.Version;
+
+import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
+
+/**
+ * @author satorux@google.com (Satoru Takabayashi) - creator
+ * @author dswitkin@google.com (Daniel Switkin) - ported from C++
+ */
+public final class Encoder {
+
+  // The original table is defined in the table 5 of JISX0510:2004 (p.19).
+<span class="fc" id="L41">  private static final int[] ALPHANUMERIC_TABLE = {</span>
+      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 0x00-0x0f
+      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 0x10-0x1f
+      36, -1, -1, -1, 37, 38, -1, -1, -1, -1, 39, 40, -1, 41, 42, 43,  // 0x20-0x2f
+      0,   1,  2,  3,  4,  5,  6,  7,  8,  9, 44, -1, -1, -1, -1, -1,  // 0x30-0x3f
+      -1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,  // 0x40-0x4f
+      25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, -1, -1, -1, -1, -1,  // 0x50-0x5f
+  };
+
+  static final String DEFAULT_BYTE_MODE_ENCODING = &quot;ISO-8859-1&quot;;
+
+  private Encoder() {
+  }
+
+  // The mask penalty calculation is complicated.  See Table 21 of JISX0510:2004 (p.45) for details.
+  // Basically it applies four rules and summate all penalties.
+  private static int calculateMaskPenalty(ByteMatrix matrix) {
+<span class="fc" id="L58">    return MaskUtil.applyMaskPenaltyRule1(matrix)</span>
+<span class="fc" id="L59">        + MaskUtil.applyMaskPenaltyRule2(matrix)</span>
+<span class="fc" id="L60">        + MaskUtil.applyMaskPenaltyRule3(matrix)</span>
+<span class="fc" id="L61">        + MaskUtil.applyMaskPenaltyRule4(matrix);</span>
+  }
+
+  /**
+   * @param content text to encode
+   * @param ecLevel error correction level to use
+   * @return {@link QRCode} representing the encoded QR code
+   * @throws WriterException if encoding can't succeed, because of for example invalid content
+   *   or configuration
+   */
+  public static QRCode encode(String content, ErrorCorrectionLevel ecLevel) throws WriterException {
+<span class="fc" id="L72">    return encode(content, ecLevel, null);</span>
+  }
+
+  public static QRCode encode(String content,
+                              ErrorCorrectionLevel ecLevel,
+                              Map&lt;EncodeHintType,?&gt; hints) throws WriterException {
+
+    // Determine what character encoding has been specified by the caller, if any
+<span class="fc" id="L80">    String encoding = DEFAULT_BYTE_MODE_ENCODING;</span>
+<span class="fc bfc" id="L81" title="All 4 branches covered.">    boolean hasEncodingHint = hints != null &amp;&amp; hints.containsKey(EncodeHintType.CHARACTER_SET);</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">    if (hasEncodingHint) {</span>
+<span class="fc" id="L83">      encoding = hints.get(EncodeHintType.CHARACTER_SET).toString();</span>
+    }
+
+    // Pick an encoding mode appropriate for the content. Note that this will not attempt to use
+    // multiple modes / segments even if that were more efficient. Twould be nice.
+<span class="fc" id="L88">    Mode mode = chooseMode(content, encoding);</span>
+
+    // This will store the header information, like mode and
+    // length, as well as &quot;header&quot; segments like an ECI segment.
+<span class="fc" id="L92">    BitArray headerBits = new BitArray();</span>
+
+    // Append ECI segment if applicable
+<span class="fc bfc" id="L95" title="All 4 branches covered.">    if (mode == Mode.BYTE &amp;&amp; hasEncodingHint) {</span>
+<span class="fc" id="L96">      CharacterSetECI eci = CharacterSetECI.getCharacterSetECIByName(encoding);</span>
+<span class="pc bpc" id="L97" title="1 of 2 branches missed.">      if (eci != null) {</span>
+<span class="fc" id="L98">        appendECI(eci, headerBits);</span>
+      }
+    }
+
+    // Append the FNC1 mode header for GS1 formatted data if applicable
+<span class="fc bfc" id="L103" title="All 4 branches covered.">    boolean hasGS1FormatHint = hints != null &amp;&amp; hints.containsKey(EncodeHintType.GS1_FORMAT);</span>
+<span class="fc bfc" id="L104" title="All 4 branches covered.">    if (hasGS1FormatHint &amp;&amp; Boolean.valueOf(hints.get(EncodeHintType.GS1_FORMAT).toString())) {</span>
+      // GS1 formatted codes are prefixed with a FNC1 in first position mode header
+<span class="fc" id="L106">      appendModeInfo(Mode.FNC1_FIRST_POSITION, headerBits);</span>
+    }
+
+    // (With ECI in place,) Write the mode marker
+<span class="fc" id="L110">    appendModeInfo(mode, headerBits);</span>
+
+    // Collect data within the main segment, separately, to count its size if needed. Don't add it to
+    // main payload yet.
+<span class="fc" id="L114">    BitArray dataBits = new BitArray();</span>
+<span class="fc" id="L115">    appendBytes(content, mode, dataBits, encoding);</span>
+
+    Version version;
+<span class="fc bfc" id="L118" title="All 4 branches covered.">    if (hints != null &amp;&amp; hints.containsKey(EncodeHintType.QR_VERSION)) {</span>
+<span class="fc" id="L119">      int versionNumber = Integer.parseInt(hints.get(EncodeHintType.QR_VERSION).toString());</span>
+<span class="fc" id="L120">      version = Version.getVersionForNumber(versionNumber);</span>
+<span class="fc" id="L121">      int bitsNeeded = calculateBitsNeeded(mode, headerBits, dataBits, version);</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      if (!willFit(bitsNeeded, version, ecLevel)) {</span>
+<span class="fc" id="L123">        throw new WriterException(&quot;Data too big for requested version&quot;);</span>
+      }
+<span class="fc" id="L125">    } else {</span>
+<span class="fc" id="L126">      version = recommendVersion(ecLevel, mode, headerBits, dataBits);</span>
+    }
+
+<span class="fc" id="L129">    BitArray headerAndDataBits = new BitArray();</span>
+<span class="fc" id="L130">    headerAndDataBits.appendBitArray(headerBits);</span>
+    // Find &quot;length&quot; of main segment and write it
+<span class="fc bfc" id="L132" title="All 2 branches covered.">    int numLetters = mode == Mode.BYTE ? dataBits.getSizeInBytes() : content.length();</span>
+<span class="fc" id="L133">    appendLengthInfo(numLetters, version, mode, headerAndDataBits);</span>
+    // Put data together into the overall payload
+<span class="fc" id="L135">    headerAndDataBits.appendBitArray(dataBits);</span>
+
+<span class="fc" id="L137">    Version.ECBlocks ecBlocks = version.getECBlocksForLevel(ecLevel);</span>
+<span class="fc" id="L138">    int numDataBytes = version.getTotalCodewords() - ecBlocks.getTotalECCodewords();</span>
+
+    // Terminate the bits properly.
+<span class="fc" id="L141">    terminateBits(numDataBytes, headerAndDataBits);</span>
+
+    // Interleave data bits with error correction code.
+<span class="fc" id="L144">    BitArray finalBits = interleaveWithECBytes(headerAndDataBits,</span>
+<span class="fc" id="L145">                                               version.getTotalCodewords(),</span>
+                                               numDataBytes,
+<span class="fc" id="L147">                                               ecBlocks.getNumBlocks());</span>
+
+<span class="fc" id="L149">    QRCode qrCode = new QRCode();</span>
+
+<span class="fc" id="L151">    qrCode.setECLevel(ecLevel);</span>
+<span class="fc" id="L152">    qrCode.setMode(mode);</span>
+<span class="fc" id="L153">    qrCode.setVersion(version);</span>
+
+    //  Choose the mask pattern and set to &quot;qrCode&quot;.
+<span class="fc" id="L156">    int dimension = version.getDimensionForVersion();</span>
+<span class="fc" id="L157">    ByteMatrix matrix = new ByteMatrix(dimension, dimension);</span>
+<span class="fc" id="L158">    int maskPattern = chooseMaskPattern(finalBits, ecLevel, version, matrix);</span>
+<span class="fc" id="L159">    qrCode.setMaskPattern(maskPattern);</span>
+
+    // Build the matrix and set it to &quot;qrCode&quot;.
+<span class="fc" id="L162">    MatrixUtil.buildMatrix(finalBits, ecLevel, version, maskPattern, matrix);</span>
+<span class="fc" id="L163">    qrCode.setMatrix(matrix);</span>
+
+<span class="fc" id="L165">    return qrCode;</span>
+  }
+
+  /**
+   * Decides the smallest version of QR code that will contain all of the provided data.
+   *
+   * @throws WriterException if the data cannot fit in any version
+   */
+  private static Version recommendVersion(ErrorCorrectionLevel ecLevel,
+                                          Mode mode,
+                                          BitArray headerBits,
+                                          BitArray dataBits) throws WriterException {
+    // Hard part: need to know version to know how many bits length takes. But need to know how many
+    // bits it takes to know version. First we take a guess at version by assuming version will be
+    // the minimum, 1:
+<span class="fc" id="L180">    int provisionalBitsNeeded = calculateBitsNeeded(mode, headerBits, dataBits, Version.getVersionForNumber(1));</span>
+<span class="fc" id="L181">    Version provisionalVersion = chooseVersion(provisionalBitsNeeded, ecLevel);</span>
+
+    // Use that guess to calculate the right version. I am still not sure this works in 100% of cases.
+<span class="fc" id="L184">    int bitsNeeded = calculateBitsNeeded(mode, headerBits, dataBits, provisionalVersion);</span>
+<span class="fc" id="L185">    return chooseVersion(bitsNeeded, ecLevel);</span>
+  }
+
+  private static int calculateBitsNeeded(Mode mode,
+                                         BitArray headerBits,
+                                         BitArray dataBits,
+                                         Version version) {
+<span class="fc" id="L192">    return headerBits.getSize() + mode.getCharacterCountBits(version) + dataBits.getSize();</span>
+  }
+
+  /**
+   * @return the code point of the table used in alphanumeric mode or
+   *  -1 if there is no corresponding code in the table.
+   */
+  static int getAlphanumericCode(int code) {
+<span class="fc bfc" id="L200" title="All 2 branches covered.">    if (code &lt; ALPHANUMERIC_TABLE.length) {</span>
+<span class="fc" id="L201">      return ALPHANUMERIC_TABLE[code];</span>
+    }
+<span class="fc" id="L203">    return -1;</span>
+  }
+
+  public static Mode chooseMode(String content) {
+<span class="fc" id="L207">    return chooseMode(content, null);</span>
+  }
+
+  /**
+   * Choose the best mode by examining the content. Note that 'encoding' is used as a hint;
+   * if it is Shift_JIS, and the input is only double-byte Kanji, then we return {@link Mode#KANJI}.
+   */
+  private static Mode chooseMode(String content, String encoding) {
+<span class="fc bfc" id="L215" title="All 4 branches covered.">    if (&quot;Shift_JIS&quot;.equals(encoding) &amp;&amp; isOnlyDoubleByteKanji(content)) {</span>
+      // Choose Kanji mode if all input are double-byte characters
+<span class="fc" id="L217">      return Mode.KANJI;</span>
+    }
+<span class="fc" id="L219">    boolean hasNumeric = false;</span>
+<span class="fc" id="L220">    boolean hasAlphanumeric = false;</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">    for (int i = 0; i &lt; content.length(); ++i) {</span>
+<span class="fc" id="L222">      char c = content.charAt(i);</span>
+<span class="fc bfc" id="L223" title="All 4 branches covered.">      if (c &gt;= '0' &amp;&amp; c &lt;= '9') {</span>
+<span class="fc" id="L224">        hasNumeric = true;</span>
+<span class="fc bfc" id="L225" title="All 2 branches covered.">      } else if (getAlphanumericCode(c) != -1) {</span>
+<span class="fc" id="L226">        hasAlphanumeric = true;</span>
+      } else {
+<span class="fc" id="L228">        return Mode.BYTE;</span>
+      }
+    }
+<span class="fc bfc" id="L231" title="All 2 branches covered.">    if (hasAlphanumeric) {</span>
+<span class="fc" id="L232">      return Mode.ALPHANUMERIC;</span>
+    }
+<span class="fc bfc" id="L234" title="All 2 branches covered.">    if (hasNumeric) {</span>
+<span class="fc" id="L235">      return Mode.NUMERIC;</span>
+    }
+<span class="fc" id="L237">    return Mode.BYTE;</span>
+  }
+
+  private static boolean isOnlyDoubleByteKanji(String content) {
+    byte[] bytes;
+    try {
+<span class="fc" id="L243">      bytes = content.getBytes(&quot;Shift_JIS&quot;);</span>
+<span class="nc" id="L244">    } catch (UnsupportedEncodingException ignored) {</span>
+<span class="nc" id="L245">      return false;</span>
+<span class="fc" id="L246">    }</span>
+<span class="fc" id="L247">    int length = bytes.length;</span>
+<span class="pc bpc" id="L248" title="1 of 2 branches missed.">    if (length % 2 != 0) {</span>
+<span class="nc" id="L249">      return false;</span>
+    }
+<span class="fc bfc" id="L251" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i += 2) {</span>
+<span class="fc" id="L252">      int byte1 = bytes[i] &amp; 0xFF;</span>
+<span class="pc bpc" id="L253" title="4 of 8 branches missed.">      if ((byte1 &lt; 0x81 || byte1 &gt; 0x9F) &amp;&amp; (byte1 &lt; 0xE0 || byte1 &gt; 0xEB)) {</span>
+<span class="fc" id="L254">        return false;</span>
+      }
+    }
+<span class="fc" id="L257">    return true;</span>
+  }
+
+  private static int chooseMaskPattern(BitArray bits,
+                                       ErrorCorrectionLevel ecLevel,
+                                       Version version,
+                                       ByteMatrix matrix) throws WriterException {
+
+<span class="fc" id="L265">    int minPenalty = Integer.MAX_VALUE;  // Lower penalty is better.</span>
+<span class="fc" id="L266">    int bestMaskPattern = -1;</span>
+    // We try all mask patterns to choose the best one.
+<span class="fc bfc" id="L268" title="All 2 branches covered.">    for (int maskPattern = 0; maskPattern &lt; QRCode.NUM_MASK_PATTERNS; maskPattern++) {</span>
+<span class="fc" id="L269">      MatrixUtil.buildMatrix(bits, ecLevel, version, maskPattern, matrix);</span>
+<span class="fc" id="L270">      int penalty = calculateMaskPenalty(matrix);</span>
+<span class="fc bfc" id="L271" title="All 2 branches covered.">      if (penalty &lt; minPenalty) {</span>
+<span class="fc" id="L272">        minPenalty = penalty;</span>
+<span class="fc" id="L273">        bestMaskPattern = maskPattern;</span>
+      }
+    }
+<span class="fc" id="L276">    return bestMaskPattern;</span>
+  }
+
+  private static Version chooseVersion(int numInputBits, ErrorCorrectionLevel ecLevel) throws WriterException {
+<span class="pc bpc" id="L280" title="1 of 2 branches missed.">    for (int versionNum = 1; versionNum &lt;= 40; versionNum++) {</span>
+<span class="fc" id="L281">      Version version = Version.getVersionForNumber(versionNum);</span>
+<span class="fc bfc" id="L282" title="All 2 branches covered.">      if (willFit(numInputBits, version, ecLevel)) {</span>
+<span class="fc" id="L283">        return version;</span>
+      }
+    }
+<span class="nc" id="L286">    throw new WriterException(&quot;Data too big&quot;);</span>
+  }
+  
+  /**
+   * @return true if the number of input bits will fit in a code with the specified version and
+   * error correction level.
+   */
+  private static boolean willFit(int numInputBits, Version version, ErrorCorrectionLevel ecLevel) {
+      // In the following comments, we use numbers of Version 7-H.
+      // numBytes = 196
+<span class="fc" id="L296">      int numBytes = version.getTotalCodewords();</span>
+      // getNumECBytes = 130
+<span class="fc" id="L298">      Version.ECBlocks ecBlocks = version.getECBlocksForLevel(ecLevel);</span>
+<span class="fc" id="L299">      int numEcBytes = ecBlocks.getTotalECCodewords();</span>
+      // getNumDataBytes = 196 - 130 = 66
+<span class="fc" id="L301">      int numDataBytes = numBytes - numEcBytes;</span>
+<span class="fc" id="L302">      int totalInputBytes = (numInputBits + 7) / 8;</span>
+<span class="fc bfc" id="L303" title="All 2 branches covered.">      return numDataBytes &gt;= totalInputBytes;</span>
+  }
+
+  /**
+   * Terminate bits as described in 8.4.8 and 8.4.9 of JISX0510:2004 (p.24).
+   */
+  static void terminateBits(int numDataBytes, BitArray bits) throws WriterException {
+<span class="fc" id="L310">    int capacity = numDataBytes * 8;</span>
+<span class="pc bpc" id="L311" title="1 of 2 branches missed.">    if (bits.getSize() &gt; capacity) {</span>
+<span class="nc" id="L312">      throw new WriterException(&quot;data bits cannot fit in the QR Code&quot; + bits.getSize() + &quot; &gt; &quot; +</span>
+          capacity);
+    }
+<span class="fc bfc" id="L315" title="All 4 branches covered.">    for (int i = 0; i &lt; 4 &amp;&amp; bits.getSize() &lt; capacity; ++i) {</span>
+<span class="fc" id="L316">      bits.appendBit(false);</span>
+    }
+    // Append termination bits. See 8.4.8 of JISX0510:2004 (p.24) for details.
+    // If the last byte isn't 8-bit aligned, we'll add padding bits.
+<span class="fc" id="L320">    int numBitsInLastByte = bits.getSize() &amp; 0x07;    </span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    if (numBitsInLastByte &gt; 0) {</span>
+<span class="fc bfc" id="L322" title="All 2 branches covered.">      for (int i = numBitsInLastByte; i &lt; 8; i++) {</span>
+<span class="fc" id="L323">        bits.appendBit(false);</span>
+      }
+    }
+    // If we have more space, we'll fill the space with padding patterns defined in 8.4.9 (p.24).
+<span class="fc" id="L327">    int numPaddingBytes = numDataBytes - bits.getSizeInBytes();</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">    for (int i = 0; i &lt; numPaddingBytes; ++i) {</span>
+<span class="fc bfc" id="L329" title="All 2 branches covered.">      bits.appendBits((i &amp; 0x01) == 0 ? 0xEC : 0x11, 8);</span>
+    }
+<span class="pc bpc" id="L331" title="1 of 2 branches missed.">    if (bits.getSize() != capacity) {</span>
+<span class="nc" id="L332">      throw new WriterException(&quot;Bits size does not equal capacity&quot;);</span>
+    }
+<span class="fc" id="L334">  }</span>
+
+  /**
+   * Get number of data bytes and number of error correction bytes for block id &quot;blockID&quot;. Store
+   * the result in &quot;numDataBytesInBlock&quot;, and &quot;numECBytesInBlock&quot;. See table 12 in 8.5.1 of
+   * JISX0510:2004 (p.30)
+   */
+  static void getNumDataBytesAndNumECBytesForBlockID(int numTotalBytes,
+                                                     int numDataBytes,
+                                                     int numRSBlocks,
+                                                     int blockID,
+                                                     int[] numDataBytesInBlock,
+                                                     int[] numECBytesInBlock) throws WriterException {
+<span class="pc bpc" id="L347" title="1 of 2 branches missed.">    if (blockID &gt;= numRSBlocks) {</span>
+<span class="nc" id="L348">      throw new WriterException(&quot;Block ID too large&quot;);</span>
+    }
+    // numRsBlocksInGroup2 = 196 % 5 = 1
+<span class="fc" id="L351">    int numRsBlocksInGroup2 = numTotalBytes % numRSBlocks;</span>
+    // numRsBlocksInGroup1 = 5 - 1 = 4
+<span class="fc" id="L353">    int numRsBlocksInGroup1 = numRSBlocks - numRsBlocksInGroup2;</span>
+    // numTotalBytesInGroup1 = 196 / 5 = 39
+<span class="fc" id="L355">    int numTotalBytesInGroup1 = numTotalBytes / numRSBlocks;</span>
+    // numTotalBytesInGroup2 = 39 + 1 = 40
+<span class="fc" id="L357">    int numTotalBytesInGroup2 = numTotalBytesInGroup1 + 1;</span>
+    // numDataBytesInGroup1 = 66 / 5 = 13
+<span class="fc" id="L359">    int numDataBytesInGroup1 = numDataBytes / numRSBlocks;</span>
+    // numDataBytesInGroup2 = 13 + 1 = 14
+<span class="fc" id="L361">    int numDataBytesInGroup2 = numDataBytesInGroup1 + 1;</span>
+    // numEcBytesInGroup1 = 39 - 13 = 26
+<span class="fc" id="L363">    int numEcBytesInGroup1 = numTotalBytesInGroup1 - numDataBytesInGroup1;</span>
+    // numEcBytesInGroup2 = 40 - 14 = 26
+<span class="fc" id="L365">    int numEcBytesInGroup2 = numTotalBytesInGroup2 - numDataBytesInGroup2;</span>
+    // Sanity checks.
+    // 26 = 26
+<span class="pc bpc" id="L368" title="1 of 2 branches missed.">    if (numEcBytesInGroup1 != numEcBytesInGroup2) {</span>
+<span class="nc" id="L369">      throw new WriterException(&quot;EC bytes mismatch&quot;);</span>
+    }
+    // 5 = 4 + 1.
+<span class="pc bpc" id="L372" title="1 of 2 branches missed.">    if (numRSBlocks != numRsBlocksInGroup1 + numRsBlocksInGroup2) {</span>
+<span class="nc" id="L373">      throw new WriterException(&quot;RS blocks mismatch&quot;);</span>
+    }
+    // 196 = (13 + 26) * 4 + (14 + 26) * 1
+<span class="pc bpc" id="L376" title="1 of 2 branches missed.">    if (numTotalBytes !=</span>
+        ((numDataBytesInGroup1 + numEcBytesInGroup1) *
+            numRsBlocksInGroup1) +
+            ((numDataBytesInGroup2 + numEcBytesInGroup2) *
+                numRsBlocksInGroup2)) {
+<span class="nc" id="L381">      throw new WriterException(&quot;Total bytes mismatch&quot;);</span>
+    }
+
+<span class="fc bfc" id="L384" title="All 2 branches covered.">    if (blockID &lt; numRsBlocksInGroup1) {</span>
+<span class="fc" id="L385">      numDataBytesInBlock[0] = numDataBytesInGroup1;</span>
+<span class="fc" id="L386">      numECBytesInBlock[0] = numEcBytesInGroup1;</span>
+    } else {
+<span class="fc" id="L388">      numDataBytesInBlock[0] = numDataBytesInGroup2;</span>
+<span class="fc" id="L389">      numECBytesInBlock[0] = numEcBytesInGroup2;</span>
+    }
+<span class="fc" id="L391">  }</span>
+
+  /**
+   * Interleave &quot;bits&quot; with corresponding error correction bytes. On success, store the result in
+   * &quot;result&quot;. The interleave rule is complicated. See 8.6 of JISX0510:2004 (p.37) for details.
+   */
+  static BitArray interleaveWithECBytes(BitArray bits,
+                                        int numTotalBytes,
+                                        int numDataBytes,
+                                        int numRSBlocks) throws WriterException {
+
+    // &quot;bits&quot; must have &quot;getNumDataBytes&quot; bytes of data.
+<span class="pc bpc" id="L403" title="1 of 2 branches missed.">    if (bits.getSizeInBytes() != numDataBytes) {</span>
+<span class="nc" id="L404">      throw new WriterException(&quot;Number of bits and data bytes does not match&quot;);</span>
+    }
+
+    // Step 1.  Divide data bytes into blocks and generate error correction bytes for them. We'll
+    // store the divided data bytes blocks and error correction bytes blocks into &quot;blocks&quot;.
+<span class="fc" id="L409">    int dataBytesOffset = 0;</span>
+<span class="fc" id="L410">    int maxNumDataBytes = 0;</span>
+<span class="fc" id="L411">    int maxNumEcBytes = 0;</span>
+
+    // Since, we know the number of reedsolmon blocks, we can initialize the vector with the number.
+<span class="fc" id="L414">    Collection&lt;BlockPair&gt; blocks = new ArrayList&lt;&gt;(numRSBlocks);</span>
+
+<span class="fc bfc" id="L416" title="All 2 branches covered.">    for (int i = 0; i &lt; numRSBlocks; ++i) {</span>
+<span class="fc" id="L417">      int[] numDataBytesInBlock = new int[1];</span>
+<span class="fc" id="L418">      int[] numEcBytesInBlock = new int[1];</span>
+<span class="fc" id="L419">      getNumDataBytesAndNumECBytesForBlockID(</span>
+          numTotalBytes, numDataBytes, numRSBlocks, i,
+          numDataBytesInBlock, numEcBytesInBlock);
+
+<span class="fc" id="L423">      int size = numDataBytesInBlock[0];</span>
+<span class="fc" id="L424">      byte[] dataBytes = new byte[size];</span>
+<span class="fc" id="L425">      bits.toBytes(8 * dataBytesOffset, dataBytes, 0, size);</span>
+<span class="fc" id="L426">      byte[] ecBytes = generateECBytes(dataBytes, numEcBytesInBlock[0]);</span>
+<span class="fc" id="L427">      blocks.add(new BlockPair(dataBytes, ecBytes));</span>
+
+<span class="fc" id="L429">      maxNumDataBytes = Math.max(maxNumDataBytes, size);</span>
+<span class="fc" id="L430">      maxNumEcBytes = Math.max(maxNumEcBytes, ecBytes.length);</span>
+<span class="fc" id="L431">      dataBytesOffset += numDataBytesInBlock[0];</span>
+    }
+<span class="pc bpc" id="L433" title="1 of 2 branches missed.">    if (numDataBytes != dataBytesOffset) {</span>
+<span class="nc" id="L434">      throw new WriterException(&quot;Data bytes does not match offset&quot;);</span>
+    }
+
+<span class="fc" id="L437">    BitArray result = new BitArray();</span>
+
+    // First, place data blocks.
+<span class="fc bfc" id="L440" title="All 2 branches covered.">    for (int i = 0; i &lt; maxNumDataBytes; ++i) {</span>
+<span class="fc bfc" id="L441" title="All 2 branches covered.">      for (BlockPair block : blocks) {</span>
+<span class="fc" id="L442">        byte[] dataBytes = block.getDataBytes();</span>
+<span class="fc bfc" id="L443" title="All 2 branches covered.">        if (i &lt; dataBytes.length) {</span>
+<span class="fc" id="L444">          result.appendBits(dataBytes[i], 8);</span>
+        }
+<span class="fc" id="L446">      }</span>
+    }
+    // Then, place error correction blocks.
+<span class="fc bfc" id="L449" title="All 2 branches covered.">    for (int i = 0; i &lt; maxNumEcBytes; ++i) {</span>
+<span class="fc bfc" id="L450" title="All 2 branches covered.">      for (BlockPair block : blocks) {</span>
+<span class="fc" id="L451">        byte[] ecBytes = block.getErrorCorrectionBytes();</span>
+<span class="pc bpc" id="L452" title="1 of 2 branches missed.">        if (i &lt; ecBytes.length) {</span>
+<span class="fc" id="L453">          result.appendBits(ecBytes[i], 8);</span>
+        }
+<span class="fc" id="L455">      }</span>
+    }
+<span class="pc bpc" id="L457" title="1 of 2 branches missed.">    if (numTotalBytes != result.getSizeInBytes()) {  // Should be same.</span>
+<span class="nc" id="L458">      throw new WriterException(&quot;Interleaving error: &quot; + numTotalBytes + &quot; and &quot; +</span>
+<span class="nc" id="L459">          result.getSizeInBytes() + &quot; differ.&quot;);</span>
+    }
+
+<span class="fc" id="L462">    return result;</span>
+  }
+
+  static byte[] generateECBytes(byte[] dataBytes, int numEcBytesInBlock) {
+<span class="fc" id="L466">    int numDataBytes = dataBytes.length;</span>
+<span class="fc" id="L467">    int[] toEncode = new int[numDataBytes + numEcBytesInBlock];</span>
+<span class="fc bfc" id="L468" title="All 2 branches covered.">    for (int i = 0; i &lt; numDataBytes; i++) {</span>
+<span class="fc" id="L469">      toEncode[i] = dataBytes[i] &amp; 0xFF;</span>
+    }
+<span class="fc" id="L471">    new ReedSolomonEncoder(GenericGF.QR_CODE_FIELD_256).encode(toEncode, numEcBytesInBlock);</span>
+
+<span class="fc" id="L473">    byte[] ecBytes = new byte[numEcBytesInBlock];</span>
+<span class="fc bfc" id="L474" title="All 2 branches covered.">    for (int i = 0; i &lt; numEcBytesInBlock; i++) {</span>
+<span class="fc" id="L475">      ecBytes[i] = (byte) toEncode[numDataBytes + i];</span>
+    }
+<span class="fc" id="L477">    return ecBytes;</span>
+  }
+
+  /**
+   * Append mode info. On success, store the result in &quot;bits&quot;.
+   */
+  static void appendModeInfo(Mode mode, BitArray bits) {
+<span class="fc" id="L484">    bits.appendBits(mode.getBits(), 4);</span>
+<span class="fc" id="L485">  }</span>
+
+
+  /**
+   * Append length info. On success, store the result in &quot;bits&quot;.
+   */
+  static void appendLengthInfo(int numLetters, Version version, Mode mode, BitArray bits) throws WriterException {
+<span class="fc" id="L492">    int numBits = mode.getCharacterCountBits(version);</span>
+<span class="pc bpc" id="L493" title="1 of 2 branches missed.">    if (numLetters &gt;= (1 &lt;&lt; numBits)) {</span>
+<span class="nc" id="L494">      throw new WriterException(numLetters + &quot; is bigger than &quot; + ((1 &lt;&lt; numBits) - 1));</span>
+    }
+<span class="fc" id="L496">    bits.appendBits(numLetters, numBits);</span>
+<span class="fc" id="L497">  }</span>
+
+  /**
+   * Append &quot;bytes&quot; in &quot;mode&quot; mode (encoding) into &quot;bits&quot;. On success, store the result in &quot;bits&quot;.
+   */
+  static void appendBytes(String content,
+                          Mode mode,
+                          BitArray bits,
+                          String encoding) throws WriterException {
+<span class="pc bpc" id="L506" title="1 of 5 branches missed.">    switch (mode) {</span>
+      case NUMERIC:
+<span class="fc" id="L508">        appendNumericBytes(content, bits);</span>
+<span class="fc" id="L509">        break;</span>
+      case ALPHANUMERIC:
+<span class="fc" id="L511">        appendAlphanumericBytes(content, bits);</span>
+<span class="fc" id="L512">        break;</span>
+      case BYTE:
+<span class="fc" id="L514">        append8BitBytes(content, bits, encoding);</span>
+<span class="fc" id="L515">        break;</span>
+      case KANJI:
+<span class="fc" id="L517">        appendKanjiBytes(content, bits);</span>
+<span class="fc" id="L518">        break;</span>
+      default:
+<span class="nc" id="L520">        throw new WriterException(&quot;Invalid mode: &quot; + mode);</span>
+    }
+<span class="fc" id="L522">  }</span>
+
+  static void appendNumericBytes(CharSequence content, BitArray bits) {
+<span class="fc" id="L525">    int length = content.length();</span>
+<span class="fc" id="L526">    int i = 0;</span>
+<span class="fc bfc" id="L527" title="All 2 branches covered.">    while (i &lt; length) {</span>
+<span class="fc" id="L528">      int num1 = content.charAt(i) - '0';</span>
+<span class="fc bfc" id="L529" title="All 2 branches covered.">      if (i + 2 &lt; length) {</span>
+        // Encode three numeric letters in ten bits.
+<span class="fc" id="L531">        int num2 = content.charAt(i + 1) - '0';</span>
+<span class="fc" id="L532">        int num3 = content.charAt(i + 2) - '0';</span>
+<span class="fc" id="L533">        bits.appendBits(num1 * 100 + num2 * 10 + num3, 10);</span>
+<span class="fc" id="L534">        i += 3;</span>
+<span class="fc bfc" id="L535" title="All 2 branches covered.">      } else if (i + 1 &lt; length) {</span>
+        // Encode two numeric letters in seven bits.
+<span class="fc" id="L537">        int num2 = content.charAt(i + 1) - '0';</span>
+<span class="fc" id="L538">        bits.appendBits(num1 * 10 + num2, 7);</span>
+<span class="fc" id="L539">        i += 2;</span>
+<span class="fc" id="L540">      } else {</span>
+        // Encode one numeric letter in four bits.
+<span class="fc" id="L542">        bits.appendBits(num1, 4);</span>
+<span class="fc" id="L543">        i++;</span>
+      }
+<span class="fc" id="L545">    }</span>
+<span class="fc" id="L546">  }</span>
+
+  static void appendAlphanumericBytes(CharSequence content, BitArray bits) throws WriterException {
+<span class="fc" id="L549">    int length = content.length();</span>
+<span class="fc" id="L550">    int i = 0;</span>
+<span class="fc bfc" id="L551" title="All 2 branches covered.">    while (i &lt; length) {</span>
+<span class="fc" id="L552">      int code1 = getAlphanumericCode(content.charAt(i));</span>
+<span class="fc bfc" id="L553" title="All 2 branches covered.">      if (code1 == -1) {</span>
+<span class="fc" id="L554">        throw new WriterException();</span>
+      }
+<span class="fc bfc" id="L556" title="All 2 branches covered.">      if (i + 1 &lt; length) {</span>
+<span class="fc" id="L557">        int code2 = getAlphanumericCode(content.charAt(i + 1));</span>
+<span class="pc bpc" id="L558" title="1 of 2 branches missed.">        if (code2 == -1) {</span>
+<span class="nc" id="L559">          throw new WriterException();</span>
+        }
+        // Encode two alphanumeric letters in 11 bits.
+<span class="fc" id="L562">        bits.appendBits(code1 * 45 + code2, 11);</span>
+<span class="fc" id="L563">        i += 2;</span>
+<span class="fc" id="L564">      } else {</span>
+        // Encode one alphanumeric letter in six bits.
+<span class="fc" id="L566">        bits.appendBits(code1, 6);</span>
+<span class="fc" id="L567">        i++;</span>
+      }
+<span class="fc" id="L569">    }</span>
+<span class="fc" id="L570">  }</span>
+
+  static void append8BitBytes(String content, BitArray bits, String encoding)
+      throws WriterException {
+    byte[] bytes;
+    try {
+<span class="fc" id="L576">      bytes = content.getBytes(encoding);</span>
+<span class="nc" id="L577">    } catch (UnsupportedEncodingException uee) {</span>
+<span class="nc" id="L578">      throw new WriterException(uee);</span>
+<span class="fc" id="L579">    }</span>
+<span class="fc bfc" id="L580" title="All 2 branches covered.">    for (byte b : bytes) {</span>
+<span class="fc" id="L581">      bits.appendBits(b, 8);</span>
+    }
+<span class="fc" id="L583">  }</span>
+
+  static void appendKanjiBytes(String content, BitArray bits) throws WriterException {
+    byte[] bytes;
+    try {
+<span class="fc" id="L588">      bytes = content.getBytes(&quot;Shift_JIS&quot;);</span>
+<span class="nc" id="L589">    } catch (UnsupportedEncodingException uee) {</span>
+<span class="nc" id="L590">      throw new WriterException(uee);</span>
+<span class="fc" id="L591">    }</span>
+<span class="pc bpc" id="L592" title="1 of 2 branches missed.">    if (bytes.length % 2 != 0) {</span>
+<span class="nc" id="L593">      throw new WriterException(&quot;Kanji byte size not even&quot;);</span>
+    }
+<span class="fc" id="L595">    int maxI = bytes.length - 1; // bytes.length must be even</span>
+<span class="fc bfc" id="L596" title="All 2 branches covered.">    for (int i = 0; i &lt; maxI; i += 2) {</span>
+<span class="fc" id="L597">      int byte1 = bytes[i] &amp; 0xFF;</span>
+<span class="fc" id="L598">      int byte2 = bytes[i + 1] &amp; 0xFF;</span>
+<span class="fc" id="L599">      int code = (byte1 &lt;&lt; 8) | byte2;</span>
+<span class="fc" id="L600">      int subtracted = -1;</span>
+<span class="pc bpc" id="L601" title="1 of 4 branches missed.">      if (code &gt;= 0x8140 &amp;&amp; code &lt;= 0x9ffc) {</span>
+<span class="fc" id="L602">        subtracted = code - 0x8140;</span>
+<span class="pc bpc" id="L603" title="2 of 4 branches missed.">      } else if (code &gt;= 0xe040 &amp;&amp; code &lt;= 0xebbf) {</span>
+<span class="fc" id="L604">        subtracted = code - 0xc140;</span>
+      }
+<span class="pc bpc" id="L606" title="1 of 2 branches missed.">      if (subtracted == -1) {</span>
+<span class="nc" id="L607">        throw new WriterException(&quot;Invalid byte sequence&quot;);</span>
+      }
+<span class="fc" id="L609">      int encoded = ((subtracted &gt;&gt; 8) * 0xc0) + (subtracted &amp; 0xff);</span>
+<span class="fc" id="L610">      bits.appendBits(encoded, 13);</span>
+    }
+<span class="fc" id="L612">  }</span>
+
+  private static void appendECI(CharacterSetECI eci, BitArray bits) {
+<span class="fc" id="L615">    bits.appendBits(Mode.ECI.getBits(), 4);</span>
+    // This is correct for values up to 127, which is all we need now.
+<span class="fc" id="L617">    bits.appendBits(eci.getValue(), 8);</span>
+<span class="fc" id="L618">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

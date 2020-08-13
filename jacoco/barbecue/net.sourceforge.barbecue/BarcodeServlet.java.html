@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BarcodeServlet.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">barbecue$All_in_barbecue_test.exec</a> &gt; <a href="index.source.html" class="el_package">net.sourceforge.barbecue</a> &gt; <span class="el_source">BarcodeServlet.java</span></div><h1>BarcodeServlet.java</h1><pre class="source lang-java linenums">/***********************************************************************************************************************
+Copyright (c) 2003, International Barcode Consortium
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of
+      conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+    * Neither the name of the International Barcode Consortium nor the names of any contributors may be used to endorse
+      or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+***********************************************************************************************************************/
+
+package net.sourceforge.barbecue;
+
+import net.sourceforge.barbecue.env.*;
+import net.sourceforge.barbecue.linear.code39.Code39Barcode;
+import net.sourceforge.barbecue.output.OutputException;
+
+import javax.servlet.ServletException;
+import javax.servlet.ServletOutputStream;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
+
+/**
+ * The query parameters for this servlet are:
+ * &lt;ol&gt;
+ * &lt;li&gt;data, required, example: &quot;1234567890&quot;
+ * &lt;li&gt;type, optional, examples: &quot;Code128A&quot;, &quot;Code128B&quot;, &quot;Code128C&quot;, if left blank will default to Code 128 B.
+ * Note that the type here must be &lt;b&gt;exactly&lt;/b&gt; the name of one of the createX methods on BarcodeFactory without
+ * the &quot;create&quot; prefix. This is case sensitive.
+ * &lt;li&gt;appid, required for UCC128 type, ignored for all other types - specifies the application identifier to use with
+ * the UCC128 barcode, example: &quot;420&quot; for a US postal service barcode
+ * &lt;li&gt;width, optional, in pixels
+ * &lt;li&gt;height, optional, in pixels
+ * &lt;li&gt;resolution, optional, in dpi
+ * &lt;li&gt;headless, optional, set to &quot;false&quot; to force non-headless mode for the servlet - default is &quot;true&quot;
+ * &lt;li&gt;drawText, optional and only takes effect if headless is &quot;false&quot;, set to &quot;false&quot; for no text
+ * &lt;/ol&gt;
+ *
+ * &lt;p&gt;Example URL: &lt;code&gt;http://hostname:80/myapp/BarcodeServlet?data=12345&amp;amp;type=Code128A&lt;/code&gt;
+ * &lt;/p&gt;
+ * 
+ * &lt;p&gt;Contributed by Robert Chou &amp;lt;rchou at users.sourceforge.net&amp;gt;&lt;/p&gt;
+ *
+ * @author Robert Chou
+ * @author &lt;a href=&quot;mailto:opensource@ianbourke.com&quot;&gt;Ian Bourke&lt;/a&gt;
+ * @author Sean Sullivan
+ * 
+ */
+<span class="fc" id="L68">public class BarcodeServlet extends HttpServlet {</span>
+	/**
+	 * From HttpServlet.
+	 * @return The literal string 'barbecue'
+	 */
+	public String getServletName() {
+<span class="fc" id="L74">		return &quot;barbecue&quot;;</span>
+	}
+
+	/**
+	 * From HttpServlet.
+	 * @param req The servlet request
+	 * @param res The servlet response
+	 * @throws ServletException If an error occurs during processing
+	 */
+	public void doPost(HttpServletRequest req, HttpServletResponse res) throws ServletException {
+<span class="fc" id="L84">		doRequest(req, res);</span>
+<span class="fc" id="L85">	}</span>
+
+	/**
+	 * From HttpServlet.
+	 * @param req The servlet request
+	 * @param res The servlet response
+	 * @throws ServletException If an error occurs during processing
+	 */
+	public void doGet(HttpServletRequest req, HttpServletResponse res) throws ServletException {
+<span class="fc" id="L94">		doRequest(req, res);</span>
+<span class="fc" id="L95">	}</span>
+
+	private void doRequest(HttpServletRequest req, HttpServletResponse res) throws ServletException {
+<span class="fc" id="L98">		String data = getRequiredParameter(req, &quot;data&quot;);</span>
+<span class="fc" id="L99">		String type = getParameter(req, &quot;type&quot;);</span>
+<span class="fc" id="L100">		String appId = getParameter(req, &quot;appid&quot;);</span>
+<span class="fc" id="L101">		Integer width = getParameterAsInteger(req, &quot;width&quot;);</span>
+<span class="fc" id="L102">		Integer height = getParameterAsInteger(req, &quot;height&quot;);</span>
+<span class="fc" id="L103">		Integer resolution = getParameterAsInteger(req, &quot;resolution&quot;);</span>
+<span class="fc" id="L104">		boolean checksum = getParameterAsBoolean(req, &quot;checksum&quot;, false);</span>
+<span class="fc" id="L105">		boolean headless = getParameterAsBoolean(req, &quot;headless&quot;, true);</span>
+<span class="fc" id="L106">		boolean drawText = false;</span>
+
+<span class="fc bfc" id="L108" title="All 2 branches covered.">		if (headless) {</span>
+<span class="fc" id="L109">			EnvironmentFactory.setHeadlessMode();</span>
+		} else {
+<span class="fc" id="L111">			drawText = getParameterAsBoolean(req, &quot;drawText&quot;, false);</span>
+		}
+
+<span class="fc" id="L114">		Barcode barcode = getBarcode(type, data, appId, checksum);</span>
+<span class="fc" id="L115">		barcode.setDrawingText(drawText);</span>
+
+<span class="fc bfc" id="L117" title="All 2 branches covered.">		if (width != null) {</span>
+<span class="fc" id="L118">			barcode.setBarWidth(width.intValue());</span>
+		}
+<span class="fc bfc" id="L120" title="All 2 branches covered.">		if (height != null) {</span>
+<span class="fc" id="L121">			barcode.setBarHeight(height.intValue());</span>
+		}
+<span class="pc bpc" id="L123" title="1 of 2 branches missed.">		if (resolution != null) {</span>
+<span class="fc" id="L124">			barcode.setResolution(resolution.intValue());</span>
+		}
+
+		try {
+<span class="fc" id="L128">			outputBarcodeImage(res, barcode);</span>
+<span class="nc" id="L129">		} catch (IOException e) {</span>
+<span class="nc" id="L130">			throw new ServletException(&quot;Could not output barcode&quot;, e);</span>
+<span class="nc" id="L131">		} catch (OutputException e) {</span>
+<span class="nc" id="L132">			throw new ServletException(&quot;Could not output barcode&quot;, e);</span>
+<span class="fc" id="L133">		}</span>
+<span class="fc" id="L134">	}</span>
+
+	private String getRequiredParameter(HttpServletRequest req, String name) throws ServletException {
+<span class="fc" id="L137">		String value = getParameter(req, name);</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">		if (value == null) {</span>
+<span class="fc" id="L139">			throw new ServletException(&quot;Parameter &quot; + name + &quot; is required&quot;);</span>
+		}
+<span class="fc" id="L141">		return value;</span>
+	}
+
+	private boolean getParameterAsBoolean(HttpServletRequest req, String name, boolean def) {
+<span class="fc" id="L145">		String value = getParameter(req, name);</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">		if (value == null) {</span>
+<span class="fc" id="L147">			return def;</span>
+		}
+<span class="fc" id="L149">		return Boolean.valueOf(value).booleanValue();</span>
+	}
+
+	private Integer getParameterAsInteger(HttpServletRequest req, String name) {
+<span class="fc" id="L153">		String value = getParameter(req, name);</span>
+<span class="fc bfc" id="L154" title="All 2 branches covered.">		if (value == null) {</span>
+<span class="fc" id="L155">			return null;</span>
+		}
+<span class="fc" id="L157">		return new Integer(value);</span>
+	}
+
+	private String getParameter(HttpServletRequest req, String name) {
+<span class="fc" id="L161">		return req.getParameter(name);</span>
+	}
+
+	/**
+	 * Returns the appropriate barcode for the speficied parameters.
+	 * @param type The barcode type
+	 * @param data The data to encode
+	 * @param appId The (optional) application ID - for UCC128 codes
+	 * @param checkSum Flag indicating whether a checksum should be appended to the barcode - for Code 39 barcodes
+	 * @return The barcode
+	 * @throws ServletException If required data is missing
+	 */
+	protected Barcode getBarcode(String type, String data, String appId, boolean checkSum) throws ServletException {
+<span class="pc bpc" id="L174" title="2 of 4 branches missed.">		if (type == null || type.length() == 0) {</span>
+			try {
+<span class="nc" id="L176">				return BarcodeFactory.createCode128B(data);</span>
+<span class="nc" id="L177">			} catch (BarcodeException e) {</span>
+<span class="nc" id="L178">				throw new ServletException(&quot;BARCODE ERROR&quot;, e);</span>
+			}
+<span class="fc bfc" id="L180" title="All 2 branches covered.">		} else if (isType(type, new String[] {&quot;UCC128&quot;})) {</span>
+<span class="fc bfc" id="L181" title="All 2 branches covered.">			if (appId == null) {</span>
+<span class="fc" id="L182">				throw new ServletException(&quot;UCC128 barcode type requires the appid parameter&quot;);</span>
+			}
+			try {
+<span class="fc" id="L185">				return BarcodeFactory.createUCC128(appId, data);</span>
+<span class="nc" id="L186">			} catch (BarcodeException e) {</span>
+<span class="nc" id="L187">				throw new ServletException(&quot;BARCODE ERROR&quot;, e);</span>
+			}
+<span class="fc bfc" id="L189" title="All 2 branches covered.">		} else if (isType(type, Code39Barcode.TYPES)) {</span>
+			try {
+<span class="fc" id="L191">				return BarcodeFactory.createCode39(data, checkSum);</span>
+<span class="nc" id="L192">			} catch (BarcodeException e) {</span>
+<span class="nc" id="L193">				throw new ServletException(&quot;BARCODE ERROR&quot;, e);</span>
+			}
+		}
+
+		try {
+<span class="fc" id="L198">			return (Barcode) getMethod(type).invoke(null, new Object[] {data});</span>
+<span class="nc" id="L199">		} catch (NoSuchMethodException e) {</span>
+<span class="nc" id="L200">			throw new ServletException(&quot;Invalid barcode type: &quot; + type);</span>
+<span class="nc" id="L201">		} catch (SecurityException e) {</span>
+<span class="nc" id="L202">			throw new ServletException(&quot;Could not create barcode of type: &quot; + type</span>
+									   + &quot;; Security exception accessing BarcodeFactory&quot;);
+<span class="nc" id="L204">		} catch (IllegalAccessException e) {</span>
+<span class="nc" id="L205">			throw new ServletException(&quot;Could not create barcode of type: &quot; + type</span>
+									   + &quot;; Illegal access to BarcodeFactory&quot;);
+<span class="nc" id="L207">		} catch (InvocationTargetException e) {</span>
+<span class="nc" id="L208">			throw new ServletException(&quot;Could not create barcode of type: &quot; + type</span>
+									   + &quot;; Could not invoke BarcodeFactory&quot;);
+		}
+	}
+
+	private boolean isType(String value, String[] types) {
+<span class="fc bfc" id="L214" title="All 2 branches covered.">		for (int i = 0; i &lt; types.length; i++) {</span>
+<span class="fc" id="L215">			String type = types[i];</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">			if (value.equalsIgnoreCase(type)) {</span>
+<span class="fc" id="L217">				return true;</span>
+			}
+		}
+<span class="fc" id="L220">		return false;</span>
+	}
+
+	private Method getMethod(String type) throws NoSuchMethodException {
+<span class="fc" id="L224">		Method[] methods = BarcodeFactory.class.getMethods();</span>
+
+<span class="pc bpc" id="L226" title="1 of 2 branches missed.">		for (int i = 0; i &lt; methods.length; i++) {</span>
+<span class="fc" id="L227">			Method method = methods[i];</span>
+<span class="fc bfc" id="L228" title="All 4 branches covered.">			if ((method.getParameterTypes().length == 1) &amp;&amp; matches(method, type)) {</span>
+<span class="fc" id="L229">				return method;</span>
+			}
+		}
+
+<span class="nc" id="L233">		throw new NoSuchMethodException();</span>
+	}
+
+	private boolean matches(Method method, String type) {
+<span class="fc bfc" id="L237" title="All 4 branches covered.">		return method.getName().startsWith(&quot;create&quot;) &amp;&amp; method.getName().substring(6).equalsIgnoreCase(type);</span>
+	}
+
+	private void outputBarcodeImage(HttpServletResponse res, Barcode barcode) throws IOException, OutputException {
+<span class="fc" id="L241">		res.setContentType(&quot;image/png&quot;);</span>
+<span class="fc" id="L242">		ServletOutputStream out = res.getOutputStream();</span>
+<span class="fc" id="L243">		BarcodeImageHandler.writePNG(barcode, out);</span>
+<span class="fc" id="L244">		out.flush();</span>
+<span class="fc" id="L245">		out.close();</span>
+<span class="fc" id="L246">	}</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

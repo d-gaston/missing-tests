@@ -1,0 +1,1360 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CMAESOptimizer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.optim.nonlinear.scalar.noderiv</a> &gt; <span class="el_source">CMAESOptimizer.java</span></div><h1>CMAESOptimizer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.optim.nonlinear.scalar.noderiv;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.NotPositiveException;
+import org.apache.commons.math4.exception.NotStrictlyPositiveException;
+import org.apache.commons.math4.exception.OutOfRangeException;
+import org.apache.commons.math4.exception.TooManyEvaluationsException;
+import org.apache.commons.math4.linear.Array2DRowRealMatrix;
+import org.apache.commons.math4.linear.EigenDecomposition;
+import org.apache.commons.math4.linear.MatrixUtils;
+import org.apache.commons.math4.linear.RealMatrix;
+import org.apache.commons.math4.optim.ConvergenceChecker;
+import org.apache.commons.math4.optim.OptimizationData;
+import org.apache.commons.math4.optim.PointValuePair;
+import org.apache.commons.math4.optim.nonlinear.scalar.GoalType;
+import org.apache.commons.math4.optim.nonlinear.scalar.MultivariateOptimizer;
+import org.apache.commons.rng.UniformRandomProvider;
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.statistics.distribution.NormalDistribution;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.MathArrays;
+
+/**
+ * An implementation of the active Covariance Matrix Adaptation Evolution Strategy (CMA-ES)
+ * for non-linear, non-convex, non-smooth, global function minimization.
+ * &lt;p&gt;
+ * The CMA-Evolution Strategy (CMA-ES) is a reliable stochastic optimization method
+ * which should be applied if derivative-based methods, e.g. quasi-Newton BFGS or
+ * conjugate gradient, fail due to a rugged search landscape (e.g. noise, local
+ * optima, outlier, etc.) of the objective function. Like a
+ * quasi-Newton method, the CMA-ES learns and applies a variable metric
+ * on the underlying search space. Unlike a quasi-Newton method, the
+ * CMA-ES neither estimates nor uses gradients, making it considerably more
+ * reliable in terms of finding a good, or even close to optimal, solution.
+ * &lt;p&gt;
+ * In general, on smooth objective functions the CMA-ES is roughly ten times
+ * slower than BFGS (counting objective function evaluations, no gradients provided).
+ * For up to &lt;code&gt;N=10&lt;/code&gt; variables also the derivative-free simplex
+ * direct search method (Nelder and Mead) can be faster, but it is
+ * far less reliable than CMA-ES.
+ * &lt;p&gt;
+ * The CMA-ES is particularly well suited for non-separable
+ * and/or badly conditioned problems. To observe the advantage of CMA compared
+ * to a conventional evolution strategy, it will usually take about
+ * &lt;code&gt;30 N&lt;/code&gt; function evaluations. On difficult problems the complete
+ * optimization (a single run) is expected to take &lt;em&gt;roughly&lt;/em&gt; between
+ * &lt;code&gt;30 N&lt;/code&gt; and &lt;code&gt;300 N&lt;sup&gt;2&lt;/sup&gt;&lt;/code&gt;
+ * function evaluations.
+ * &lt;p&gt;
+ * This implementation is translated and adapted from the Matlab version
+ * of the CMA-ES algorithm as implemented in module {@code cmaes.m} version 3.51.
+ * &lt;p&gt;
+ * For more information, please refer to the following links:
+ * &lt;ul&gt;
+ *  &lt;li&gt;&lt;a href=&quot;http://www.lri.fr/~hansen/cmaes.m&quot;&gt;Matlab code&lt;/a&gt;&lt;/li&gt;
+ *  &lt;li&gt;&lt;a href=&quot;http://www.lri.fr/~hansen/cmaesintro.html&quot;&gt;Introduction to CMA-ES&lt;/a&gt;&lt;/li&gt;
+ *  &lt;li&gt;&lt;a href=&quot;http://en.wikipedia.org/wiki/CMA-ES&quot;&gt;Wikipedia&lt;/a&gt;&lt;/li&gt;
+ * &lt;/ul&gt;
+ *
+ * @since 3.0
+ */
+public class CMAESOptimizer
+    extends MultivariateOptimizer {
+    // global search parameters
+    /**
+     * Population size, offspring number. The primary strategy parameter to play
+     * with, which can be increased from its default value. Increasing the
+     * population size improves global search properties in exchange to speed.
+     * Speed decreases, as a rule, at most linearly with increasing population
+     * size. It is advisable to begin with the default small population size.
+     */
+    private int lambda; // population size
+    /**
+     * Covariance update mechanism, default is active CMA. isActiveCMA = true
+     * turns on &quot;active CMA&quot; with a negative update of the covariance matrix and
+     * checks for positive definiteness. OPTS.CMA.active = 2 does not check for
+     * pos. def. and is numerically faster. Active CMA usually speeds up the
+     * adaptation.
+     */
+    private final boolean isActiveCMA;
+    /**
+     * Determines how often a new random offspring is generated in case it is
+     * not feasible / beyond the defined limits, default is 0.
+     */
+    private final int checkFeasableCount;
+    /**
+     * @see Sigma
+     */
+    private double[] inputSigma;
+    /** Number of objective variables/problem dimension */
+    private int dimension;
+    /**
+     * Defines the number of initial iterations, where the covariance matrix
+     * remains diagonal and the algorithm has internally linear time complexity.
+     * diagonalOnly = 1 means keeping the covariance matrix always diagonal and
+     * this setting also exhibits linear space complexity. This can be
+     * particularly useful for dimension &gt; 100.
+     * @see &lt;a href=&quot;http://hal.archives-ouvertes.fr/inria-00287367/en&quot;&gt;A Simple Modification in CMA-ES&lt;/a&gt;
+     */
+    private int diagonalOnly;
+    /** Number of objective variables/problem dimension */
+<span class="fc" id="L123">    private boolean isMinimize = true;</span>
+    /** Indicates whether statistic data is collected. */
+    private final boolean generateStatistics;
+
+    // termination criteria
+    /** Maximal number of iterations allowed. */
+    private final int maxIterations;
+    /** Limit for fitness value. */
+    private final double stopFitness;
+    /** Stop if x-changes larger stopTolUpX. */
+    private double stopTolUpX;
+    /** Stop if x-change smaller stopTolX. */
+    private double stopTolX;
+    /** Stop if fun-changes smaller stopTolFun. */
+    private double stopTolFun;
+    /** Stop if back fun-changes smaller stopTolHistFun. */
+    private double stopTolHistFun;
+
+    // selection strategy parameters
+    /** Number of parents/points for recombination. */
+    private int mu; //
+    /** log(mu + 0.5), stored for efficiency. */
+    private double logMu2;
+    /** Array for weighted recombination. */
+    private RealMatrix weights;
+    /** Variance-effectiveness of sum w_i x_i. */
+    private double mueff; //
+
+    // dynamic strategy parameters and constants
+    /** Overall standard deviation - search volume. */
+    private double sigma;
+    /** Cumulation constant. */
+    private double cc;
+    /** Cumulation constant for step-size. */
+    private double cs;
+    /** Damping for step-size. */
+    private double damps;
+    /** Learning rate for rank-one update. */
+    private double ccov1;
+    /** Learning rate for rank-mu update' */
+    private double ccovmu;
+    /** Expectation of ||N(0,I)|| == norm(randn(N,1)). */
+    private double chiN;
+    /** Learning rate for rank-one update - diagonalOnly */
+    private double ccov1Sep;
+    /** Learning rate for rank-mu update - diagonalOnly */
+    private double ccovmuSep;
+
+    // CMA internal values - updated each generation
+    /** Objective variables. */
+    private RealMatrix xmean;
+    /** Evolution path. */
+    private RealMatrix pc;
+    /** Evolution path for sigma. */
+    private RealMatrix ps;
+    /** Norm of ps, stored for efficiency. */
+    private double normps;
+    /** Coordinate system. */
+    private RealMatrix B;
+    /** Scaling. */
+    private RealMatrix D;
+    /** B*D, stored for efficiency. */
+    private RealMatrix BD;
+    /** Diagonal of sqrt(D), stored for efficiency. */
+    private RealMatrix diagD;
+    /** Covariance matrix. */
+    private RealMatrix C;
+    /** Diagonal of C, used for diagonalOnly. */
+    private RealMatrix diagC;
+    /** Number of iterations already performed. */
+    private int iterations;
+
+    /** History queue of best values. */
+    private double[] fitnessHistory;
+    /** Size of history queue of best values. */
+    private int historySize;
+
+    /** Gaussian sampler. */
+    private final ContinuousDistribution.Sampler random;
+
+    /** History of sigma values. */
+<span class="fc" id="L204">    private final List&lt;Double&gt; statisticsSigmaHistory = new ArrayList&lt;&gt;();</span>
+    /** History of mean matrix. */
+<span class="fc" id="L206">    private final List&lt;RealMatrix&gt; statisticsMeanHistory = new ArrayList&lt;&gt;();</span>
+    /** History of fitness values. */
+<span class="fc" id="L208">    private final List&lt;Double&gt; statisticsFitnessHistory = new ArrayList&lt;&gt;();</span>
+    /** History of D matrix. */
+<span class="fc" id="L210">    private final List&lt;RealMatrix&gt; statisticsDHistory = new ArrayList&lt;&gt;();</span>
+
+    /**
+     * @param maxIterations Maximal number of iterations.
+     * @param stopFitness Whether to stop if objective function value is smaller than
+     * {@code stopFitness}.
+     * @param isActiveCMA Chooses the covariance matrix update method.
+     * @param diagonalOnly Number of initial iterations, where the covariance matrix
+     * remains diagonal.
+     * @param checkFeasableCount Determines how often new random objective variables are
+     * generated in case they are out of bounds.
+     * @param rng Random generator.
+     * @param generateStatistics Whether statistic data is collected.
+     * @param checker Convergence checker.
+     *
+     * @since 3.1
+     */
+    public CMAESOptimizer(int maxIterations,
+                          double stopFitness,
+                          boolean isActiveCMA,
+                          int diagonalOnly,
+                          int checkFeasableCount,
+                          UniformRandomProvider rng,
+                          boolean generateStatistics,
+                          ConvergenceChecker&lt;PointValuePair&gt; checker) {
+<span class="fc" id="L235">        super(checker);</span>
+<span class="fc" id="L236">        this.maxIterations = maxIterations;</span>
+<span class="fc" id="L237">        this.stopFitness = stopFitness;</span>
+<span class="fc" id="L238">        this.isActiveCMA = isActiveCMA;</span>
+<span class="fc" id="L239">        this.diagonalOnly = diagonalOnly;</span>
+<span class="fc" id="L240">        this.checkFeasableCount = checkFeasableCount;</span>
+<span class="fc" id="L241">        this.random = new NormalDistribution(0, 1).createSampler(rng);</span>
+<span class="fc" id="L242">        this.generateStatistics = generateStatistics;</span>
+<span class="fc" id="L243">    }</span>
+
+    /**
+     * @return History of sigma values.
+     */
+    public List&lt;Double&gt; getStatisticsSigmaHistory() {
+<span class="nc" id="L249">        return statisticsSigmaHistory;</span>
+    }
+
+    /**
+     * @return History of mean matrix.
+     */
+    public List&lt;RealMatrix&gt; getStatisticsMeanHistory() {
+<span class="nc" id="L256">        return statisticsMeanHistory;</span>
+    }
+
+    /**
+     * @return History of fitness values.
+     */
+    public List&lt;Double&gt; getStatisticsFitnessHistory() {
+<span class="nc" id="L263">        return statisticsFitnessHistory;</span>
+    }
+
+    /**
+     * @return History of D matrix.
+     */
+    public List&lt;RealMatrix&gt; getStatisticsDHistory() {
+<span class="nc" id="L270">        return statisticsDHistory;</span>
+    }
+
+    /**
+     * Input sigma values.
+     * They define the initial coordinate-wise standard deviations for
+     * sampling new search points around the initial guess.
+     * It is suggested to set them to the estimated distance from the
+     * initial to the desired optimum.
+     * Small values induce the search to be more local (and very small
+     * values are more likely to find a local optimum close to the initial
+     * guess).
+     * Too small values might however lead to early termination.
+     */
+    public static class Sigma implements OptimizationData {
+        /** Sigma values. */
+        private final double[] sigma;
+
+        /**
+         * @param s Sigma values.
+         * @throws NotPositiveException if any of the array entries is smaller
+         * than zero.
+         */
+        public Sigma(double[] s)
+<span class="fc" id="L294">            throws NotPositiveException {</span>
+<span class="fc bfc" id="L295" title="All 2 branches covered.">            for (int i = 0; i &lt; s.length; i++) {</span>
+<span class="fc bfc" id="L296" title="All 2 branches covered.">                if (s[i] &lt; 0) {</span>
+<span class="fc" id="L297">                    throw new NotPositiveException(s[i]);</span>
+                }
+            }
+
+<span class="fc" id="L301">            sigma = s.clone();</span>
+<span class="fc" id="L302">        }</span>
+
+        /**
+         * @return the sigma values.
+         */
+        public double[] getSigma() {
+<span class="fc" id="L308">            return sigma.clone();</span>
+        }
+    }
+
+    /**
+     * Population size.
+     * The number of offspring is the primary strategy parameter.
+     * In the absence of better clues, a good default could be an
+     * integer close to {@code 4 + 3 ln(n)}, where {@code n} is the
+     * number of optimized parameters.
+     * Increasing the population size improves global search properties
+     * at the expense of speed (which in general decreases at most
+     * linearly with increasing population size).
+     */
+    public static class PopulationSize implements OptimizationData {
+        /** Population size. */
+        private final int lambda;
+
+        /**
+         * @param size Population size.
+         * @throws NotStrictlyPositiveException if {@code size &lt;= 0}.
+         */
+        public PopulationSize(int size)
+<span class="fc" id="L331">            throws NotStrictlyPositiveException {</span>
+<span class="pc bpc" id="L332" title="1 of 2 branches missed.">            if (size &lt;= 0) {</span>
+<span class="nc" id="L333">                throw new NotStrictlyPositiveException(size);</span>
+            }
+<span class="fc" id="L335">            lambda = size;</span>
+<span class="fc" id="L336">        }</span>
+
+        /**
+         * @return the population size.
+         */
+        public int getPopulationSize() {
+<span class="fc" id="L342">            return lambda;</span>
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @param optData Optimization data. In addition to those documented in
+     * {@link MultivariateOptimizer#parseOptimizationData(OptimizationData[])
+     * MultivariateOptimizer}, this method will register the following data:
+     * &lt;ul&gt;
+     *  &lt;li&gt;{@link Sigma}&lt;/li&gt;
+     *  &lt;li&gt;{@link PopulationSize}&lt;/li&gt;
+     * &lt;/ul&gt;
+     * @return {@inheritDoc}
+     * @throws TooManyEvaluationsException if the maximal number of
+     * evaluations is exceeded.
+     * @throws DimensionMismatchException if the initial guess, target, and weight
+     * arguments have inconsistent dimensions.
+     */
+    @Override
+    public PointValuePair optimize(OptimizationData... optData)
+        throws TooManyEvaluationsException,
+               DimensionMismatchException {
+        // Set up base class and perform computation.
+<span class="fc" id="L367">        return super.optimize(optData);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    protected PointValuePair doOptimize() {
+         // -------------------- Initialization --------------------------------
+<span class="fc" id="L374">        isMinimize = getGoalType().equals(GoalType.MINIMIZE);</span>
+<span class="fc" id="L375">        final FitnessFunction fitfun = new FitnessFunction();</span>
+<span class="fc" id="L376">        final double[] guess = getStartPoint();</span>
+        // number of objective variables/problem dimension
+<span class="fc" id="L378">        dimension = guess.length;</span>
+<span class="fc" id="L379">        initializeCMA(guess);</span>
+<span class="fc" id="L380">        iterations = 0;</span>
+<span class="fc" id="L381">        ValuePenaltyPair valuePenalty = fitfun.value(guess);</span>
+<span class="fc" id="L382">        double bestValue = valuePenalty.value+valuePenalty.penalty;</span>
+<span class="fc" id="L383">        push(fitnessHistory, bestValue);</span>
+<span class="fc" id="L384">        PointValuePair optimum</span>
+<span class="fc bfc" id="L385" title="All 2 branches covered.">            = new PointValuePair(getStartPoint(),</span>
+                                 isMinimize ? bestValue : -bestValue);
+<span class="fc" id="L387">        PointValuePair lastResult = null;</span>
+
+        // -------------------- Generation Loop --------------------------------
+
+        generationLoop:
+<span class="pc bpc" id="L392" title="1 of 2 branches missed.">        for (iterations = 1; iterations &lt;= maxIterations; iterations++) {</span>
+<span class="fc" id="L393">            incrementIterationCount();</span>
+
+            // Generate and evaluate lambda offspring
+<span class="fc" id="L396">            final RealMatrix arz = randn1(dimension, lambda);</span>
+<span class="fc" id="L397">            final RealMatrix arx = zeros(dimension, lambda);</span>
+<span class="fc" id="L398">            final double[] fitness = new double[lambda];</span>
+<span class="fc" id="L399">            final ValuePenaltyPair[] valuePenaltyPairs = new ValuePenaltyPair[lambda];</span>
+            // generate random offspring
+<span class="fc bfc" id="L401" title="All 2 branches covered.">            for (int k = 0; k &lt; lambda; k++) {</span>
+<span class="fc" id="L402">                RealMatrix arxk = null;</span>
+<span class="pc bpc" id="L403" title="1 of 2 branches missed.">                for (int i = 0; i &lt; checkFeasableCount + 1; i++) {</span>
+<span class="fc bfc" id="L404" title="All 2 branches covered.">                    if (diagonalOnly &lt;= 0) {</span>
+<span class="fc" id="L405">                        arxk = xmean.add(BD.multiply(arz.getColumnMatrix(k))</span>
+<span class="fc" id="L406">                                         .scalarMultiply(sigma)); // m + sig * Normal(0,C)</span>
+                    } else {
+<span class="fc" id="L408">                        arxk = xmean.add(times(diagD,arz.getColumnMatrix(k))</span>
+<span class="fc" id="L409">                                         .scalarMultiply(sigma));</span>
+                    }
+<span class="pc bpc" id="L411" title="1 of 2 branches missed.">                    if (i &gt;= checkFeasableCount ||</span>
+<span class="nc bnc" id="L412" title="All 2 branches missed.">                        fitfun.isFeasible(arxk.getColumn(0))) {</span>
+<span class="nc" id="L413">                        break;</span>
+                    }
+                    // regenerate random arguments for row
+<span class="nc" id="L416">                    arz.setColumn(k, randn(dimension));</span>
+                }
+<span class="fc" id="L418">                copyColumn(arxk, 0, arx, k);</span>
+                try {
+<span class="fc" id="L420">                    valuePenaltyPairs[k] = fitfun.value(arx.getColumn(k)); // compute fitness</span>
+<span class="nc" id="L421">                } catch (TooManyEvaluationsException e) {</span>
+<span class="nc" id="L422">                    break generationLoop;</span>
+<span class="fc" id="L423">                }</span>
+            }
+
+            // Compute fitnesses by adding value and penalty after scaling by value range.
+<span class="fc" id="L427">            double valueRange = valueRange(valuePenaltyPairs);</span>
+<span class="fc bfc" id="L428" title="All 2 branches covered.">            for (int iValue=0;iValue&lt;valuePenaltyPairs.length;iValue++) {</span>
+<span class="fc" id="L429">                 fitness[iValue] = valuePenaltyPairs[iValue].value + valuePenaltyPairs[iValue].penalty*valueRange;</span>
+            }
+
+            // Sort by fitness and compute weighted mean into xmean
+<span class="fc" id="L433">            final int[] arindex = sortedIndices(fitness);</span>
+            // Calculate new xmean, this is selection and recombination
+<span class="fc" id="L435">            final RealMatrix xold = xmean; // for speed up of Eq. (2) and (3)</span>
+<span class="fc" id="L436">            final RealMatrix bestArx = selectColumns(arx, MathArrays.copyOf(arindex, mu));</span>
+<span class="fc" id="L437">            xmean = bestArx.multiply(weights);</span>
+<span class="fc" id="L438">            final RealMatrix bestArz = selectColumns(arz, MathArrays.copyOf(arindex, mu));</span>
+<span class="fc" id="L439">            final RealMatrix zmean = bestArz.multiply(weights);</span>
+<span class="fc" id="L440">            final boolean hsig = updateEvolutionPaths(zmean, xold);</span>
+<span class="fc bfc" id="L441" title="All 2 branches covered.">            if (diagonalOnly &lt;= 0) {</span>
+<span class="fc" id="L442">                updateCovariance(hsig, bestArx, arz, arindex, xold);</span>
+            } else {
+<span class="fc" id="L444">                updateCovarianceDiagonalOnly(hsig, bestArz);</span>
+            }
+            // Adapt step size sigma - Eq. (5)
+<span class="fc" id="L447">            sigma *= FastMath.exp(FastMath.min(1, (normps/chiN - 1) * cs / damps));</span>
+<span class="fc" id="L448">            final double bestFitness = fitness[arindex[0]];</span>
+<span class="fc" id="L449">            final double worstFitness = fitness[arindex[arindex.length - 1]];</span>
+<span class="fc bfc" id="L450" title="All 2 branches covered.">            if (bestValue &gt; bestFitness) {</span>
+<span class="fc" id="L451">                bestValue = bestFitness;</span>
+<span class="fc" id="L452">                lastResult = optimum;</span>
+<span class="fc bfc" id="L453" title="All 2 branches covered.">                optimum = new PointValuePair(fitfun.repair(bestArx.getColumn(0)),</span>
+                                             isMinimize ? bestFitness : -bestFitness);
+<span class="pc bpc" id="L455" title="3 of 4 branches missed.">                if (getConvergenceChecker() != null &amp;&amp; lastResult != null &amp;&amp;</span>
+<span class="nc bnc" id="L456" title="All 2 branches missed.">                    getConvergenceChecker().converged(iterations, optimum, lastResult)) {</span>
+<span class="nc" id="L457">                    break generationLoop;</span>
+                }
+            }
+            // handle termination criteria
+            // Break, if fitness is good enough
+<span class="fc bfc" id="L462" title="All 6 branches covered.">            if (stopFitness != 0 &amp;&amp; bestFitness &lt; (isMinimize ? stopFitness : -stopFitness)) {</span>
+<span class="fc" id="L463">                break generationLoop;</span>
+            }
+<span class="fc" id="L465">            final double[] sqrtDiagC = sqrt(diagC).getColumn(0);</span>
+<span class="fc" id="L466">            final double[] pcCol = pc.getColumn(0);</span>
+<span class="pc bpc" id="L467" title="1 of 2 branches missed.">            for (int i = 0; i &lt; dimension; i++) {</span>
+<span class="fc bfc" id="L468" title="All 2 branches covered.">                if (sigma * FastMath.max(FastMath.abs(pcCol[i]), sqrtDiagC[i]) &gt; stopTolX) {</span>
+<span class="fc" id="L469">                    break;</span>
+                }
+<span class="fc bfc" id="L471" title="All 2 branches covered.">                if (i &gt;= dimension - 1) {</span>
+<span class="fc" id="L472">                    break generationLoop;</span>
+                }
+            }
+<span class="fc bfc" id="L475" title="All 2 branches covered.">            for (int i = 0; i &lt; dimension; i++) {</span>
+<span class="pc bpc" id="L476" title="1 of 2 branches missed.">                if (sigma * sqrtDiagC[i] &gt; stopTolUpX) {</span>
+<span class="nc" id="L477">                    break generationLoop;</span>
+                }
+            }
+<span class="fc" id="L480">            final double historyBest = min(fitnessHistory);</span>
+<span class="fc" id="L481">            final double historyWorst = max(fitnessHistory);</span>
+<span class="fc bfc" id="L482" title="All 2 branches covered.">            if (iterations &gt; 2 &amp;&amp;</span>
+<span class="fc" id="L483">                FastMath.max(historyWorst, worstFitness) -</span>
+<span class="fc bfc" id="L484" title="All 2 branches covered.">                FastMath.min(historyBest, bestFitness) &lt; stopTolFun) {</span>
+<span class="fc" id="L485">                break generationLoop;</span>
+            }
+<span class="pc bpc" id="L487" title="1 of 4 branches missed.">            if (iterations &gt; fitnessHistory.length &amp;&amp;</span>
+                historyWorst - historyBest &lt; stopTolHistFun) {
+<span class="nc" id="L489">                break generationLoop;</span>
+            }
+            // condition number of the covariance matrix exceeds 1e14
+<span class="fc bfc" id="L492" title="All 2 branches covered.">            if (max(diagD) / min(diagD) &gt; 1e7) {</span>
+<span class="fc" id="L493">                break generationLoop;</span>
+            }
+            // user defined termination
+<span class="pc bpc" id="L496" title="1 of 2 branches missed.">            if (getConvergenceChecker() != null) {</span>
+<span class="nc" id="L497">                final PointValuePair current</span>
+<span class="nc bnc" id="L498" title="All 2 branches missed.">                    = new PointValuePair(bestArx.getColumn(0),</span>
+                                         isMinimize ? bestFitness : -bestFitness);
+<span class="nc bnc" id="L500" title="All 2 branches missed.">                if (lastResult != null &amp;&amp;</span>
+<span class="nc bnc" id="L501" title="All 2 branches missed.">                    getConvergenceChecker().converged(iterations, current, lastResult)) {</span>
+<span class="nc" id="L502">                    break generationLoop;</span>
+                    }
+<span class="nc" id="L504">                lastResult = current;</span>
+            }
+            // Adjust step size in case of equal function values (flat fitness)
+<span class="fc bfc" id="L507" title="All 2 branches covered.">            if (bestValue == fitness[arindex[(int)(0.1+lambda/4.)]]) {</span>
+<span class="fc" id="L508">                sigma *= FastMath.exp(0.2 + cs / damps);</span>
+            }
+<span class="fc bfc" id="L510" title="All 2 branches covered.">            if (iterations &gt; 2 &amp;&amp; FastMath.max(historyWorst, bestFitness) -</span>
+<span class="pc bpc" id="L511" title="1 of 2 branches missed.">                FastMath.min(historyBest, bestFitness) == 0) {</span>
+<span class="nc" id="L512">                sigma *= FastMath.exp(0.2 + cs / damps);</span>
+            }
+            // store best in history
+<span class="fc" id="L515">            push(fitnessHistory,bestFitness);</span>
+<span class="pc bpc" id="L516" title="1 of 2 branches missed.">            if (generateStatistics) {</span>
+<span class="nc" id="L517">                statisticsSigmaHistory.add(sigma);</span>
+<span class="nc" id="L518">                statisticsFitnessHistory.add(bestFitness);</span>
+<span class="nc" id="L519">                statisticsMeanHistory.add(xmean.transpose());</span>
+<span class="nc" id="L520">                statisticsDHistory.add(diagD.transpose().scalarMultiply(1E5));</span>
+            }
+        }
+<span class="fc" id="L523">        return optimum;</span>
+    }
+
+    /**
+     * Scans the list of (required and optional) optimization data that
+     * characterize the problem.
+     *
+     * @param optData Optimization data. The following data will be looked for:
+     * &lt;ul&gt;
+     *  &lt;li&gt;{@link Sigma}&lt;/li&gt;
+     *  &lt;li&gt;{@link PopulationSize}&lt;/li&gt;
+     * &lt;/ul&gt;
+     */
+    @Override
+    protected void parseOptimizationData(OptimizationData... optData) {
+        // Allow base class to register its own data.
+<span class="fc" id="L539">        super.parseOptimizationData(optData);</span>
+
+        // The existing values (as set by the previous call) are reused if
+        // not provided in the argument list.
+<span class="fc bfc" id="L543" title="All 2 branches covered.">        for (OptimizationData data : optData) {</span>
+<span class="fc bfc" id="L544" title="All 2 branches covered.">            if (data instanceof Sigma) {</span>
+<span class="fc" id="L545">                inputSigma = ((Sigma) data).getSigma();</span>
+<span class="fc" id="L546">                continue;</span>
+            }
+<span class="fc bfc" id="L548" title="All 2 branches covered.">            if (data instanceof PopulationSize) {</span>
+<span class="fc" id="L549">                lambda = ((PopulationSize) data).getPopulationSize();</span>
+<span class="fc" id="L550">                continue;</span>
+            }
+        }
+
+<span class="fc" id="L554">        checkParameters();</span>
+<span class="fc" id="L555">    }</span>
+
+    /**
+     * Checks dimensions and values of boundaries and inputSigma if defined.
+     */
+    private void checkParameters() {
+<span class="pc bpc" id="L561" title="1 of 2 branches missed.">        if (inputSigma != null) {</span>
+<span class="fc" id="L562">            final double[] init = getStartPoint();</span>
+
+<span class="fc bfc" id="L564" title="All 2 branches covered.">            if (inputSigma.length != init.length) {</span>
+<span class="fc" id="L565">                throw new DimensionMismatchException(inputSigma.length, init.length);</span>
+            }
+
+<span class="fc" id="L568">            final double[] lB = getLowerBound();</span>
+<span class="fc" id="L569">            final double[] uB = getUpperBound();</span>
+
+<span class="fc bfc" id="L571" title="All 2 branches covered.">            for (int i = 0; i &lt; init.length; i++) {</span>
+<span class="fc bfc" id="L572" title="All 2 branches covered.">                if (inputSigma[i] &gt; uB[i] - lB[i]) {</span>
+<span class="fc" id="L573">                    throw new OutOfRangeException(inputSigma[i], 0, uB[i] - lB[i]);</span>
+                }
+            }
+        }
+<span class="fc" id="L577">    }</span>
+
+    /**
+     * Initialization of the dynamic search parameters
+     *
+     * @param guess Initial guess for the arguments of the fitness function.
+     */
+    private void initializeCMA(double[] guess) {
+<span class="pc bpc" id="L585" title="1 of 2 branches missed.">        if (lambda &lt;= 0) {</span>
+<span class="nc" id="L586">            throw new NotStrictlyPositiveException(lambda);</span>
+        }
+        // initialize sigma
+<span class="fc" id="L589">        final double[][] sigmaArray = new double[guess.length][1];</span>
+<span class="fc bfc" id="L590" title="All 2 branches covered.">        for (int i = 0; i &lt; guess.length; i++) {</span>
+<span class="fc" id="L591">            sigmaArray[i][0] = inputSigma[i];</span>
+        }
+<span class="fc" id="L593">        final RealMatrix insigma = new Array2DRowRealMatrix(sigmaArray, false);</span>
+<span class="fc" id="L594">        sigma = max(insigma); // overall standard deviation</span>
+
+        // initialize termination criteria
+<span class="fc" id="L597">        stopTolUpX = 1e3 * max(insigma);</span>
+<span class="fc" id="L598">        stopTolX = 1e-11 * max(insigma);</span>
+<span class="fc" id="L599">        stopTolFun = 1e-12;</span>
+<span class="fc" id="L600">        stopTolHistFun = 1e-13;</span>
+
+        // initialize selection strategy parameters
+<span class="fc" id="L603">        mu = lambda / 2; // number of parents/points for recombination</span>
+<span class="fc" id="L604">        logMu2 = FastMath.log(mu + 0.5);</span>
+<span class="fc" id="L605">        weights = log(sequence(1, mu, 1)).scalarMultiply(-1).scalarAdd(logMu2);</span>
+<span class="fc" id="L606">        double sumw = 0;</span>
+<span class="fc" id="L607">        double sumwq = 0;</span>
+<span class="fc bfc" id="L608" title="All 2 branches covered.">        for (int i = 0; i &lt; mu; i++) {</span>
+<span class="fc" id="L609">            double w = weights.getEntry(i, 0);</span>
+<span class="fc" id="L610">            sumw += w;</span>
+<span class="fc" id="L611">            sumwq += w * w;</span>
+        }
+<span class="fc" id="L613">        weights = weights.scalarMultiply(1 / sumw);</span>
+<span class="fc" id="L614">        mueff = sumw * sumw / sumwq; // variance-effectiveness of sum w_i x_i</span>
+
+        // initialize dynamic strategy parameters and constants
+<span class="fc" id="L617">        cc = (4 + mueff / dimension) /</span>
+                (dimension + 4 + 2 * mueff / dimension);
+<span class="fc" id="L619">        cs = (mueff + 2) / (dimension + mueff + 3.);</span>
+<span class="fc" id="L620">        damps = (1 + 2 * FastMath.max(0, FastMath.sqrt((mueff - 1) /</span>
+                                                       (dimension + 1)) - 1)) *
+<span class="fc" id="L622">            FastMath.max(0.3,</span>
+                         1 - dimension / (1e-6 + maxIterations)) + cs; // minor increment
+<span class="fc" id="L624">        ccov1 = 2 / ((dimension + 1.3) * (dimension + 1.3) + mueff);</span>
+<span class="fc" id="L625">        ccovmu = FastMath.min(1 - ccov1, 2 * (mueff - 2 + 1 / mueff) /</span>
+                              ((dimension + 2) * (dimension + 2) + mueff));
+<span class="fc" id="L627">        ccov1Sep = FastMath.min(1, ccov1 * (dimension + 1.5) / 3);</span>
+<span class="fc" id="L628">        ccovmuSep = FastMath.min(1 - ccov1, ccovmu * (dimension + 1.5) / 3);</span>
+<span class="fc" id="L629">        chiN = FastMath.sqrt(dimension) *</span>
+                (1 - 1 / ((double) 4 * dimension) + 1 / ((double) 21 * dimension * dimension));
+        // intialize CMA internal values - updated each generation
+<span class="fc" id="L632">        xmean = MatrixUtils.createColumnRealMatrix(guess); // objective variables</span>
+<span class="fc" id="L633">        diagD = insigma.scalarMultiply(1 / sigma);</span>
+<span class="fc" id="L634">        diagC = square(diagD);</span>
+<span class="fc" id="L635">        pc = zeros(dimension, 1); // evolution paths for C and sigma</span>
+<span class="fc" id="L636">        ps = zeros(dimension, 1); // B defines the coordinate system</span>
+<span class="fc" id="L637">        normps = ps.getFrobeniusNorm();</span>
+
+<span class="fc" id="L639">        B = eye(dimension, dimension);</span>
+<span class="fc" id="L640">        D = ones(dimension, 1); // diagonal D defines the scaling</span>
+<span class="fc" id="L641">        BD = times(B, repmat(diagD.transpose(), dimension, 1));</span>
+<span class="fc" id="L642">        C = B.multiply(diag(square(D)).multiply(B.transpose())); // covariance</span>
+<span class="fc" id="L643">        historySize = 10 + (int) (3 * 10 * dimension / (double) lambda);</span>
+<span class="fc" id="L644">        fitnessHistory = new double[historySize]; // history of fitness values</span>
+<span class="fc bfc" id="L645" title="All 2 branches covered.">        for (int i = 0; i &lt; historySize; i++) {</span>
+<span class="fc" id="L646">            fitnessHistory[i] = Double.MAX_VALUE;</span>
+        }
+<span class="fc" id="L648">    }</span>
+
+    /**
+     * Update of the evolution paths ps and pc.
+     *
+     * @param zmean Weighted row matrix of the gaussian random numbers generating
+     * the current offspring.
+     * @param xold xmean matrix of the previous generation.
+     * @return hsig flag indicating a small correction.
+     */
+    private boolean updateEvolutionPaths(RealMatrix zmean, RealMatrix xold) {
+<span class="fc" id="L659">        ps = ps.scalarMultiply(1 - cs).add(</span>
+<span class="fc" id="L660">                B.multiply(zmean).scalarMultiply(</span>
+<span class="fc" id="L661">                        FastMath.sqrt(cs * (2 - cs) * mueff)));</span>
+<span class="fc" id="L662">        normps = ps.getFrobeniusNorm();</span>
+<span class="fc" id="L663">        final boolean hsig = normps /</span>
+<span class="fc bfc" id="L664" title="All 2 branches covered.">            FastMath.sqrt(1 - FastMath.pow(1 - cs, 2 * iterations)) /</span>
+            chiN &lt; 1.4 + 2 / ((double) dimension + 1);
+<span class="fc" id="L666">        pc = pc.scalarMultiply(1 - cc);</span>
+<span class="fc bfc" id="L667" title="All 2 branches covered.">        if (hsig) {</span>
+<span class="fc" id="L668">            pc = pc.add(xmean.subtract(xold).scalarMultiply(FastMath.sqrt(cc * (2 - cc) * mueff) / sigma));</span>
+        }
+<span class="fc" id="L670">        return hsig;</span>
+    }
+
+    /**
+     * Update of the covariance matrix C for diagonalOnly &gt; 0
+     *
+     * @param hsig Flag indicating a small correction.
+     * @param bestArz Fitness-sorted matrix of the gaussian random values of the
+     * current offspring.
+     */
+    private void updateCovarianceDiagonalOnly(boolean hsig,
+                                              final RealMatrix bestArz) {
+        // minor correction if hsig==false
+<span class="fc bfc" id="L683" title="All 2 branches covered.">        double oldFac = hsig ? 0 : ccov1Sep * cc * (2 - cc);</span>
+<span class="fc" id="L684">        oldFac += 1 - ccov1Sep - ccovmuSep;</span>
+<span class="fc" id="L685">        diagC = diagC.scalarMultiply(oldFac) // regard old matrix</span>
+<span class="fc" id="L686">            .add(square(pc).scalarMultiply(ccov1Sep)) // plus rank one update</span>
+<span class="fc" id="L687">            .add((times(diagC, square(bestArz).multiply(weights))) // plus rank mu update</span>
+<span class="fc" id="L688">                 .scalarMultiply(ccovmuSep));</span>
+<span class="fc" id="L689">        diagD = sqrt(diagC); // replaces eig(C)</span>
+<span class="fc bfc" id="L690" title="All 4 branches covered.">        if (diagonalOnly &gt; 1 &amp;&amp;</span>
+            iterations &gt; diagonalOnly) {
+            // full covariance matrix from now on
+<span class="fc" id="L693">            diagonalOnly = 0;</span>
+<span class="fc" id="L694">            B = eye(dimension, dimension);</span>
+<span class="fc" id="L695">            BD = diag(diagD);</span>
+<span class="fc" id="L696">            C = diag(diagC);</span>
+        }
+<span class="fc" id="L698">    }</span>
+
+    /**
+     * Update of the covariance matrix C.
+     *
+     * @param hsig Flag indicating a small correction.
+     * @param bestArx Fitness-sorted matrix of the argument vectors producing the
+     * current offspring.
+     * @param arz Unsorted matrix containing the gaussian random values of the
+     * current offspring.
+     * @param arindex Indices indicating the fitness-order of the current offspring.
+     * @param xold xmean matrix of the previous generation.
+     */
+    private void updateCovariance(boolean hsig, final RealMatrix bestArx,
+                                  final RealMatrix arz, final int[] arindex,
+                                  final RealMatrix xold) {
+<span class="fc" id="L714">        double negccov = 0;</span>
+<span class="pc bpc" id="L715" title="1 of 2 branches missed.">        if (ccov1 + ccovmu &gt; 0) {</span>
+<span class="fc" id="L716">            final RealMatrix arpos = bestArx.subtract(repmat(xold, 1, mu))</span>
+<span class="fc" id="L717">                .scalarMultiply(1 / sigma); // mu difference vectors</span>
+<span class="fc" id="L718">            final RealMatrix roneu = pc.multiply(pc.transpose())</span>
+<span class="fc" id="L719">                .scalarMultiply(ccov1); // rank one update</span>
+            // minor correction if hsig==false
+<span class="fc bfc" id="L721" title="All 2 branches covered.">            double oldFac = hsig ? 0 : ccov1 * cc * (2 - cc);</span>
+<span class="fc" id="L722">            oldFac += 1 - ccov1 - ccovmu;</span>
+<span class="fc bfc" id="L723" title="All 2 branches covered.">            if (isActiveCMA) {</span>
+                // Adapt covariance matrix C active CMA
+<span class="fc" id="L725">                negccov = (1 - ccovmu) * 0.25 * mueff /</span>
+<span class="fc" id="L726">                    (FastMath.pow(dimension + 2, 1.5) + 2 * mueff);</span>
+                // keep at least 0.66 in all directions, small popsize are most
+                // critical
+<span class="fc" id="L729">                final double negminresidualvariance = 0.66;</span>
+                // where to make up for the variance loss
+<span class="fc" id="L731">                final double negalphaold = 0.5;</span>
+                // prepare vectors, compute negative updating matrix Cneg
+<span class="fc" id="L733">                final int[] arReverseIndex = reverse(arindex);</span>
+<span class="fc" id="L734">                RealMatrix arzneg = selectColumns(arz, MathArrays.copyOf(arReverseIndex, mu));</span>
+<span class="fc" id="L735">                RealMatrix arnorms = sqrt(sumRows(square(arzneg)));</span>
+<span class="fc" id="L736">                final int[] idxnorms = sortedIndices(arnorms.getRow(0));</span>
+<span class="fc" id="L737">                final RealMatrix arnormsSorted = selectColumns(arnorms, idxnorms);</span>
+<span class="fc" id="L738">                final int[] idxReverse = reverse(idxnorms);</span>
+<span class="fc" id="L739">                final RealMatrix arnormsReverse = selectColumns(arnorms, idxReverse);</span>
+<span class="fc" id="L740">                arnorms = divide(arnormsReverse, arnormsSorted);</span>
+<span class="fc" id="L741">                final int[] idxInv = inverse(idxnorms);</span>
+<span class="fc" id="L742">                final RealMatrix arnormsInv = selectColumns(arnorms, idxInv);</span>
+                // check and set learning rate negccov
+<span class="fc" id="L744">                final double negcovMax = (1 - negminresidualvariance) /</span>
+<span class="fc" id="L745">                    square(arnormsInv).multiply(weights).getEntry(0, 0);</span>
+<span class="fc bfc" id="L746" title="All 2 branches covered.">                if (negccov &gt; negcovMax) {</span>
+<span class="fc" id="L747">                    negccov = negcovMax;</span>
+                }
+<span class="fc" id="L749">                arzneg = times(arzneg, repmat(arnormsInv, dimension, 1));</span>
+<span class="fc" id="L750">                final RealMatrix artmp = BD.multiply(arzneg);</span>
+<span class="fc" id="L751">                final RealMatrix Cneg = artmp.multiply(diag(weights)).multiply(artmp.transpose());</span>
+<span class="fc" id="L752">                oldFac += negalphaold * negccov;</span>
+<span class="fc" id="L753">                C = C.scalarMultiply(oldFac)</span>
+<span class="fc" id="L754">                    .add(roneu) // regard old matrix</span>
+<span class="fc" id="L755">                    .add(arpos.scalarMultiply( // plus rank one update</span>
+                                              ccovmu + (1 - negalphaold) * negccov) // plus rank mu update
+<span class="fc" id="L757">                         .multiply(times(repmat(weights, 1, dimension),</span>
+<span class="fc" id="L758">                                         arpos.transpose())))</span>
+<span class="fc" id="L759">                    .subtract(Cneg.scalarMultiply(negccov));</span>
+<span class="fc" id="L760">            } else {</span>
+                // Adapt covariance matrix C - nonactive
+<span class="fc" id="L762">                C = C.scalarMultiply(oldFac) // regard old matrix</span>
+<span class="fc" id="L763">                    .add(roneu) // plus rank one update</span>
+<span class="fc" id="L764">                    .add(arpos.scalarMultiply(ccovmu) // plus rank mu update</span>
+<span class="fc" id="L765">                         .multiply(times(repmat(weights, 1, dimension),</span>
+<span class="fc" id="L766">                                         arpos.transpose())));</span>
+            }
+        }
+<span class="fc" id="L769">        updateBD(negccov);</span>
+<span class="fc" id="L770">    }</span>
+
+    /**
+     * Update B and D from C.
+     *
+     * @param negccov Negative covariance factor.
+     */
+    private void updateBD(double negccov) {
+<span class="pc bpc" id="L778" title="2 of 4 branches missed.">        if (ccov1 + ccovmu + negccov &gt; 0 &amp;&amp;</span>
+            (iterations % 1. / (ccov1 + ccovmu + negccov) / dimension / 10.) &lt; 1) {
+            // to achieve O(N^2)
+<span class="fc" id="L781">            C = triu(C, 0).add(triu(C, 1).transpose());</span>
+            // enforce symmetry to prevent complex numbers
+<span class="fc" id="L783">            final EigenDecomposition eig = new EigenDecomposition(C);</span>
+<span class="fc" id="L784">            B = eig.getV(); // eigen decomposition, B==normalized eigenvectors</span>
+<span class="fc" id="L785">            D = eig.getD();</span>
+<span class="fc" id="L786">            diagD = diag(D);</span>
+<span class="pc bpc" id="L787" title="1 of 2 branches missed.">            if (min(diagD) &lt;= 0) {</span>
+<span class="nc bnc" id="L788" title="All 2 branches missed.">                for (int i = 0; i &lt; dimension; i++) {</span>
+<span class="nc bnc" id="L789" title="All 2 branches missed.">                    if (diagD.getEntry(i, 0) &lt; 0) {</span>
+<span class="nc" id="L790">                        diagD.setEntry(i, 0, 0);</span>
+                    }
+                }
+<span class="nc" id="L793">                final double tfac = max(diagD) / 1e14;</span>
+<span class="nc" id="L794">                C = C.add(eye(dimension, dimension).scalarMultiply(tfac));</span>
+<span class="nc" id="L795">                diagD = diagD.add(ones(dimension, 1).scalarMultiply(tfac));</span>
+            }
+<span class="fc bfc" id="L797" title="All 2 branches covered.">            if (max(diagD) &gt; 1e14 * min(diagD)) {</span>
+<span class="fc" id="L798">                final double tfac = max(diagD) / 1e14 - min(diagD);</span>
+<span class="fc" id="L799">                C = C.add(eye(dimension, dimension).scalarMultiply(tfac));</span>
+<span class="fc" id="L800">                diagD = diagD.add(ones(dimension, 1).scalarMultiply(tfac));</span>
+            }
+<span class="fc" id="L802">            diagC = diag(C);</span>
+<span class="fc" id="L803">            diagD = sqrt(diagD); // D contains standard deviations now</span>
+<span class="fc" id="L804">            BD = times(B, repmat(diagD.transpose(), dimension, 1)); // O(n^2)</span>
+        }
+<span class="fc" id="L806">    }</span>
+
+    /**
+     * Pushes the current best fitness value in a history queue.
+     *
+     * @param vals History queue.
+     * @param val Current best fitness value.
+     */
+    private static void push(double[] vals, double val) {
+<span class="fc bfc" id="L815" title="All 2 branches covered.">        for (int i = vals.length-1; i &gt; 0; i--) {</span>
+<span class="fc" id="L816">            vals[i] = vals[i-1];</span>
+        }
+<span class="fc" id="L818">        vals[0] = val;</span>
+<span class="fc" id="L819">    }</span>
+
+    /**
+     * Sorts fitness values.
+     *
+     * @param doubles Array of values to be sorted.
+     * @return a sorted array of indices pointing into doubles.
+     */
+    private int[] sortedIndices(final double[] doubles) {
+<span class="fc" id="L828">        final DoubleIndex[] dis = new DoubleIndex[doubles.length];</span>
+<span class="fc bfc" id="L829" title="All 2 branches covered.">        for (int i = 0; i &lt; doubles.length; i++) {</span>
+<span class="fc" id="L830">            dis[i] = new DoubleIndex(doubles[i], i);</span>
+        }
+<span class="fc" id="L832">        Arrays.sort(dis);</span>
+<span class="fc" id="L833">        final int[] indices = new int[doubles.length];</span>
+<span class="fc bfc" id="L834" title="All 2 branches covered.">        for (int i = 0; i &lt; doubles.length; i++) {</span>
+<span class="fc" id="L835">            indices[i] = dis[i].index;</span>
+        }
+<span class="fc" id="L837">        return indices;</span>
+    }
+   /**
+     * Get range of values.
+     *
+     * @param vpPairs Array of valuePenaltyPairs to get range from.
+     * @return a double equal to maximum value minus minimum value.
+     */
+    private double valueRange(final ValuePenaltyPair[] vpPairs) {
+<span class="fc" id="L846">        double max = Double.NEGATIVE_INFINITY;</span>
+<span class="fc" id="L847">        double min = Double.MAX_VALUE;</span>
+<span class="fc bfc" id="L848" title="All 2 branches covered.">        for (ValuePenaltyPair vpPair:vpPairs) {</span>
+<span class="fc bfc" id="L849" title="All 2 branches covered.">            if (vpPair.value &gt; max) {</span>
+<span class="fc" id="L850">                max = vpPair.value;</span>
+            }
+<span class="fc bfc" id="L852" title="All 2 branches covered.">            if (vpPair.value &lt; min) {</span>
+<span class="fc" id="L853">                min = vpPair.value;</span>
+            }
+        }
+<span class="fc" id="L856">        return max-min;</span>
+    }
+
+    /**
+     * Used to sort fitness values. Sorting is always in lower value first
+     * order.
+     */
+    private static class DoubleIndex implements Comparable&lt;DoubleIndex&gt; {
+        /** Value to compare. */
+        private final double value;
+        /** Index into sorted array. */
+        private final int index;
+
+        /**
+         * @param value Value to compare.
+         * @param index Index into sorted array.
+         */
+<span class="fc" id="L873">        DoubleIndex(double value, int index) {</span>
+<span class="fc" id="L874">            this.value = value;</span>
+<span class="fc" id="L875">            this.index = index;</span>
+<span class="fc" id="L876">        }</span>
+
+        /** {@inheritDoc} */
+        @Override
+        public int compareTo(DoubleIndex o) {
+<span class="fc" id="L881">            return Double.compare(value, o.value);</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public boolean equals(Object other) {
+
+<span class="nc bnc" id="L888" title="All 2 branches missed.">            if (this == other) {</span>
+<span class="nc" id="L889">                return true;</span>
+            }
+
+<span class="nc bnc" id="L892" title="All 2 branches missed.">            if (other instanceof DoubleIndex) {</span>
+<span class="nc bnc" id="L893" title="All 2 branches missed.">                return Double.compare(value, ((DoubleIndex) other).value) == 0;</span>
+            }
+
+<span class="nc" id="L896">            return false;</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public int hashCode() {
+<span class="nc" id="L902">            long bits = Double.doubleToLongBits(value);</span>
+<span class="nc" id="L903">            return (int) ((1438542 ^ (bits &gt;&gt;&gt; 32) ^ bits) &amp; 0xffffffff);</span>
+        }
+    }
+    /**
+     * Stores the value and penalty (for repair of out of bounds point).
+     */
+    private static class ValuePenaltyPair {
+        /** Objective function value. */
+        private double value;
+        /** Penalty value for repair of out out of bounds points. */
+        private double penalty;
+
+        /**
+         * @param value Function value.
+         * @param penalty Out-of-bounds penalty.
+        */
+<span class="fc" id="L919">        ValuePenaltyPair(final double value, final double penalty) {</span>
+<span class="fc" id="L920">            this.value   = value;</span>
+<span class="fc" id="L921">            this.penalty = penalty;</span>
+<span class="fc" id="L922">        }</span>
+    }
+
+
+    /**
+     * Normalizes fitness values to the range [0,1]. Adds a penalty to the
+     * fitness value if out of range.
+     */
+    private class FitnessFunction {
+        /**
+         * Flag indicating whether the objective variables are forced into their
+         * bounds if defined
+         */
+        private final boolean isRepairMode;
+
+        /** Simple constructor.
+         */
+<span class="fc" id="L939">        FitnessFunction() {</span>
+<span class="fc" id="L940">            isRepairMode = true;</span>
+<span class="fc" id="L941">        }</span>
+
+        /**
+         * @param point Normalized objective variables.
+         * @return the objective value + penalty for violated bounds.
+         */
+        public ValuePenaltyPair value(final double[] point) {
+            double value;
+<span class="fc" id="L949">            double penalty=0.0;</span>
+<span class="pc bpc" id="L950" title="1 of 2 branches missed.">            if (isRepairMode) {</span>
+<span class="fc" id="L951">                double[] repaired = repair(point);</span>
+<span class="fc" id="L952">                value = CMAESOptimizer.this.computeObjectiveValue(repaired);</span>
+<span class="fc" id="L953">                penalty =  penalty(point, repaired);</span>
+<span class="fc" id="L954">            } else {</span>
+<span class="nc" id="L955">                value = CMAESOptimizer.this.computeObjectiveValue(point);</span>
+            }
+<span class="fc bfc" id="L957" title="All 2 branches covered.">            value = isMinimize ? value : -value;</span>
+<span class="fc bfc" id="L958" title="All 2 branches covered.">            penalty = isMinimize ? penalty : -penalty;</span>
+<span class="fc" id="L959">            return new ValuePenaltyPair(value,penalty);</span>
+        }
+
+        /**
+         * @param x Normalized objective variables.
+         * @return {@code true} if in bounds.
+         */
+        public boolean isFeasible(final double[] x) {
+<span class="nc" id="L967">            final double[] lB = CMAESOptimizer.this.getLowerBound();</span>
+<span class="nc" id="L968">            final double[] uB = CMAESOptimizer.this.getUpperBound();</span>
+
+<span class="nc bnc" id="L970" title="All 2 branches missed.">            for (int i = 0; i &lt; x.length; i++) {</span>
+<span class="nc bnc" id="L971" title="All 2 branches missed.">                if (x[i] &lt; lB[i]) {</span>
+<span class="nc" id="L972">                    return false;</span>
+                }
+<span class="nc bnc" id="L974" title="All 2 branches missed.">                if (x[i] &gt; uB[i]) {</span>
+<span class="nc" id="L975">                    return false;</span>
+                }
+            }
+<span class="nc" id="L978">            return true;</span>
+        }
+
+        /**
+         * @param x Normalized objective variables.
+         * @return the repaired (i.e. all in bounds) objective variables.
+         */
+        private double[] repair(final double[] x) {
+<span class="fc" id="L986">            final double[] lB = CMAESOptimizer.this.getLowerBound();</span>
+<span class="fc" id="L987">            final double[] uB = CMAESOptimizer.this.getUpperBound();</span>
+
+<span class="fc" id="L989">            final double[] repaired = new double[x.length];</span>
+<span class="fc bfc" id="L990" title="All 2 branches covered.">            for (int i = 0; i &lt; x.length; i++) {</span>
+<span class="fc bfc" id="L991" title="All 2 branches covered.">                if (x[i] &lt; lB[i]) {</span>
+<span class="fc" id="L992">                    repaired[i] = lB[i];</span>
+<span class="fc bfc" id="L993" title="All 2 branches covered.">                } else if (x[i] &gt; uB[i]) {</span>
+<span class="fc" id="L994">                    repaired[i] = uB[i];</span>
+                } else {
+<span class="fc" id="L996">                    repaired[i] = x[i];</span>
+                }
+            }
+<span class="fc" id="L999">            return repaired;</span>
+        }
+
+        /**
+         * @param x Normalized objective variables.
+         * @param repaired Repaired objective variables.
+         * @return Penalty value according to the violation of the bounds.
+         */
+        private double penalty(final double[] x, final double[] repaired) {
+<span class="fc" id="L1008">            double penalty = 0;</span>
+<span class="fc bfc" id="L1009" title="All 2 branches covered.">            for (int i = 0; i &lt; x.length; i++) {</span>
+<span class="fc" id="L1010">                double diff = FastMath.abs(x[i] - repaired[i]);</span>
+<span class="fc" id="L1011">                penalty += diff;</span>
+            }
+<span class="fc bfc" id="L1013" title="All 2 branches covered.">            return isMinimize ? penalty : -penalty;</span>
+        }
+    }
+
+    // -----Matrix utility functions similar to the Matlab build in functions------
+
+    /**
+     * @param m Input matrix
+     * @return Matrix representing the element-wise logarithm of m.
+     */
+    private static RealMatrix log(final RealMatrix m) {
+<span class="fc" id="L1024">        final double[][] d = new double[m.getRowDimension()][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1025" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1026" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1027">                d[r][c] = FastMath.log(m.getEntry(r, c));</span>
+            }
+        }
+<span class="fc" id="L1030">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @return Matrix representing the element-wise square root of m.
+     */
+    private static RealMatrix sqrt(final RealMatrix m) {
+<span class="fc" id="L1038">        final double[][] d = new double[m.getRowDimension()][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1039" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1040" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1041">                d[r][c] = FastMath.sqrt(m.getEntry(r, c));</span>
+            }
+        }
+<span class="fc" id="L1044">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @return Matrix representing the element-wise square of m.
+     */
+    private static RealMatrix square(final RealMatrix m) {
+<span class="fc" id="L1052">        final double[][] d = new double[m.getRowDimension()][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1053" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1054" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1055">                double e = m.getEntry(r, c);</span>
+<span class="fc" id="L1056">                d[r][c] = e * e;</span>
+            }
+        }
+<span class="fc" id="L1059">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix 1.
+     * @param n Input matrix 2.
+     * @return the matrix where the elements of m and n are element-wise multiplied.
+     */
+    private static RealMatrix times(final RealMatrix m, final RealMatrix n) {
+<span class="fc" id="L1068">        final double[][] d = new double[m.getRowDimension()][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1069" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1070" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1071">                d[r][c] = m.getEntry(r, c) * n.getEntry(r, c);</span>
+            }
+        }
+<span class="fc" id="L1074">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix 1.
+     * @param n Input matrix 2.
+     * @return Matrix where the elements of m and n are element-wise divided.
+     */
+    private static RealMatrix divide(final RealMatrix m, final RealMatrix n) {
+<span class="fc" id="L1083">        final double[][] d = new double[m.getRowDimension()][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1084" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1085" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1086">                d[r][c] = m.getEntry(r, c) / n.getEntry(r, c);</span>
+            }
+        }
+<span class="fc" id="L1089">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @param cols Columns to select.
+     * @return Matrix representing the selected columns.
+     */
+    private static RealMatrix selectColumns(final RealMatrix m, final int[] cols) {
+<span class="fc" id="L1098">        final double[][] d = new double[m.getRowDimension()][cols.length];</span>
+<span class="fc bfc" id="L1099" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1100" title="All 2 branches covered.">            for (int c = 0; c &lt; cols.length; c++) {</span>
+<span class="fc" id="L1101">                d[r][c] = m.getEntry(r, cols[c]);</span>
+            }
+        }
+<span class="fc" id="L1104">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @param k Diagonal position.
+     * @return Upper triangular part of matrix.
+     */
+    private static RealMatrix triu(final RealMatrix m, int k) {
+<span class="fc" id="L1113">        final double[][] d = new double[m.getRowDimension()][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1114" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1115" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc bfc" id="L1116" title="All 2 branches covered.">                d[r][c] = r &lt;= c - k ? m.getEntry(r, c) : 0;</span>
+            }
+        }
+<span class="fc" id="L1119">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @return Row matrix representing the sums of the rows.
+     */
+    private static RealMatrix sumRows(final RealMatrix m) {
+<span class="fc" id="L1127">        final double[][] d = new double[1][m.getColumnDimension()];</span>
+<span class="fc bfc" id="L1128" title="All 2 branches covered.">        for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1129">            double sum = 0;</span>
+<span class="fc bfc" id="L1130" title="All 2 branches covered.">            for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc" id="L1131">                sum += m.getEntry(r, c);</span>
+            }
+<span class="fc" id="L1133">            d[0][c] = sum;</span>
+        }
+<span class="fc" id="L1135">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @return the diagonal n-by-n matrix if m is a column matrix or the column
+     * matrix representing the diagonal if m is a n-by-n matrix.
+     */
+    private static RealMatrix diag(final RealMatrix m) {
+<span class="fc bfc" id="L1144" title="All 2 branches covered.">        if (m.getColumnDimension() == 1) {</span>
+<span class="fc" id="L1145">            final double[][] d = new double[m.getRowDimension()][m.getRowDimension()];</span>
+<span class="fc bfc" id="L1146" title="All 2 branches covered.">            for (int i = 0; i &lt; m.getRowDimension(); i++) {</span>
+<span class="fc" id="L1147">                d[i][i] = m.getEntry(i, 0);</span>
+            }
+<span class="fc" id="L1149">            return new Array2DRowRealMatrix(d, false);</span>
+        } else {
+<span class="fc" id="L1151">            final double[][] d = new double[m.getRowDimension()][1];</span>
+<span class="fc bfc" id="L1152" title="All 2 branches covered.">            for (int i = 0; i &lt; m.getColumnDimension(); i++) {</span>
+<span class="fc" id="L1153">                d[i][0] = m.getEntry(i, i);</span>
+            }
+<span class="fc" id="L1155">            return new Array2DRowRealMatrix(d, false);</span>
+        }
+    }
+
+    /**
+     * Copies a column from m1 to m2.
+     *
+     * @param m1 Source matrix.
+     * @param col1 Source column.
+     * @param m2 Target matrix.
+     * @param col2 Target column.
+     */
+    private static void copyColumn(final RealMatrix m1, int col1,
+                                   RealMatrix m2, int col2) {
+<span class="fc bfc" id="L1169" title="All 2 branches covered.">        for (int i = 0; i &lt; m1.getRowDimension(); i++) {</span>
+<span class="fc" id="L1170">            m2.setEntry(i, col2, m1.getEntry(i, col1));</span>
+        }
+<span class="fc" id="L1172">    }</span>
+
+    /**
+     * @param n Number of rows.
+     * @param m Number of columns.
+     * @return n-by-m matrix filled with 1.
+     */
+    private static RealMatrix ones(int n, int m) {
+<span class="fc" id="L1180">        final double[][] d = new double[n][m];</span>
+<span class="fc bfc" id="L1181" title="All 2 branches covered.">        for (int r = 0; r &lt; n; r++) {</span>
+<span class="fc" id="L1182">            Arrays.fill(d[r], 1);</span>
+        }
+<span class="fc" id="L1184">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param n Number of rows.
+     * @param m Number of columns.
+     * @return n-by-m matrix of 0 values out of diagonal, and 1 values on
+     * the diagonal.
+     */
+    private static RealMatrix eye(int n, int m) {
+<span class="fc" id="L1194">        final double[][] d = new double[n][m];</span>
+<span class="fc bfc" id="L1195" title="All 2 branches covered.">        for (int r = 0; r &lt; n; r++) {</span>
+<span class="pc bpc" id="L1196" title="1 of 2 branches missed.">            if (r &lt; m) {</span>
+<span class="fc" id="L1197">                d[r][r] = 1;</span>
+            }
+        }
+<span class="fc" id="L1200">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param n Number of rows.
+     * @param m Number of columns.
+     * @return n-by-m matrix of zero values.
+     */
+    private static RealMatrix zeros(int n, int m) {
+<span class="fc" id="L1209">        return new Array2DRowRealMatrix(n, m);</span>
+    }
+
+    /**
+     * @param mat Input matrix.
+     * @param n Number of row replicates.
+     * @param m Number of column replicates.
+     * @return a matrix which replicates the input matrix in both directions.
+     */
+    private static RealMatrix repmat(final RealMatrix mat, int n, int m) {
+<span class="fc" id="L1219">        final int rd = mat.getRowDimension();</span>
+<span class="fc" id="L1220">        final int cd = mat.getColumnDimension();</span>
+<span class="fc" id="L1221">        final double[][] d = new double[n * rd][m * cd];</span>
+<span class="fc bfc" id="L1222" title="All 2 branches covered.">        for (int r = 0; r &lt; n * rd; r++) {</span>
+<span class="fc bfc" id="L1223" title="All 2 branches covered.">            for (int c = 0; c &lt; m * cd; c++) {</span>
+<span class="fc" id="L1224">                d[r][c] = mat.getEntry(r % rd, c % cd);</span>
+            }
+        }
+<span class="fc" id="L1227">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param start Start value.
+     * @param end End value.
+     * @param step Step size.
+     * @return a sequence as column matrix.
+     */
+    private static RealMatrix sequence(double start, double end, double step) {
+<span class="fc" id="L1237">        final int size = (int) ((end - start) / step + 1);</span>
+<span class="fc" id="L1238">        final double[][] d = new double[size][1];</span>
+<span class="fc" id="L1239">        double value = start;</span>
+<span class="fc bfc" id="L1240" title="All 2 branches covered.">        for (int r = 0; r &lt; size; r++) {</span>
+<span class="fc" id="L1241">            d[r][0] = value;</span>
+<span class="fc" id="L1242">            value += step;</span>
+        }
+<span class="fc" id="L1244">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @return the maximum of the matrix element values.
+     */
+    private static double max(final RealMatrix m) {
+<span class="fc" id="L1252">        double max = -Double.MAX_VALUE;</span>
+<span class="fc bfc" id="L1253" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1254" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1255">                double e = m.getEntry(r, c);</span>
+<span class="fc bfc" id="L1256" title="All 2 branches covered.">                if (max &lt; e) {</span>
+<span class="fc" id="L1257">                    max = e;</span>
+                }
+            }
+        }
+<span class="fc" id="L1261">        return max;</span>
+    }
+
+    /**
+     * @param m Input matrix.
+     * @return the minimum of the matrix element values.
+     */
+    private static double min(final RealMatrix m) {
+<span class="fc" id="L1269">        double min = Double.MAX_VALUE;</span>
+<span class="fc bfc" id="L1270" title="All 2 branches covered.">        for (int r = 0; r &lt; m.getRowDimension(); r++) {</span>
+<span class="fc bfc" id="L1271" title="All 2 branches covered.">            for (int c = 0; c &lt; m.getColumnDimension(); c++) {</span>
+<span class="fc" id="L1272">                double e = m.getEntry(r, c);</span>
+<span class="fc bfc" id="L1273" title="All 2 branches covered.">                if (min &gt; e) {</span>
+<span class="fc" id="L1274">                    min = e;</span>
+                }
+            }
+        }
+<span class="fc" id="L1278">        return min;</span>
+    }
+
+    /**
+     * @param m Input array.
+     * @return the maximum of the array values.
+     */
+    private static double max(final double[] m) {
+<span class="fc" id="L1286">        double max = -Double.MAX_VALUE;</span>
+<span class="fc bfc" id="L1287" title="All 2 branches covered.">        for (int r = 0; r &lt; m.length; r++) {</span>
+<span class="fc bfc" id="L1288" title="All 2 branches covered.">            if (max &lt; m[r]) {</span>
+<span class="fc" id="L1289">                max = m[r];</span>
+            }
+        }
+<span class="fc" id="L1292">        return max;</span>
+    }
+
+    /**
+     * @param m Input array.
+     * @return the minimum of the array values.
+     */
+    private static double min(final double[] m) {
+<span class="fc" id="L1300">        double min = Double.MAX_VALUE;</span>
+<span class="fc bfc" id="L1301" title="All 2 branches covered.">        for (int r = 0; r &lt; m.length; r++) {</span>
+<span class="fc bfc" id="L1302" title="All 2 branches covered.">            if (min &gt; m[r]) {</span>
+<span class="fc" id="L1303">                min = m[r];</span>
+            }
+        }
+<span class="fc" id="L1306">        return min;</span>
+    }
+
+    /**
+     * @param indices Input index array.
+     * @return the inverse of the mapping defined by indices.
+     */
+    private static int[] inverse(final int[] indices) {
+<span class="fc" id="L1314">        final int[] inverse = new int[indices.length];</span>
+<span class="fc bfc" id="L1315" title="All 2 branches covered.">        for (int i = 0; i &lt; indices.length; i++) {</span>
+<span class="fc" id="L1316">            inverse[indices[i]] = i;</span>
+        }
+<span class="fc" id="L1318">        return inverse;</span>
+    }
+
+    /**
+     * @param indices Input index array.
+     * @return the indices in inverse order (last is first).
+     */
+    private static int[] reverse(final int[] indices) {
+<span class="fc" id="L1326">        final int[] reverse = new int[indices.length];</span>
+<span class="fc bfc" id="L1327" title="All 2 branches covered.">        for (int i = 0; i &lt; indices.length; i++) {</span>
+<span class="fc" id="L1328">            reverse[i] = indices[indices.length - i - 1];</span>
+        }
+<span class="fc" id="L1330">        return reverse;</span>
+    }
+
+    /**
+     * @param size Length of random array.
+     * @return an array of Gaussian random numbers.
+     */
+    private double[] randn(int size) {
+<span class="nc" id="L1338">        final double[] randn = new double[size];</span>
+<span class="nc bnc" id="L1339" title="All 2 branches missed.">        for (int i = 0; i &lt; size; i++) {</span>
+<span class="nc" id="L1340">            randn[i] = random.sample();</span>
+        }
+<span class="nc" id="L1342">        return randn;</span>
+    }
+
+    /**
+     * @param size Number of rows.
+     * @param popSize Population size.
+     * @return a 2-dimensional matrix of Gaussian random numbers.
+     */
+    private RealMatrix randn1(int size, int popSize) {
+<span class="fc" id="L1351">        final double[][] d = new double[size][popSize];</span>
+<span class="fc bfc" id="L1352" title="All 2 branches covered.">        for (int r = 0; r &lt; size; r++) {</span>
+<span class="fc bfc" id="L1353" title="All 2 branches covered.">            for (int c = 0; c &lt; popSize; c++) {</span>
+<span class="fc" id="L1354">                d[r][c] = random.sample();</span>
+            }
+        }
+<span class="fc" id="L1357">        return new Array2DRowRealMatrix(d, false);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

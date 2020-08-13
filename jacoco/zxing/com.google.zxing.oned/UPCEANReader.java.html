@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UPCEANReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">UPCEANReader.java</span></div><h1>UPCEANReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.ChecksumException;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.ReaderException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultMetadataType;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.ResultPointCallback;
+import com.google.zxing.common.BitArray;
+
+import java.util.Arrays;
+import java.util.Map;
+
+/**
+ * &lt;p&gt;Encapsulates functionality and implementation that is common to UPC and EAN families
+ * of one-dimensional barcodes.&lt;/p&gt;
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ * @author Sean Owen
+ * @author alasdair@google.com (Alasdair Mackintosh)
+ */
+public abstract class UPCEANReader extends OneDReader {
+
+  // These two values are critical for determining how permissive the decoding will be.
+  // We've arrived at these values through a lot of trial and error. Setting them any higher
+  // lets false positives creep in quickly.
+  private static final float MAX_AVG_VARIANCE = 0.48f;
+  private static final float MAX_INDIVIDUAL_VARIANCE = 0.7f;
+
+  /**
+   * Start/end guard pattern.
+   */
+<span class="fc" id="L53">  static final int[] START_END_PATTERN = {1, 1, 1,};</span>
+
+  /**
+   * Pattern marking the middle of a UPC/EAN pattern, separating the two halves.
+   */
+<span class="fc" id="L58">  static final int[] MIDDLE_PATTERN = {1, 1, 1, 1, 1};</span>
+  /**
+   * end guard pattern.
+   */
+<span class="fc" id="L62">  static final int[] END_PATTERN = {1, 1, 1, 1, 1, 1};</span>
+  /**
+   * &quot;Odd&quot;, or &quot;L&quot; patterns used to encode UPC/EAN digits.
+   */
+<span class="fc" id="L66">  static final int[][] L_PATTERNS = {</span>
+      {3, 2, 1, 1}, // 0
+      {2, 2, 2, 1}, // 1
+      {2, 1, 2, 2}, // 2
+      {1, 4, 1, 1}, // 3
+      {1, 1, 3, 2}, // 4
+      {1, 2, 3, 1}, // 5
+      {1, 1, 1, 4}, // 6
+      {1, 3, 1, 2}, // 7
+      {1, 2, 1, 3}, // 8
+      {3, 1, 1, 2}  // 9
+  };
+
+  /**
+   * As above but also including the &quot;even&quot;, or &quot;G&quot; patterns used to encode UPC/EAN digits.
+   */
+  static final int[][] L_AND_G_PATTERNS;
+
+  static {
+<span class="fc" id="L85">    L_AND_G_PATTERNS = new int[20][];</span>
+<span class="fc" id="L86">    System.arraycopy(L_PATTERNS, 0, L_AND_G_PATTERNS, 0, 10);</span>
+<span class="fc bfc" id="L87" title="All 2 branches covered.">    for (int i = 10; i &lt; 20; i++) {</span>
+<span class="fc" id="L88">      int[] widths = L_PATTERNS[i - 10];</span>
+<span class="fc" id="L89">      int[] reversedWidths = new int[widths.length];</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">      for (int j = 0; j &lt; widths.length; j++) {</span>
+<span class="fc" id="L91">        reversedWidths[j] = widths[widths.length - j - 1];</span>
+      }
+<span class="fc" id="L93">      L_AND_G_PATTERNS[i] = reversedWidths;</span>
+    }
+<span class="fc" id="L95">  }</span>
+
+  private final StringBuilder decodeRowStringBuffer;
+  private final UPCEANExtensionSupport extensionReader;
+  private final EANManufacturerOrgSupport eanManSupport;
+
+<span class="fc" id="L101">  protected UPCEANReader() {</span>
+<span class="fc" id="L102">    decodeRowStringBuffer = new StringBuilder(20);</span>
+<span class="fc" id="L103">    extensionReader = new UPCEANExtensionSupport();</span>
+<span class="fc" id="L104">    eanManSupport = new EANManufacturerOrgSupport();</span>
+<span class="fc" id="L105">  }</span>
+
+  static int[] findStartGuardPattern(BitArray row) throws NotFoundException {
+<span class="fc" id="L108">    boolean foundStart = false;</span>
+<span class="fc" id="L109">    int[] startRange = null;</span>
+<span class="fc" id="L110">    int nextStart = 0;</span>
+<span class="fc" id="L111">    int[] counters = new int[START_END_PATTERN.length];</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    while (!foundStart) {</span>
+<span class="fc" id="L113">      Arrays.fill(counters, 0, START_END_PATTERN.length, 0);</span>
+<span class="fc" id="L114">      startRange = findGuardPattern(row, nextStart, false, START_END_PATTERN, counters);</span>
+<span class="fc" id="L115">      int start = startRange[0];</span>
+<span class="fc" id="L116">      nextStart = startRange[1];</span>
+      // Make sure there is a quiet zone at least as big as the start pattern before the barcode.
+      // If this check would run off the left edge of the image, do not accept this barcode,
+      // as it is very likely to be a false positive.
+<span class="fc" id="L120">      int quietStart = start - (nextStart - start);</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">      if (quietStart &gt;= 0) {</span>
+<span class="fc" id="L122">        foundStart = row.isRange(quietStart, start, false);</span>
+      }
+<span class="fc" id="L124">    }</span>
+<span class="fc" id="L125">    return startRange;</span>
+  }
+
+  @Override
+  public Result decodeRow(int rowNumber, BitArray row, Map&lt;DecodeHintType,?&gt; hints)
+      throws NotFoundException, ChecksumException, FormatException {
+<span class="nc" id="L131">    return decodeRow(rowNumber, row, findStartGuardPattern(row), hints);</span>
+  }
+
+  /**
+   * &lt;p&gt;Like {@link #decodeRow(int, BitArray, Map)}, but
+   * allows caller to inform method about where the UPC/EAN start pattern is
+   * found. This allows this to be computed once and reused across many implementations.&lt;/p&gt;
+   *
+   * @param rowNumber row index into the image
+   * @param row encoding of the row of the barcode image
+   * @param startGuardRange start/end column where the opening start pattern was found
+   * @param hints optional hints that influence decoding
+   * @return {@link Result} encapsulating the result of decoding a barcode in the row
+   * @throws NotFoundException if no potential barcode is found
+   * @throws ChecksumException if a potential barcode is found but does not pass its checksum
+   * @throws FormatException if a potential barcode is found but format is invalid
+   */
+  public Result decodeRow(int rowNumber,
+                          BitArray row,
+                          int[] startGuardRange,
+                          Map&lt;DecodeHintType,?&gt; hints)
+      throws NotFoundException, ChecksumException, FormatException {
+
+<span class="fc bfc" id="L154" title="All 2 branches covered.">    ResultPointCallback resultPointCallback = hints == null ? null :</span>
+<span class="fc" id="L155">        (ResultPointCallback) hints.get(DecodeHintType.NEED_RESULT_POINT_CALLBACK);</span>
+
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">    if (resultPointCallback != null) {</span>
+<span class="nc" id="L158">      resultPointCallback.foundPossibleResultPoint(new ResultPoint(</span>
+          (startGuardRange[0] + startGuardRange[1]) / 2.0f, rowNumber
+      ));
+    }
+
+<span class="fc" id="L163">    StringBuilder result = decodeRowStringBuffer;</span>
+<span class="fc" id="L164">    result.setLength(0);</span>
+<span class="fc" id="L165">    int endStart = decodeMiddle(row, startGuardRange, result);</span>
+
+<span class="pc bpc" id="L167" title="1 of 2 branches missed.">    if (resultPointCallback != null) {</span>
+<span class="nc" id="L168">      resultPointCallback.foundPossibleResultPoint(new ResultPoint(</span>
+          endStart, rowNumber
+      ));
+    }
+
+<span class="fc" id="L173">    int[] endRange = decodeEnd(row, endStart);</span>
+
+<span class="pc bpc" id="L175" title="1 of 2 branches missed.">    if (resultPointCallback != null) {</span>
+<span class="nc" id="L176">      resultPointCallback.foundPossibleResultPoint(new ResultPoint(</span>
+          (endRange[0] + endRange[1]) / 2.0f, rowNumber
+      ));
+    }
+
+
+    // Make sure there is a quiet zone at least as big as the end pattern after the barcode. The
+    // spec might want more whitespace, but in practice this is the maximum we can count on.
+<span class="fc" id="L184">    int end = endRange[1];</span>
+<span class="fc" id="L185">    int quietEnd = end + (end - endRange[0]);</span>
+<span class="fc bfc" id="L186" title="All 4 branches covered.">    if (quietEnd &gt;= row.getSize() || !row.isRange(end, quietEnd, false)) {</span>
+<span class="fc" id="L187">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc" id="L190">    String resultString = result.toString();</span>
+    // UPC/EAN should never be less than 8 chars anyway
+<span class="pc bpc" id="L192" title="1 of 2 branches missed.">    if (resultString.length() &lt; 8) {</span>
+<span class="nc" id="L193">      throw FormatException.getFormatInstance();</span>
+    }
+<span class="fc bfc" id="L195" title="All 2 branches covered.">    if (!checkChecksum(resultString)) {</span>
+<span class="fc" id="L196">      throw ChecksumException.getChecksumInstance();</span>
+    }
+
+<span class="fc" id="L199">    float left = (startGuardRange[1] + startGuardRange[0]) / 2.0f;</span>
+<span class="fc" id="L200">    float right = (endRange[1] + endRange[0]) / 2.0f;</span>
+<span class="fc" id="L201">    BarcodeFormat format = getBarcodeFormat();</span>
+<span class="fc" id="L202">    Result decodeResult = new Result(resultString,</span>
+        null, // no natural byte representation for these barcodes
+        new ResultPoint[]{
+            new ResultPoint(left, rowNumber),
+            new ResultPoint(right, rowNumber)},
+        format);
+
+<span class="fc" id="L209">    int extensionLength = 0;</span>
+
+    try {
+<span class="fc" id="L212">      Result extensionResult = extensionReader.decodeRow(rowNumber, row, endRange[1]);</span>
+<span class="fc" id="L213">      decodeResult.putMetadata(ResultMetadataType.UPC_EAN_EXTENSION, extensionResult.getText());</span>
+<span class="fc" id="L214">      decodeResult.putAllMetadata(extensionResult.getResultMetadata());</span>
+<span class="fc" id="L215">      decodeResult.addResultPoints(extensionResult.getResultPoints());</span>
+<span class="fc" id="L216">      extensionLength = extensionResult.getText().length();</span>
+<span class="fc" id="L217">    } catch (ReaderException re) {</span>
+      // continue
+<span class="fc" id="L219">    }</span>
+
+<span class="fc bfc" id="L221" title="All 2 branches covered.">    int[] allowedExtensions =</span>
+<span class="fc" id="L222">        hints == null ? null : (int[]) hints.get(DecodeHintType.ALLOWED_EAN_EXTENSIONS);</span>
+<span class="pc bpc" id="L223" title="1 of 2 branches missed.">    if (allowedExtensions != null) {</span>
+<span class="nc" id="L224">      boolean valid = false;</span>
+<span class="nc bnc" id="L225" title="All 2 branches missed.">      for (int length : allowedExtensions) {</span>
+<span class="nc bnc" id="L226" title="All 2 branches missed.">        if (extensionLength == length) {</span>
+<span class="nc" id="L227">          valid = true;</span>
+<span class="nc" id="L228">          break;</span>
+        }
+      }
+<span class="nc bnc" id="L231" title="All 2 branches missed.">      if (!valid) {</span>
+<span class="nc" id="L232">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+    }
+
+<span class="pc bpc" id="L236" title="1 of 4 branches missed.">    if (format == BarcodeFormat.EAN_13 || format == BarcodeFormat.UPC_A) {</span>
+<span class="fc" id="L237">      String countryID = eanManSupport.lookupCountryIdentifier(resultString);</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">      if (countryID != null) {</span>
+<span class="fc" id="L239">        decodeResult.putMetadata(ResultMetadataType.POSSIBLE_COUNTRY, countryID);</span>
+      }
+    }
+
+<span class="fc" id="L243">    return decodeResult;</span>
+  }
+
+  /**
+   * @param s string of digits to check
+   * @return {@link #checkStandardUPCEANChecksum(CharSequence)}
+   * @throws FormatException if the string does not contain only digits
+   */
+  boolean checkChecksum(String s) throws FormatException {
+<span class="fc" id="L252">    return checkStandardUPCEANChecksum(s);</span>
+  }
+
+  /**
+   * Computes the UPC/EAN checksum on a string of digits, and reports
+   * whether the checksum is correct or not.
+   *
+   * @param s string of digits to check
+   * @return true iff string of digits passes the UPC/EAN checksum algorithm
+   * @throws FormatException if the string does not contain only digits
+   */
+  static boolean checkStandardUPCEANChecksum(CharSequence s) throws FormatException {
+<span class="fc" id="L264">    int length = s.length();</span>
+<span class="pc bpc" id="L265" title="1 of 2 branches missed.">    if (length == 0) {</span>
+<span class="nc" id="L266">      return false;</span>
+    }
+<span class="fc" id="L268">    int check = Character.digit(s.charAt(length - 1), 10);</span>
+<span class="fc bfc" id="L269" title="All 2 branches covered.">    return getStandardUPCEANChecksum(s.subSequence(0, length - 1)) == check;</span>
+  }
+
+  static int getStandardUPCEANChecksum(CharSequence s) throws FormatException {
+<span class="fc" id="L273">    int length = s.length();</span>
+<span class="fc" id="L274">    int sum = 0;</span>
+<span class="fc bfc" id="L275" title="All 2 branches covered.">    for (int i = length - 1; i &gt;= 0; i -= 2) {</span>
+<span class="fc" id="L276">      int digit = s.charAt(i) - '0';</span>
+<span class="pc bpc" id="L277" title="1 of 4 branches missed.">      if (digit &lt; 0 || digit &gt; 9) {</span>
+<span class="fc" id="L278">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L280">      sum += digit;</span>
+    }
+<span class="fc" id="L282">    sum *= 3;</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">    for (int i = length - 2; i &gt;= 0; i -= 2) {</span>
+<span class="fc" id="L284">      int digit = s.charAt(i) - '0';</span>
+<span class="pc bpc" id="L285" title="2 of 4 branches missed.">      if (digit &lt; 0 || digit &gt; 9) {</span>
+<span class="nc" id="L286">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L288">      sum += digit;</span>
+    }
+<span class="fc" id="L290">    return (1000 - sum) % 10;</span>
+  }
+
+  int[] decodeEnd(BitArray row, int endStart) throws NotFoundException {
+<span class="fc" id="L294">    return findGuardPattern(row, endStart, false, START_END_PATTERN);</span>
+  }
+
+  static int[] findGuardPattern(BitArray row,
+                                int rowOffset,
+                                boolean whiteFirst,
+                                int[] pattern) throws NotFoundException {
+<span class="fc" id="L301">    return findGuardPattern(row, rowOffset, whiteFirst, pattern, new int[pattern.length]);</span>
+  }
+
+  /**
+   * @param row row of black/white values to search
+   * @param rowOffset position to start search
+   * @param whiteFirst if true, indicates that the pattern specifies white/black/white/...
+   * pixel counts, otherwise, it is interpreted as black/white/black/...
+   * @param pattern pattern of counts of number of black and white pixels that are being
+   * searched for as a pattern
+   * @param counters array of counters, as long as pattern, to re-use
+   * @return start/end horizontal offset of guard pattern, as an array of two ints
+   * @throws NotFoundException if pattern is not found
+   */
+  private static int[] findGuardPattern(BitArray row,
+                                        int rowOffset,
+                                        boolean whiteFirst,
+                                        int[] pattern,
+                                        int[] counters) throws NotFoundException {
+<span class="fc" id="L320">    int width = row.getSize();</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    rowOffset = whiteFirst ? row.getNextUnset(rowOffset) : row.getNextSet(rowOffset);</span>
+<span class="fc" id="L322">    int counterPosition = 0;</span>
+<span class="fc" id="L323">    int patternStart = rowOffset;</span>
+<span class="fc" id="L324">    int patternLength = pattern.length;</span>
+<span class="fc" id="L325">    boolean isWhite = whiteFirst;</span>
+<span class="fc bfc" id="L326" title="All 2 branches covered.">    for (int x = rowOffset; x &lt; width; x++) {</span>
+<span class="fc bfc" id="L327" title="All 2 branches covered.">      if (row.get(x) != isWhite) {</span>
+<span class="fc" id="L328">        counters[counterPosition]++;</span>
+      } else {
+<span class="fc bfc" id="L330" title="All 2 branches covered.">        if (counterPosition == patternLength - 1) {</span>
+<span class="fc bfc" id="L331" title="All 2 branches covered.">          if (patternMatchVariance(counters, pattern, MAX_INDIVIDUAL_VARIANCE) &lt; MAX_AVG_VARIANCE) {</span>
+<span class="fc" id="L332">            return new int[]{patternStart, x};</span>
+          }
+<span class="fc" id="L334">          patternStart += counters[0] + counters[1];</span>
+<span class="fc" id="L335">          System.arraycopy(counters, 2, counters, 0, counterPosition - 1);</span>
+<span class="fc" id="L336">          counters[counterPosition - 1] = 0;</span>
+<span class="fc" id="L337">          counters[counterPosition] = 0;</span>
+<span class="fc" id="L338">          counterPosition--;</span>
+        } else {
+<span class="fc" id="L340">          counterPosition++;</span>
+        }
+<span class="fc" id="L342">        counters[counterPosition] = 1;</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">        isWhite = !isWhite;</span>
+      }
+    }
+<span class="fc" id="L346">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  /**
+   * Attempts to decode a single UPC/EAN-encoded digit.
+   *
+   * @param row row of black/white values to decode
+   * @param counters the counts of runs of observed black/white/black/... values
+   * @param rowOffset horizontal offset to start decoding from
+   * @param patterns the set of patterns to use to decode -- sometimes different encodings
+   * for the digits 0-9 are used, and this indicates the encodings for 0 to 9 that should
+   * be used
+   * @return horizontal offset of first pixel beyond the decoded digit
+   * @throws NotFoundException if digit cannot be decoded
+   */
+  static int decodeDigit(BitArray row, int[] counters, int rowOffset, int[][] patterns)
+      throws NotFoundException {
+<span class="fc" id="L363">    recordPattern(row, rowOffset, counters);</span>
+<span class="fc" id="L364">    float bestVariance = MAX_AVG_VARIANCE; // worst variance we'll accept</span>
+<span class="fc" id="L365">    int bestMatch = -1;</span>
+<span class="fc" id="L366">    int max = patterns.length;</span>
+<span class="fc bfc" id="L367" title="All 2 branches covered.">    for (int i = 0; i &lt; max; i++) {</span>
+<span class="fc" id="L368">      int[] pattern = patterns[i];</span>
+<span class="fc" id="L369">      float variance = patternMatchVariance(counters, pattern, MAX_INDIVIDUAL_VARIANCE);</span>
+<span class="fc bfc" id="L370" title="All 2 branches covered.">      if (variance &lt; bestVariance) {</span>
+<span class="fc" id="L371">        bestVariance = variance;</span>
+<span class="fc" id="L372">        bestMatch = i;</span>
+      }
+    }
+<span class="fc bfc" id="L375" title="All 2 branches covered.">    if (bestMatch &gt;= 0) {</span>
+<span class="fc" id="L376">      return bestMatch;</span>
+    } else {
+<span class="fc" id="L378">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+  }
+
+  /**
+   * Get the format of this decoder.
+   *
+   * @return The 1D format.
+   */
+  abstract BarcodeFormat getBarcodeFormat();
+
+  /**
+   * Subclasses override this to decode the portion of a barcode between the start
+   * and end guard patterns.
+   *
+   * @param row row of black/white values to search
+   * @param startRange start/end offset of start guard pattern
+   * @param resultString {@link StringBuilder} to append decoded chars to
+   * @return horizontal offset of first pixel after the &quot;middle&quot; that was decoded
+   * @throws NotFoundException if decoding could not complete successfully
+   */
+  protected abstract int decodeMiddle(BitArray row,
+                                      int[] startRange,
+                                      StringBuilder resultString) throws NotFoundException;
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

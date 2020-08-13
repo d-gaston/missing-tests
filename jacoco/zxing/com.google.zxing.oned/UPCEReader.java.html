@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UPCEReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">UPCEReader.java</span></div><h1>UPCEReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.common.BitArray;
+
+/**
+ * &lt;p&gt;Implements decoding of the UPC-E format.&lt;/p&gt;
+ * &lt;p&gt;&lt;a href=&quot;http://www.barcodeisland.com/upce.phtml&quot;&gt;This&lt;/a&gt; is a great reference for
+ * UPC-E information.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+public final class UPCEReader extends UPCEANReader {
+
+  /**
+   * The pattern that marks the middle, and end, of a UPC-E pattern.
+   * There is no &quot;second half&quot; to a UPC-E barcode.
+   */
+<span class="fc" id="L37">  private static final int[] MIDDLE_END_PATTERN = {1, 1, 1, 1, 1, 1};</span>
+
+  // For an UPC-E barcode, the final digit is represented by the parities used
+  // to encode the middle six digits, according to the table below.
+  //
+  //                Parity of next 6 digits
+  //    Digit   0     1     2     3     4     5
+  //       0    Even   Even  Even Odd  Odd   Odd
+  //       1    Even   Even  Odd  Even Odd   Odd
+  //       2    Even   Even  Odd  Odd  Even  Odd
+  //       3    Even   Even  Odd  Odd  Odd   Even
+  //       4    Even   Odd   Even Even Odd   Odd
+  //       5    Even   Odd   Odd  Even Even  Odd
+  //       6    Even   Odd   Odd  Odd  Even  Even
+  //       7    Even   Odd   Even Odd  Even  Odd
+  //       8    Even   Odd   Even Odd  Odd   Even
+  //       9    Even   Odd   Odd  Even Odd   Even
+  //
+  // The encoding is represented by the following array, which is a bit pattern
+  // using Odd = 0 and Even = 1. For example, 5 is represented by:
+  //
+  //              Odd Even Even Odd Odd Even
+  // in binary:
+  //                0    1    1   0   0    1   == 0x19
+  //
+
+  /**
+   * See {@link #L_AND_G_PATTERNS}; these values similarly represent patterns of
+   * even-odd parity encodings of digits that imply both the number system (0 or 1)
+   * used, and the check digit.
+   */
+<span class="fc" id="L68">  static final int[][] NUMSYS_AND_CHECK_DIGIT_PATTERNS = {</span>
+      {0x38, 0x34, 0x32, 0x31, 0x2C, 0x26, 0x23, 0x2A, 0x29, 0x25},
+      {0x07, 0x0B, 0x0D, 0x0E, 0x13, 0x19, 0x1C, 0x15, 0x16, 0x1A}
+  };
+
+  private final int[] decodeMiddleCounters;
+
+<span class="fc" id="L75">  public UPCEReader() {</span>
+<span class="fc" id="L76">    decodeMiddleCounters = new int[4];</span>
+<span class="fc" id="L77">  }</span>
+
+  @Override
+  protected int decodeMiddle(BitArray row, int[] startRange, StringBuilder result)
+      throws NotFoundException {
+<span class="fc" id="L82">    int[] counters = decodeMiddleCounters;</span>
+<span class="fc" id="L83">    counters[0] = 0;</span>
+<span class="fc" id="L84">    counters[1] = 0;</span>
+<span class="fc" id="L85">    counters[2] = 0;</span>
+<span class="fc" id="L86">    counters[3] = 0;</span>
+<span class="fc" id="L87">    int end = row.getSize();</span>
+<span class="fc" id="L88">    int rowOffset = startRange[1];</span>
+
+<span class="fc" id="L90">    int lgPatternFound = 0;</span>
+
+<span class="pc bpc" id="L92" title="1 of 4 branches missed.">    for (int x = 0; x &lt; 6 &amp;&amp; rowOffset &lt; end; x++) {</span>
+<span class="fc" id="L93">      int bestMatch = decodeDigit(row, counters, rowOffset, L_AND_G_PATTERNS);</span>
+<span class="fc" id="L94">      result.append((char) ('0' + bestMatch % 10));</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">      for (int counter : counters) {</span>
+<span class="fc" id="L96">        rowOffset += counter;</span>
+      }
+<span class="fc bfc" id="L98" title="All 2 branches covered.">      if (bestMatch &gt;= 10) {</span>
+<span class="fc" id="L99">        lgPatternFound |= 1 &lt;&lt; (5 - x);</span>
+      }
+    }
+
+<span class="fc" id="L103">    determineNumSysAndCheckDigit(result, lgPatternFound);</span>
+
+<span class="fc" id="L105">    return rowOffset;</span>
+  }
+
+  @Override
+  protected int[] decodeEnd(BitArray row, int endStart) throws NotFoundException {
+<span class="fc" id="L110">    return findGuardPattern(row, endStart, true, MIDDLE_END_PATTERN);</span>
+  }
+
+  @Override
+  protected boolean checkChecksum(String s) throws FormatException {
+<span class="fc" id="L115">    return super.checkChecksum(convertUPCEtoUPCA(s));</span>
+  }
+
+  private static void determineNumSysAndCheckDigit(StringBuilder resultString, int lgPatternFound)
+      throws NotFoundException {
+
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    for (int numSys = 0; numSys &lt;= 1; numSys++) {</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      for (int d = 0; d &lt; 10; d++) {</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">        if (lgPatternFound == NUMSYS_AND_CHECK_DIGIT_PATTERNS[numSys][d]) {</span>
+<span class="fc" id="L124">          resultString.insert(0, (char) ('0' + numSys));</span>
+<span class="fc" id="L125">          resultString.append((char) ('0' + d));</span>
+<span class="fc" id="L126">          return;</span>
+        }
+      }
+    }
+<span class="fc" id="L130">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  @Override
+  BarcodeFormat getBarcodeFormat() {
+<span class="fc" id="L135">    return BarcodeFormat.UPC_E;</span>
+  }
+
+  /**
+   * Expands a UPC-E value back into its full, equivalent UPC-A code value.
+   *
+   * @param upce UPC-E code as string of digits
+   * @return equivalent UPC-A code as string of digits
+   */
+  public static String convertUPCEtoUPCA(String upce) {
+<span class="fc" id="L145">    char[] upceChars = new char[6];</span>
+<span class="fc" id="L146">    upce.getChars(1, 7, upceChars, 0);</span>
+<span class="fc" id="L147">    StringBuilder result = new StringBuilder(12);</span>
+<span class="fc" id="L148">    result.append(upce.charAt(0));</span>
+<span class="fc" id="L149">    char lastChar = upceChars[5];</span>
+<span class="fc bfc" id="L150" title="All 4 branches covered.">    switch (lastChar) {</span>
+      case '0':
+      case '1':
+      case '2':
+<span class="fc" id="L154">        result.append(upceChars, 0, 2);</span>
+<span class="fc" id="L155">        result.append(lastChar);</span>
+<span class="fc" id="L156">        result.append(&quot;0000&quot;);</span>
+<span class="fc" id="L157">        result.append(upceChars, 2, 3);</span>
+<span class="fc" id="L158">        break;</span>
+      case '3':
+<span class="fc" id="L160">        result.append(upceChars, 0, 3);</span>
+<span class="fc" id="L161">        result.append(&quot;00000&quot;);</span>
+<span class="fc" id="L162">        result.append(upceChars, 3, 2);</span>
+<span class="fc" id="L163">        break;</span>
+      case '4':
+<span class="fc" id="L165">        result.append(upceChars, 0, 4);</span>
+<span class="fc" id="L166">        result.append(&quot;00000&quot;);</span>
+<span class="fc" id="L167">        result.append(upceChars[4]);</span>
+<span class="fc" id="L168">        break;</span>
+      default:
+<span class="fc" id="L170">        result.append(upceChars, 0, 5);</span>
+<span class="fc" id="L171">        result.append(&quot;0000&quot;);</span>
+<span class="fc" id="L172">        result.append(lastChar);</span>
+        break;
+    }
+    // Only append check digit in conversion if supplied
+<span class="fc bfc" id="L176" title="All 2 branches covered.">    if (upce.length() &gt;= 8) {</span>
+<span class="fc" id="L177">      result.append(upce.charAt(7));</span>
+    }
+<span class="fc" id="L179">    return result.toString();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

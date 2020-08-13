@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TimeDependentFilteringTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.filters</a> &gt; <span class="el_source">TimeDependentFilteringTest.java</span></div><h1>TimeDependentFilteringTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.filters;
+
+import static java.lang.System.out;
+import static org.junit.jupiter.api.Assertions.fail;
+
+import com.google.common.base.Stopwatch;
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeSet;
+import com.google.common.collect.TreeRangeSet;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import org.apache.commons.lang3.RandomUtils;
+import org.apache.commons.text.RandomStringGenerator;
+import tech.tablesaw.api.DateColumn;
+import tech.tablesaw.api.DoubleColumn;
+import tech.tablesaw.api.Row;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.dates.PackedLocalDate;
+import tech.tablesaw.columns.numbers.NumberColumnFormatter;
+import tech.tablesaw.table.StandardTableSliceGroup;
+import tech.tablesaw.table.TableSlice;
+import tech.tablesaw.table.TableSliceGroup;
+
+/** Tests manipulation of large (but not big) data sets */
+<span class="nc" id="L46">public class TimeDependentFilteringTest {</span>
+
+  private static final int CONCEPT_COUNT = 10;
+  private static final int PATIENT_COUNT = 10_000;
+
+  // pools to get random test data from
+<span class="nc" id="L52">  private static List&lt;String&gt; concepts = new ArrayList&lt;&gt;(CONCEPT_COUNT);</span>
+<span class="nc" id="L53">  private static IntArrayList patientIds = new IntArrayList(PATIENT_COUNT);</span>
+<span class="nc" id="L54">  private static int size = 60 * 365;</span>
+<span class="nc" id="L55">  private static IntArrayList dates = new IntArrayList(size);</span>
+
+  public static void main(String[] args) throws Exception {
+
+<span class="nc" id="L59">    int numberOfRecordsInTable = 100_000_000;</span>
+<span class="nc" id="L60">    Stopwatch stopwatch = Stopwatch.createStarted();</span>
+
+<span class="nc" id="L62">    Table t = defineSchema();</span>
+<span class="nc" id="L63">    generateTestData(t, numberOfRecordsInTable, stopwatch);</span>
+
+<span class="nc" id="L65">    t.setName(&quot;Observations&quot;);</span>
+
+    // non temporal constraints
+<span class="nc" id="L68">    String conceptA = t.stringColumn(&quot;concept&quot;).get(RandomUtils.nextInt(0, t.rowCount()));</span>
+<span class="nc" id="L69">    String conceptB = t.stringColumn(&quot;concept&quot;).get(RandomUtils.nextInt(0, t.rowCount()));</span>
+
+    // independent temporal constraints
+<span class="nc" id="L72">    String conceptZ = t.stringColumn(&quot;concept&quot;).get(RandomUtils.nextInt(0, t.rowCount()));</span>
+<span class="nc" id="L73">    String conceptD = t.stringColumn(&quot;concept&quot;).get(RandomUtils.nextInt(0, t.rowCount()));</span>
+<span class="nc" id="L74">    DependencyFilter independentConstraintFilter = DependencyFilter.FIRST;</span>
+
+    // temporal dependency range constraint
+<span class="nc" id="L77">    Range&lt;Integer&gt; daysConstraint = Range.closed(0, 0);</span>
+
+<span class="nc" id="L79">    StringColumn concept = t.stringColumn(&quot;concept&quot;);</span>
+
+    // Non-temporal clause
+<span class="nc" id="L82">    Table nt = t.where(concept.isEqualTo(conceptA).and(concept.isNotEqualTo(conceptB)));</span>
+
+<span class="nc" id="L84">    DoubleColumn ntPatients = nt.doubleColumn(&quot;patient&quot;);</span>
+
+    // Group the original table by patient id
+<span class="nc" id="L87">    TableSliceGroup patients = StandardTableSliceGroup.create(t, &quot;patient&quot;);</span>
+
+    // Create a list of patient sub-tables to work with TODO(lwhite): Build the copy-on-write to
+    // ViewGroups to avoid
+<span class="nc" id="L91">    CopyOnWriteArrayList&lt;TableSlice&gt; patientTables =</span>
+<span class="nc" id="L92">        new CopyOnWriteArrayList&lt;&gt;(patients.getSlices());</span>
+
+    // Apply the independent temporal event filtering to the patient subtables and remove any that
+    // don't pass
+<span class="nc bnc" id="L96" title="All 2 branches missed.">    for (TableSlice patientTable : patients) {</span>
+<span class="nc" id="L97">      StringColumn concepts = patientTable.stringColumn(&quot;concept&quot;);</span>
+<span class="nc" id="L98">      double patientId = Double.parseDouble(patientTable.name());</span>
+<span class="nc bnc" id="L99" title="All 4 branches missed.">      if (!concepts.contains(conceptZ) || concepts.contains(conceptD)) {</span>
+<span class="nc" id="L100">        patientTables.remove(patientTable);</span>
+<span class="nc bnc" id="L101" title="All 2 branches missed.">      } else if (!ntPatients.contains(</span>
+<span class="nc" id="L102">          patientId)) { // filtering out the non-temporal now constraints for</span>
+        // efficiency
+<span class="nc" id="L104">        patientTables.remove(patientTable);</span>
+      }
+<span class="nc" id="L106">    }</span>
+
+<span class="nc" id="L108">    List&lt;IndependentResult&gt; independentResults = new ArrayList&lt;&gt;();</span>
+
+    // Working with the filtered patient tables, calculate the event dates for the independent
+    // events
+<span class="nc bnc" id="L112" title="All 2 branches missed.">    for (TableSlice patientTable : patientTables) {</span>
+<span class="nc" id="L113">      IndependentResult result = new IndependentResult();</span>
+<span class="nc" id="L114">      List&lt;LocalDate&gt; eventDates = new ArrayList&lt;&gt;();</span>
+
+      // iterate an individual table and find the rows where concept matches the target concept
+<span class="nc bnc" id="L117" title="All 2 branches missed.">      for (Row row : patientTable) {</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">        if (row.getString(&quot;concept&quot;).equals(conceptZ)) {</span>
+<span class="nc" id="L119">          eventDates.add(row.getDate(&quot;date&quot;));</span>
+        }
+<span class="nc" id="L121">      }</span>
+
+<span class="nc bnc" id="L123" title="All 2 branches missed.">      if (independentConstraintFilter == DependencyFilter.FIRST) {</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">        if (eventDates.isEmpty()) {</span>
+          // this is an error
+<span class="nc" id="L126">          fail(&quot;There are no event dates&quot;);</span>
+        } else { // Get the first event for the current patient and createFromCsv a date range
+          // around it
+<span class="nc" id="L129">          LocalDate date = eventDates.get(0);</span>
+<span class="nc" id="L130">          result.addRange(</span>
+<span class="nc" id="L131">              Range.closed(</span>
+<span class="nc" id="L132">                  date.minusDays(daysConstraint.lowerEndpoint()),</span>
+<span class="nc" id="L133">                  date.plusDays(daysConstraint.upperEndpoint())));</span>
+        } // TODO handle last and any cases
+      }
+<span class="nc" id="L136">      independentResults.add(result);</span>
+<span class="nc" id="L137">    }</span>
+<span class="nc" id="L138">  }</span>
+
+  private static Table defineSchema() {
+    Table t;
+<span class="nc" id="L142">    t = Table.create(&quot;Observations&quot;);</span>
+<span class="nc" id="L143">    StringColumn conceptId = StringColumn.create(&quot;concept&quot;);</span>
+<span class="nc" id="L144">    DateColumn date = DateColumn.create(&quot;date&quot;);</span>
+<span class="nc" id="L145">    DoubleColumn value = DoubleColumn.create(&quot;value&quot;);</span>
+<span class="nc" id="L146">    DoubleColumn patientId = DoubleColumn.create(&quot;patient&quot;);</span>
+<span class="nc" id="L147">    patientId.setPrintFormatter(NumberColumnFormatter.ints());</span>
+
+<span class="nc" id="L149">    t.addColumns(conceptId);</span>
+<span class="nc" id="L150">    t.addColumns(date);</span>
+<span class="nc" id="L151">    t.addColumns(value);</span>
+<span class="nc" id="L152">    t.addColumns(patientId);</span>
+<span class="nc" id="L153">    return t;</span>
+  }
+
+  private static void generateTestData(Table t, int numberOfRecordsInTable, Stopwatch stopwatch)
+      throws IOException {
+<span class="nc" id="L158">    stopwatch.reset().start();</span>
+<span class="nc" id="L159">    out.println(&quot;Generating test data&quot;);</span>
+<span class="nc" id="L160">    generateData(numberOfRecordsInTable, t);</span>
+<span class="nc" id="L161">    out.println(</span>
+        &quot;Time to generate &quot;
+            + numberOfRecordsInTable
+            + &quot; records: &quot;
+<span class="nc" id="L165">            + stopwatch.elapsed(TimeUnit.SECONDS)</span>
+            + &quot; seconds&quot;);
+<span class="nc" id="L167">  }</span>
+
+  private static void generateData(int observationCount, Table table) {
+    // createFromCsv pools of random values
+
+<span class="nc" id="L172">    RandomStringGenerator generator =</span>
+<span class="nc" id="L173">        new RandomStringGenerator.Builder().withinRange(32, 127).build();</span>
+<span class="nc bnc" id="L174" title="All 2 branches missed.">    while (concepts.size() &lt;= CONCEPT_COUNT) {</span>
+<span class="nc" id="L175">      concepts.add(generator.generate(30));</span>
+    }
+
+<span class="nc bnc" id="L178" title="All 2 branches missed.">    while (patientIds.size() &lt;= PATIENT_COUNT) {</span>
+<span class="nc" id="L179">      patientIds.add(RandomUtils.nextInt(0, 2_000_000_000));</span>
+    }
+
+<span class="nc bnc" id="L182" title="All 2 branches missed.">    while (dates.size() &lt;= size) {</span>
+<span class="nc" id="L183">      dates.add(PackedLocalDate.pack(randomDate()));</span>
+    }
+
+<span class="nc" id="L186">    DateColumn dateColumn = table.dateColumn(&quot;date&quot;);</span>
+<span class="nc" id="L187">    StringColumn conceptColumn = table.stringColumn(&quot;concept&quot;);</span>
+<span class="nc" id="L188">    DoubleColumn valueColumn = table.doubleColumn(&quot;value&quot;);</span>
+<span class="nc" id="L189">    DoubleColumn patientColumn = table.doubleColumn(&quot;patient&quot;);</span>
+
+    // sample from the pools to write the data
+<span class="nc bnc" id="L192" title="All 2 branches missed.">    for (int i = 0; i &lt; observationCount; i++) {</span>
+<span class="nc" id="L193">      dateColumn.appendInternal(dates.getInt(RandomUtils.nextInt(0, dates.size())));</span>
+<span class="nc" id="L194">      conceptColumn.append(concepts.get(RandomUtils.nextInt(0, concepts.size())));</span>
+<span class="nc" id="L195">      valueColumn.append(RandomUtils.nextDouble(0f, 100_000f));</span>
+<span class="nc" id="L196">      patientColumn.append(patientIds.getInt(RandomUtils.nextInt(0, patientIds.size())));</span>
+    }
+<span class="nc" id="L198">  }</span>
+
+  // TODO(lwhite): Put this in a Test utils class
+  private static LocalDate randomDate() {
+<span class="nc" id="L202">    Random random = new Random();</span>
+<span class="nc" id="L203">    int minDay = (int) LocalDate.of(2000, 1, 1).toEpochDay();</span>
+<span class="nc" id="L204">    int maxDay = (int) LocalDate.of(2016, 1, 1).toEpochDay();</span>
+<span class="nc" id="L205">    long randomDay = minDay + random.nextInt(maxDay - minDay);</span>
+<span class="nc" id="L206">    return LocalDate.ofEpochDay(randomDay);</span>
+  }
+
+<span class="nc" id="L209">  private enum DependencyFilter {</span>
+<span class="nc" id="L210">    FIRST,</span>
+<span class="nc" id="L211">    LAST,</span>
+<span class="nc" id="L212">    ANY</span>
+  }
+
+<span class="nc" id="L215">  private static class IndependentResult {</span>
+<span class="nc" id="L216">    private RangeSet&lt;LocalDate&gt; dateRanges = TreeRangeSet.create();</span>
+
+    private void addRange(Range&lt;LocalDate&gt; dateRange) {
+<span class="nc" id="L219">      dateRanges.add(dateRange);</span>
+<span class="nc" id="L220">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

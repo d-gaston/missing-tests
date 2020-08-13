@@ -1,0 +1,533 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KeyedRateLimiterExecutor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">KeyedRateLimiterExecutor.java</span></div><h1>KeyedRateLimiterExecutor.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+
+import org.threadly.concurrent.AbstractSubmitterExecutor;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.PrioritySchedulerService;
+import org.threadly.concurrent.ReschedulingOperation;
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.future.ImmediateResultListenableFuture;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.wrapper.priority.DefaultPriorityWrapper;
+import org.threadly.concurrent.wrapper.traceability.ThreadRenamingSubmitterScheduler;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.StringUtils;
+
+/**
+ * Similar to {@link RateLimiterExecutor} except that the rate is applied on a per key basis.  
+ * Tasks submitted to this executor must all be associated to a key.  The key is compared by using 
+ * {@link Object#hashCode()} and {@link Object#equals(Object)}.  For any given key, a rate is 
+ * applied, but keys which don't match with the above checks will not impact each other.
+ * &lt;p&gt;
+ * Because different keys don't interact, this is not capable of providing a global rate limit 
+ * (unless the key quantity is known and restricted).
+ * &lt;p&gt;
+ * This differs from {@link KeyedExecutorLimiter} in that while that limits concurrency, this 
+ * limits by rate (thus there may be periods where nothing is execution, or if executions are long 
+ * things may run concurrently).  Please see {@link RateLimiterExecutor} for more details about how 
+ * rate is limited.
+ * 
+ * @since 4.7.0
+ */
+public class KeyedRateLimiterExecutor {
+  protected static final short LIMITER_IDLE_TIMEOUT = 2_000;
+  protected static final short CONCURRENT_HASH_MAP_INITIAL_SIZE = 16;
+  
+  protected final SubmitterScheduler scheduler;
+  protected final RejectedExecutionHandler rejectedExecutionHandler;
+  protected final SubmitterScheduler limiterCheckerScheduler;
+  protected final double permitsPerSecond;
+  protected final long maxScheduleDelayMillis;
+  protected final String subPoolName;
+  protected final boolean addKeyToThreadName;
+  protected final ConcurrentHashMap&lt;Object, RateLimiterExecutor&gt; currentLimiters;
+  protected final LimiterChecker limiterChecker;
+  
+  /**
+   * Constructs a new key rate limiting executor.  Using sensible default options.
+   * &lt;p&gt;
+   * This will schedule tasks out infinitely far in order to maintain rate.  If you want tasks to 
+   * be rejected at a certain point consider using 
+   * {@link #KeyedRateLimiterExecutor(SubmitterScheduler, double, long)}.
+   * 
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   */
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond) {
+<span class="fc" id="L65">    this(scheduler, permitsPerSecond, Long.MAX_VALUE, null, &quot;&quot;, false);</span>
+<span class="fc" id="L66">  }</span>
+  
+  /**
+   * Constructs a new key rate limiting executor.  Allowing the specification of thread naming 
+   * behavior.  Providing null or empty for the {@code subPoolName} and {@code false} for appending 
+   * the key to the thread name will result in no thread name adjustments occurring.
+   * &lt;p&gt;
+   * This will schedule tasks out infinitely far in order to maintain rate.  If you want tasks to 
+   * be rejected at a certain point consider using 
+   * {@link #KeyedRateLimiterExecutor(SubmitterScheduler, double, long, String, boolean)}.
+   * 
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   * @param subPoolName Prefix to give threads while executing tasks submitted through this limiter
+   * @param addKeyToThreadName {@code true} to append the task's key to the thread name
+   */
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                                  String subPoolName, boolean addKeyToThreadName) {
+<span class="nc" id="L84">    this(scheduler, permitsPerSecond, Long.MAX_VALUE, null, </span>
+         subPoolName, addKeyToThreadName);
+<span class="nc" id="L86">  }</span>
+  
+  /**
+   * Constructs a new key rate limiting executor.  
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then a {@link java.util.concurrent.RejectedExecutionException} will be 
+   * thrown instead of scheduling the task.
+   * 
+   * @since 4.8.0
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   */
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                                  long maxScheduleDelayMillis) {
+<span class="fc" id="L102">    this(scheduler, permitsPerSecond, maxScheduleDelayMillis, null, &quot;&quot;, false);</span>
+<span class="fc" id="L103">  }</span>
+  
+  /**
+   * Constructs a new key rate limiting executor.  
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then a {@link java.util.concurrent.RejectedExecutionException} will be 
+   * thrown instead of scheduling the task.
+   * 
+   * @since 4.8.0
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   * @param rejectedExecutionHandler Handler to accept tasks which could not be executed
+   */
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                                  long maxScheduleDelayMillis, 
+                                  RejectedExecutionHandler rejectedExecutionHandler) {
+<span class="fc" id="L121">    this(scheduler, permitsPerSecond, maxScheduleDelayMillis, rejectedExecutionHandler, </span>
+         &quot;&quot;, false);
+<span class="fc" id="L123">  }</span>
+  
+  /**
+   * Constructs a new key rate limiting executor.  Allowing the specification of thread naming 
+   * behavior.  Providing null or empty for the {@code subPoolName} and {@code false} for appending 
+   * the key to the thread name will result in no thread name adjustments occurring.    
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then a {@link java.util.concurrent.RejectedExecutionException} will be 
+   * thrown instead of scheduling the task.
+   * 
+   * @since 4.8.0
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   * @param subPoolName Prefix to give threads while executing tasks submitted through this limiter
+   * @param addKeyToThreadName {@code true} to append the task's key to the thread name
+   */
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                                  long maxScheduleDelayMillis, 
+                                  String subPoolName, boolean addKeyToThreadName) {
+<span class="fc" id="L144">    this(scheduler, permitsPerSecond, maxScheduleDelayMillis, null, </span>
+         subPoolName, addKeyToThreadName);
+<span class="fc" id="L146">  }</span>
+  
+  /**
+   * Constructs a new key rate limiting executor.  Allowing the specification of thread naming 
+   * behavior.  Providing null or empty for the {@code subPoolName} and {@code false} for appending 
+   * the key to the thread name will result in no thread name adjustments occurring.    
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then a {@link java.util.concurrent.RejectedExecutionException} will be 
+   * thrown instead of scheduling the task.
+   * 
+   * @since 4.8.0
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   * @param rejectedExecutionHandler Handler to accept tasks which could not be executed
+   * @param subPoolName Prefix to give threads while executing tasks submitted through this limiter
+   * @param addKeyToThreadName {@code true} to append the task's key to the thread name
+   */
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                                  long maxScheduleDelayMillis, 
+                                  RejectedExecutionHandler rejectedExecutionHandler, 
+<span class="fc" id="L168">                                  String subPoolName, boolean addKeyToThreadName) {</span>
+<span class="fc" id="L169">    ArgumentVerifier.assertNotNull(scheduler, &quot;scheduler&quot;);</span>
+<span class="fc" id="L170">    ArgumentVerifier.assertGreaterThanZero(permitsPerSecond, &quot;permitsPerSecond&quot;);</span>
+<span class="fc" id="L171">    ArgumentVerifier.assertGreaterThanZero(maxScheduleDelayMillis, &quot;maxScheduleDelayMillis&quot;);</span>
+
+<span class="fc" id="L173">    this.scheduler = scheduler;</span>
+<span class="fc" id="L174">    this.rejectedExecutionHandler = rejectedExecutionHandler;</span>
+<span class="pc bpc" id="L175" title="1 of 2 branches missed.">    if (scheduler instanceof PrioritySchedulerService) {</span>
+<span class="fc" id="L176">      limiterCheckerScheduler = </span>
+<span class="fc" id="L177">          DefaultPriorityWrapper.ensurePriority((PrioritySchedulerService)scheduler, </span>
+                                                TaskPriority.Low);
+    } else {
+<span class="nc" id="L180">      limiterCheckerScheduler = scheduler;</span>
+    }
+<span class="fc" id="L182">    this.permitsPerSecond = permitsPerSecond;</span>
+<span class="fc" id="L183">    this.maxScheduleDelayMillis = maxScheduleDelayMillis;</span>
+    // make sure this is non-null so that it 'null' wont appear
+<span class="fc" id="L185">    this.subPoolName = StringUtils.nullToEmpty(subPoolName);</span>
+<span class="fc" id="L186">    this.addKeyToThreadName = addKeyToThreadName;</span>
+<span class="fc" id="L187">    this.currentLimiters = new ConcurrentHashMap&lt;&gt;(CONCURRENT_HASH_MAP_INITIAL_SIZE);</span>
+<span class="fc" id="L188">    this.limiterChecker = new LimiterChecker(scheduler, LIMITER_IDLE_TIMEOUT / 2);</span>
+<span class="fc" id="L189">  }</span>
+  
+  /**
+   * Constructs a new key rate limiting executor.  This constructor allows you to set both the 
+   * thread naming behavior as well as the level of parallelism expected for task submission.  
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then a {@link java.util.concurrent.RejectedExecutionException} will be 
+   * thrown instead of scheduling the task.
+   * &lt;p&gt;
+   * The parallelism value should be a factor of how many keys are submitted to the pool during any 
+   * given period of time.  Depending on task execution duration, and quantity of threads executing 
+   * tasks this value may be able to be smaller than expected.  Higher values result in less lock 
+   * contention, but more memory usage.  Most systems will run fine with this anywhere from 4 to 64.
+   * 
+   * @deprecated Please use constructor without the {@code expectedParallism} field
+   * 
+   * @since 4.8.0
+   * @param scheduler Scheduler to defer executions to
+   * @param permitsPerSecond how many permits should be allowed per second per key
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   * @param rejectedExecutionHandler Handler to accept tasks which could not be executed
+   * @param subPoolName Prefix to give threads while executing tasks submitted through this limiter
+   * @param addKeyToThreadName {@code true} to append the task's key to the thread name
+   * @param expectedParallism IGNORED AND DEPRECATED
+   */
+  @Deprecated
+  public KeyedRateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                                  long maxScheduleDelayMillis, 
+                                  RejectedExecutionHandler rejectedExecutionHandler, 
+                                  String subPoolName, boolean addKeyToThreadName, 
+                                  @SuppressWarnings(&quot;unused&quot;) int expectedParallism) {
+<span class="nc" id="L221">    this(scheduler, permitsPerSecond, maxScheduleDelayMillis, rejectedExecutionHandler, </span>
+         subPoolName, addKeyToThreadName);
+<span class="nc" id="L223">  }</span>
+  
+  /**
+   * Check how many keys are currently being restricted or monitored.  This number is particularly 
+   * relevant for when checking the queued tasks of the parent scheduler.  As part of the inner 
+   * workings of this limiter, a task will exist for each key.  Because of that there will be 
+   * queued tasks which are not actual application submitted work units.
+   * 
+   * @return The number of task keys being monitored
+   */
+  public int getTrackedKeyCount() {
+<span class="fc" id="L234">    return currentLimiters.size();</span>
+  }
+  
+  /**
+   * This call will check how far out we have already scheduled tasks to be run.  Because it is 
+   * the applications responsibility to not provide tasks too fast for the limiter to run them, 
+   * this can give an idea of how backed up tasks provided through this limiter actually are.
+   * 
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @return minimum delay in milliseconds for the next task to be provided
+   */
+  public int getMinimumDelay(Object taskKey) {
+<span class="fc" id="L246">    RateLimiterExecutor rle = currentLimiters.get(taskKey);</span>
+<span class="fc bfc" id="L247" title="All 2 branches covered.">    if (rle == null) {</span>
+<span class="fc" id="L248">      return 0;</span>
+    } else {
+<span class="fc" id="L250">      return rle.getMinimumDelay();</span>
+    }
+  }
+  
+  /**
+   * In order to help assist with avoiding to schedule too much on the scheduler at any given 
+   * time, this call returns a future that will block until the delay for the next task falls 
+   * below the maximum delay provided into this call.  If you want to ensure that the next task 
+   * will execute immediately, you should provide a zero to this function.  If more tasks are 
+   * added to the limiter after this call, it will NOT impact when this future will unblock.  So 
+   * this future is assuming that nothing else is added to the limiter after requested.
+   * 
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param maximumDelay maximum delay in milliseconds until returned Future should unblock
+   * @return Future that will unblock {@code get()} calls once delay has been reduced below the provided maximum
+   */
+  public ListenableFuture&lt;?&gt; getFutureTillDelay(Object taskKey, long maximumDelay) {
+<span class="fc" id="L267">    int currentMinimumDelay = getMinimumDelay(taskKey);</span>
+<span class="fc bfc" id="L268" title="All 2 branches covered.">    if (currentMinimumDelay == 0) {</span>
+<span class="fc" id="L269">      return ImmediateResultListenableFuture.NULL_RESULT;</span>
+    } else {
+      long futureDelay;
+<span class="pc bpc" id="L272" title="3 of 4 branches missed.">      if (maximumDelay &gt; 0 &amp;&amp; currentMinimumDelay &gt; maximumDelay) {</span>
+<span class="nc" id="L273">        futureDelay = maximumDelay;</span>
+      } else {
+<span class="fc" id="L275">        futureDelay = currentMinimumDelay;</span>
+      }
+      
+<span class="fc" id="L278">      return scheduler.submitScheduled(DoNothingRunnable.instance(), futureDelay);</span>
+    }
+  }
+  
+  /**
+   * Provide a task to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#execute(Runnable)} and 
+   * {@link RateLimiterExecutor#execute(Runnable)}.
+   * 
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed
+   */
+  public void execute(Object taskKey, Runnable task) {
+<span class="fc" id="L292">    execute(1, taskKey, task);</span>
+<span class="fc" id="L293">  }</span>
+  
+  /**
+   * Provide a task to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#execute(Runnable)} and 
+   * {@link RateLimiterExecutor#execute(double, Runnable)}.
+   * 
+   * @param permits resource permits for this task
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed
+   * @return Time in milliseconds task was delayed to maintain rate, or {@code -1} if rejected but handler did not throw
+   */
+  public long execute(double permits, Object taskKey, Runnable task) {
+<span class="fc" id="L307">    return limiterForKey(taskKey, (l) -&gt; l.execute(permits, task));</span>
+  }
+  
+  /**
+   * Submit a task to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#submit(Runnable)} and 
+   * {@link RateLimiterExecutor#submit(Runnable)}.
+   * 
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed
+   * @return Future to represent when the execution has occurred
+   */
+  public ListenableFuture&lt;?&gt; submit(Object taskKey, Runnable task) {
+<span class="nc" id="L321">    return submit(1, taskKey, task, null);</span>
+  }
+  
+  /**
+   * Submit a task to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#submit(Runnable)} and 
+   * {@link RateLimiterExecutor#submit(double, Runnable)}.
+   * 
+   * @param permits resource permits for this task
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed
+   * @return Future to represent when the execution has occurred
+   */
+  public ListenableFuture&lt;?&gt; submit(double permits, Object taskKey, Runnable task) {
+<span class="fc" id="L336">    return submit(permits, taskKey, task, null);</span>
+  }
+  
+  /**
+   * Submit a task to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#submit(Runnable, Object)} and 
+   * {@link RateLimiterExecutor#submit(Runnable, Object)}.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Runnable to be executed
+   * @param result Result to be returned from future when task completes
+   * @return Future to represent when the execution has occurred and provide the given result
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Object taskKey, Runnable task, T result) {
+<span class="fc" id="L352">    return submit(1, taskKey, task, result);</span>
+  }
+  
+  /**
+   * Submit a task to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#submit(Runnable, Object)} and 
+   * {@link RateLimiterExecutor#submit(double, Runnable, Object)}.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param permits resource permits for this task
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Runnable to be executed
+   * @param result Result to be returned from future when task completes
+   * @return Future to represent when the execution has occurred and provide the given result
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(double permits, Object taskKey, Runnable task, T result) {
+    // we go directly to the limiter here to get DoNothingRunnable optimizations (can't wrap task)
+<span class="fc" id="L370">    return limiterForKey(taskKey, (l) -&gt; l.submit(permits, task, result));</span>
+  }
+  
+  /**
+   * Submit a callable to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#submit(Callable)} and 
+   * {@link RateLimiterExecutor#submit(Callable)}.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Callable to be executed
+   * @return Future to represent when the execution has occurred and provide the result from the callable
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Object taskKey, Callable&lt;T&gt; task) {
+<span class="fc" id="L385">    return submit(1, taskKey, task);</span>
+  }
+  
+  /**
+   * Submit a callable to be run with a given thread key.
+   * &lt;p&gt;
+   * See also: {@link SubmitterExecutor#submit(Callable)} and 
+   * {@link RateLimiterExecutor#submit(double, Callable)}.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param permits resource permits for this task
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Callable to be executed
+   * @return Future to represent when the execution has occurred and provide the result from the callable
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(double permits, Object taskKey, Callable&lt;T&gt; task) {
+<span class="fc" id="L401">    return limiterForKey(taskKey, (l) -&gt; l.submit(permits, task));</span>
+  }
+  
+  /**
+   * This invokes a function with a provided {@link RateLimiterExecutor}.  This invocation is 
+   * atomic using {@link ConcurrentHashMap#compute(Object, java.util.function.BiFunction)} so that 
+   * it will not interfere with others.
+   * 
+   * @param &lt;T&gt; Type of result from provided function
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @return A {@link RateLimiterExecutor} that is shared by the key
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  protected &lt;T&gt; T limiterForKey(Object taskKey, Function&lt;RateLimiterExecutor, ? extends T&gt; c) {
+<span class="fc" id="L415">    ArgumentVerifier.assertNotNull(taskKey, &quot;taskKey&quot;);</span>
+    
+<span class="fc" id="L417">    Object[] capture = new Object[1];</span>
+<span class="fc" id="L418">    currentLimiters.compute(taskKey, (k, v) -&gt; {</span>
+<span class="fc bfc" id="L419" title="All 2 branches covered.">      if (v == null) {</span>
+<span class="fc bfc" id="L420" title="All 2 branches covered.">        String keyedPoolName = subPoolName + (addKeyToThreadName ? taskKey.toString() : &quot;&quot;);</span>
+        SubmitterScheduler threadNamedScheduler;
+<span class="fc bfc" id="L422" title="All 2 branches covered.">        if (StringUtils.isNullOrEmpty(keyedPoolName)) {</span>
+<span class="fc" id="L423">          threadNamedScheduler = scheduler;</span>
+        } else {
+<span class="fc" id="L425">          threadNamedScheduler = new ThreadRenamingSubmitterScheduler(scheduler, keyedPoolName, false);</span>
+        }
+<span class="fc" id="L427">        v = new RateLimiterExecutor(threadNamedScheduler, permitsPerSecond, </span>
+                                    maxScheduleDelayMillis, rejectedExecutionHandler);
+<span class="fc" id="L429">        limiterChecker.signalToRun();</span>
+      }
+      // TODO - I would like to improve this
+      //          This is awkward having to construct an Object[] just to get the result returned
+      //          Ideally we would avoid both that, and the lambda's that need to be passed in, but 
+      //          how to do that is not super obvious.  By applying the function inside the `compute` 
+      //          we are ensuring the operation is atomic compared to any removes that might want 
+      //          to happen.
+      //          Other ideas I have:
+      //            * Increase memory overhead by having the value be an Object[] of size 2
+      //                Index 0 would be the RateLimiterExecutor, 1 would be able to be used for the capture
+      //            * Extend RateLimiterExecutor and store a timestamp that is updated here in compute.
+      //                This is probably the simplest, but does not completely solve the problem
+      //                This would just ensure the timestamp is updated when looking to remove, but 
+      //                If the action took X milliseconds after the update, then it may still be removed.
+      //                Highly unlikely, but I prefer impossibility if we can
+<span class="fc" id="L445">      capture[0] = c.apply(v);</span>
+<span class="fc" id="L446">      return v;</span>
+    });
+<span class="fc" id="L448">    return (T)capture[0];</span>
+  }
+
+  /**
+   * Returns an executor implementation where all tasks submitted on this executor will run on the 
+   * provided key.  Tasks executed on the returned scheduler will be limited by the key 
+   * submitted on this instance equally with ones provided through the returned instance.
+   * 
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @return Executor which will only execute with reference to the provided key
+   */
+  public SubmitterExecutor getSubmitterExecutorForKey(Object taskKey) {
+<span class="fc" id="L460">    return getSubmitterExecutorForKey(1, taskKey);</span>
+  }
+
+  /**
+   * Returns an executor implementation where all tasks submitted on this executor will run on the 
+   * provided key.  Tasks executed on the returned scheduler will be limited by the key 
+   * submitted on this instance equally with ones provided through the returned instance.
+   * 
+   * @param permits resource permits for all tasks submitted on the returned executor
+   * @param taskKey object key where {@code equals()} will be used to determine execution thread
+   * @return Executor which will only execute with reference to the provided key
+   */
+  public SubmitterExecutor getSubmitterExecutorForKey(double permits, Object taskKey) {
+<span class="fc" id="L473">    ArgumentVerifier.assertNotNegative(permits, &quot;permits&quot;);</span>
+<span class="fc" id="L474">    ArgumentVerifier.assertNotNull(taskKey, &quot;taskKey&quot;);</span>
+    
+<span class="fc" id="L476">    return new KeyedSubmitterExecutor(permits, taskKey);</span>
+  }
+  
+  /**
+   * Submitter executor which delegates to this instance with a constructed permits and task key.
+   * 
+   * @since 4.9.0
+   */
+  protected class KeyedSubmitterExecutor extends AbstractSubmitterExecutor {
+    protected final double permits;
+    protected final Object taskKey;
+    
+<span class="fc" id="L488">    protected KeyedSubmitterExecutor(double permits, Object taskKey) {</span>
+<span class="fc" id="L489">      this.permits = permits;</span>
+<span class="fc" id="L490">      this.taskKey = taskKey;</span>
+<span class="fc" id="L491">    }</span>
+    
+    @Override
+    protected void doExecute(Runnable task) {
+<span class="fc" id="L495">      limiterForKey(taskKey, (l) -&gt; l.execute(permits, task));</span>
+<span class="fc" id="L496">    }</span>
+  }
+  
+  /**
+   * Task which checks over all limiters to see if any should be expired / removed.
+   * 
+   * @since 5.25
+   */
+  protected class LimiterChecker extends ReschedulingOperation {
+<span class="fc" id="L505">    protected LimiterChecker(SubmitterScheduler scheduler, long scheduleDelay) {</span>
+<span class="fc" id="L506">      super(scheduler, scheduleDelay);</span>
+<span class="fc" id="L507">    }</span>
+
+    @Override
+    public void run() {
+<span class="fc" id="L511">      Iterator&lt;Map.Entry&lt;Object, RateLimiterExecutor&gt;&gt; it = currentLimiters.entrySet().iterator();</span>
+<span class="fc" id="L512">      long now = Clock.lastKnownForwardProgressingMillis();</span>
+<span class="fc bfc" id="L513" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L514">        Map.Entry&lt;Object, RateLimiterExecutor&gt; e = it.next();</span>
+<span class="pc bpc" id="L515" title="1 of 2 branches missed.">        if (now - e.getValue().getLastScheduleTime() &gt; LIMITER_IDLE_TIMEOUT) {</span>
+          // if optimistic check above failed, we must remove in `compute` to ensure
+          // no tasks are being submitted while we are removing the limiter
+<span class="nc" id="L518">          currentLimiters.computeIfPresent(e.getKey(), (k, v) -&gt; {</span>
+<span class="nc bnc" id="L519" title="All 2 branches missed.">            if (now - v.getLastScheduleTime() &gt; LIMITER_IDLE_TIMEOUT) {</span>
+<span class="nc" id="L520">              return null;</span>
+            } else {
+<span class="nc" id="L522">              return v;</span>
+            }
+          });
+        }
+<span class="fc" id="L526">      }</span>
+<span class="pc bpc" id="L527" title="1 of 2 branches missed.">      if (! currentLimiters.isEmpty()) {</span>
+<span class="fc" id="L528">        signalToRun();</span>
+      }
+<span class="fc" id="L530">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

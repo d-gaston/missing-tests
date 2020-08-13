@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TravellingSalesmanSolver.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ml.neuralnet.sofm</a> &gt; <span class="el_source">TravellingSalesmanSolver.java</span></div><h1>TravellingSalesmanSolver.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ml.neuralnet.sofm;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collection;
+import java.util.Iterator;
+
+import org.apache.commons.math4.analysis.FunctionUtils;
+import org.apache.commons.math4.analysis.UnivariateFunction;
+import org.apache.commons.math4.analysis.function.Constant;
+import org.apache.commons.math4.analysis.function.HarmonicOscillator;
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.statistics.distribution.UniformContinuousDistribution;
+import org.apache.commons.math4.exception.MathUnsupportedOperationException;
+import org.apache.commons.math4.ml.distance.DistanceMeasure;
+import org.apache.commons.math4.ml.distance.EuclideanDistance;
+import org.apache.commons.math4.ml.neuralnet.FeatureInitializer;
+import org.apache.commons.math4.ml.neuralnet.FeatureInitializerFactory;
+import org.apache.commons.math4.ml.neuralnet.Network;
+import org.apache.commons.math4.ml.neuralnet.Neuron;
+import org.apache.commons.math4.ml.neuralnet.oned.NeuronString;
+import org.apache.commons.math4.ml.neuralnet.sofm.KohonenTrainingTask;
+import org.apache.commons.math4.ml.neuralnet.sofm.KohonenUpdateAction;
+import org.apache.commons.math4.ml.neuralnet.sofm.LearningFactorFunction;
+import org.apache.commons.math4.ml.neuralnet.sofm.LearningFactorFunctionFactory;
+import org.apache.commons.math4.ml.neuralnet.sofm.NeighbourhoodSizeFunction;
+import org.apache.commons.math4.ml.neuralnet.sofm.NeighbourhoodSizeFunctionFactory;
+import org.apache.commons.rng.simple.RandomSource;
+import org.apache.commons.rng.UniformRandomProvider;
+import org.apache.commons.math4.util.FastMath;
+
+/**
+ * Solves the &quot;Travelling Salesman's Problem&quot; (i.e. trying to find the
+ * sequence of cities that minimizes the travel distance) using a 1D
+ * SOFM.
+ */
+public class TravellingSalesmanSolver {
+    private static final long FIRST_NEURON_ID = 0;
+    /** RNG. */
+    private final UniformRandomProvider random;
+    /** Set of cities. */
+<span class="fc" id="L61">    private final Set&lt;City&gt; cities = new HashSet&lt;&gt;();</span>
+    /** SOFM. */
+    private final Network net;
+    /** Distance function. */
+<span class="fc" id="L65">    private final DistanceMeasure distance = new EuclideanDistance();</span>
+    /** Total number of neurons. */
+    private final int numberOfNeurons;
+
+    /**
+     * @param cityList List of cities to visit in a single travel.
+     * @param numNeuronsPerCity Number of neurons per city.
+     */
+    public TravellingSalesmanSolver(City[] cityList,
+                                    double numNeuronsPerCity) {
+<span class="nc" id="L75">        this(cityList, numNeuronsPerCity, RandomSource.createLong());</span>
+<span class="nc" id="L76">    }</span>
+
+    /**
+     * @param cityList List of cities to visit in a single travel.
+     * @param numNeuronsPerCity Number of neurons per city.
+     * @param seed Seed for the RNG that is used to present the samples
+     * to the trainer.
+     */
+    public TravellingSalesmanSolver(City[] cityList,
+                                    double numNeuronsPerCity,
+<span class="fc" id="L86">                                    long seed) {</span>
+<span class="fc" id="L87">        random = RandomSource.create(RandomSource.WELL_1024_A, seed);</span>
+
+        // Make sure that each city will appear only once in the list.
+<span class="fc bfc" id="L90" title="All 2 branches covered.">        for (City city : cityList) {</span>
+<span class="fc" id="L91">            cities.add(city);</span>
+        }
+
+        // Total number of neurons.
+<span class="fc" id="L95">        numberOfNeurons = (int) numNeuronsPerCity * cities.size();</span>
+
+        // Create a network with circle topology.
+<span class="fc" id="L98">        net = new NeuronString(numberOfNeurons, true, makeInitializers()).getNetwork();</span>
+<span class="fc" id="L99">    }</span>
+
+    /**
+     * Creates training tasks.
+     *
+     * @param numTasks Number of tasks to create.
+     * @param numSamplesPerTask Number of training samples per task.
+     * @return the created tasks.
+     */
+    public Runnable[] createParallelTasks(int numTasks,
+                                          long numSamplesPerTask) {
+<span class="fc" id="L110">        final Runnable[] tasks = new Runnable[numTasks];</span>
+<span class="fc" id="L111">        final LearningFactorFunction learning</span>
+<span class="fc" id="L112">            = LearningFactorFunctionFactory.exponentialDecay(2e-1,</span>
+                                                             5e-2,
+                                                             numSamplesPerTask / 2);
+<span class="fc" id="L115">        final NeighbourhoodSizeFunction neighbourhood</span>
+<span class="fc" id="L116">            = NeighbourhoodSizeFunctionFactory.exponentialDecay(0.5 * numberOfNeurons,</span>
+                                                                0.1 * numberOfNeurons,
+                                                                numSamplesPerTask / 2);
+
+<span class="fc bfc" id="L120" title="All 2 branches covered.">        for (int i = 0; i &lt; numTasks; i++) {</span>
+<span class="fc" id="L121">            final KohonenUpdateAction action = new KohonenUpdateAction(distance,</span>
+                                                                       learning,
+                                                                       neighbourhood);
+<span class="fc" id="L124">            tasks[i] = new KohonenTrainingTask(net,</span>
+<span class="fc" id="L125">                                               createRandomIterator(numSamplesPerTask),</span>
+                                               action);
+        }
+
+<span class="fc" id="L129">        return tasks;</span>
+    }
+
+    /**
+     * Creates a training task.
+     *
+     * @param numSamples Number of training samples.
+     * @return the created task.
+     */
+    public Runnable createSequentialTask(long numSamples) {
+<span class="fc" id="L139">        return createParallelTasks(1, numSamples)[0];</span>
+    }
+
+    /**
+     * Measures the network's concurrent update performance.
+     *
+     * @return the ratio between the number of succesful network updates
+     * and the number of update attempts.
+     */
+    public double getUpdateRatio() {
+<span class="fc" id="L149">        return computeUpdateRatio(net);</span>
+    }
+
+    /**
+     * Measures the network's concurrent update performance.
+     *
+     * @param net Network to be trained with the SOFM algorithm.
+     * @return the ratio between the number of successful network updates
+     * and the number of update attempts.
+     */
+    private static double computeUpdateRatio(Network net) {
+<span class="fc" id="L160">        long numAttempts = 0;</span>
+<span class="fc" id="L161">        long numSuccesses = 0;</span>
+
+<span class="fc bfc" id="L163" title="All 2 branches covered.">        for (Neuron n : net) {</span>
+<span class="fc" id="L164">            numAttempts += n.getNumberOfAttemptedUpdates();</span>
+<span class="fc" id="L165">            numSuccesses += n.getNumberOfSuccessfulUpdates();</span>
+<span class="fc" id="L166">        }</span>
+
+<span class="fc" id="L168">        return (double) numSuccesses / (double) numAttempts;</span>
+    }
+
+    /**
+     * Creates an iterator that will present a series of city's coordinates in
+     * a random order.
+     *
+     * @param numSamples Number of samples.
+     * @return the iterator.
+     */
+    private Iterator&lt;double[]&gt; createRandomIterator(final long numSamples) {
+<span class="fc" id="L179">        final List&lt;City&gt; cityList = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L180">        cityList.addAll(cities);</span>
+
+<span class="fc" id="L182">        return new Iterator&lt;double[]&gt;() {</span>
+            /** Number of samples. */
+<span class="fc" id="L184">            private long n = 0;</span>
+            /** {@inheritDoc} */
+            @Override
+            public boolean hasNext() {
+<span class="fc bfc" id="L188" title="All 2 branches covered.">                return n &lt; numSamples;</span>
+            }
+            /** {@inheritDoc} */
+            @Override
+            public double[] next() {
+<span class="fc" id="L193">                ++n;</span>
+<span class="fc" id="L194">                return cityList.get(random.nextInt(cityList.size())).getCoordinates();</span>
+            }
+            /** {@inheritDoc} */
+            @Override
+            public void remove() {
+<span class="nc" id="L199">                throw new MathUnsupportedOperationException();</span>
+            }
+        };
+    }
+
+    /**
+     * @return the list of linked neurons (i.e. the one-dimensional
+     * SOFM).
+     */
+    private List&lt;Neuron&gt; getNeuronList() {
+        // Sequence of coordinates.
+<span class="fc" id="L210">        final List&lt;Neuron&gt; list = new ArrayList&lt;&gt;();</span>
+
+        // First neuron.
+<span class="fc" id="L213">        Neuron current = net.getNeuron(FIRST_NEURON_ID);</span>
+        while (true) {
+<span class="fc" id="L215">            list.add(current);</span>
+<span class="fc" id="L216">            final Collection&lt;Neuron&gt; neighbours</span>
+<span class="fc" id="L217">                = net.getNeighbours(current, list);</span>
+
+<span class="fc" id="L219">            final Iterator&lt;Neuron&gt; iter = neighbours.iterator();</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">            if (!iter.hasNext()) {</span>
+                // All neurons have been visited.
+<span class="fc" id="L222">                break;</span>
+            }
+
+<span class="fc" id="L225">            current = iter.next();</span>
+<span class="fc" id="L226">        }</span>
+
+<span class="fc" id="L228">        return list;</span>
+    }
+
+    /**
+     * @return the list of features (coordinates) of linked neurons.
+     */
+    public List&lt;double[]&gt; getCoordinatesList() {
+        // Sequence of coordinates.
+<span class="fc" id="L236">        final List&lt;double[]&gt; coordinatesList = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L238" title="All 2 branches covered.">        for (Neuron n : getNeuronList()) {</span>
+<span class="fc" id="L239">            coordinatesList.add(n.getFeatures());</span>
+<span class="fc" id="L240">        }</span>
+
+<span class="fc" id="L242">        return coordinatesList;</span>
+    }
+
+    /**
+     * Returns the travel proposed by the solver.
+     * Note: cities can be missing or duplicated.
+     *
+     * @return the list of cities in travel order.
+     */
+    public City[] getCityList() {
+<span class="fc" id="L252">        final List&lt;double[]&gt; coord = getCoordinatesList();</span>
+<span class="fc" id="L253">        final City[] cityList = new City[coord.size()];</span>
+<span class="fc bfc" id="L254" title="All 2 branches covered.">        for (int i = 0; i &lt; cityList.length; i++) {</span>
+<span class="fc" id="L255">            final double[] c = coord.get(i);</span>
+<span class="fc" id="L256">            cityList[i] = getClosestCity(c[0], c[1]);</span>
+        }
+<span class="fc" id="L258">        return cityList;</span>
+    }
+
+    /**
+     * @param x x-coordinate.
+     * @param y y-coordinate.
+     * @return the city whose coordinates are closest to {@code (x, y)}.
+     */
+    public City getClosestCity(double x,
+                               double y) {
+<span class="fc" id="L268">        City closest = null;</span>
+<span class="fc" id="L269">        double min = Double.POSITIVE_INFINITY;</span>
+<span class="fc bfc" id="L270" title="All 2 branches covered.">        for (City c : cities) {</span>
+<span class="fc" id="L271">            final double d = c.distance(x, y);</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">            if (d &lt; min) {</span>
+<span class="fc" id="L273">                min = d;</span>
+<span class="fc" id="L274">                closest = c;</span>
+            }
+<span class="fc" id="L276">        }</span>
+<span class="fc" id="L277">        return closest;</span>
+    }
+
+    /**
+     * Computes the barycentre of all city locations.
+     *
+     * @param cities City list.
+     * @return the barycentre.
+     */
+    private static double[] barycentre(Set&lt;City&gt; cities) {
+<span class="fc" id="L287">        double xB = 0;</span>
+<span class="fc" id="L288">        double yB = 0;</span>
+
+<span class="fc" id="L290">        int count = 0;</span>
+<span class="fc bfc" id="L291" title="All 2 branches covered.">        for (City c : cities) {</span>
+<span class="fc" id="L292">            final double[] coord = c.getCoordinates();</span>
+<span class="fc" id="L293">            xB += coord[0];</span>
+<span class="fc" id="L294">            yB += coord[1];</span>
+
+<span class="fc" id="L296">            ++count;</span>
+<span class="fc" id="L297">        }</span>
+
+<span class="fc" id="L299">        return new double[] { xB / count, yB / count };</span>
+    }
+
+    /**
+     * Computes the largest distance between the point at coordinates
+     * {@code (x, y)} and any of the cities.
+     *
+     * @param x x-coodinate.
+     * @param y y-coodinate.
+     * @param cities City list.
+     * @return the largest distance.
+     */
+    private static double largestDistance(double x,
+                                          double y,
+                                          Set&lt;City&gt; cities) {
+<span class="fc" id="L314">        double maxDist = 0;</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">        for (City c : cities) {</span>
+<span class="fc" id="L316">            final double dist = c.distance(x, y);</span>
+<span class="fc bfc" id="L317" title="All 2 branches covered.">            if (dist &gt; maxDist) {</span>
+<span class="fc" id="L318">                maxDist = dist;</span>
+            }
+<span class="fc" id="L320">        }</span>
+
+<span class="fc" id="L322">        return maxDist;</span>
+    }
+
+    /**
+     * Creates the features' initializers: an approximate circle around the
+     * barycentre of the cities.
+     *
+     * @return an array containing the two initializers.
+     */
+    private FeatureInitializer[] makeInitializers() {
+        // Barycentre.
+<span class="fc" id="L333">        final double[] centre = barycentre(cities);</span>
+        // Largest distance from centre.
+<span class="fc" id="L335">        final double radius = 0.5 * largestDistance(centre[0], centre[1], cities);</span>
+
+<span class="fc" id="L337">        final double omega = 2 * Math.PI / numberOfNeurons;</span>
+<span class="fc" id="L338">        final UnivariateFunction h1 = new HarmonicOscillator(radius, omega, 0);</span>
+<span class="fc" id="L339">        final UnivariateFunction h2 = new HarmonicOscillator(radius, omega, 0.5 * Math.PI);</span>
+
+<span class="fc" id="L341">        final UnivariateFunction f1 = FunctionUtils.add(h1, new Constant(centre[0]));</span>
+<span class="fc" id="L342">        final UnivariateFunction f2 = FunctionUtils.add(h2, new Constant(centre[1]));</span>
+
+<span class="fc" id="L344">        final ContinuousDistribution u = new UniformContinuousDistribution(-0.05 * radius, 0.05 * radius);</span>
+
+<span class="fc" id="L346">        return new FeatureInitializer[] {</span>
+<span class="fc" id="L347">            FeatureInitializerFactory.randomize(u.createSampler(random),</span>
+<span class="fc" id="L348">                                                FeatureInitializerFactory.function(f1, 0, 1)),</span>
+<span class="fc" id="L349">            FeatureInitializerFactory.randomize(u.createSampler(random),</span>
+<span class="fc" id="L350">                                                FeatureInitializerFactory.function(f2, 0, 1))</span>
+        };
+    }
+}
+
+/**
+ * A city, represented by a name and two-dimensional coordinates.
+ */
+class City {
+    /** Identifier. */
+    final String name;
+    /** x-coordinate. */
+    final double x;
+    /** y-coordinate. */
+    final double y;
+
+    /**
+     * @param name Name.
+     * @param x Cartesian x-coordinate.
+     * @param y Cartesian y-coordinate.
+     */
+    public City(String name,
+                double x,
+<span class="fc" id="L373">                double y) {</span>
+<span class="fc" id="L374">        this.name = name;</span>
+<span class="fc" id="L375">        this.x = x;</span>
+<span class="fc" id="L376">        this.y = y;</span>
+<span class="fc" id="L377">    }</span>
+
+    /**
+     * @retun the name.
+     */
+    public String getName() {
+<span class="nc" id="L383">        return name;</span>
+    }
+
+    /**
+     * @return the (x, y) coordinates.
+     */
+    public double[] getCoordinates() {
+<span class="fc" id="L390">        return new double[] { x, y };</span>
+    }
+
+    /**
+     * Computes the distance between this city and
+     * the given point.
+     *
+     * @param x x-coodinate.
+     * @param y y-coodinate.
+     * @return the distance between {@code (x, y)} and this
+     * city.
+     */
+    public double distance(double x,
+                           double y) {
+<span class="fc" id="L404">        final double xDiff = this.x - x;</span>
+<span class="fc" id="L405">        final double yDiff = this.y - y;</span>
+
+<span class="fc" id="L407">        return FastMath.sqrt(xDiff * xDiff + yDiff * yDiff);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L413" title="1 of 2 branches missed.">        if (o instanceof City) {</span>
+<span class="fc" id="L414">            final City other = (City) o;</span>
+<span class="pc bpc" id="L415" title="3 of 4 branches missed.">            return x == other.x &amp;&amp;</span>
+                y == other.y;
+        }
+<span class="nc" id="L418">        return false;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public int hashCode() {
+<span class="fc" id="L424">        int result = 17;</span>
+
+<span class="fc" id="L426">        final long c1 = Double.doubleToLongBits(x);</span>
+<span class="fc" id="L427">        result = 31 * result + (int) (c1 ^ (c1 &gt;&gt;&gt; 32));</span>
+
+<span class="fc" id="L429">        final long c2 = Double.doubleToLongBits(y);</span>
+<span class="fc" id="L430">        result = 31 * result + (int) (c2 ^ (c2 &gt;&gt;&gt; 32));</span>
+
+<span class="fc" id="L432">        return result;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

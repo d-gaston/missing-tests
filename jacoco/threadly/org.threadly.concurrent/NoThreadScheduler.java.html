@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>NoThreadScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">NoThreadScheduler.java</span></div><h1>NoThreadScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionHandler;
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * Executor which has no threads itself.  This allows you to have the same scheduler abilities 
+ * (schedule tasks, recurring tasks, etc, etc), without having to deal with multiple threads, 
+ * memory barriers, or other similar concerns.  This class can be very useful in GUI development 
+ * (if you want it to run on the GUI thread).  It also can be useful in android development in a 
+ * very similar way.
+ * &lt;p&gt;
+ * The tasks in this scheduler are only progressed forward with calls to 
+ * {@link #tick(ExceptionHandler)}.  Since it is running on the calling thread, calls to 
+ * {@code Object.wait()} and {@code Thread.sleep()} from sub tasks will block (possibly forever).  
+ * The call to {@link #tick(ExceptionHandler)} will not unblock till there is no more work for the 
+ * scheduler to currently handle.
+ * 
+ * @since 2.0.0
+ */
+public class NoThreadScheduler extends AbstractPriorityScheduler {
+  protected final QueueSetListener queueListener;
+  protected final QueueManager queueManager;
+  protected final AtomicReference&lt;Thread&gt; blockingThread;
+  private volatile boolean tickRunning;
+  private volatile boolean tickCanceled;
+  
+  /**
+   * Constructs a new {@link NoThreadScheduler} scheduler.
+   */
+  public NoThreadScheduler() {
+<span class="fc" id="L39">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS);</span>
+<span class="fc" id="L40">  }</span>
+  
+  /**
+   * Constructs a new {@link NoThreadScheduler} scheduler with specified default priority behavior.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  public NoThreadScheduler(TaskPriority defaultPriority, long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L49">    super(defaultPriority);</span>
+    
+<span class="fc" id="L51">    queueManager = new QueueManager(queueListener = new QueueSetListener() {</span>
+      @Override
+      public void handleQueueUpdate() {
+<span class="fc" id="L54">        Thread t = blockingThread.get();</span>
+<span class="fc bfc" id="L55" title="All 2 branches covered.">        if (t != null) {</span>
+<span class="fc" id="L56">          LockSupport.unpark(t);</span>
+        }
+<span class="fc" id="L58">      }</span>
+    }, maxWaitForLowPriorityInMs);
+<span class="fc" id="L60">    blockingThread = new AtomicReference&lt;&gt;(null);</span>
+<span class="fc" id="L61">    tickRunning = false;</span>
+<span class="fc" id="L62">    tickCanceled = false;</span>
+    
+    // call to verify and set values
+<span class="fc" id="L65">    setMaxWaitForLowPriority(maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L66">  }</span>
+
+  /**
+   * Abstract call to get the value the scheduler should use to represent the current time.  This 
+   * can be overridden if someone wanted to artificially change the time.
+   * 
+   * @param accurate If {@code true} then time estimates are not acceptable
+   * @return current time in milliseconds
+   */
+  protected long nowInMillis(boolean accurate) {
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    if (accurate) {</span>
+<span class="fc" id="L77">      return Clock.accurateForwardProgressingMillis();</span>
+    } else {
+<span class="fc" id="L79">      return Clock.lastKnownForwardProgressingMillis();</span>
+    }
+  }
+  
+  /**
+   * Call to cancel current or the next tick call.  If currently in a 
+   * {@link #tick(ExceptionHandler)} call (weather blocking waiting for tasks, or currently running 
+   * tasks), this will call the {@link #tick(ExceptionHandler)} to return.  If a task is currently 
+   * running it will finish the current task before returning.  If not currently in a 
+   * {@link #tick(ExceptionHandler)} call, the next tick call will return immediately without 
+   * running anything.
+   */
+  public void cancelTick() {
+<span class="fc" id="L92">    tickCanceled = true;</span>
+    
+<span class="fc" id="L94">    queueListener.handleQueueUpdate();</span>
+<span class="fc" id="L95">  }</span>
+  
+  /**
+   * Invoking this will run any tasks which are ready to be run.  This will block as it runs as 
+   * many scheduled or waiting tasks as possible.  It is CRITICAL that only one thread at a time 
+   * calls the {@link #tick(ExceptionHandler)} OR {@link #blockingTick(ExceptionHandler)}.  While 
+   * this class is in general thread safe, if multiple threads invoke either function at the same 
+   * time, it is possible a given task may run more than once.  In order to maintain high 
+   * performance, threadly does not guard against this condition.
+   * &lt;p&gt;
+   * This call allows you to specify an {@link ExceptionHandler}.  If provided, if any tasks throw 
+   * an exception, this will be called to communicate the exception.  This allows you to ensure 
+   * that you get a returned task count (meaning if provided, no exceptions will be thrown from 
+   * this invocation).  If {@code null} is provided for the exception handler, than any tasks 
+   * which throw a {@link RuntimeException}, will throw out of this invocation.
+   * &lt;p&gt;
+   * This call is NOT thread safe, calling {@link #tick(ExceptionHandler)} or 
+   * {@link #blockingTick(ExceptionHandler)} in parallel could cause the same task to be 
+   * run multiple times in parallel.  Invoking in parallel will also make the behavior of 
+   * {@link #getActiveTaskCount()} non-deterministic and inaccurate.
+   * 
+   * @since 3.2.0
+   * @param exceptionHandler Exception handler implementation to call if any tasks throw an 
+   *                           exception, or null to have exceptions thrown out of this call
+   * @return quantity of tasks run during this tick invocation
+   */
+  public int tick(ExceptionHandler exceptionHandler) {
+<span class="fc" id="L122">    return tick(exceptionHandler, true);</span>
+  }
+  
+  /**
+   * Internal tick implementation.  Allowing control on if the cancelTick boolean should be reset 
+   * if no tasks are run.  Thus allowing for an optimistic attempt to run tasks, while maintaining 
+   * the cancelTick state.
+   * 
+   * @param exceptionHandler Exception handler implementation to call if any tasks throw an 
+   *                           exception, or null to have exceptions thrown out of this call
+   * @param resetCancelTickIfNoTasksRan if {@code true} will reset cancelTick weather tasks ran or 
+   *                                      not, otherwise cancelTick will only be reset if tasks ran 
+   * @return quantity of tasks run during this tick invocation
+   */
+  private int tick(ExceptionHandler exceptionHandler, boolean resetCancelTickIfNoTasksRan) {
+<span class="fc" id="L137">    int tasks = 0;</span>
+    TaskWrapper nextTask;
+<span class="fc" id="L139">    tickRunning = true;</span>
+    try {
+<span class="fc bfc" id="L141" title="All 4 branches covered.">      while ((nextTask = getNextReadyTask()) != null &amp;&amp; ! tickCanceled) {</span>
+        // call will remove task from queue, or reposition as necessary
+        // we can cheat with the execution reference since task de-queue is single threaded
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">        if (nextTask.canExecute(nextTask.getExecuteReference())) {</span>
+          try {
+<span class="fc" id="L146">            nextTask.runTask();</span>
+<span class="fc" id="L147">          } catch (Throwable t) {</span>
+<span class="fc bfc" id="L148" title="All 2 branches covered.">            if (exceptionHandler != null) {</span>
+<span class="fc" id="L149">              exceptionHandler.handleException(t);</span>
+            } else {
+<span class="fc" id="L151">              throw ExceptionUtils.makeRuntime(t);</span>
+            }
+<span class="fc" id="L153">          }</span>
+          
+<span class="fc" id="L155">          tasks++;</span>
+        }
+      }
+      
+<span class="fc bfc" id="L159" title="All 6 branches covered.">      if ((tasks != 0 || resetCancelTickIfNoTasksRan) &amp;&amp; tickCanceled) {</span>
+        // reset for future tick calls
+<span class="fc" id="L161">        tickCanceled = false;</span>
+      }
+      
+<span class="fc" id="L164">      return tasks;</span>
+    } finally {
+<span class="fc" id="L166">      tickRunning = false;</span>
+    }
+  }
+  
+  /**
+   * This is similar to {@link #tick(ExceptionHandler)}, except that it will block until there are 
+   * tasks ready to run, or until {@link #cancelTick()} is invoked.  
+   * &lt;p&gt;
+   * Once there are tasks ready to run, this will continue to block as it runs as many tasks that 
+   * are ready to run.  
+   * &lt;p&gt;
+   * It is CRITICAL that only one thread at a time calls the {@link #tick(ExceptionHandler)} OR 
+   * {@link #blockingTick(ExceptionHandler)}.  
+   * &lt;p&gt;
+   * This call allows you to specify an {@link ExceptionHandler}.  If provided, if any tasks throw 
+   * an exception, this will be called to communicate the exception.  This allows you to ensure 
+   * that you get a returned task count (meaning if provided, no exceptions will be thrown from 
+   * this invocation).  If {@code null} is provided for the exception handler, than any tasks 
+   * which throw a {@link RuntimeException}, will throw out of this invocation.
+   * &lt;p&gt;
+   * This call is NOT thread safe, calling {@link #tick(ExceptionHandler)} or 
+   * {@link #blockingTick(ExceptionHandler)} in parallel could cause the same task to be 
+   * run multiple times in parallel.  Invoking in parallel will also make the behavior of 
+   * {@link #getActiveTaskCount()} non-deterministic and inaccurate.
+   * 
+   * @since 4.0.0
+   * @param exceptionHandler Exception handler implementation to call if any tasks throw an 
+   *                           exception, or null to have exceptions thrown out of this call
+   * @return quantity of tasks run during this tick invocation
+   * @throws InterruptedException thrown if thread is interrupted waiting for task to run
+   */
+  public int blockingTick(ExceptionHandler exceptionHandler) throws InterruptedException {
+<span class="fc" id="L198">    int initialTickResult = tick(exceptionHandler, false);</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    if (initialTickResult == 0) {</span>
+<span class="fc" id="L200">      Thread currentThread = Thread.currentThread();</span>
+      // we already tried to optimistically run something above, so we now must prepare to park
+      // and park if we still find nothing to execute
+<span class="pc bpc" id="L203" title="1 of 2 branches missed.">      if (! blockingThread.compareAndSet(null, currentThread)) {</span>
+<span class="nc" id="L204">        throw new IllegalStateException(&quot;Another thread is already blocking!!&quot;);</span>
+      }
+      try {
+        while (true) {
+          /* we must check the cancelTick once we have the lock 
+           * since that is when the .notify() would happen.
+           */
+<span class="fc bfc" id="L211" title="All 2 branches covered.">          if (tickCanceled) {</span>
+<span class="fc" id="L212">            tickCanceled = false;</span>
+<span class="fc" id="L213">            return 0;</span>
+<span class="fc bfc" id="L214" title="All 2 branches covered.">          } else if (currentThread.isInterrupted()) {</span>
+<span class="fc" id="L215">            throw new InterruptedException();</span>
+          }
+<span class="fc" id="L217">          TaskWrapper nextTask = queueManager.getNextTask();</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">          if (nextTask == null) {</span>
+<span class="fc" id="L219">              LockSupport.park();</span>
+          } else {
+<span class="fc" id="L221">            long nextTaskDelay = nextTask.getScheduleDelay();</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">            if (nextTaskDelay &gt; 0) {</span>
+<span class="fc" id="L223">              LockSupport.parkNanos(Clock.NANOS_IN_MILLISECOND * nextTaskDelay);</span>
+            } else {
+              // task is ready to run, so break loop
+              break;
+            }
+          }
+<span class="fc" id="L229">        }</span>
+      } finally {
+        // lazy set should be safe here as a CAS operation (the only read done for this atomic) 
+        // should invoke a volatile write to see the update.  But assuming it does not (since the 
+        // docs are not perfectly clear on it), in theory only one thread should be invoking tick 
+        // anyways, so the worst case would be another thread sees us as still blocking even 
+        // though we have gone into tick (or completed), but that would be an indication of a bad 
+        // design pattern with NoThreadScheduler.  If only one thread is invoking tick (as it 
+        // should).  This would never be seen.
+<span class="fc" id="L238">        blockingThread.lazySet(null);</span>
+      }
+      
+<span class="fc" id="L241">      return tick(exceptionHandler, true);</span>
+    } else {
+<span class="fc" id="L243">      return initialTickResult;</span>
+    }
+  }
+
+  @Override
+  protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L249">    QueueSet queueSet = queueManager.getQueueSet(priority);</span>
+    OneTimeTaskWrapper result;
+<span class="fc bfc" id="L251" title="All 2 branches covered.">    if (delayInMillis == 0) {</span>
+<span class="fc" id="L252">      queueSet.addExecute((result = new NoThreadOneTimeTaskWrapper(task, queueSet.executeQueue, </span>
+<span class="fc" id="L253">                                                                   nowInMillis(false))));</span>
+    } else {
+<span class="fc" id="L255">      queueSet.addScheduled((result = new NoThreadOneTimeTaskWrapper(task, queueSet.scheduleQueue, </span>
+<span class="fc" id="L256">                                                                     nowInMillis(true) + delayInMillis)));</span>
+    }
+<span class="fc" id="L258">    return result;</span>
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay,
+                                     TaskPriority priority) {
+<span class="fc" id="L264">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L265">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+<span class="fc" id="L266">    ArgumentVerifier.assertNotNegative(recurringDelay, &quot;recurringDelay&quot;);</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L268">      priority = defaultPriority;</span>
+    }
+    
+<span class="fc" id="L271">    QueueSet queueSet = queueManager.getQueueSet(priority);</span>
+<span class="fc" id="L272">    NoThreadRecurringDelayTaskWrapper taskWrapper = </span>
+        new NoThreadRecurringDelayTaskWrapper(task, queueSet, 
+<span class="fc" id="L274">                                              nowInMillis(true) + initialDelay, recurringDelay);</span>
+<span class="fc" id="L275">    queueSet.addScheduled(taskWrapper);</span>
+<span class="fc" id="L276">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period,
+                                  TaskPriority priority) {
+<span class="fc" id="L281">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L282">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+<span class="fc" id="L283">    ArgumentVerifier.assertGreaterThanZero(period, &quot;period&quot;);</span>
+<span class="fc bfc" id="L284" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L285">      priority = defaultPriority;</span>
+    }
+    
+<span class="fc" id="L288">    QueueSet queueSet = queueManager.getQueueSet(priority);</span>
+    
+<span class="fc" id="L290">    NoThreadRecurringRateTaskWrapper taskWrapper = </span>
+        new NoThreadRecurringRateTaskWrapper(task, queueSet, 
+<span class="fc" id="L292">                                             nowInMillis(true) + initialDelay, period);</span>
+<span class="fc" id="L293">    queueSet.addScheduled(taskWrapper);</span>
+<span class="fc" id="L294">  }</span>
+
+  @Override
+  public int getActiveTaskCount() {
+<span class="fc bfc" id="L298" title="All 2 branches covered.">    return tickRunning ? 1 : 0;</span>
+  }
+
+  @Override
+  public boolean isShutdown() {
+<span class="fc" id="L303">    return false;</span>
+  }
+  
+  /**
+   * Call to get the next ready task that is ready to be run.  If there are no tasks, or the next 
+   * task still has a remaining delay, this will return {@code null}.
+   * &lt;p&gt;
+   * If this is being called in parallel with a {@link #tick(ExecutionHandlerInterface)} call, the 
+   * returned task may already be running.  You must check the {@code TaskContainer.running} 
+   * boolean if this condition is important to you.
+   * 
+   * @return next ready task, or {@code null} if there are none
+   */
+  protected TaskWrapper getNextReadyTask() {
+<span class="fc" id="L317">    TaskWrapper tw = queueManager.getNextTask();</span>
+<span class="fc bfc" id="L318" title="All 4 branches covered.">    if (tw == null || tw.getScheduleDelay() &gt; 0) {</span>
+<span class="fc" id="L319">      return null;</span>
+    } else {
+<span class="fc" id="L321">      return tw;</span>
+    }
+  }
+  
+  /**
+   * Checks if there are tasks ready to be run on the scheduler.  Generally this is called from 
+   * the same thread that would call {@link #tick(ExceptionHandler)} (but does not have to be).  
+   * If {@link #tick(ExceptionHandler)} is not currently being called, this call indicates if the 
+   * next {@link #tick(ExceptionHandler)} will have at least one task to run.  If 
+   * {@link #tick(ExceptionHandler)} is currently being invoked, this call will do a best attempt 
+   * to indicate if there is at least one more task to run (not including the task which may 
+   * currently be running).  It's a best attempt as it will try not to block the thread invoking 
+   * {@link #tick(ExceptionHandler)} to prevent it from accepting additional work.
+   *  
+   * @return {@code true} if there are task waiting to run
+   */
+  public boolean hasTaskReadyToRun() {
+<span class="fc bfc" id="L338" title="All 2 branches covered.">    for (TaskPriority p : TaskPriority.values()) {</span>
+<span class="fc bfc" id="L339" title="All 2 branches covered.">      if (hasTaskReadyToRun(queueManager.getQueueSet(p))) {</span>
+<span class="fc" id="L340">        return true;</span>
+      }
+    }
+<span class="fc" id="L343">    return false;</span>
+  }
+  
+  private static boolean hasTaskReadyToRun(QueueSet queueSet) {
+<span class="fc bfc" id="L347" title="All 2 branches covered.">    if (queueSet.executeQueue.isEmpty()) {</span>
+<span class="fc" id="L348">      TaskWrapper headTask = queueSet.scheduleQueue.peekFirst();</span>
+<span class="fc bfc" id="L349" title="All 4 branches covered.">      return headTask != null &amp;&amp; headTask.getScheduleDelay() &lt;= 0;</span>
+    } else {
+<span class="fc" id="L351">      return true;</span>
+    }
+  }
+  
+  /**
+   * Checks how long till the next task will be ready to execute.  If there are no tasks in this 
+   * scheduler currently then {@link Long#MAX_VALUE} will be returned.  If there is a task ready 
+   * to execute this will return a value less than or equal to zero.  If the task is past its 
+   * desired point of execution the result will be a negative amount of milliseconds past that 
+   * point in time.  
+   * &lt;p&gt;
+   * Generally this is called from the same thread that would invoke 
+   * {@link #tick(ExceptionHandler)} (but does not have to be).  Since this does not block or lock 
+   * if being invoked in parallel with {@link #tick(ExceptionHandler)}, the results may be no 
+   * longer accurate by the time this invocation has returned.
+   * &lt;p&gt;
+   * If a recurring task is currently running this will return a very large number.  This will 
+   * remain until the task has rescheduled itself.  To avoid this just ensure this is never 
+   * invoked in parallel with {@link #tick(ExceptionHandler)}.
+   * &lt;p&gt;
+   * This can be useful if you want to know how long you can block on something, ASSUMING you can 
+   * detect that something has been added to the scheduler, and interrupt that blocking in order 
+   * to handle tasks.
+   * 
+   * @return Milliseconds till the next task is ready to run
+   */
+  public long getDelayTillNextTask() {
+<span class="fc" id="L378">    TaskWrapper tw = queueManager.getNextTask();</span>
+<span class="fc bfc" id="L379" title="All 2 branches covered.">    if (tw != null) {</span>
+<span class="fc" id="L380">      return tw.getRunTime() - nowInMillis(true);</span>
+    } else {
+<span class="fc" id="L382">      return Long.MAX_VALUE;</span>
+    }
+  }
+  
+  /**
+   * Removes any tasks waiting to be run.  Will not interrupt any tasks currently running if 
+   * {@link #tick(ExceptionHandler)} is being called.  But will avoid additional tasks from being 
+   * run on the current {@link #tick(ExceptionHandler)} call.  
+   * &lt;p&gt;
+   * If tasks are added concurrently during this invocation they may or may not be removed.
+   * 
+   * @return List of runnables which were waiting in the task queue to be executed (and were now removed)
+   */
+  public List&lt;Runnable&gt; clearTasks() {
+<span class="fc" id="L396">    return queueManager.clearQueue();</span>
+  }
+  
+  @Override
+  protected QueueManager getQueueManager() {
+<span class="fc" id="L401">    return queueManager;</span>
+  }
+  
+  /**
+   * Wrapper for tasks which only executes once.
+   * 
+   * @since 1.0.0
+   */
+  protected class NoThreadOneTimeTaskWrapper extends OneTimeTaskWrapper {
+    protected NoThreadOneTimeTaskWrapper(Runnable task, 
+<span class="fc" id="L411">                                         Queue&lt;? extends TaskWrapper&gt; taskQueue, long runTime) {</span>
+<span class="fc" id="L412">      super(task, taskQueue, runTime);</span>
+<span class="fc" id="L413">    }</span>
+    
+    @Override
+    public long getScheduleDelay() {
+<span class="fc bfc" id="L417" title="All 2 branches covered.">      if (getRunTime() &gt; nowInMillis(false)) {</span>
+<span class="fc" id="L418">        return getRunTime() - nowInMillis(true);</span>
+      } else {
+<span class="fc" id="L420">        return 0;</span>
+      }
+    }
+
+    @Override
+    public void runTask() {
+<span class="pc bpc" id="L426" title="1 of 2 branches missed.">      if (! invalidated) {</span>
+        // Do not use ExceptionUtils to run task, so that exceptions can be handled in .tick()
+<span class="fc" id="L428">        task.run();</span>
+      }
+<span class="fc" id="L430">    }</span>
+  }
+
+  /**
+   * Abstract wrapper for any tasks which run repeatedly.
+   * 
+   * @since 4.3.0
+   */
+  protected abstract class NoThreadRecurringTaskWrapper extends RecurringTaskWrapper {
+<span class="fc" id="L439">    protected NoThreadRecurringTaskWrapper(Runnable task, QueueSet queueSet, long firstRunTime) {</span>
+<span class="fc" id="L440">      super(task, queueSet, firstRunTime);</span>
+<span class="fc" id="L441">    }</span>
+    
+    @Override
+    public long getScheduleDelay() {
+<span class="fc bfc" id="L445" title="All 2 branches covered.">      if (getRunTime() &gt; nowInMillis(false)) {</span>
+<span class="fc" id="L446">        return getRunTime() - nowInMillis(true);</span>
+      } else {
+<span class="fc" id="L448">        return 0;</span>
+      }
+    }
+    
+    /**
+     * Called when the implementing class should update the variable {@code nextRunTime} to be the 
+     * next absolute time in milliseconds the task should run.
+     */
+    @Override
+    protected abstract void updateNextRunTime();
+
+    @Override
+    public void runTask() {
+<span class="pc bpc" id="L461" title="1 of 2 branches missed.">      if (invalidated) {</span>
+<span class="nc" id="L462">        return;</span>
+      }
+      
+      try {
+        // Do not use ExceptionUtils to run task, so that exceptions can be handled in .tick()
+<span class="fc" id="L467">        task.run();</span>
+      } finally {
+<span class="fc bfc" id="L469" title="All 2 branches covered.">        if (! invalidated) {</span>
+<span class="fc" id="L470">          updateNextRunTime();</span>
+          // now that nextRunTime has been set, resort the queue (ask reschedule)
+<span class="fc" id="L472">          reschedule();  // this will set executing to false atomically with the resort</span>
+        }
+      }
+<span class="fc" id="L475">    }</span>
+  }
+  
+  /**
+   * Container for tasks which run with a fixed delay after the previous run.
+   * 
+   * @since 4.3.0
+   */
+  protected class NoThreadRecurringDelayTaskWrapper extends NoThreadRecurringTaskWrapper {
+    protected final long recurringDelay;
+    
+    protected NoThreadRecurringDelayTaskWrapper(Runnable task, QueueSet queueSet, 
+<span class="fc" id="L487">                                                long firstRunTime, long recurringDelay) {</span>
+<span class="fc" id="L488">      super(task, queueSet, firstRunTime);</span>
+      
+<span class="fc" id="L490">      this.recurringDelay = recurringDelay;</span>
+<span class="fc" id="L491">    }</span>
+    
+    @Override
+    protected void updateNextRunTime() {
+<span class="fc" id="L495">      nextRunTime = nowInMillis(true) + recurringDelay;</span>
+<span class="fc" id="L496">    }</span>
+  }
+  
+  /**
+   * Wrapper for tasks which run at a fixed period (regardless of execution time).
+   * 
+   * @since 4.3.0
+   */
+  protected class NoThreadRecurringRateTaskWrapper extends NoThreadRecurringTaskWrapper {
+    protected final long period;
+    
+    protected NoThreadRecurringRateTaskWrapper(Runnable task, QueueSet queueSet, 
+<span class="fc" id="L508">                                               long firstRunTime, long period) {</span>
+<span class="fc" id="L509">      super(task, queueSet, firstRunTime);</span>
+      
+<span class="fc" id="L511">      this.period = period;</span>
+<span class="fc" id="L512">    }</span>
+    
+    @Override
+    protected void updateNextRunTime() {
+<span class="fc" id="L516">      nextRunTime += period;</span>
+<span class="fc" id="L517">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

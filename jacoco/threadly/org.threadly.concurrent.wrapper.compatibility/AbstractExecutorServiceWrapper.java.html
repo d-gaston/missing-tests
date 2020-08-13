@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractExecutorServiceWrapper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.compatibility</a> &gt; <span class="el_source">AbstractExecutorServiceWrapper.java</span></div><h1>AbstractExecutorServiceWrapper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.compatibility;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.SchedulerService;
+import org.threadly.concurrent.future.FutureCallback;
+import org.threadly.concurrent.future.FutureUtils;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * Generic implementation for the wrappers that implement {@link ScheduledExecutorService}.  This 
+ * allows us to add new wrappers with the minimal amount of duplicated code.
+ * 
+ * @since 4.6.0 (since 2.0.0 at org.threadly.concurrent)
+ */
+abstract class AbstractExecutorServiceWrapper implements ScheduledExecutorService {
+  protected final SchedulerService scheduler;
+  
+  /**
+   * Constructs a new wrapper to adhere to the {@link ScheduledExecutorService} interface.
+   * 
+   * @param scheduler scheduler implementation to rely on
+   */
+<span class="fc" id="L41">  public AbstractExecutorServiceWrapper(SchedulerService scheduler) {</span>
+<span class="fc" id="L42">    ArgumentVerifier.assertNotNull(scheduler, &quot;scheduler&quot;);</span>
+    
+<span class="fc" id="L44">    this.scheduler = scheduler;</span>
+<span class="fc" id="L45">  }</span>
+
+  @Override
+  public boolean isShutdown() {
+<span class="fc" id="L49">    return scheduler.isShutdown();</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task) {
+<span class="fc" id="L54">    return scheduler.submit(task);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result) {
+<span class="fc" id="L59">    return scheduler.submit(task, result);</span>
+  }
+
+  @Override
+  public ListenableFuture&lt;?&gt; submit(Runnable task) {
+<span class="fc" id="L64">    return scheduler.submit(task);</span>
+  }
+
+  @Override
+  public &lt;T&gt; List&lt;Future&lt;T&gt;&gt; invokeAll(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks) throws InterruptedException {
+<span class="fc" id="L69">    return invokeAll(tasks, Long.MAX_VALUE, TimeUnit.MILLISECONDS);</span>
+  }
+
+  @Override
+  public &lt;T&gt; List&lt;Future&lt;T&gt;&gt; invokeAll(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks,
+                                       long timeout, TimeUnit unit) throws InterruptedException {
+<span class="fc" id="L75">    long timeoutInMs = unit.toMillis(timeout);</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    long startTime = timeoutInMs &lt; Long.MAX_VALUE ? Clock.accurateForwardProgressingMillis() : -1;</span>
+<span class="fc" id="L77">    List&lt;Future&lt;T&gt;&gt; resultList = new ArrayList&lt;&gt;(tasks.size());</span>
+    // execute all the tasks provided
+    {
+<span class="fc" id="L80">      Iterator&lt;? extends Callable&lt;T&gt;&gt; it = tasks.iterator();</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L82">        Callable&lt;T&gt; c = it.next();</span>
+<span class="fc bfc" id="L83" title="All 2 branches covered.">        if (c == null) {</span>
+<span class="fc" id="L84">          throw new NullPointerException();</span>
+        }
+        
+<span class="fc" id="L87">        ListenableFuture&lt;T&gt; lf = scheduler.submit(c);</span>
+<span class="fc" id="L88">        resultList.add(lf);</span>
+<span class="fc" id="L89">      }</span>
+    }
+    // block till all tasks finish, or we reach our timeout
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    if (timeoutInMs &lt; Long.MAX_VALUE) {</span>
+<span class="fc" id="L93">      long remainingTime = timeoutInMs - (Clock.lastKnownForwardProgressingMillis() - startTime);</span>
+      try {
+<span class="nc" id="L95">        FutureUtils.blockTillAllComplete(resultList, remainingTime);</span>
+<span class="fc" id="L96">      } catch (TimeoutException e) {</span>
+<span class="fc" id="L97">        FutureUtils.cancelIncompleteFutures(resultList, true);</span>
+<span class="nc" id="L98">      }</span>
+<span class="fc" id="L99">    } else {</span>
+<span class="fc" id="L100">      FutureUtils.blockTillAllComplete(resultList);</span>
+    }
+    
+<span class="fc" id="L103">    return resultList;</span>
+  }
+
+  @Override
+  public &lt;T&gt; T invokeAny(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks) throws InterruptedException,
+                                                                         ExecutionException {
+    try {
+<span class="fc" id="L110">      return invokeAny(tasks, Long.MAX_VALUE, TimeUnit.MILLISECONDS);</span>
+<span class="nc" id="L111">    } catch (TimeoutException e) {</span>
+      // basically impossible
+<span class="nc" id="L113">      throw ExceptionUtils.makeRuntime(e);</span>
+    }
+  }
+
+  @Override
+  public &lt;T&gt; T invokeAny(Collection&lt;? extends Callable&lt;T&gt;&gt; tasks, 
+                         long timeout, TimeUnit unit) throws InterruptedException,
+                                                             ExecutionException, 
+                                                             TimeoutException {
+<span class="fc bfc" id="L122" title="All 2 branches covered.">    if (tasks.size() &lt; 1) {</span>
+<span class="fc" id="L123">      throw new IllegalArgumentException(&quot;Empty task list provided&quot;);</span>
+    }
+    
+<span class="fc" id="L126">    final long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L127">    final long timeoutInMs = unit.toMillis(timeout);</span>
+<span class="fc" id="L128">    int failureCount = 0;</span>
+    // going to be optimistic and allocate the initialize size so that at most we have to do one expansion
+<span class="fc" id="L130">    List&lt;Future&lt;T&gt;&gt; submittedFutures = new ArrayList&lt;&gt;((tasks.size() / 2) + 1);</span>
+    
+    try {
+<span class="fc" id="L133">      ExecutorCompletionService&lt;T&gt; ecs = new ExecutorCompletionService&lt;&gt;(this);</span>
+<span class="fc" id="L134">      ExecutionException lastEE = null;</span>
+<span class="fc" id="L135">      Iterator&lt;? extends Callable&lt;T&gt;&gt; it = tasks.iterator();</span>
+      // submit first one
+<span class="fc" id="L137">      submittedFutures.add(ecs.submit(it.next()));</span>
+
+      long remainingTime;
+<span class="fc bfc" id="L140" title="All 2 branches covered.">      while (it.hasNext() &amp;&amp; </span>
+<span class="pc bpc" id="L141" title="1 of 2 branches missed.">             (remainingTime = timeoutInMs - (Clock.lastKnownForwardProgressingMillis() - startTime)) &gt; 0) {</span>
+<span class="fc" id="L142">        Future&lt;T&gt; completedFuture = ecs.poll();</span>
+<span class="fc bfc" id="L143" title="All 2 branches covered.">        if (completedFuture == null) {</span>
+          // submit another
+<span class="fc" id="L145">          submittedFutures.add(ecs.submit(it.next()));</span>
+        } else {
+          try {
+<span class="fc" id="L148">            return completedFuture.get();</span>
+<span class="nc" id="L149">          } catch (ExecutionException e) {</span>
+<span class="nc" id="L150">            failureCount++;</span>
+<span class="nc" id="L151">            lastEE = e;</span>
+          }
+        }
+<span class="fc" id="L154">      }</span>
+      
+      // we must compare against failure count otherwise we may throw a TimeoutException when all tasks have failed
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">      while ((remainingTime = timeoutInMs - (Clock.lastKnownForwardProgressingMillis() - startTime)) &gt; 0 &amp;&amp; </span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">             failureCount &lt; submittedFutures.size()) {</span>
+<span class="fc" id="L159">        Future&lt;T&gt; completedFuture = ecs.poll(remainingTime, TimeUnit.MILLISECONDS);</span>
+<span class="fc bfc" id="L160" title="All 2 branches covered.">        if (completedFuture == null) {</span>
+<span class="fc" id="L161">          throw new TimeoutException();</span>
+        } else {
+          try {
+<span class="fc" id="L164">            return completedFuture.get();</span>
+<span class="fc" id="L165">          } catch (ExecutionException e) {</span>
+<span class="fc" id="L166">            failureCount++;</span>
+<span class="fc" id="L167">            lastEE = e;</span>
+          }
+        }
+<span class="fc" id="L170">      }</span>
+      
+<span class="pc bpc" id="L172" title="1 of 2 branches missed.">      if (remainingTime &lt;= 0) {</span>
+<span class="nc" id="L173">        throw new TimeoutException();</span>
+      } else {
+        /* since we know we have at least one task provided, and since nothing returned by this point
+         * we know that we only got ExecutionExceptions, and thus this should NOT be null
+         */
+<span class="fc" id="L178">        throw lastEE;</span>
+      }
+    } finally {
+<span class="fc" id="L181">      FutureUtils.cancelIncompleteFutures(submittedFutures, true);</span>
+    }
+  }
+
+  @Override
+  public void execute(Runnable task) {
+<span class="fc" id="L187">    scheduler.execute(task);</span>
+<span class="fc" id="L188">  }</span>
+  
+  @Override
+  public ListenableScheduledFuture&lt;?&gt; schedule(Runnable task, long delay, TimeUnit unit) {
+<span class="fc bfc" id="L192" title="All 2 branches covered.">    if (task == null) {</span>
+<span class="fc" id="L193">      throw new NullPointerException(&quot;Must provide task&quot;);</span>
+<span class="pc bpc" id="L194" title="1 of 2 branches missed.">    } else if (delay &lt; 0) {</span>
+<span class="nc" id="L195">      delay = 0;</span>
+    }
+    
+<span class="fc" id="L198">    return schedule(task, unit.toMillis(delay));</span>
+  }
+
+  protected abstract ListenableScheduledFuture&lt;?&gt; schedule(Runnable task, long delayInMillis);
+
+  @Override
+  public &lt;V&gt; ListenableScheduledFuture&lt;V&gt; schedule(Callable&lt;V&gt; callable, long delay,
+                                                   TimeUnit unit) {
+<span class="fc bfc" id="L206" title="All 2 branches covered.">    if (callable == null) {</span>
+<span class="fc" id="L207">      throw new NullPointerException(&quot;Must provide task&quot;);</span>
+<span class="pc bpc" id="L208" title="1 of 2 branches missed.">    } else if (delay &lt; 0) {</span>
+<span class="nc" id="L209">      delay = 0;</span>
+    }
+    
+<span class="fc" id="L212">    return schedule(callable, unit.toMillis(delay));</span>
+  }
+  
+
+  protected abstract &lt;V&gt; ListenableScheduledFuture&lt;V&gt; schedule(Callable&lt;V&gt; callable, long delayInMillis);
+  
+  @Override
+  public ListenableScheduledFuture&lt;?&gt; scheduleWithFixedDelay(Runnable task,
+                                                             long initialDelay,
+                                                             long delay, TimeUnit unit) {
+<span class="fc bfc" id="L222" title="All 2 branches covered.">    if (task == null) {</span>
+<span class="fc" id="L223">      throw new NullPointerException(&quot;Must provide task&quot;);</span>
+<span class="fc bfc" id="L224" title="All 2 branches covered.">    } else if (delay &lt;= 0) {</span>
+<span class="fc" id="L225">      throw new IllegalArgumentException();</span>
+<span class="pc bpc" id="L226" title="1 of 2 branches missed.">    } else if (initialDelay &lt; 0) {</span>
+<span class="nc" id="L227">      initialDelay = 0;</span>
+    }
+    
+<span class="fc" id="L230">    long initialDelayInMs = unit.toMillis(initialDelay);</span>
+<span class="fc" id="L231">    long delayInMs = unit.toMillis(delay);</span>
+    
+<span class="fc" id="L233">    return scheduleWithFixedDelay(task, initialDelayInMs, delayInMs);</span>
+  }
+  
+  protected abstract ListenableScheduledFuture&lt;?&gt; scheduleWithFixedDelay(Runnable task,
+                                                                         long initialDelayInMillis,
+                                                                         long delayInMillis);
+
+  @Override
+  public ListenableScheduledFuture&lt;?&gt; scheduleAtFixedRate(Runnable task,
+                                                          long initialDelay, long period,
+                                                          TimeUnit unit) {
+<span class="fc bfc" id="L244" title="All 2 branches covered.">    if (task == null) {</span>
+<span class="fc" id="L245">      throw new NullPointerException(&quot;Must provide task&quot;);</span>
+<span class="fc bfc" id="L246" title="All 2 branches covered.">    } else if (period &lt;= 0) {</span>
+<span class="fc" id="L247">      throw new IllegalArgumentException();</span>
+<span class="pc bpc" id="L248" title="1 of 2 branches missed.">    } else if (initialDelay &lt; 0) {</span>
+<span class="nc" id="L249">      initialDelay = 0;</span>
+    }
+    
+<span class="fc" id="L252">    long initialDelayInMs = unit.toMillis(initialDelay);</span>
+<span class="fc" id="L253">    long periodInMs = unit.toMillis(period);</span>
+    
+<span class="fc" id="L255">    return scheduleAtFixedRate(task, initialDelayInMs, periodInMs);</span>
+  }
+  
+  protected abstract ListenableScheduledFuture&lt;?&gt; scheduleAtFixedRate(Runnable task,
+                                                                      long initialDelayInMillis,
+                                                                      long periodInMillis);
+  
+  /**
+   * Implementation of the {@link ListenableScheduledFuture} interface.  This design delegates 
+   * between a {@link Delayed} instance and {@link ListenableFuture} instance.
+   * 
+   * @since 5.22 (since 1.0.0 under org.threadly.concurrent.future package)
+   * @param &lt;T&gt; The result object type returned by this future
+   */
+  protected static class ScheduledFutureDelegate&lt;T&gt; implements ListenableScheduledFuture&lt;T&gt; {
+    protected final ListenableFuture&lt;? extends T&gt; futureImp;
+    protected final Delayed delayed;
+    
+    /**
+     * Constructs a new {@link ScheduledFutureDelegate} with the provided instances to call to for 
+     * each interface.
+     * 
+     * @param futureImp implementation to call to for all Future calls
+     * @param delayed implementation to call to for getDelay and compareTo
+     */
+<span class="fc" id="L280">    public ScheduledFutureDelegate(ListenableFuture&lt;? extends T&gt; futureImp, Delayed delayed) {</span>
+<span class="fc" id="L281">      this.futureImp = futureImp;</span>
+<span class="fc" id="L282">      this.delayed = delayed;</span>
+<span class="fc" id="L283">    }</span>
+    
+    @Override
+    public long getDelay(TimeUnit unit) {
+<span class="fc" id="L287">      return delayed.getDelay(unit);</span>
+    }
+
+    @Override
+    public int compareTo(Delayed o) {
+<span class="fc" id="L292">      return delayed.compareTo(o);</span>
+    }
+
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+<span class="fc" id="L297">      return futureImp.cancel(mayInterruptIfRunning);</span>
+    }
+
+    @Override
+    public boolean isCancelled() {
+<span class="fc" id="L302">      return futureImp.isCancelled();</span>
+    }
+
+    @Override
+    public boolean isDone() {
+<span class="fc" id="L307">      return futureImp.isDone();</span>
+    }
+
+    @Override
+    public T get() throws InterruptedException, ExecutionException {
+<span class="fc" id="L312">      return futureImp.get();</span>
+    }
+
+    @Override
+    public T get(long timeout, TimeUnit unit) throws InterruptedException, 
+                                                     ExecutionException, TimeoutException {
+<span class="fc" id="L318">      return futureImp.get(timeout, unit);</span>
+    }
+
+    @Override
+    public void addListener(Runnable listener, Executor executor, 
+                            ListenerOptimizationStrategy optimizeExecution) {
+<span class="fc" id="L324">      futureImp.addListener(listener, executor, optimizeExecution);</span>
+<span class="fc" id="L325">    }</span>
+
+    @Override
+    public void addCallback(FutureCallback&lt;? super T&gt; callback, Executor executor, 
+                            ListenerOptimizationStrategy optimizeExecution) {
+<span class="fc" id="L330">      futureImp.addCallback(callback, executor, optimizeExecution);</span>
+<span class="fc" id="L331">    }</span>
+
+    @Override
+    public StackTraceElement[] getRunningStackTrace() {
+<span class="nc" id="L335">      return futureImp.getRunningStackTrace();</span>
+    }
+  }
+  
+  /**
+   * Because in {@link java.util.concurrent.ScheduledExecutorService} an exception from a 
+   * recurring task causes the task to stop executing, we have to wrap the task.  That way we can 
+   * remove the recurring task if the error occurs (since 
+   * {@link org.threadly.concurrent.SubmitterScheduler} will continue to execute the task despite 
+   * the error.
+   * 
+   * @since 2.1.0
+   */
+  protected static class ThrowableHandlingRecurringRunnable implements RunnableContainer, Runnable {
+    private final SchedulerService scheduler;
+    private final Runnable task;
+    
+<span class="fc" id="L352">    protected ThrowableHandlingRecurringRunnable(SchedulerService scheduler, Runnable task) {</span>
+<span class="fc" id="L353">      this.scheduler = scheduler;</span>
+<span class="fc" id="L354">      this.task = task;</span>
+<span class="fc" id="L355">    }</span>
+    
+    @Override
+    public void run() {
+      try {
+<span class="fc" id="L360">        task.run();</span>
+<span class="fc" id="L361">      } catch (Throwable t) {</span>
+<span class="fc" id="L362">        scheduler.remove(this);</span>
+<span class="fc" id="L363">        ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L364">      }</span>
+<span class="fc" id="L365">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="nc" id="L369">      return task;</span>
+    }
+  }
+  
+  /**
+   * An implementation of {@link ListenableFutureTask} which will remove the task from the 
+   * scheduler when cancel is invoked.  Threadly does not normally have this behavior for a 
+   * couple reasons.  Because we don't return futures on recurring tasks, canceling a future just 
+   * results in a one time task execution that is a quick no-op.  It is cheaper in threadly to 
+   * allow this no-op task on .cancel than to attempt removal.  Because 
+   * {@link ScheduledExecutorService} returns a future that can be canceled for recurring tasks, 
+   * we want to go ahead and remove the task (rather than have recurring no-op executions).
+   * 
+   * @since 4.4.3
+   * @param &lt;T&gt; The result object type returned by this future
+   */
+  protected static class CancelRemovingListenableFutureTask&lt;T&gt; extends ListenableFutureTask&lt;T&gt; {
+    private final SchedulerService scheduler;
+
+    public CancelRemovingListenableFutureTask(SchedulerService scheduler, 
+                                              boolean recurring, Runnable task, 
+                                              Executor executingExecutor) {
+<span class="fc" id="L391">      super(recurring, task, executingExecutor);</span>
+      
+<span class="fc" id="L393">      this.scheduler = scheduler;</span>
+<span class="fc" id="L394">    }</span>
+    
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+<span class="pc bpc" id="L398" title="1 of 2 branches missed.">      if (super.cancel(mayInterruptIfRunning)) {</span>
+<span class="fc" id="L399">        scheduler.remove(this.getContainedCallable());</span>
+<span class="fc" id="L400">        return true;</span>
+      } else {
+<span class="nc" id="L402">        return false;</span>
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

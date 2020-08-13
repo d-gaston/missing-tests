@@ -1,0 +1,428 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PackedLocalTime.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.columns.times</a> &gt; <span class="el_source">PackedLocalTime.java</span></div><h1>PackedLocalTime.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.columns.times;
+
+import com.google.common.base.Strings;
+import com.google.common.primitives.Ints;
+import java.time.Duration;
+import java.time.LocalTime;
+import java.time.temporal.ChronoField;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalUnit;
+import java.time.temporal.UnsupportedTemporalTypeException;
+import tech.tablesaw.columns.numbers.IntColumnType;
+
+/**
+ * A localTime with millisecond precision packed into a single int value.
+ *
+ * &lt;p&gt;The bytes are packed into the int as: First byte: hourOfDay next byte: minuteOfHour last two
+ * bytes (short): millisecond of minute
+ *
+ * &lt;p&gt;Storing the millisecond of minute in an short requires that we treat the short as if it were
+ * unsigned. Unfortunately, Neither Java nor Guava provide unsigned short support so we use char,
+ * which is a 16-bit unsigned int to store values of up to 60,000 milliseconds (60 secs * 1000)
+ */
+<span class="nc" id="L37">public class PackedLocalTime {</span>
+
+<span class="fc" id="L39">  private static final int MIDNIGHT = pack(LocalTime.MIDNIGHT);</span>
+<span class="fc" id="L40">  private static final int NOON = pack(LocalTime.NOON);</span>
+
+  private static final int HOURS_PER_DAY = 24;
+  private static final int MINUTES_PER_HOUR = 60;
+  private static final int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY;
+  private static final int SECONDS_PER_MINUTE = 60;
+  private static final int SECONDS_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
+  private static final int SECONDS_PER_DAY = SECONDS_PER_HOUR * HOURS_PER_DAY;
+  private static final int MILLIS_PER_DAY = SECONDS_PER_DAY * 1000;
+  private static final long NANOS_PER_SECOND = 1000_000_000L;
+  private static final long NANOS_PER_MINUTE = NANOS_PER_SECOND * SECONDS_PER_MINUTE;
+  private static final long NANOS_PER_HOUR = NANOS_PER_MINUTE * MINUTES_PER_HOUR;
+  private static final long NANOS_PER_DAY = NANOS_PER_HOUR * HOURS_PER_DAY;
+
+  public static byte getHour(int time) {
+<span class="fc" id="L55">    return (byte) (time &gt;&gt; 24);</span>
+  }
+
+  public static int of(int hour, int minute) {
+<span class="fc" id="L59">    ChronoField.HOUR_OF_DAY.checkValidValue(hour);</span>
+<span class="fc" id="L60">    ChronoField.MINUTE_OF_HOUR.checkValidValue(minute);</span>
+<span class="fc" id="L61">    return create(hour, minute, 0, 0);</span>
+  }
+
+  public static int of(int hour, int minute, int second) {
+<span class="fc" id="L65">    ChronoField.HOUR_OF_DAY.checkValidValue(hour);</span>
+<span class="fc" id="L66">    ChronoField.MINUTE_OF_HOUR.checkValidValue(minute);</span>
+<span class="fc" id="L67">    ChronoField.SECOND_OF_MINUTE.checkValidValue(second);</span>
+<span class="fc" id="L68">    return create(hour, minute, second, 0);</span>
+  }
+
+  public static int of(int hour, int minute, int second, int millis) {
+<span class="fc" id="L72">    ChronoField.HOUR_OF_DAY.checkValidValue(hour);</span>
+<span class="fc" id="L73">    ChronoField.MINUTE_OF_HOUR.checkValidValue(minute);</span>
+<span class="fc" id="L74">    ChronoField.SECOND_OF_MINUTE.checkValidValue(second);</span>
+<span class="fc" id="L75">    ChronoField.MILLI_OF_SECOND.checkValidValue(millis);</span>
+<span class="fc" id="L76">    return create(hour, minute, second, millis);</span>
+  }
+
+  public static int truncatedTo(TemporalUnit unit, int packedTime) {
+<span class="pc bpc" id="L80" title="2 of 4 branches missed.">    if (unit == ChronoUnit.NANOS || unit == ChronoUnit.MILLIS) {</span>
+<span class="nc" id="L81">      return packedTime;</span>
+    }
+<span class="fc" id="L83">    Duration unitDur = unit.getDuration();</span>
+<span class="pc bpc" id="L84" title="1 of 2 branches missed.">    if (unitDur.getSeconds() &gt; SECONDS_PER_DAY) {</span>
+<span class="nc" id="L85">      throw new UnsupportedTemporalTypeException(&quot;Unit is too large to be used for truncation&quot;);</span>
+    }
+
+<span class="fc" id="L88">    int hour = PackedLocalTime.getHour(packedTime);</span>
+<span class="fc" id="L89">    int minute = PackedLocalTime.getMinute(packedTime);</span>
+<span class="fc" id="L90">    int second = PackedLocalTime.getSecond(packedTime);</span>
+<span class="fc" id="L91">    int milli = 0;</span>
+
+<span class="fc bfc" id="L93" title="All 2 branches covered.">    if (unit == ChronoUnit.DAYS) {</span>
+<span class="fc" id="L94">      hour = 0;</span>
+<span class="fc" id="L95">      minute = 0;</span>
+<span class="fc" id="L96">      second = 0;</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">    } else if (unit == ChronoUnit.HALF_DAYS) {</span>
+<span class="fc bfc" id="L98" title="All 2 branches covered.">      if (hour &gt;= 12) {</span>
+<span class="fc" id="L99">        hour = 12;</span>
+      } else {
+<span class="fc" id="L101">        hour = 0;</span>
+      }
+<span class="fc" id="L103">      minute = 0;</span>
+<span class="fc" id="L104">      second = 0;</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">    } else if (unit == ChronoUnit.HOURS) {</span>
+<span class="fc" id="L106">      minute = 0;</span>
+<span class="fc" id="L107">      second = 0;</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">    } else if (unit == ChronoUnit.MINUTES) {</span>
+<span class="fc" id="L109">      second = 0;</span>
+    }
+<span class="fc" id="L111">    return PackedLocalTime.create(hour, minute, second, milli);</span>
+  }
+
+  public static int plusHours(int hoursToAdd, int packedTime) {
+<span class="fc bfc" id="L115" title="All 2 branches covered.">    if (hoursToAdd == 0) {</span>
+<span class="fc" id="L116">      return packedTime;</span>
+    }
+<span class="fc" id="L118">    int hour = PackedLocalTime.getHour(packedTime);</span>
+<span class="fc" id="L119">    int newHour = ((hoursToAdd % HOURS_PER_DAY) + hour + HOURS_PER_DAY) % HOURS_PER_DAY;</span>
+<span class="fc" id="L120">    return create(</span>
+        newHour,
+<span class="fc" id="L122">        PackedLocalTime.getMinute(packedTime),</span>
+<span class="fc" id="L123">        PackedLocalTime.getSecond(packedTime),</span>
+<span class="fc" id="L124">        PackedLocalTime.getMilliseconds(packedTime));</span>
+  }
+
+  public static int plusMinutes(int minutesToAdd, int packedTime) {
+<span class="pc bpc" id="L128" title="1 of 2 branches missed.">    if (minutesToAdd == 0) {</span>
+<span class="nc" id="L129">      return packedTime;</span>
+    }
+<span class="fc" id="L131">    int hour = PackedLocalTime.getHour(packedTime);</span>
+<span class="fc" id="L132">    int minute = PackedLocalTime.getMinute(packedTime);</span>
+<span class="fc" id="L133">    int second = PackedLocalTime.getSecond(packedTime);</span>
+<span class="fc" id="L134">    int milli = PackedLocalTime.getMilliseconds(packedTime);</span>
+
+<span class="fc" id="L136">    int mofd = hour * MINUTES_PER_HOUR + minute;</span>
+
+<span class="fc" id="L138">    int newMofd = ((minutesToAdd % MINUTES_PER_DAY) + mofd + MINUTES_PER_DAY) % MINUTES_PER_DAY;</span>
+<span class="pc bpc" id="L139" title="1 of 2 branches missed.">    if (mofd == newMofd) {</span>
+<span class="nc" id="L140">      return packedTime;</span>
+    }
+<span class="fc" id="L142">    int newHour = newMofd / MINUTES_PER_HOUR;</span>
+<span class="fc" id="L143">    int newMinute = newMofd % MINUTES_PER_HOUR;</span>
+<span class="fc" id="L144">    return create(newHour, newMinute, second, milli);</span>
+  }
+
+  public static int plusSeconds(int secondsToAdd, int packedTime) {
+<span class="pc bpc" id="L148" title="1 of 2 branches missed.">    if (secondsToAdd == 0) {</span>
+<span class="nc" id="L149">      return packedTime;</span>
+    }
+<span class="fc" id="L151">    int hour = PackedLocalTime.getHour(packedTime);</span>
+<span class="fc" id="L152">    int minute = PackedLocalTime.getMinute(packedTime);</span>
+<span class="fc" id="L153">    int second = PackedLocalTime.getSecond(packedTime);</span>
+<span class="fc" id="L154">    int milli = PackedLocalTime.getMilliseconds(packedTime);</span>
+
+<span class="fc" id="L156">    int sofd = hour * SECONDS_PER_HOUR + minute * SECONDS_PER_MINUTE + second;</span>
+<span class="fc" id="L157">    int newSofd = ((secondsToAdd % SECONDS_PER_DAY) + sofd + SECONDS_PER_DAY) % SECONDS_PER_DAY;</span>
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">    if (sofd == newSofd) {</span>
+<span class="nc" id="L159">      return packedTime;</span>
+    }
+<span class="fc" id="L161">    int newHour = newSofd / SECONDS_PER_HOUR;</span>
+<span class="fc" id="L162">    int newMinute = (newSofd / SECONDS_PER_MINUTE) % MINUTES_PER_HOUR;</span>
+<span class="fc" id="L163">    int newSecond = newSofd % SECONDS_PER_MINUTE;</span>
+<span class="fc" id="L164">    return create(newHour, newMinute, newSecond, milli);</span>
+  }
+
+  public static int plusMilliseconds(int msToAdd, int packedTime) {
+<span class="pc bpc" id="L168" title="1 of 2 branches missed.">    if (msToAdd == 0) {</span>
+<span class="nc" id="L169">      return packedTime;</span>
+    }
+<span class="fc" id="L171">    long nanosToAdd = (msToAdd % MILLIS_PER_DAY) * 1000_000;</span>
+<span class="fc" id="L172">    long nofd = toNanoOfDay(packedTime);</span>
+<span class="fc" id="L173">    long newNofd = ((nanosToAdd % NANOS_PER_DAY) + nofd + NANOS_PER_DAY) % NANOS_PER_DAY;</span>
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">    if (nofd == newNofd) {</span>
+<span class="nc" id="L175">      return packedTime;</span>
+    }
+<span class="fc" id="L177">    int newHour = (int) (newNofd / NANOS_PER_HOUR);</span>
+<span class="fc" id="L178">    int newMinute = (int) ((newNofd / NANOS_PER_MINUTE) % MINUTES_PER_HOUR);</span>
+<span class="fc" id="L179">    int newSecond = (int) ((newNofd / NANOS_PER_SECOND) % SECONDS_PER_MINUTE);</span>
+<span class="fc" id="L180">    int newNano = (int) (newNofd % NANOS_PER_SECOND);</span>
+<span class="fc" id="L181">    int newMilli = newNano / 1_000_000;</span>
+<span class="fc" id="L182">    return create(newHour, newMinute, newSecond, newMilli);</span>
+  }
+
+  public static int minusHours(int hoursToSubtract, int packedTime) {
+<span class="fc" id="L186">    return plusHours(-hoursToSubtract, packedTime);</span>
+  }
+
+  public static int minusMinutes(int minutesToSubtract, int packedTime) {
+<span class="fc" id="L190">    return plusMinutes(-minutesToSubtract, packedTime);</span>
+  }
+
+  public static int minusSeconds(int secondsToSubtract, int packedTime) {
+<span class="fc" id="L194">    return plusSeconds(-secondsToSubtract, packedTime);</span>
+  }
+
+  public static int minusMilliseconds(int millisToSubtract, int packedTime) {
+<span class="fc" id="L198">    return plusMilliseconds(-millisToSubtract, packedTime);</span>
+  }
+
+  public static int withHour(int hour, int packedTime) {
+<span class="pc bpc" id="L202" title="1 of 2 branches missed.">    if (PackedLocalTime.getHour(packedTime) == hour) {</span>
+<span class="nc" id="L203">      return packedTime;</span>
+    }
+<span class="fc" id="L205">    ChronoField.HOUR_OF_DAY.checkValidValue(hour);</span>
+<span class="fc" id="L206">    return create(</span>
+        hour,
+<span class="fc" id="L208">        PackedLocalTime.getMinute(packedTime),</span>
+<span class="fc" id="L209">        PackedLocalTime.getSecond(packedTime),</span>
+<span class="fc" id="L210">        PackedLocalTime.getMilliseconds(packedTime));</span>
+  }
+
+  public static int withMinute(int minute, int packedTime) {
+<span class="pc bpc" id="L214" title="1 of 2 branches missed.">    if (PackedLocalTime.getMinute(packedTime) == minute) {</span>
+<span class="nc" id="L215">      return packedTime;</span>
+    }
+<span class="fc" id="L217">    ChronoField.MINUTE_OF_HOUR.checkValidValue(minute);</span>
+<span class="fc" id="L218">    return create(</span>
+<span class="fc" id="L219">        PackedLocalTime.getHour(packedTime),</span>
+        minute,
+<span class="fc" id="L221">        PackedLocalTime.getSecond(packedTime),</span>
+<span class="fc" id="L222">        PackedLocalTime.getMilliseconds(packedTime));</span>
+  }
+
+  public static int withSecond(int second, int packedTime) {
+<span class="pc bpc" id="L226" title="1 of 2 branches missed.">    if (PackedLocalTime.getSecond(packedTime) == second) {</span>
+<span class="nc" id="L227">      return packedTime;</span>
+    }
+<span class="fc" id="L229">    ChronoField.SECOND_OF_MINUTE.checkValidValue(second);</span>
+<span class="fc" id="L230">    return create(</span>
+<span class="fc" id="L231">        PackedLocalTime.getHour(packedTime),</span>
+<span class="fc" id="L232">        PackedLocalTime.getMinute(packedTime),</span>
+        second,
+<span class="fc" id="L234">        PackedLocalTime.getMilliseconds(packedTime));</span>
+  }
+
+  public static int withMillisecond(int milliseconds, int packedTime) {
+<span class="pc bpc" id="L238" title="1 of 2 branches missed.">    if (PackedLocalTime.getMilliseconds(packedTime) == milliseconds) {</span>
+<span class="nc" id="L239">      return packedTime;</span>
+    }
+<span class="fc" id="L241">    ChronoField.MILLI_OF_SECOND.checkValidValue(milliseconds);</span>
+
+<span class="fc" id="L243">    return create(</span>
+<span class="fc" id="L244">        PackedLocalTime.getHour(packedTime),</span>
+<span class="fc" id="L245">        PackedLocalTime.getMinute(packedTime),</span>
+<span class="fc" id="L246">        PackedLocalTime.getSecond(packedTime),</span>
+        milliseconds);
+  }
+
+  private static int create(int hour, int minute, int second, int millis) {
+<span class="fc" id="L251">    byte _hour = (byte) hour;</span>
+<span class="fc" id="L252">    byte _minute = (byte) minute;</span>
+<span class="fc" id="L253">    char _millis = (char) millis;</span>
+<span class="fc" id="L254">    _millis = (char) (_millis + (char) (second * 1000));</span>
+<span class="fc" id="L255">    return create(_hour, _minute, _millis);</span>
+  }
+
+  public static char getMillisecondOfMinute(int time) {
+<span class="fc" id="L259">    byte byte1 = (byte) (time &gt;&gt; 8);</span>
+<span class="fc" id="L260">    byte byte2 = (byte) time;</span>
+<span class="fc" id="L261">    return (char) ((byte1 &lt;&lt; 8) | (byte2 &amp; 0xFF));</span>
+  }
+
+  public static int getNano(int time) {
+<span class="fc" id="L265">    long millis = getMillisecondOfMinute(time);</span>
+<span class="fc" id="L266">    millis = millis * 1_000_000L; // convert to nanos of minute</span>
+<span class="fc" id="L267">    byte seconds = getSecond(time);</span>
+<span class="fc" id="L268">    long nanos = seconds * 1_000_000_000L;</span>
+<span class="fc" id="L269">    millis = millis - nanos; // remove the part in seconds</span>
+<span class="fc" id="L270">    return (int) millis;</span>
+  }
+
+  public static int getMilliseconds(int time) {
+<span class="fc" id="L274">    long millis = getMillisecondOfMinute(time);</span>
+<span class="fc" id="L275">    millis = millis * 1_000_000L; // convert to nanos of minute</span>
+<span class="fc" id="L276">    byte seconds = getSecond(time);</span>
+<span class="fc" id="L277">    long nanos = seconds * 1_000_000_000L;</span>
+<span class="fc" id="L278">    millis = millis - nanos; // remove the part in seconds</span>
+<span class="fc" id="L279">    return (int) (millis / 1_000_000L);</span>
+  }
+
+  public static long toNanoOfDay(int time) {
+<span class="fc" id="L283">    long nano = getHour(time) * 3_600_000_000_000L;</span>
+<span class="fc" id="L284">    nano += getMinute(time) * 60_000_000_000L;</span>
+<span class="fc" id="L285">    nano += getSecond(time) * 1_000_000_000L;</span>
+<span class="fc" id="L286">    nano += getNano(time);</span>
+<span class="fc" id="L287">    return nano;</span>
+  }
+
+  public static LocalTime asLocalTime(int time) {
+<span class="fc bfc" id="L291" title="All 2 branches covered.">    if (time == TimeColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L292">      return null;</span>
+    }
+
+<span class="fc" id="L295">    byte hourByte = (byte) (time &gt;&gt; 24);</span>
+<span class="fc" id="L296">    byte minuteByte = (byte) (time &gt;&gt; 16);</span>
+<span class="fc" id="L297">    byte millisecondByte1 = (byte) (time &gt;&gt; 8);</span>
+<span class="fc" id="L298">    byte millisecondByte2 = (byte) time;</span>
+<span class="fc" id="L299">    char millis = (char) ((millisecondByte1 &lt;&lt; 8) | (millisecondByte2 &amp; 0xFF));</span>
+<span class="fc" id="L300">    int second = millis / 1000;</span>
+<span class="fc" id="L301">    int nanoOfSecond = (millis % 1000) * 1_000_000;</span>
+<span class="fc" id="L302">    return LocalTime.of(hourByte, minuteByte, second, nanoOfSecond);</span>
+  }
+
+  public static byte getMinute(int time) {
+<span class="fc" id="L306">    return (byte) (time &gt;&gt; 16);</span>
+  }
+
+  public static int pack(LocalTime time) {
+<span class="fc bfc" id="L310" title="All 2 branches covered.">    if (time == null) {</span>
+<span class="fc" id="L311">      return TimeColumnType.missingValueIndicator();</span>
+    }
+
+<span class="fc" id="L314">    byte hour = (byte) time.getHour();</span>
+<span class="fc" id="L315">    byte minute = (byte) time.getMinute();</span>
+<span class="fc" id="L316">    char millis = (char) (time.getNano() / 1_000_000.0);</span>
+<span class="fc" id="L317">    millis = (char) (millis + (char) (time.getSecond() * 1000));</span>
+<span class="fc" id="L318">    return create(hour, minute, millis);</span>
+  }
+
+  private static int create(byte hour, byte minute, char millis) {
+<span class="fc" id="L322">    byte m1 = (byte) (millis &gt;&gt; 8);</span>
+<span class="fc" id="L323">    byte m2 = (byte) millis;</span>
+
+<span class="fc" id="L325">    return Ints.fromBytes(hour, minute, m1, m2);</span>
+  }
+
+  public static byte getSecond(int packedLocalTime) {
+<span class="fc" id="L329">    return (byte) (getMillisecondOfMinute(packedLocalTime) / 1000);</span>
+  }
+
+  public static int getMinuteOfDay(int packedLocalTime) {
+<span class="fc bfc" id="L333" title="All 2 branches covered.">    if (packedLocalTime == TimeColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L334">      return IntColumnType.missingValueIndicator();</span>
+    }
+<span class="fc" id="L336">    return getHour(packedLocalTime) * 60 + getMinute(packedLocalTime);</span>
+  }
+
+  public static int getSecondOfDay(int packedLocalTime) {
+<span class="fc bfc" id="L340" title="All 2 branches covered.">    if (packedLocalTime == TimeColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L341">      return IntColumnType.missingValueIndicator();</span>
+    }
+<span class="fc" id="L343">    int total = getHour(packedLocalTime) * 60 * 60;</span>
+<span class="fc" id="L344">    total += getMinute(packedLocalTime) * 60;</span>
+<span class="fc" id="L345">    total += getSecond(packedLocalTime);</span>
+<span class="fc" id="L346">    return total;</span>
+  }
+
+  public static int getMillisecondOfDay(int packedLocalTime) {
+<span class="fc" id="L350">    return (int) (toNanoOfDay(packedLocalTime) / 1000_000);</span>
+  }
+
+  public static String toShortTimeString(int time) {
+<span class="pc bpc" id="L354" title="1 of 2 branches missed.">    if (time == TimeColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L355">      return &quot;&quot;;</span>
+    }
+
+<span class="fc" id="L358">    byte hourByte = (byte) (time &gt;&gt; 24);</span>
+<span class="fc" id="L359">    byte minuteByte = (byte) (time &gt;&gt; 16);</span>
+<span class="fc" id="L360">    byte millisecondByte1 = (byte) (time &gt;&gt; 8);</span>
+<span class="fc" id="L361">    byte millisecondByte2 = (byte) time;</span>
+<span class="fc" id="L362">    char millis = (char) ((millisecondByte1 &lt;&lt; 8) | (millisecondByte2 &amp; 0xFF));</span>
+<span class="fc" id="L363">    int second = millis / 1000;</span>
+
+<span class="fc" id="L365">    return String.format(</span>
+        &quot;%s:%s:%s&quot;,
+<span class="fc" id="L367">        Strings.padStart(Byte.toString(hourByte), 2, '0'),</span>
+<span class="fc" id="L368">        Strings.padStart(Byte.toString(minuteByte), 2, '0'),</span>
+<span class="fc" id="L369">        Strings.padStart(Integer.toString(second), 2, '0'));</span>
+  }
+
+  public static boolean isMidnight(int packedTime) {
+<span class="fc bfc" id="L373" title="All 2 branches covered.">    return packedTime == MIDNIGHT;</span>
+  }
+
+  public static boolean isNoon(int packedTime) {
+<span class="fc bfc" id="L377" title="All 2 branches covered.">    return packedTime == NOON;</span>
+  }
+
+  public static boolean isAfter(int packedTime, int otherPackedTime) {
+<span class="fc bfc" id="L381" title="All 2 branches covered.">    return packedTime &gt; otherPackedTime;</span>
+  }
+
+  public static boolean isOnOrAfter(int packedTime, int otherPackedTime) {
+<span class="pc bpc" id="L385" title="1 of 2 branches missed.">    return packedTime &gt;= otherPackedTime;</span>
+  }
+
+  public static boolean isBefore(int packedTime, int otherPackedTime) {
+<span class="fc bfc" id="L389" title="All 2 branches covered.">    return packedTime &lt; otherPackedTime;</span>
+  }
+
+  public static boolean isOnOrBefore(int packedTime, int otherPackedTime) {
+<span class="fc bfc" id="L393" title="All 2 branches covered.">    return packedTime &lt;= otherPackedTime;</span>
+  }
+
+  public static boolean isEqualTo(int packedTime, int otherPackedTime) {
+<span class="nc bnc" id="L397" title="All 2 branches missed.">    return packedTime == otherPackedTime;</span>
+  }
+
+  /**
+   * Returns true if the time is in the AM or &quot;before noon&quot;. Note: we follow the convention that
+   * 12:00 NOON is PM and 12 MIDNIGHT is AM
+   */
+  public static boolean AM(int packedTime) {
+<span class="fc bfc" id="L405" title="All 2 branches covered.">    return packedTime &lt; NOON;</span>
+  }
+
+  /**
+   * Returns true if the time is in the PM or &quot;after noon&quot;. Note: we follow the convention that
+   * 12:00 NOON is PM and 12 MIDNIGHT is AM
+   */
+  public static boolean PM(int packedTime) {
+<span class="fc bfc" id="L413" title="All 2 branches covered.">    return packedTime &gt;= NOON;</span>
+  }
+
+  public static int hoursUntil(int packedTimeEnd, int packedTimeStart) {
+<span class="fc" id="L417">    return secondsUntil(packedTimeEnd, packedTimeStart) / 3600;</span>
+  }
+
+  public static int minutesUntil(int packedTimeEnd, int packedTimeStart) {
+<span class="fc" id="L421">    return secondsUntil(packedTimeEnd, packedTimeStart) / 60;</span>
+  }
+
+  public static int secondsUntil(int packedTimeEnd, int packedTimeStart) {
+<span class="fc" id="L425">    return (getSecondOfDay(packedTimeEnd) - getSecondOfDay(packedTimeStart));</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,561 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>EmpiricalDistributionTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.distribution</a> &gt; <span class="el_source">EmpiricalDistributionTest.java</span></div><h1>EmpiricalDistributionTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.distribution;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Arrays;
+
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.statistics.distribution.ConstantContinuousDistribution;
+import org.apache.commons.statistics.distribution.UniformContinuousDistribution;
+import org.apache.commons.statistics.distribution.NormalDistribution;
+import org.apache.commons.math4.TestUtils;
+import org.apache.commons.math4.analysis.UnivariateFunction;
+import org.apache.commons.math4.analysis.integration.BaseAbstractUnivariateIntegrator;
+import org.apache.commons.math4.analysis.integration.IterativeLegendreGaussIntegrator;
+import org.apache.commons.math4.exception.MathIllegalStateException;
+import org.apache.commons.math4.exception.NullArgumentException;
+import org.apache.commons.math4.exception.NotStrictlyPositiveException;
+import org.apache.commons.rng.simple.RandomSource;
+import org.apache.commons.math4.stat.descriptive.SummaryStatistics;
+import org.apache.commons.math4.util.FastMath;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+/**
+ * Test cases for the {@link EmpiricalDistribution} class.
+ */
+<span class="fc" id="L48">public final class EmpiricalDistributionTest extends RealDistributionAbstractTest {</span>
+
+<span class="fc" id="L50">    protected EmpiricalDistribution empiricalDistribution = null;</span>
+<span class="fc" id="L51">    protected EmpiricalDistribution empiricalDistribution2 = null;</span>
+<span class="fc" id="L52">    protected File file = null;</span>
+<span class="fc" id="L53">    protected URL url = null;</span>
+<span class="fc" id="L54">    protected double[] dataArray = null;</span>
+<span class="fc" id="L55">    protected final int n = 10000;</span>
+
+    @Override
+    @Before
+    public void setUp() {
+<span class="fc" id="L60">        super.setUp();</span>
+<span class="fc" id="L61">        empiricalDistribution = new EmpiricalDistribution(100);</span>
+<span class="fc" id="L62">        url = getClass().getResource(&quot;testData.txt&quot;);</span>
+<span class="fc" id="L63">        final ArrayList&lt;Double&gt; list = new ArrayList&lt;&gt;();</span>
+        try {
+<span class="fc" id="L65">            empiricalDistribution2 = new EmpiricalDistribution(100);</span>
+<span class="fc" id="L66">            BufferedReader in =</span>
+                new BufferedReader(new InputStreamReader(
+<span class="fc" id="L68">                        url.openStream()));</span>
+<span class="fc" id="L69">            String str = null;</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">            while ((str = in.readLine()) != null) {</span>
+<span class="fc" id="L71">                list.add(Double.valueOf(str));</span>
+            }
+<span class="fc" id="L73">            in.close();</span>
+<span class="fc" id="L74">            in = null;</span>
+<span class="nc" id="L75">        } catch (IOException ex) {</span>
+<span class="nc" id="L76">            Assert.fail(&quot;IOException &quot; + ex);</span>
+<span class="fc" id="L77">        }</span>
+
+<span class="fc" id="L79">        dataArray = new double[list.size()];</span>
+<span class="fc" id="L80">        int i = 0;</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">        for (Double data : list) {</span>
+<span class="fc" id="L82">            dataArray[i] = data.doubleValue();</span>
+<span class="fc" id="L83">            i++;</span>
+<span class="fc" id="L84">        }</span>
+<span class="fc" id="L85">    }</span>
+
+    // MATH-1279
+    @Test(expected=NotStrictlyPositiveException.class)
+    public void testPrecondition1() {
+<span class="nc" id="L90">        new EmpiricalDistribution(0);</span>
+<span class="nc" id="L91">    }</span>
+
+    /**
+     * Test EmpiricalDistrbution.load() using sample data file.&lt;br&gt;
+     * Check that the sampleCount, mu and sigma match data in
+     * the sample data file. Also verify that load is idempotent.
+     */
+    @Test
+    public void testLoad() throws Exception {
+        // Load from a URL
+<span class="fc" id="L101">        empiricalDistribution.load(url);</span>
+<span class="fc" id="L102">        checkDistribution();</span>
+
+        // Load again from a file (also verifies idempotency of load)
+<span class="fc" id="L105">        File file = new File(url.toURI());</span>
+<span class="fc" id="L106">        empiricalDistribution.load(file);</span>
+<span class="fc" id="L107">        checkDistribution();</span>
+<span class="fc" id="L108">    }</span>
+
+    private void checkDistribution() {
+        // testData File has 10000 values, with mean ~ 5.0, std dev ~ 1
+        // Make sure that loaded distribution matches this
+<span class="fc" id="L113">        Assert.assertEquals(empiricalDistribution.getSampleStats().getN(),1000,10E-7);</span>
+        //TODO: replace with statistical tests
+<span class="fc" id="L115">        Assert.assertEquals(empiricalDistribution.getSampleStats().getMean(),</span>
+                5.069831575018909,10E-7);
+<span class="fc" id="L117">        Assert.assertEquals(empiricalDistribution.getSampleStats().getStandardDeviation(),</span>
+                1.0173699343977738,10E-7);
+<span class="fc" id="L119">    }</span>
+
+    /**
+     * Test EmpiricalDistrbution.load(double[]) using data taken from
+     * sample data file.&lt;br&gt;
+     * Check that the sampleCount, mu and sigma match data in
+     * the sample data file.
+     */
+    @Test
+    public void testDoubleLoad() throws Exception {
+<span class="fc" id="L129">        empiricalDistribution2.load(dataArray);</span>
+        // testData File has 10000 values, with mean ~ 5.0, std dev ~ 1
+        // Make sure that loaded distribution matches this
+<span class="fc" id="L132">        Assert.assertEquals(empiricalDistribution2.getSampleStats().getN(),1000,10E-7);</span>
+        //TODO: replace with statistical tests
+<span class="fc" id="L134">        Assert.assertEquals(empiricalDistribution2.getSampleStats().getMean(),</span>
+                5.069831575018909,10E-7);
+<span class="fc" id="L136">        Assert.assertEquals(empiricalDistribution2.getSampleStats().getStandardDeviation(),</span>
+                1.0173699343977738,10E-7);
+
+<span class="fc" id="L139">        double[] bounds = empiricalDistribution2.getGeneratorUpperBounds();</span>
+<span class="fc" id="L140">        Assert.assertEquals(bounds.length, 100);</span>
+<span class="fc" id="L141">        Assert.assertEquals(bounds[99], 1.0, 10e-12);</span>
+
+<span class="fc" id="L143">    }</span>
+
+    /**
+      * Generate 1000 random values and make sure they look OK.&lt;br&gt;
+      * Note that there is a non-zero (but very small) probability that
+      * these tests will fail even if the code is working as designed.
+      */
+    @Test
+    public void testNext() throws Exception {
+<span class="fc" id="L152">        tstGen(0.1);</span>
+<span class="fc" id="L153">        tstDoubleGen(0.1);</span>
+<span class="fc" id="L154">    }</span>
+
+    /**
+     * Make sure exception thrown if sampling is attempted
+     * before loading empiricalDistribution.
+     */
+    @Test
+    public void testNextFail1() {
+        try {
+<span class="nc" id="L163">            empiricalDistribution.createSampler(RandomSource.create(RandomSource.JDK)).sample();</span>
+<span class="nc" id="L164">            Assert.fail(&quot;Expecting MathIllegalStateException&quot;);</span>
+<span class="fc" id="L165">        } catch (MathIllegalStateException ex) {</span>
+            // expected
+<span class="nc" id="L167">        }</span>
+<span class="fc" id="L168">    }</span>
+
+    /**
+     * Make sure exception thrown if sampling is attempted
+     * before loading empiricalDistribution.
+     */
+    @Test
+    public void testNextFail2() {
+        try {
+<span class="nc" id="L177">            empiricalDistribution2.createSampler(RandomSource.create(RandomSource.JDK)).sample();</span>
+<span class="nc" id="L178">            Assert.fail(&quot;Expecting MathIllegalStateException&quot;);</span>
+<span class="fc" id="L179">        } catch (MathIllegalStateException ex) {</span>
+            // expected
+<span class="nc" id="L181">        }</span>
+<span class="fc" id="L182">    }</span>
+
+    /**
+     * Make sure we can handle a grid size that is too fine
+     */
+    @Test
+    public void testGridTooFine() throws Exception {
+<span class="fc" id="L189">        empiricalDistribution = new EmpiricalDistribution(1001);</span>
+<span class="fc" id="L190">        tstGen(0.1);</span>
+<span class="fc" id="L191">        empiricalDistribution2 = new EmpiricalDistribution(1001);</span>
+<span class="fc" id="L192">        tstDoubleGen(0.1);</span>
+<span class="fc" id="L193">    }</span>
+
+    /**
+     * How about too fat?
+     */
+    @Test
+    public void testGridTooFat() throws Exception {
+<span class="fc" id="L200">        empiricalDistribution = new EmpiricalDistribution(1);</span>
+<span class="fc" id="L201">        tstGen(5); // ridiculous tolerance; but ridiculous grid size</span>
+                   // really just checking to make sure we do not bomb
+<span class="fc" id="L203">        empiricalDistribution2 = new EmpiricalDistribution(1);</span>
+<span class="fc" id="L204">        tstDoubleGen(5);</span>
+<span class="fc" id="L205">    }</span>
+
+    /**
+     * Test bin index overflow problem (BZ 36450)
+     */
+    @Test
+    public void testBinIndexOverflow() throws Exception {
+<span class="fc" id="L212">        double[] x = new double[] {9474.94326071674, 2080107.8865462579};</span>
+<span class="fc" id="L213">        new EmpiricalDistribution().load(x);</span>
+<span class="fc" id="L214">    }</span>
+
+    @Test
+    public void testSerialization() {
+        // Empty
+<span class="fc" id="L219">        EmpiricalDistribution dist = new EmpiricalDistribution();</span>
+<span class="fc" id="L220">        EmpiricalDistribution dist2 = (EmpiricalDistribution) TestUtils.serializeAndRecover(dist);</span>
+<span class="fc" id="L221">        verifySame(dist, dist2);</span>
+
+        // Loaded
+<span class="fc" id="L224">        empiricalDistribution2.load(dataArray);</span>
+<span class="fc" id="L225">        dist2 = (EmpiricalDistribution) TestUtils.serializeAndRecover(empiricalDistribution2);</span>
+<span class="fc" id="L226">        verifySame(empiricalDistribution2, dist2);</span>
+<span class="fc" id="L227">    }</span>
+
+    @Test(expected=NullArgumentException.class)
+    public void testLoadNullDoubleArray() {
+<span class="nc" id="L231">       new EmpiricalDistribution().load((double[]) null);</span>
+<span class="nc" id="L232">    }</span>
+
+    @Test(expected=NullArgumentException.class)
+    public void testLoadNullURL() throws Exception {
+<span class="nc" id="L236">        new EmpiricalDistribution().load((URL) null);</span>
+<span class="nc" id="L237">    }</span>
+
+    @Test(expected=NullArgumentException.class)
+    public void testLoadNullFile() throws Exception {
+<span class="nc" id="L241">        new EmpiricalDistribution().load((File) null);</span>
+<span class="nc" id="L242">    }</span>
+
+    /**
+     * MATH-298
+     */
+    @Test
+    public void testGetBinUpperBounds() {
+<span class="fc" id="L249">        double[] testData = {0, 1, 1, 2, 3, 4, 4, 5, 6, 7, 8, 9, 10};</span>
+<span class="fc" id="L250">        EmpiricalDistribution dist = new EmpiricalDistribution(5);</span>
+<span class="fc" id="L251">        dist.load(testData);</span>
+<span class="fc" id="L252">        double[] expectedBinUpperBounds = {2, 4, 6, 8, 10};</span>
+<span class="fc" id="L253">        double[] expectedGeneratorUpperBounds = {4d/13d, 7d/13d, 9d/13d, 11d/13d, 1};</span>
+<span class="fc" id="L254">        double tol = 10E-12;</span>
+<span class="fc" id="L255">        TestUtils.assertEquals(expectedBinUpperBounds, dist.getUpperBounds(), tol);</span>
+<span class="fc" id="L256">        TestUtils.assertEquals(expectedGeneratorUpperBounds, dist.getGeneratorUpperBounds(), tol);</span>
+<span class="fc" id="L257">    }</span>
+
+    private void verifySame(EmpiricalDistribution d1, EmpiricalDistribution d2) {
+<span class="fc" id="L260">        Assert.assertEquals(d1.isLoaded(), d2.isLoaded());</span>
+<span class="fc" id="L261">        Assert.assertEquals(d1.getBinCount(), d2.getBinCount());</span>
+<span class="fc" id="L262">        Assert.assertEquals(d1.getSampleStats(), d2.getSampleStats());</span>
+<span class="fc bfc" id="L263" title="All 2 branches covered.">        if (d1.isLoaded()) {</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">            for (int i = 0;  i &lt; d1.getUpperBounds().length; i++) {</span>
+<span class="fc" id="L265">                Assert.assertEquals(d1.getUpperBounds()[i], d2.getUpperBounds()[i], 0);</span>
+            }
+<span class="fc" id="L267">            Assert.assertEquals(d1.getBinStats(), d2.getBinStats());</span>
+        }
+<span class="fc" id="L269">    }</span>
+
+    private void tstGen(double tolerance)throws Exception {
+<span class="fc" id="L272">        empiricalDistribution.load(url);</span>
+<span class="fc" id="L273">        ContinuousDistribution.Sampler sampler</span>
+<span class="fc" id="L274">            = empiricalDistribution.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 1000));</span>
+<span class="fc" id="L275">        SummaryStatistics stats = new SummaryStatistics();</span>
+<span class="fc bfc" id="L276" title="All 2 branches covered.">        for (int i = 1; i &lt; 1000; i++) {</span>
+<span class="fc" id="L277">            stats.addValue(sampler.sample());</span>
+        }
+<span class="fc" id="L279">        Assert.assertEquals(&quot;mean&quot;, 5.069831575018909, stats.getMean(),tolerance);</span>
+<span class="fc" id="L280">        Assert.assertEquals(&quot;std dev&quot;, 1.0173699343977738, stats.getStandardDeviation(),tolerance);</span>
+<span class="fc" id="L281">    }</span>
+
+    private void tstDoubleGen(double tolerance)throws Exception {
+<span class="fc" id="L284">        empiricalDistribution2.load(dataArray);</span>
+<span class="fc" id="L285">        ContinuousDistribution.Sampler sampler</span>
+<span class="fc" id="L286">            = empiricalDistribution2.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 1000));</span>
+<span class="fc" id="L287">        SummaryStatistics stats = new SummaryStatistics();</span>
+<span class="fc bfc" id="L288" title="All 2 branches covered.">        for (int i = 1; i &lt; 1000; i++) {</span>
+<span class="fc" id="L289">            stats.addValue(sampler.sample());</span>
+        }
+<span class="fc" id="L291">        Assert.assertEquals(&quot;mean&quot;, 5.069831575018909, stats.getMean(), tolerance);</span>
+<span class="fc" id="L292">        Assert.assertEquals(&quot;std dev&quot;, 1.0173699343977738, stats.getStandardDeviation(), tolerance);</span>
+<span class="fc" id="L293">    }</span>
+
+    //  Setup for distribution tests
+
+    @Override
+    public RealDistribution makeDistribution() {
+        // Create a uniform distribution on [0, 10,000]
+<span class="fc" id="L300">        final double[] sourceData = new double[n + 1];</span>
+<span class="fc bfc" id="L301" title="All 2 branches covered.">        for (int i = 0; i &lt; n + 1; i++) {</span>
+<span class="fc" id="L302">            sourceData[i] = i;</span>
+        }
+<span class="fc" id="L304">        EmpiricalDistribution dist = new EmpiricalDistribution();</span>
+<span class="fc" id="L305">        dist.load(sourceData);</span>
+<span class="fc" id="L306">        return dist;</span>
+    }
+
+    /** Uniform bin mass = 10/10001 == mass of all but the first bin */
+<span class="fc" id="L310">    private final double binMass = 10d / (n + 1);</span>
+
+    /** Mass of first bin = 11/10001 */
+<span class="fc" id="L313">    private final double firstBinMass = 11d / (n + 1);</span>
+
+    @Override
+    public double[] makeCumulativeTestPoints() {
+<span class="fc" id="L317">       final double[] testPoints = new double[] {9, 10, 15, 1000, 5004, 9999};</span>
+<span class="fc" id="L318">       return testPoints;</span>
+    }
+
+
+    @Override
+    public double[] makeCumulativeTestValues() {
+        /*
+         * Bins should be [0, 10], (10, 20], ..., (9990, 10000]
+         * Kernels should be N(4.5, 3.02765), N(14.5, 3.02765)...
+         * Each bin should have mass 10/10000 = .001
+         */
+<span class="fc" id="L329">        final double[] testPoints = getCumulativeTestPoints();</span>
+<span class="fc" id="L330">        final double[] cumValues = new double[testPoints.length];</span>
+<span class="fc" id="L331">        final EmpiricalDistribution empiricalDistribution = (EmpiricalDistribution) makeDistribution();</span>
+<span class="fc" id="L332">        final double[] binBounds = empiricalDistribution.getUpperBounds();</span>
+<span class="fc bfc" id="L333" title="All 2 branches covered.">        for (int i = 0; i &lt; testPoints.length; i++) {</span>
+<span class="fc" id="L334">            final int bin = findBin(testPoints[i]);</span>
+<span class="fc bfc" id="L335" title="All 2 branches covered.">            final double lower = bin == 0 ? empiricalDistribution.getSupportLowerBound() :</span>
+                binBounds[bin - 1];
+<span class="fc" id="L337">            final double upper = binBounds[bin];</span>
+            // Compute bMinus = sum or mass of bins below the bin containing the point
+            // First bin has mass 11 / 10000, the rest have mass 10 / 10000.
+<span class="fc bfc" id="L340" title="All 2 branches covered.">            final double bMinus = bin == 0 ? 0 : (bin - 1) * binMass + firstBinMass;</span>
+<span class="fc" id="L341">            final ContinuousDistribution kernel = findKernel(lower, upper);</span>
+<span class="fc" id="L342">            final double withinBinKernelMass = kernel.probability(lower, upper);</span>
+<span class="fc" id="L343">            final double kernelCum = kernel.probability(lower, testPoints[i]);</span>
+<span class="fc bfc" id="L344" title="All 2 branches covered.">            cumValues[i] = bMinus + (bin == 0 ? firstBinMass : binMass) * kernelCum/withinBinKernelMass;</span>
+        }
+<span class="fc" id="L346">        return cumValues;</span>
+    }
+
+    @Override
+    public double[] makeDensityTestValues() {
+<span class="fc" id="L351">        final double[] testPoints = getCumulativeTestPoints();</span>
+<span class="fc" id="L352">        final double[] densityValues = new double[testPoints.length];</span>
+<span class="fc" id="L353">        final EmpiricalDistribution empiricalDistribution = (EmpiricalDistribution) makeDistribution();</span>
+<span class="fc" id="L354">        final double[] binBounds = empiricalDistribution.getUpperBounds();</span>
+<span class="fc bfc" id="L355" title="All 2 branches covered.">        for (int i = 0; i &lt; testPoints.length; i++) {</span>
+<span class="fc" id="L356">            final int bin = findBin(testPoints[i]);</span>
+<span class="fc bfc" id="L357" title="All 2 branches covered.">            final double lower = bin == 0 ? empiricalDistribution.getSupportLowerBound() :</span>
+                binBounds[bin - 1];
+<span class="fc" id="L359">            final double upper = binBounds[bin];</span>
+<span class="fc" id="L360">            final ContinuousDistribution kernel = findKernel(lower, upper);</span>
+<span class="fc" id="L361">            final double withinBinKernelMass = kernel.probability(lower, upper);</span>
+<span class="fc" id="L362">            final double density = kernel.density(testPoints[i]);</span>
+<span class="fc bfc" id="L363" title="All 2 branches covered.">            densityValues[i] = density * (bin == 0 ? firstBinMass : binMass) / withinBinKernelMass;</span>
+        }
+<span class="fc" id="L365">        return densityValues;</span>
+    }
+
+    /**
+     * Modify test integration bounds from the default. Because the distribution
+     * has discontinuities at bin boundaries, integrals spanning multiple bins
+     * will face convergence problems.  Only test within-bin integrals and spans
+     * across no more than 3 bin boundaries.
+     */
+    @Override
+    @Test
+    public void testDensityIntegrals() {
+<span class="fc" id="L377">        final RealDistribution distribution = makeDistribution();</span>
+<span class="fc" id="L378">        final double tol = 1.0e-9;</span>
+<span class="fc" id="L379">        final BaseAbstractUnivariateIntegrator integrator =</span>
+            new IterativeLegendreGaussIntegrator(5, 1.0e-12, 1.0e-10);
+<span class="fc" id="L381">        final UnivariateFunction d = new UnivariateFunction() {</span>
+            @Override
+            public double value(double x) {
+<span class="fc" id="L384">                return distribution.density(x);</span>
+            }
+        };
+<span class="fc" id="L387">        final double[] lower = {0, 5, 1000, 5001, 9995};</span>
+<span class="fc" id="L388">        final double[] upper = {5, 12, 1030, 5010, 10000};</span>
+<span class="fc bfc" id="L389" title="All 2 branches covered.">        for (int i = 1; i &lt; 5; i++) {</span>
+<span class="fc" id="L390">            Assert.assertEquals(</span>
+<span class="fc" id="L391">                    distribution.probability(</span>
+                            lower[i], upper[i]),
+<span class="fc" id="L393">                            integrator.integrate(</span>
+                                    1000000, // Triangle integrals are very slow to converge
+                                    d, lower[i], upper[i]), tol);
+        }
+<span class="fc" id="L397">    }</span>
+
+    /**
+     * MATH-984
+     * Verify that sampled values do not go outside of the range of the data.
+     */
+    @Test
+    public void testSampleValuesRange() {
+        // Concentrate values near the endpoints of (0, 1).
+        // Unconstrained Gaussian kernel would generate values outside the interval.
+<span class="fc" id="L407">        final double[] data = new double[100];</span>
+<span class="fc bfc" id="L408" title="All 2 branches covered.">        for (int i = 0; i &lt; 50; i++) {</span>
+<span class="fc" id="L409">            data[i] = 1 / ((double) i + 1);</span>
+        }
+<span class="fc bfc" id="L411" title="All 2 branches covered.">        for (int i = 51; i &lt; 100; i++) {</span>
+<span class="fc" id="L412">            data[i] = 1 - 1 / (100 - (double) i + 2);</span>
+        }
+<span class="fc" id="L414">        EmpiricalDistribution dist = new EmpiricalDistribution(10);</span>
+<span class="fc" id="L415">        dist.load(data);</span>
+<span class="fc" id="L416">        ContinuousDistribution.Sampler sampler</span>
+<span class="fc" id="L417">            = dist.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 1000));</span>
+<span class="fc bfc" id="L418" title="All 2 branches covered.">        for (int i = 0; i &lt; 1000; i++) {</span>
+<span class="fc" id="L419">            final double dev = sampler.sample();</span>
+<span class="pc bpc" id="L420" title="1 of 2 branches missed.">            Assert.assertTrue(dev &lt; 1);</span>
+<span class="pc bpc" id="L421" title="1 of 2 branches missed.">            Assert.assertTrue(dev &gt; 0);</span>
+        }
+<span class="fc" id="L423">    }</span>
+
+    /**
+     * MATH-1203, MATH-1208
+     */
+    @Test
+    public void testNoBinVariance() {
+<span class="fc" id="L430">        final double[] data = {0, 0, 1, 1};</span>
+<span class="fc" id="L431">        EmpiricalDistribution dist = new EmpiricalDistribution(2);</span>
+<span class="fc" id="L432">        dist.load(data);</span>
+<span class="fc" id="L433">        ContinuousDistribution.Sampler sampler</span>
+<span class="fc" id="L434">            = dist.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 1000));</span>
+<span class="fc bfc" id="L435" title="All 2 branches covered.">        for (int i = 0; i &lt; 1000; i++) {</span>
+<span class="fc" id="L436">            final double dev = sampler.sample();</span>
+<span class="pc bpc" id="L437" title="1 of 4 branches missed.">            Assert.assertTrue(dev == 0 || dev == 1);</span>
+        }
+<span class="fc" id="L439">        Assert.assertEquals(0.5, dist.cumulativeProbability(0), Double.MIN_VALUE);</span>
+<span class="fc" id="L440">        Assert.assertEquals(1.0, dist.cumulativeProbability(1), Double.MIN_VALUE);</span>
+<span class="fc" id="L441">        Assert.assertEquals(0.5, dist.cumulativeProbability(0.5), Double.MIN_VALUE);</span>
+<span class="fc" id="L442">        Assert.assertEquals(0.5, dist.cumulativeProbability(0.7), Double.MIN_VALUE);</span>
+<span class="fc" id="L443">    }</span>
+
+    /**
+     * Find the bin that x belongs (relative to {@link #makeDistribution()}).
+     */
+    private int findBin(double x) {
+        // Number of bins below x should be trunc(x/10)
+<span class="fc" id="L450">        final double nMinus = FastMath.floor(x / 10);</span>
+<span class="fc" id="L451">        final int bin =  (int) FastMath.round(nMinus);</span>
+        // If x falls on a bin boundary, it is in the lower bin
+<span class="fc bfc" id="L453" title="All 2 branches covered.">        return FastMath.floor(x / 10) == x / 10 ? bin - 1 : bin;</span>
+    }
+
+    /**
+     * Find the within-bin kernel for the bin with lower bound lower
+     * and upper bound upper. All bins other than the first contain 10 points
+     * exclusive of the lower bound and are centered at (lower + upper + 1) / 2.
+     * The first bin includes its lower bound, 0, so has different mean and
+     * standard deviation.
+     */
+    private ContinuousDistribution findKernel(double lower, double upper) {
+<span class="fc bfc" id="L464" title="All 2 branches covered.">        if (lower &lt; 1) {</span>
+<span class="fc" id="L465">            return new NormalDistribution(5d, 3.3166247903554);</span>
+        } else {
+<span class="fc" id="L467">            return new NormalDistribution((upper + lower + 1) / 2d, 3.0276503540974917);</span>
+        }
+    }
+
+    @Test
+    public void testKernelOverrideConstant() {
+<span class="fc" id="L473">        final EmpiricalDistribution dist = new ConstantKernelEmpiricalDistribution(5);</span>
+<span class="fc" id="L474">        final double[] data = {1d,2d,3d, 4d,5d,6d, 7d,8d,9d, 10d,11d,12d, 13d,14d,15d};</span>
+<span class="fc" id="L475">        dist.load(data);</span>
+<span class="fc" id="L476">        ContinuousDistribution.Sampler sampler</span>
+<span class="fc" id="L477">            = dist.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 1000));</span>
+        // Bin masses concentrated on 2, 5, 8, 11, 14 &lt;- effectively discrete uniform distribution over these
+<span class="fc" id="L479">        double[] values = {2d, 5d, 8d, 11d, 14d};</span>
+<span class="fc bfc" id="L480" title="All 2 branches covered.">        for (int i = 0; i &lt; 20; i++) {</span>
+<span class="pc bpc" id="L481" title="1 of 2 branches missed.">            Assert.assertTrue(Arrays.binarySearch(values, sampler.sample()) &gt;= 0);</span>
+        }
+<span class="fc" id="L483">        final double tol = 10E-12;</span>
+<span class="fc" id="L484">        Assert.assertEquals(0.0, dist.cumulativeProbability(1), tol);</span>
+<span class="fc" id="L485">        Assert.assertEquals(0.2, dist.cumulativeProbability(2), tol);</span>
+<span class="fc" id="L486">        Assert.assertEquals(0.6, dist.cumulativeProbability(10), tol);</span>
+<span class="fc" id="L487">        Assert.assertEquals(0.8, dist.cumulativeProbability(12), tol);</span>
+<span class="fc" id="L488">        Assert.assertEquals(0.8, dist.cumulativeProbability(13), tol);</span>
+<span class="fc" id="L489">        Assert.assertEquals(1.0, dist.cumulativeProbability(15), tol);</span>
+
+<span class="fc" id="L491">        Assert.assertEquals(2.0, dist.inverseCumulativeProbability(0.1), tol);</span>
+<span class="fc" id="L492">        Assert.assertEquals(2.0, dist.inverseCumulativeProbability(0.2), tol);</span>
+<span class="fc" id="L493">        Assert.assertEquals(5.0, dist.inverseCumulativeProbability(0.3), tol);</span>
+<span class="fc" id="L494">        Assert.assertEquals(5.0, dist.inverseCumulativeProbability(0.4), tol);</span>
+<span class="fc" id="L495">        Assert.assertEquals(8.0, dist.inverseCumulativeProbability(0.5), tol);</span>
+<span class="fc" id="L496">        Assert.assertEquals(8.0, dist.inverseCumulativeProbability(0.6), tol);</span>
+<span class="fc" id="L497">    }</span>
+
+    @Test
+    public void testKernelOverrideUniform() {
+<span class="fc" id="L501">        final EmpiricalDistribution dist = new UniformKernelEmpiricalDistribution(5);</span>
+<span class="fc" id="L502">        final double[] data = {1d,2d,3d, 4d,5d,6d, 7d,8d,9d, 10d,11d,12d, 13d,14d,15d};</span>
+<span class="fc" id="L503">        dist.load(data);</span>
+<span class="fc" id="L504">        ContinuousDistribution.Sampler sampler</span>
+<span class="fc" id="L505">            = dist.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 1000));</span>
+        // Kernels are uniform distributions on [1,3], [4,6], [7,9], [10,12], [13,15]
+<span class="fc" id="L507">        final double bounds[] = {3d, 6d, 9d, 12d};</span>
+<span class="fc" id="L508">        final double tol = 10E-12;</span>
+<span class="fc bfc" id="L509" title="All 2 branches covered.">        for (int i = 0; i &lt; 20; i++) {</span>
+<span class="fc" id="L510">            final double v = sampler.sample();</span>
+            // Make sure v is not in the excluded range between bins - that is (bounds[i], bounds[i] + 1)
+<span class="fc bfc" id="L512" title="All 2 branches covered.">            for (int j = 0; j &lt; bounds.length; j++) {</span>
+<span class="pc bpc" id="L513" title="1 of 4 branches missed.">                Assert.assertFalse(v &gt; bounds[j] + tol &amp;&amp; v &lt; bounds[j] + 1 - tol);</span>
+            }
+        }
+<span class="fc" id="L516">        Assert.assertEquals(0.0, dist.cumulativeProbability(1), tol);</span>
+<span class="fc" id="L517">        Assert.assertEquals(0.1, dist.cumulativeProbability(2), tol);</span>
+<span class="fc" id="L518">        Assert.assertEquals(0.6, dist.cumulativeProbability(10), tol);</span>
+<span class="fc" id="L519">        Assert.assertEquals(0.8, dist.cumulativeProbability(12), tol);</span>
+<span class="fc" id="L520">        Assert.assertEquals(0.8, dist.cumulativeProbability(13), tol);</span>
+<span class="fc" id="L521">        Assert.assertEquals(1.0, dist.cumulativeProbability(15), tol);</span>
+
+<span class="fc" id="L523">        Assert.assertEquals(2.0, dist.inverseCumulativeProbability(0.1), tol);</span>
+<span class="fc" id="L524">        Assert.assertEquals(3.0, dist.inverseCumulativeProbability(0.2), tol);</span>
+<span class="fc" id="L525">        Assert.assertEquals(5.0, dist.inverseCumulativeProbability(0.3), tol);</span>
+<span class="fc" id="L526">        Assert.assertEquals(6.0, dist.inverseCumulativeProbability(0.4), tol);</span>
+<span class="fc" id="L527">        Assert.assertEquals(8.0, dist.inverseCumulativeProbability(0.5), tol);</span>
+<span class="fc" id="L528">        Assert.assertEquals(9.0, dist.inverseCumulativeProbability(0.6), tol);</span>
+<span class="fc" id="L529">    }</span>
+
+
+    /**
+     * Empirical distribution using a constant smoothing kernel.
+     */
+    private class ConstantKernelEmpiricalDistribution extends EmpiricalDistribution {
+        private static final long serialVersionUID = 1L;
+<span class="fc" id="L537">        public ConstantKernelEmpiricalDistribution(int i) {</span>
+<span class="fc" id="L538">            super(i);</span>
+<span class="fc" id="L539">        }</span>
+        // Use constant distribution equal to bin mean within bin
+        @Override
+        protected ContinuousDistribution getKernel(SummaryStatistics bStats) {
+<span class="fc" id="L543">            return new ConstantContinuousDistribution(bStats.getMean());</span>
+        }
+    }
+
+    /**
+     * Empirical distribution using a uniform smoothing kernel.
+     */
+    private class UniformKernelEmpiricalDistribution extends EmpiricalDistribution {
+        private static final long serialVersionUID = 2963149194515159653L;
+<span class="fc" id="L552">        public UniformKernelEmpiricalDistribution(int i) {</span>
+<span class="fc" id="L553">            super(i);</span>
+<span class="fc" id="L554">        }</span>
+        @Override
+        protected ContinuousDistribution getKernel(SummaryStatistics bStats) {
+<span class="fc" id="L557">            return new UniformContinuousDistribution(bStats.getMin(), bStats.getMax());</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

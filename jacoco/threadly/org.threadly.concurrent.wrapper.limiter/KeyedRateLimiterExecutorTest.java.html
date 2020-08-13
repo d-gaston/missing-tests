@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KeyedRateLimiterExecutorTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">KeyedRateLimiterExecutorTest.java</span></div><h1>KeyedRateLimiterExecutorTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import static org.junit.Assert.*;
+
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.PriorityScheduler;
+import org.threadly.concurrent.StrictPriorityScheduler;
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.SubmitterExecutorInterfaceTest;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.TestCallable;
+import org.threadly.concurrent.PrioritySchedulerTest.PrioritySchedulerFactory;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.test.concurrent.TestUtils;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.test.concurrent.TestableScheduler;
+import org.threadly.util.Clock;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L27">public class KeyedRateLimiterExecutorTest extends SubmitterExecutorInterfaceTest {</span>
+  private TestableScheduler scheduler;
+  private KeyedRateLimiterExecutor limiter;
+  
+  @Before
+  public void setup() {
+<span class="fc" id="L33">    scheduler = new TestableScheduler();</span>
+<span class="fc" id="L34">    limiter = new KeyedRateLimiterExecutor(scheduler, 1, 600_000);</span>
+<span class="fc" id="L35">  }</span>
+
+  @Override
+  protected SubmitterExecutorFactory getSubmitterExecutorFactory() {
+<span class="fc" id="L39">    return new KeyedRateLimiterFactory();</span>
+  }
+  
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test
+  public void constructorFail() {
+    try {
+<span class="nc" id="L46">      new KeyedRateLimiterExecutor(null, 10);</span>
+<span class="nc" id="L47">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L48">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L50">    }</span>
+    try {
+<span class="nc" id="L52">      new KeyedRateLimiterExecutor(scheduler, 0);</span>
+<span class="nc" id="L53">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L54">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L56">    }</span>
+<span class="fc" id="L57">  }</span>
+  
+  @Test
+  public void getCurrentMinimumDelayTest() {
+<span class="fc" id="L61">    Object key = new Object();</span>
+<span class="fc" id="L62">    assertEquals(0, limiter.getMinimumDelay(key));</span>
+    
+<span class="fc" id="L64">    limiter.execute(10, key, DoNothingRunnable.instance());</span>
+<span class="fc" id="L65">    int delay = limiter.getMinimumDelay(key);</span>
+<span class="fc" id="L66">    assertEquals(10000, delay, 1000);</span>
+    
+<span class="fc" id="L68">    limiter.execute(10, key, DoNothingRunnable.instance());</span>
+<span class="fc" id="L69">    delay = limiter.getMinimumDelay(key);</span>
+<span class="fc" id="L70">    assertEquals(20000, delay, 1000);</span>
+<span class="fc" id="L71">  }</span>
+  
+  @Test
+  public void getFutureTillDelayTest() {
+<span class="fc" id="L75">    Object key = new Object();</span>
+    // verify that an empty limiter returns a finished future
+<span class="fc" id="L77">    ListenableFuture&lt;?&gt; f = limiter.getFutureTillDelay(key, 0);</span>
+<span class="fc" id="L78">    assertTrue(f.isDone());</span>
+    
+    // verify it works if the limiter has waiting tasks
+<span class="fc" id="L81">    limiter.execute(key, DoNothingRunnable.instance());</span>
+<span class="fc" id="L82">    f = limiter.getFutureTillDelay(key, 0);</span>
+<span class="fc" id="L83">    assertFalse(f.isDone());</span>
+    
+<span class="fc" id="L85">    scheduler.advance(1000);</span>
+<span class="fc" id="L86">    assertTrue(f.isDone());</span>
+<span class="fc" id="L87">  }</span>
+  
+  @Test
+  public void executeWithPermitsReturnedDelayTest() {
+<span class="fc" id="L91">    long firstDelay = limiter.execute(10, &quot;foo&quot;, DoNothingRunnable.instance());</span>
+<span class="fc" id="L92">    assertEquals(0, firstDelay);</span>
+    
+<span class="fc" id="L94">    long secondDelay = limiter.execute(1, &quot;foo&quot;, DoNothingRunnable.instance());</span>
+    // should be incremented from first delay
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">    assertTrue(secondDelay &gt; 8000);</span>
+<span class="fc" id="L97">  }</span>
+  
+  @Test
+  public void limitTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L101">    Object key = new Object();</span>
+<span class="fc" id="L102">    int rateLimit = 200;</span>
+<span class="fc" id="L103">    final AtomicInteger ranPermits = new AtomicInteger();</span>
+<span class="fc" id="L104">    PriorityScheduler pse = new StrictPriorityScheduler(32);</span>
+    try {
+<span class="fc" id="L106">      KeyedRateLimiterExecutor krls = new KeyedRateLimiterExecutor(pse, rateLimit);</span>
+<span class="fc" id="L107">      ListenableFuture&lt;?&gt; lastFuture = null;</span>
+<span class="fc" id="L108">      double startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L109">      boolean flip = true;</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY * 10; i++) {</span>
+<span class="fc" id="L111">        final int permit = (i % 4) + 1;</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">        if (flip) {</span>
+<span class="fc" id="L113">          lastFuture = krls.submit(permit, key, new Runnable() {</span>
+            @Override
+            public void run() {
+<span class="fc" id="L116">              ranPermits.addAndGet(permit);</span>
+<span class="fc" id="L117">            }</span>
+          });
+<span class="fc" id="L119">          flip = false;</span>
+        } else {
+<span class="fc" id="L121">          lastFuture = krls.submit(permit, key, new Callable&lt;Void&gt;() {</span>
+            @Override
+            public Void call() {
+<span class="fc" id="L124">              ranPermits.addAndGet(permit);</span>
+<span class="fc" id="L125">              return null;</span>
+            }
+          });
+<span class="fc" id="L128">          flip = true;</span>
+        }
+      }
+<span class="fc" id="L131">      lastFuture.get();</span>
+<span class="fc" id="L132">      long endTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L133">      double actualLimit = ranPermits.get() / ((endTime - startTime) / 1000);</span>
+
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">      assertEquals(rateLimit, actualLimit, SLOW_MACHINE ? 150 : 100);</span>
+    } finally {
+<span class="fc" id="L137">      pse.shutdownNow();</span>
+    }
+<span class="fc" id="L139">  }</span>
+  
+  @Test
+  public void executeWithPermitsFail() {
+    try {
+<span class="nc" id="L144">      limiter.execute(-1, new Object(), DoNothingRunnable.instance());</span>
+<span class="nc" id="L145">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L146">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L148">    }</span>
+    try {
+<span class="nc" id="L150">      limiter.execute(1, new Object(), null);</span>
+<span class="nc" id="L151">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L152">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L154">    }</span>
+<span class="fc" id="L155">  }</span>
+  
+  @Test
+  public void submitRunnableWithPermitsFail() {
+    try {
+<span class="nc" id="L160">      limiter.submit(-1, new Object(), DoNothingRunnable.instance());</span>
+<span class="nc" id="L161">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L162">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L164">    }</span>
+    try {
+<span class="nc" id="L166">      limiter.submit(1, new Object(), (Runnable)null);</span>
+<span class="nc" id="L167">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L168">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L170">    }</span>
+<span class="fc" id="L171">  }</span>
+  
+  @Test
+  public void submitCallableWithPermitsFail() {
+    try {
+<span class="nc" id="L176">      limiter.submit(-1, new Object(), new TestCallable());</span>
+<span class="nc" id="L177">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L178">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L180">    }</span>
+    try {
+<span class="nc" id="L182">      limiter.submit(1, new Object(), (Callable&lt;?&gt;)null);</span>
+<span class="nc" id="L183">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L184">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L186">    }</span>
+<span class="fc" id="L187">  }</span>
+  
+  @Test
+  public void submitWithNoKeyFail() {
+    try {
+<span class="nc" id="L192">      limiter.submit(1, null, DoNothingRunnable.instance());</span>
+<span class="nc" id="L193">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L194">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L196">    }</span>
+    try {
+<span class="nc" id="L198">      limiter.submit(1, null, new TestCallable());</span>
+<span class="nc" id="L199">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L200">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L202">    }</span>
+<span class="fc" id="L203">  }</span>
+  
+  @Test
+  public void verifyCleanupTaskTest() {
+<span class="fc" id="L207">    double permits = .1;</span>
+<span class="fc" id="L208">    Object key = new Object();</span>
+<span class="fc" id="L209">    limiter.execute(permits, key, new TestRunnable());</span>
+<span class="fc" id="L210">    assertEquals(2, scheduler.advance(KeyedRateLimiterExecutor.LIMITER_IDLE_TIMEOUT));</span>
+<span class="fc" id="L211">    assertEquals(1, limiter.getTrackedKeyCount());</span>
+<span class="fc" id="L212">    assertFalse(limiter.currentLimiters.isEmpty());</span>
+<span class="pc bpc" id="L213" title="1 of 2 branches missed.">    if (TEST_PROFILE == TestLoad.Stress) {  // too slow for normal tests right now</span>
+<span class="nc" id="L214">      TestUtils.sleep((long)(KeyedRateLimiterExecutor.LIMITER_IDLE_TIMEOUT + (1000 * permits)));</span>
+<span class="nc" id="L215">      TestUtils.blockTillClockAdvances();</span>
+<span class="nc" id="L216">      assertEquals(1, scheduler.advance(KeyedRateLimiterExecutor.LIMITER_IDLE_TIMEOUT));</span>
+<span class="nc" id="L217">      assertTrue(limiter.currentLimiters.isEmpty());</span>
+<span class="nc" id="L218">      assertEquals(0, limiter.getTrackedKeyCount());</span>
+    }
+<span class="fc" id="L220">  }</span>
+  
+  @Test (expected = RejectedExecutionException.class)
+  public void rejectDueToScheduleDelay() {
+<span class="fc" id="L224">    limiter = new KeyedRateLimiterExecutor(scheduler, 1, 1000);</span>
+<span class="fc" id="L225">    limiter.execute(2000, &quot;foo&quot;, DoNothingRunnable.instance());</span>
+<span class="nc" id="L226">    limiter.execute(&quot;foo&quot;, DoNothingRunnable.instance());</span>
+<span class="nc" id="L227">  }</span>
+  
+<span class="fc" id="L229">  private static class KeyedRateLimiterFactory implements SubmitterExecutorFactory {</span>
+<span class="fc" id="L230">    private final PrioritySchedulerFactory schedulerFactory = new PrioritySchedulerFactory();</span>
+<span class="pc bpc" id="L231" title="1 of 2 branches missed.">    private final int rateLimit = TEST_PROFILE == TestLoad.Stress ? 50 : 1000; </span>
+
+    @Override
+    public SubmitterExecutor makeSubmitterExecutor(int poolSize, boolean prestartIfAvailable) {
+<span class="fc" id="L235">      SubmitterScheduler scheduler = schedulerFactory.makeSubmitterScheduler(poolSize, prestartIfAvailable);</span>
+      
+<span class="fc" id="L237">      KeyedRateLimiterExecutor executor = new KeyedRateLimiterExecutor(scheduler, rateLimit, 600_000, </span>
+                                                                       &quot;test&quot;, true);
+      
+<span class="fc" id="L240">      return new SubmitterExecutor() {</span>
+        @Override
+        public void execute(Runnable task) {
+<span class="fc" id="L243">          executor.execute(&quot;foo&quot;, task);</span>
+<span class="fc" id="L244">        }</span>
+
+        @Override
+        public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result) {
+<span class="fc" id="L248">          return executor.submit(&quot;foo&quot;, task, result);</span>
+        }
+
+        @Override
+        public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task) {
+<span class="fc" id="L253">          return executor.submit(&quot;foo&quot;, task);</span>
+        }
+      };
+    }
+
+    @Override
+    public void shutdown() {
+<span class="fc" id="L260">      schedulerFactory.shutdown();</span>
+<span class="fc" id="L261">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

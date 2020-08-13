@@ -1,0 +1,424 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Summarizer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.aggregate</a> &gt; <span class="el_source">Summarizer.java</span></div><h1>Summarizer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.aggregate;
+
+import static tech.tablesaw.api.QuerySupport.numberColumn;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ArrayListMultimap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import tech.tablesaw.api.CategoricalColumn;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.IntColumn;
+import tech.tablesaw.api.Row;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.table.StandardTableSliceGroup;
+import tech.tablesaw.table.TableSliceGroup;
+
+/**
+ * Summarizes the data in a table, by applying functions to a subset of its columns.
+ *
+ * &lt;p&gt;How to use:
+ *
+ * &lt;p&gt;1. Create an instance providing a source table, the column or columns to summarize, and a
+ * function or functions to apply 2. Applying the functions to the designated columns, possibly
+ * creating subgroup summaries using one of the by() methods
+ */
+public class Summarizer {
+
+<span class="pc" id="L47">  private String[] groupColumnNames = new String[0];</span>
+  private final Table original;
+  private Table temp;
+<span class="pc" id="L50">  private final List&lt;String&gt; summarizedColumns = new ArrayList&lt;&gt;();</span>
+  private final AggregateFunction&lt;?, ?&gt;[] reductions;
+  private static final String GROUP_COL_TEMP_NAME = &quot;_temp_group_col_&quot;;
+
+  /**
+   * Returns an object capable of summarizing the given column in the given sourceTable, by applying
+   * the given functions
+   */
+<span class="fc" id="L58">  public Summarizer(Table sourceTable, Column&lt;?&gt; column, AggregateFunction&lt;?, ?&gt;... functions) {</span>
+<span class="fc" id="L59">    Table tempTable = Table.create(sourceTable.name());</span>
+<span class="fc" id="L60">    tempTable.addColumns(column);</span>
+<span class="fc" id="L61">    this.temp = tempTable;</span>
+<span class="fc" id="L62">    this.original = sourceTable;</span>
+<span class="fc" id="L63">    summarizedColumns.add(column.name());</span>
+<span class="fc" id="L64">    this.reductions = functions;</span>
+<span class="fc" id="L65">  }</span>
+
+  /**
+   * Returns an object capable of summarizing the given column in the given sourceTable, by applying
+   * the given functions
+   */
+  public Summarizer(
+<span class="fc" id="L72">      Table sourceTable, List&lt;String&gt; columnNames, AggregateFunction&lt;?, ?&gt;... functions) {</span>
+<span class="fc" id="L73">    Table tempTable = Table.create(sourceTable.name());</span>
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    for (String nm : columnNames) {</span>
+<span class="fc" id="L75">      tempTable.addColumns(sourceTable.column(nm));</span>
+<span class="fc" id="L76">    }</span>
+<span class="fc" id="L77">    this.temp = tempTable;</span>
+<span class="fc" id="L78">    this.original = sourceTable;</span>
+<span class="fc" id="L79">    summarizedColumns.addAll(columnNames);</span>
+<span class="fc" id="L80">    this.reductions = functions;</span>
+<span class="fc" id="L81">  }</span>
+
+  /**
+   * Returns an object capable of summarizing the given columns in the given sourceTable, by
+   * applying the given functions
+   */
+  public Summarizer(
+      Table sourceTable,
+      Column&lt;?&gt; column1,
+      Column&lt;?&gt; column2,
+<span class="fc" id="L91">      AggregateFunction&lt;?, ?&gt;... functions) {</span>
+<span class="fc" id="L92">    Table tempTable = Table.create(sourceTable.name());</span>
+<span class="fc" id="L93">    tempTable.addColumns(column1);</span>
+<span class="fc" id="L94">    tempTable.addColumns(column2);</span>
+<span class="fc" id="L95">    this.temp = tempTable;</span>
+<span class="fc" id="L96">    this.original = sourceTable;</span>
+<span class="fc" id="L97">    summarizedColumns.add(column1.name());</span>
+<span class="fc" id="L98">    summarizedColumns.add(column2.name());</span>
+<span class="fc" id="L99">    this.reductions = functions;</span>
+<span class="fc" id="L100">  }</span>
+
+  /**
+   * Returns an object capable of summarizing the given columns in the given sourceTable, by
+   * applying the given functions
+   */
+  public Summarizer(
+      Table sourceTable,
+      Column&lt;?&gt; column1,
+      Column&lt;?&gt; column2,
+      Column&lt;?&gt; column3,
+      Column&lt;?&gt; column4,
+<span class="nc" id="L112">      AggregateFunction&lt;?, ?&gt;... functions) {</span>
+<span class="nc bnc" id="L113" title="All 2 branches missed.">    Preconditions.checkArgument(!sourceTable.isEmpty(), &quot;The table to summarize is empty.&quot;);</span>
+<span class="nc" id="L114">    Table tempTable = Table.create(sourceTable.name());</span>
+<span class="nc" id="L115">    tempTable.addColumns(column1);</span>
+<span class="nc" id="L116">    tempTable.addColumns(column2);</span>
+<span class="nc" id="L117">    tempTable.addColumns(column3);</span>
+<span class="nc" id="L118">    tempTable.addColumns(column4);</span>
+<span class="nc" id="L119">    this.temp = tempTable;</span>
+<span class="nc" id="L120">    this.original = sourceTable;</span>
+<span class="nc" id="L121">    summarizedColumns.add(column1.name());</span>
+<span class="nc" id="L122">    summarizedColumns.add(column2.name());</span>
+<span class="nc" id="L123">    summarizedColumns.add(column3.name());</span>
+<span class="nc" id="L124">    summarizedColumns.add(column4.name());</span>
+<span class="nc" id="L125">    this.reductions = functions;</span>
+<span class="nc" id="L126">  }</span>
+
+  /**
+   * Returns an object capable of summarizing the given column2 in the given sourceTable, by
+   * applying the given functions
+   */
+  public Summarizer(
+      Table sourceTable,
+      Column&lt;?&gt; column1,
+      Column&lt;?&gt; column2,
+      Column&lt;?&gt; column3,
+<span class="nc" id="L137">      AggregateFunction&lt;?, ?&gt;... functions) {</span>
+<span class="nc" id="L138">    Table tempTable = Table.create(sourceTable.name());</span>
+<span class="nc" id="L139">    tempTable.addColumns(column1);</span>
+<span class="nc" id="L140">    tempTable.addColumns(column2);</span>
+<span class="nc" id="L141">    tempTable.addColumns(column3);</span>
+<span class="nc" id="L142">    this.temp = tempTable;</span>
+<span class="nc" id="L143">    this.original = sourceTable;</span>
+<span class="nc" id="L144">    summarizedColumns.add(column1.name());</span>
+<span class="nc" id="L145">    summarizedColumns.add(column2.name());</span>
+<span class="nc" id="L146">    summarizedColumns.add(column3.name());</span>
+<span class="nc" id="L147">    this.reductions = functions;</span>
+<span class="nc" id="L148">  }</span>
+
+  public Table by(String... columnNames) {
+<span class="fc bfc" id="L151" title="All 2 branches covered.">    for (String columnName : columnNames) {</span>
+<span class="pc bpc" id="L152" title="1 of 2 branches missed.">      if (tableDoesNotContain(columnName, temp)) {</span>
+<span class="fc" id="L153">        temp.addColumns(original.column(columnName));</span>
+      }
+    }
+<span class="fc" id="L156">    TableSliceGroup group = StandardTableSliceGroup.create(temp, columnNames);</span>
+<span class="fc" id="L157">    return summarize(group);</span>
+  }
+
+  public Table by(CategoricalColumn&lt;?&gt;... columns) {
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    for (Column&lt;?&gt; c : columns) {</span>
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">      if (!temp.containsColumn(c)) {</span>
+<span class="fc" id="L163">        temp.addColumns(c);</span>
+      }
+    }
+<span class="fc" id="L166">    TableSliceGroup group = StandardTableSliceGroup.create(temp, columns);</span>
+<span class="fc" id="L167">    return summarize(group);</span>
+  }
+
+  /**
+   * Returns a summary of the records grouped into subsets of the same size, in the order they
+   * appear
+   *
+   * &lt;p&gt;All groups have the same number of records. If the final group has fewer than step records
+   * it is dropped.
+   *
+   * @deprecated Use by(step) instead.
+   * @param groupNameTemplate a prefix for the group name
+   * @param step the number or records to include in each group
+   */
+  @Deprecated
+  public Table by(String groupNameTemplate, int step) {
+
+<span class="fc" id="L184">    IntColumn groupColumn = assignToGroupsByStep(step);</span>
+<span class="fc" id="L185">    Table t = getSummaryTable(groupColumn);</span>
+
+<span class="fc" id="L187">    StringColumn groupNameColumn = StringColumn.create(&quot;Group&quot;, t.rowCount());</span>
+
+<span class="fc bfc" id="L189" title="All 2 branches covered.">    for (Row row : t) {</span>
+<span class="fc" id="L190">      int id = row.getInt(groupColumn.name());</span>
+<span class="fc" id="L191">      String name = groupNameTemplate + &quot;: &quot; + id;</span>
+<span class="fc" id="L192">      groupNameColumn.set(row.getRowNumber(), name);</span>
+<span class="fc" id="L193">    }</span>
+
+<span class="fc" id="L195">    t.replaceColumn(0, groupNameColumn);</span>
+<span class="fc" id="L196">    return t;</span>
+  }
+
+  private Table getSummaryTable(IntColumn groupColumn) {
+<span class="fc" id="L200">    TableSliceGroup group = StandardTableSliceGroup.create(temp, groupColumn);</span>
+<span class="fc" id="L201">    return summarize(group);</span>
+  }
+
+  /**
+   * Returns a summary of the records grouped into subsets of the same size, in the order they
+   * appear
+   *
+   * &lt;p&gt;All groups have the same number of records. If the final group has fewer than step records
+   * it is dropped.
+   *
+   * @param step the number or records to include in each group
+   */
+  public Table by(int step) {
+
+<span class="fc" id="L215">    IntColumn groupColumn = assignToGroupsByStep(step);</span>
+<span class="fc" id="L216">    Table t = getSummaryTable(groupColumn);</span>
+<span class="fc" id="L217">    t.column(GROUP_COL_TEMP_NAME).setName(&quot;Group&quot;);</span>
+<span class="fc" id="L218">    return t;</span>
+  }
+
+  /**
+   * Returns the result of applying to the functions to all the values in the appropriate column
+   * TODO add a test that uses a non numeric return type with apply
+   */
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  public Table apply() {
+
+<span class="fc bfc" id="L228" title="All 2 branches covered.">    if (groupColumnNames.length &gt; 0) {</span>
+<span class="fc" id="L229">      TableSliceGroup group = StandardTableSliceGroup.create(temp, groupColumnNames);</span>
+<span class="fc" id="L230">      return summarize(group);</span>
+    } else {
+<span class="fc" id="L232">      List&lt;Table&gt; results = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L233">      ArrayListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; reductionMultimap =</span>
+<span class="fc" id="L234">          getAggregateFunctionMultimap();</span>
+
+<span class="fc bfc" id="L236" title="All 2 branches covered.">      for (String name : reductionMultimap.keys()) {</span>
+<span class="fc" id="L237">        List&lt;AggregateFunction&lt;?, ?&gt;&gt; reductions = reductionMultimap.get(name);</span>
+<span class="fc" id="L238">        Table table = TableSliceGroup.summaryTableName(temp);</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">        for (AggregateFunction function : reductions) {</span>
+<span class="fc" id="L240">          Column column = temp.column(name);</span>
+<span class="fc" id="L241">          Object result = function.summarize(column);</span>
+<span class="fc" id="L242">          ColumnType type = function.returnType();</span>
+<span class="fc" id="L243">          Column newColumn =</span>
+<span class="fc" id="L244">              type.create(TableSliceGroup.aggregateColumnName(name, function.functionName()));</span>
+<span class="fc bfc" id="L245" title="All 2 branches covered.">          if (result instanceof Number) {</span>
+<span class="fc" id="L246">            Number number = (Number) result;</span>
+<span class="fc" id="L247">            newColumn.append(number.doubleValue());</span>
+<span class="fc" id="L248">          } else {</span>
+<span class="fc" id="L249">            newColumn.append(result);</span>
+          }
+<span class="fc" id="L251">          table.addColumns(newColumn);</span>
+<span class="fc" id="L252">        }</span>
+<span class="fc" id="L253">        results.add(table);</span>
+<span class="fc" id="L254">      }</span>
+<span class="fc" id="L255">      return (combineTables(results));</span>
+    }
+  }
+
+  public Table having(Function&lt;Table, Selection&gt; selection) {
+<span class="pc bpc" id="L260" title="1 of 2 branches missed.">    Preconditions.checkState(</span>
+        groupColumnNames.length &gt; 0,
+        &quot;Cannot perform having() on summary that has not been grouped first&quot;);
+
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    if (groupColumnNames[0].equals(GROUP_COL_TEMP_NAME)) {</span>
+<span class="fc" id="L265">      IntColumn groupColumn = temp.intColumn(GROUP_COL_TEMP_NAME);</span>
+<span class="fc" id="L266">      TableSliceGroup group = StandardTableSliceGroup.create(temp, groupColumn);</span>
+<span class="fc" id="L267">      return summarizeForHaving(group, selection);</span>
+    } else {
+<span class="fc" id="L269">      TableSliceGroup group = StandardTableSliceGroup.create(temp, groupColumnNames);</span>
+<span class="fc" id="L270">      return summarizeForHaving(group, selection);</span>
+    }
+  }
+
+  public Summarizer groupBy(CategoricalColumn&lt;?&gt;... columns) {
+<span class="fc" id="L275">    groupColumnNames = new String[columns.length];</span>
+<span class="fc bfc" id="L276" title="All 2 branches covered.">    for (int i = 0; i &lt; columns.length; i++) {</span>
+<span class="fc" id="L277">      Column&lt;?&gt; c = columns[i];</span>
+<span class="pc bpc" id="L278" title="1 of 2 branches missed.">      if (!temp.containsColumn(c)) {</span>
+<span class="fc" id="L279">        temp.addColumns(c);</span>
+<span class="fc" id="L280">        groupColumnNames[i] = c.name();</span>
+      }
+    }
+<span class="fc" id="L283">    return this;</span>
+  }
+
+  public Summarizer groupBy(String... columnNames) {
+<span class="nc bnc" id="L287" title="All 2 branches missed.">    for (String columnName : columnNames) {</span>
+<span class="nc bnc" id="L288" title="All 2 branches missed.">      if (tableDoesNotContain(columnName, temp)) {</span>
+<span class="nc" id="L289">        temp.addColumns(original.column(columnName));</span>
+      }
+    }
+<span class="nc" id="L292">    groupColumnNames = columnNames;</span>
+<span class="nc" id="L293">    return this;</span>
+  }
+
+  public Summarizer groupBy(int step) {
+<span class="fc" id="L297">    IntColumn groupColumn = assignToGroupsByStep(step);</span>
+<span class="pc bpc" id="L298" title="1 of 2 branches missed.">    if (tableDoesNotContain(groupColumn.name(), temp)) {</span>
+<span class="nc" id="L299">      temp.addColumns(groupColumn);</span>
+    }
+<span class="fc" id="L301">    groupColumnNames = new String[] {GROUP_COL_TEMP_NAME};</span>
+
+<span class="fc" id="L303">    return this;</span>
+  }
+
+  /**
+   * Associates the columns to be summarized with the functions that match their type. All valid
+   * combinations are used
+   *
+   * @param group A table slice group
+   * @param selectionFunction Function that provides the filter for the having clause
+   * @return A table containing a row of summarized data for each group in the table slice group
+   */
+  private Table summarizeForHaving(
+      TableSliceGroup group, Function&lt;Table, Selection&gt; selectionFunction) {
+<span class="fc" id="L316">    List&lt;Table&gt; results = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L318">    ArrayListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; reductionMultimap =</span>
+<span class="fc" id="L319">        getAggregateFunctionMultimap();</span>
+
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    for (String name : reductionMultimap.keys()) {</span>
+<span class="fc" id="L322">      List&lt;AggregateFunction&lt;?, ?&gt;&gt; reductions = reductionMultimap.get(name);</span>
+<span class="fc" id="L323">      Table groupTable = group.aggregate(name, reductions.toArray(new AggregateFunction&lt;?, ?&gt;[0]));</span>
+<span class="fc" id="L324">      groupTable = groupTable.where(selectionFunction);</span>
+<span class="pc bpc" id="L325" title="1 of 2 branches missed.">      if (!groupTable.isEmpty()) {</span>
+<span class="fc" id="L326">        results.add(groupTable);</span>
+      }
+<span class="fc" id="L328">    }</span>
+<span class="fc" id="L329">    return combineTables(results);</span>
+  }
+
+  private IntColumn assignToGroupsByStep(int step) {
+<span class="fc" id="L333">    IntColumn groupColumn = IntColumn.create(GROUP_COL_TEMP_NAME, temp.rowCount());</span>
+<span class="fc" id="L334">    temp.addColumns(groupColumn);</span>
+
+<span class="fc" id="L336">    int groupId = 1;</span>
+<span class="fc" id="L337">    int withinGroupCount = 0;</span>
+<span class="fc" id="L338">    Row row = new Row(temp);</span>
+
+<span class="fc bfc" id="L340" title="All 2 branches covered.">    while (row.hasNext()) {</span>
+<span class="fc" id="L341">      row.next();</span>
+<span class="fc bfc" id="L342" title="All 2 branches covered.">      if (withinGroupCount &lt; step) {</span>
+<span class="fc" id="L343">        withinGroupCount++;</span>
+<span class="fc" id="L344">        groupColumn.set(row.getRowNumber(), groupId);</span>
+      } else {
+<span class="fc" id="L346">        groupId++;</span>
+<span class="fc" id="L347">        groupColumn.set(row.getRowNumber(), groupId);</span>
+<span class="fc" id="L348">        withinGroupCount = 1;</span>
+      }
+    }
+<span class="fc" id="L351">    int lastGroupSize = temp.where(numberColumn(GROUP_COL_TEMP_NAME).isEqualTo(groupId)).rowCount();</span>
+<span class="pc bpc" id="L352" title="1 of 2 branches missed.">    if (lastGroupSize &lt; step) {</span>
+<span class="fc" id="L353">      temp = temp.dropWhere(numberColumn(GROUP_COL_TEMP_NAME).isEqualTo(groupId));</span>
+    }
+<span class="fc" id="L355">    temp.addColumns(IntColumn.indexColumn(&quot;index&quot;, temp.rowCount(), 1));</span>
+<span class="fc" id="L356">    return groupColumn;</span>
+  }
+
+  /**
+   * Associates the columns to be summarized with the functions that match their type. All valid
+   * combinations are used
+   *
+   * @param group A table slice group
+   * @return A table containing a row of summarized data for each group in the table slice group
+   */
+  private Table summarize(TableSliceGroup group) {
+<span class="fc" id="L367">    List&lt;Table&gt; results = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L369">    ArrayListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; reductionMultimap =</span>
+<span class="fc" id="L370">        getAggregateFunctionMultimap();</span>
+
+<span class="fc bfc" id="L372" title="All 2 branches covered.">    for (String name : reductionMultimap.keys()) {</span>
+<span class="fc" id="L373">      List&lt;AggregateFunction&lt;?, ?&gt;&gt; reductions = reductionMultimap.get(name);</span>
+<span class="fc" id="L374">      results.add(group.aggregate(name, reductions.toArray(new AggregateFunction&lt;?, ?&gt;[0])));</span>
+<span class="fc" id="L375">    }</span>
+<span class="fc" id="L376">    return combineTables(results);</span>
+  }
+
+  private ArrayListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; getAggregateFunctionMultimap() {
+    ArrayListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; reductionMultimap =
+<span class="fc" id="L381">        ArrayListMultimap.create();</span>
+<span class="fc bfc" id="L382" title="All 2 branches covered.">    for (String name : summarizedColumns) {</span>
+<span class="fc" id="L383">      Column&lt;?&gt; column = temp.column(name);</span>
+<span class="fc" id="L384">      ColumnType type = column.type();</span>
+<span class="fc bfc" id="L385" title="All 2 branches covered.">      for (AggregateFunction&lt;?, ?&gt; reduction : reductions) {</span>
+<span class="fc bfc" id="L386" title="All 2 branches covered.">        if (reduction.isCompatibleColumn(type)) {</span>
+<span class="fc" id="L387">          reductionMultimap.put(name, reduction);</span>
+        }
+      }
+<span class="fc" id="L390">    }</span>
+<span class="pc bpc" id="L391" title="1 of 2 branches missed.">    if (reductionMultimap.isEmpty()) {</span>
+<span class="nc" id="L392">      throw new IllegalArgumentException(</span>
+          &quot;None of the aggregate functions provided apply to the summarized column type(s).&quot;);
+    }
+<span class="fc" id="L395">    return reductionMultimap;</span>
+  }
+
+  private Table combineTables(List&lt;Table&gt; tables) {
+<span class="fc bfc" id="L399" title="All 2 branches covered.">    if (tables.size() == 1) {</span>
+<span class="fc" id="L400">      return tables.get(0);</span>
+    }
+
+<span class="fc" id="L403">    Table result = null;</span>
+<span class="fc bfc" id="L404" title="All 2 branches covered.">    for (Table table : tables) {</span>
+<span class="fc bfc" id="L405" title="All 2 branches covered.">      if (result == null) {</span>
+<span class="fc" id="L406">        result = table;</span>
+      } else {
+<span class="fc bfc" id="L408" title="All 2 branches covered.">        for (Column&lt;?&gt; column : table.columns()) {</span>
+<span class="fc bfc" id="L409" title="All 2 branches covered.">          if (tableDoesNotContain(column.name(), result)) {</span>
+<span class="fc" id="L410">            result.addColumns(column);</span>
+          }
+<span class="fc" id="L412">        }</span>
+      }
+<span class="fc" id="L414">    }</span>
+<span class="fc" id="L415">    return result;</span>
+  }
+
+  private boolean tableDoesNotContain(String columnName, Table table) {
+<span class="fc" id="L419">    List&lt;String&gt; upperCase =</span>
+<span class="fc" id="L420">        table.columnNames().stream().map(String::toUpperCase).collect(Collectors.toList());</span>
+<span class="fc bfc" id="L421" title="All 2 branches covered.">    return !upperCase.contains(columnName.toUpperCase());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

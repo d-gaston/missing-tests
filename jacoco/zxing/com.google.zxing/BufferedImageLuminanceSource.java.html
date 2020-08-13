@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BufferedImageLuminanceSource.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing</a> &gt; <span class="el_source">BufferedImageLuminanceSource.java</span></div><h1>BufferedImageLuminanceSource.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2009 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing;
+
+import java.awt.Graphics2D;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
+import java.awt.image.WritableRaster;
+
+/**
+ * This LuminanceSource implementation is meant for J2SE clients and our blackbox unit tests.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ * @author Sean Owen
+ * @author code@elektrowolle.de (Wolfgang Jung)
+ */
+public final class BufferedImageLuminanceSource extends LuminanceSource {
+
+  private static final double MINUS_45_IN_RADIANS = -0.7853981633974483; // Math.toRadians(-45.0)
+
+  private final BufferedImage image;
+  private final int left;
+  private final int top;
+
+  public BufferedImageLuminanceSource(BufferedImage image) {
+<span class="fc" id="L40">    this(image, 0, 0, image.getWidth(), image.getHeight());</span>
+<span class="fc" id="L41">  }</span>
+
+  public BufferedImageLuminanceSource(BufferedImage image, int left, int top, int width, int height) {
+<span class="fc" id="L44">    super(width, height);</span>
+
+<span class="fc bfc" id="L46" title="All 2 branches covered.">    if (image.getType() == BufferedImage.TYPE_BYTE_GRAY) {</span>
+<span class="fc" id="L47">      this.image = image;</span>
+    } else {
+<span class="fc" id="L49">      int sourceWidth = image.getWidth();</span>
+<span class="fc" id="L50">      int sourceHeight = image.getHeight();</span>
+<span class="pc bpc" id="L51" title="2 of 4 branches missed.">      if (left + width &gt; sourceWidth || top + height &gt; sourceHeight) {</span>
+<span class="nc" id="L52">        throw new IllegalArgumentException(&quot;Crop rectangle does not fit within image data.&quot;);</span>
+      }
+
+<span class="fc" id="L55">      this.image = new BufferedImage(sourceWidth, sourceHeight, BufferedImage.TYPE_BYTE_GRAY);</span>
+
+<span class="fc" id="L57">      WritableRaster raster = this.image.getRaster();</span>
+<span class="fc" id="L58">      int[] buffer = new int[width];</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">      for (int y = top; y &lt; top + height; y++) {</span>
+<span class="fc" id="L60">        image.getRGB(left, y, width, 1, buffer, 0, sourceWidth);</span>
+<span class="fc bfc" id="L61" title="All 2 branches covered.">        for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc" id="L62">          int pixel = buffer[x];</span>
+
+          // The color of fully-transparent pixels is irrelevant. They are often, technically, fully-transparent
+          // black (0 alpha, and then 0 RGB). They are often used, of course as the &quot;white&quot; area in a
+          // barcode image. Force any such pixel to be white:
+<span class="fc bfc" id="L67" title="All 2 branches covered.">          if ((pixel &amp; 0xFF000000) == 0) {</span>
+<span class="fc" id="L68">            pixel = 0xFFFFFFFF; // = white</span>
+          }
+
+          // .299R + 0.587G + 0.114B (YUV/YIQ for PAL and NTSC), 
+          // (306*R) &gt;&gt; 10 is approximately equal to R*0.299, and so on.
+          // 0x200 &gt;&gt; 10 is 0.5, it implements rounding.
+<span class="fc" id="L74">          buffer[x] =</span>
+              (306 * ((pixel &gt;&gt; 16) &amp; 0xFF) +
+               601 * ((pixel &gt;&gt; 8) &amp; 0xFF) +
+               117 * (pixel &amp; 0xFF) +
+               0x200) &gt;&gt; 10;
+        }
+<span class="fc" id="L80">        raster.setPixels(left, y, width, 1, buffer);</span>
+      }
+
+    }
+<span class="fc" id="L84">    this.left = left;</span>
+<span class="fc" id="L85">    this.top = top;</span>
+<span class="fc" id="L86">  }</span>
+
+  @Override
+  public byte[] getRow(int y, byte[] row) {
+<span class="pc bpc" id="L90" title="2 of 4 branches missed.">    if (y &lt; 0 || y &gt;= getHeight()) {</span>
+<span class="nc" id="L91">      throw new IllegalArgumentException(&quot;Requested row is outside the image: &quot; + y);</span>
+    }
+<span class="fc" id="L93">    int width = getWidth();</span>
+<span class="pc bpc" id="L94" title="2 of 4 branches missed.">    if (row == null || row.length &lt; width) {</span>
+<span class="nc" id="L95">      row = new byte[width];</span>
+    }
+    // The underlying raster of image consists of bytes with the luminance values
+<span class="fc" id="L98">    image.getRaster().getDataElements(left, top + y, width, 1, row);</span>
+<span class="fc" id="L99">    return row;</span>
+  }
+
+  @Override
+  public byte[] getMatrix() {
+<span class="fc" id="L104">    int width = getWidth();</span>
+<span class="fc" id="L105">    int height = getHeight();</span>
+<span class="fc" id="L106">    int area = width * height;</span>
+<span class="fc" id="L107">    byte[] matrix = new byte[area];</span>
+    // The underlying raster of image consists of area bytes with the luminance values
+<span class="fc" id="L109">    image.getRaster().getDataElements(left, top, width, height, matrix);</span>
+<span class="fc" id="L110">    return matrix;</span>
+  }
+
+  @Override
+  public boolean isCropSupported() {
+<span class="nc" id="L115">    return true;</span>
+  }
+
+  @Override
+  public LuminanceSource crop(int left, int top, int width, int height) {
+<span class="fc" id="L120">    return new BufferedImageLuminanceSource(image, this.left + left, this.top + top, width, height);</span>
+  }
+
+  /**
+   * This is always true, since the image is a gray-scale image.
+   *
+   * @return true
+   */
+  @Override
+  public boolean isRotateSupported() {
+<span class="fc" id="L130">    return true;</span>
+  }
+
+  @Override
+  public LuminanceSource rotateCounterClockwise() {
+<span class="fc" id="L135">    int sourceWidth = image.getWidth();</span>
+<span class="fc" id="L136">    int sourceHeight = image.getHeight();</span>
+
+    // Rotate 90 degrees counterclockwise.
+<span class="fc" id="L139">    AffineTransform transform = new AffineTransform(0.0, -1.0, 1.0, 0.0, 0.0, sourceWidth);</span>
+
+    // Note width/height are flipped since we are rotating 90 degrees.
+<span class="fc" id="L142">    BufferedImage rotatedImage = new BufferedImage(sourceHeight, sourceWidth, BufferedImage.TYPE_BYTE_GRAY);</span>
+
+    // Draw the original image into rotated, via transformation
+<span class="fc" id="L145">    Graphics2D g = rotatedImage.createGraphics();</span>
+<span class="fc" id="L146">    g.drawImage(image, transform, null);</span>
+<span class="fc" id="L147">    g.dispose();</span>
+
+    // Maintain the cropped region, but rotate it too.
+<span class="fc" id="L150">    int width = getWidth();</span>
+<span class="fc" id="L151">    return new BufferedImageLuminanceSource(rotatedImage, top, sourceWidth - (left + width), getHeight(), width);</span>
+  }
+
+  @Override
+  public LuminanceSource rotateCounterClockwise45() {
+<span class="nc" id="L156">    int width = getWidth();</span>
+<span class="nc" id="L157">    int height = getHeight();</span>
+
+<span class="nc" id="L159">    int oldCenterX = left + width / 2;</span>
+<span class="nc" id="L160">    int oldCenterY = top + height / 2;</span>
+
+    // Rotate 45 degrees counterclockwise.
+<span class="nc" id="L163">    AffineTransform transform = AffineTransform.getRotateInstance(MINUS_45_IN_RADIANS, oldCenterX, oldCenterY);</span>
+
+<span class="nc" id="L165">    int sourceDimension = Math.max(image.getWidth(), image.getHeight());</span>
+<span class="nc" id="L166">    BufferedImage rotatedImage = new BufferedImage(sourceDimension, sourceDimension, BufferedImage.TYPE_BYTE_GRAY);</span>
+
+    // Draw the original image into rotated, via transformation
+<span class="nc" id="L169">    Graphics2D g = rotatedImage.createGraphics();</span>
+<span class="nc" id="L170">    g.drawImage(image, transform, null);</span>
+<span class="nc" id="L171">    g.dispose();</span>
+
+<span class="nc" id="L173">    int halfDimension = Math.max(width, height) / 2;</span>
+<span class="nc" id="L174">    int newLeft = Math.max(0, oldCenterX - halfDimension);</span>
+<span class="nc" id="L175">    int newTop = Math.max(0, oldCenterY - halfDimension);</span>
+<span class="nc" id="L176">    int newRight = Math.min(sourceDimension - 1, oldCenterX + halfDimension);</span>
+<span class="nc" id="L177">    int newBottom = Math.min(sourceDimension - 1, oldCenterY + halfDimension);</span>
+
+<span class="nc" id="L179">    return new BufferedImageLuminanceSource(rotatedImage, newLeft, newTop, newRight - newLeft, newBottom - newTop);</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UPCABarcode.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">barbecue$All_in_barbecue_test.exec</a> &gt; <a href="index.source.html" class="el_package">net.sourceforge.barbecue.linear.upc</a> &gt; <span class="el_source">UPCABarcode.java</span></div><h1>UPCABarcode.java</h1><pre class="source lang-java linenums">/***********************************************************************************************************************
+ * Copyright (c) 2004, International Barcode Consortium
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *
+ * Redistributions of source code must retain the above copyright notice, this list of
+ * conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright notice, this list of
+ * conditions and the following disclaimer in the documentation and/or other materials
+ * provided with the distribution.
+ * Neither the name of the International Barcode Consortium nor the names of any contributors may be used to endorse
+ * or promote products derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ ***********************************************************************************************************************/
+
+package net.sourceforge.barbecue.linear.upc;
+
+import net.sourceforge.barbecue.BarcodeException;
+import net.sourceforge.barbecue.Module;
+import net.sourceforge.barbecue.linear.LinearBarcode;
+import net.sourceforge.barbecue.output.LabelLayoutFactory;
+import net.sourceforge.barbecue.output.Output;
+import net.sourceforge.barbecue.output.OutputException;
+
+import java.awt.*;
+import java.text.CharacterIterator;
+import java.text.StringCharacterIterator;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * This is a concrete implementation of the UPC-A barcode.
+ *
+ * @author &lt;a href=&quot;mailto:james@metalskin.com&quot;&gt;James Jenner&lt;/a&gt;
+ */
+public class UPCABarcode extends LinearBarcode {
+    /**
+     * A list of type identifiers for the UPC-A barcode format
+     */
+<span class="fc" id="L51">    public static final String[] TYPES = new String[]{</span>
+        &quot;UPC-A&quot;, &quot;UPCA&quot;
+    };
+<span class="fc" id="L54">    protected boolean requiresChecksum = false;</span>
+    protected final String label;
+<span class="fc" id="L56">    protected int width = 0;</span>
+
+    protected final static int CHECKSUM_WEIGHT_EVEN = 1;
+    protected final static int CHECKSUM_WEIGHT_ODD = 3;
+
+    public final static int BARCODE_LENGTH = 11;
+
+    /**
+     * Constructs a basic mode UPC-A barcode with the specified data and an optional
+     * checksum.  The length of the barcode is 11, 12 with a checksum.  If the length
+     * passed is only 11, then a checksum will be automaticaly added.  If the length
+     * is not 11 or 12 then a barcode exception will be thrown.
+     *
+     * @param data The data to encode
+     * @throws BarcodeException
+     *          If the data to be encoded is invalid
+     */
+    public UPCABarcode(String data) throws BarcodeException {
+<span class="nc" id="L74">        this(data, false);</span>
+<span class="nc" id="L75">    }</span>
+
+    public UPCABarcode(String data, boolean randomWeight) throws BarcodeException {
+<span class="fc" id="L78">        super(validateChars(data));</span>
+
+<span class="pc bpc" id="L80" title="1 of 2 branches missed.">        if (data.length() != getBarcodeLength()) {</span>
+<span class="fc" id="L81">            throw new BarcodeException(&quot;Invalid data length&quot;);</span>
+        }
+
+<span class="nc" id="L84">        requiresChecksum = true;</span>
+<span class="nc bnc" id="L85" title="All 2 branches missed.">        if (randomWeight) {</span>
+<span class="nc" id="L86">            data = populateRandonWeightCheckDigit(data);</span>
+        }
+<span class="nc" id="L88">        this.label = data;</span>
+<span class="nc" id="L89">    }</span>
+
+    protected int getBarcodeLength() {
+<span class="fc" id="L92">        return BARCODE_LENGTH;</span>
+    }
+
+    /* TODO: The following is very close to EAN13Barcode's version,
+     * should change this so EAN13Barcode doesn't need to override.  
+     * 
+     * Note that the following code uses member functions to get static 
+     * values from the ModuleFactory class, instead of referencing the 
+     * values directly.  This is so sub-classes can override the 
+     * member functions and thus change the static values.
+     */
+    protected Dimension draw(Output output, int x, int y, int barWidth, int barHeight) throws OutputException {
+<span class="nc" id="L104">        int currentX = x;</span>
+
+<span class="nc" id="L106">        output.beginDraw();</span>
+        
+        // need to change the output.barHeight value, appears to be no means to do so
+<span class="nc" id="L109">        int guardBarHeight = 0;</span>
+<span class="nc" id="L110">        int shortBarHeight = barHeight;</span>
+<span class="nc" id="L111">        int textHeight = 10 * barWidth;</span>
+
+<span class="nc bnc" id="L113" title="All 2 branches missed.">        if (drawingText) {</span>
+<span class="nc" id="L114">            shortBarHeight = barHeight - (11 * barWidth);</span>
+<span class="nc" id="L115">            guardBarHeight = shortBarHeight + (6 * barWidth);</span>
+        } else {
+<span class="nc" id="L117">            shortBarHeight = barHeight - (6 * barWidth);</span>
+<span class="nc" id="L118">            guardBarHeight = barHeight;</span>
+        }
+
+<span class="nc" id="L121">        String text = getLabel();</span>
+<span class="nc" id="L122">        int currentY = this.barHeight + y;</span>
+
+<span class="nc" id="L124">        Module[] modules = encodeData();</span>
+
+<span class="nc" id="L126">        String leadChar = String.valueOf(text.charAt(0));</span>
+<span class="nc" id="L127">        String endChar = String.valueOf(text.charAt(text.length() - 1));</span>
+<span class="nc" id="L128">        String firstSet = text.substring(1, getLeftWidth());</span>
+<span class="nc" id="L129">        String lastSet = text.substring(getLeftWidth(), 11);</span>
+
+<span class="nc bnc" id="L131" title="All 2 branches missed.">        if (requiresChecksum) {</span>
+<span class="nc" id="L132">            endChar = calculateChecksum().getSymbol();</span>
+        }
+
+<span class="nc" id="L135">        int startTextPos = 0;</span>
+<span class="nc" id="L136">        int firstTextPos = 0;</span>
+<span class="nc" id="L137">        int secondTextPos = 0;</span>
+<span class="nc" id="L138">        int endTextPos = 0;</span>
+
+<span class="nc" id="L140">        int startTextW = x;</span>
+<span class="nc" id="L141">        int firstTextW = 0;</span>
+<span class="nc" id="L142">        int secondTextW = 0;</span>
+<span class="nc" id="L143">        int endTextW = 0;</span>
+<span class="nc" id="L144">        int width = 0;</span>
+<span class="nc" id="L145">        Module preAmble = getPreAmble();</span>
+<span class="nc" id="L146">        Module postAmble = getPostAmble();</span>
+<span class="nc" id="L147">        startTextW = 0;</span>
+        
+        // draw leading white space
+<span class="nc bnc" id="L150" title="All 2 branches missed.">        if (super.drawingQuietSection) {</span>
+<span class="nc" id="L151">            currentX += drawModule(getLeftMargin(), output, currentX, y, barWidth, shortBarHeight + textHeight);</span>
+        }
+<span class="nc" id="L153">        startTextPos = x;</span>
+<span class="nc" id="L154">        startTextW = currentX - startTextPos;</span>
+<span class="nc" id="L155">        width = currentX;</span>
+<span class="nc" id="L156">        int guardCharSize = getGuardCharSize();</span>
+<span class="nc" id="L157">        int leftWidth = getLeftWidth();</span>
+        
+        // draw the left guard
+<span class="nc bnc" id="L160" title="All 2 branches missed.">        if (preAmble != null) {</span>
+<span class="nc" id="L161">            currentX += drawModule(preAmble, output, currentX, y, barWidth, guardBarHeight);</span>
+        }
+        
+        // draw first char in left side
+<span class="nc bnc" id="L165" title="All 2 branches missed.">        for (int i = 0; i &lt; guardCharSize; i++) {</span>
+<span class="nc" id="L166">            currentX += drawModule(modules[0], output, currentX, y, barWidth, guardBarHeight);</span>
+        }
+<span class="nc" id="L168">        firstTextPos = currentX;</span>
+        
+        // draw the blank space below the guard
+<span class="nc" id="L171">        width = currentX - width;</span>
+<span class="nc" id="L172">        output.paintBackground(currentX - width, guardBarHeight, width, ((shortBarHeight + textHeight) - guardBarHeight));</span>
+
+<span class="nc bnc" id="L174" title="All 2 branches missed.">        for (int i = guardCharSize; i &lt; leftWidth; i++) {</span>
+<span class="nc" id="L175">            currentX += drawModule(modules[i], output, currentX, y, barWidth, shortBarHeight);</span>
+        }
+
+<span class="nc" id="L178">        firstTextW = currentX - firstTextPos;</span>
+
+<span class="nc" id="L180">        width = currentX;</span>
+        // draw the centre guard
+<span class="nc" id="L182">        currentX += drawModule(getCentreGuard(), output, currentX, y, barWidth, guardBarHeight);</span>
+<span class="nc" id="L183">        secondTextPos = currentX;</span>
+        
+        // draw the blank space below the guard
+<span class="nc" id="L186">        width = currentX - width;</span>
+<span class="nc" id="L187">        output.paintBackground(currentX - width, guardBarHeight, width, ((shortBarHeight + textHeight) - guardBarHeight));</span>
+
+<span class="nc" id="L189">        int endGuardOffset = modules.length - guardCharSize;</span>
+
+<span class="nc bnc" id="L191" title="All 2 branches missed.">        for (int i = leftWidth; i &lt; endGuardOffset; i++) {</span>
+<span class="nc" id="L192">            currentX += drawModule(modules[i], output, currentX, y, barWidth, shortBarHeight);</span>
+        }
+
+<span class="nc" id="L195">        secondTextW = currentX - secondTextPos;</span>
+<span class="nc" id="L196">        width = currentX;</span>
+<span class="nc bnc" id="L197" title="All 2 branches missed.">        for (int i = endGuardOffset; i &lt; modules.length; i++) {</span>
+<span class="nc" id="L198">            currentX += drawModule(modules[i], output, currentX, y, barWidth, guardBarHeight);</span>
+        }
+        
+        // draw the right guard
+<span class="nc bnc" id="L202" title="All 2 branches missed.">        if (postAmble != null) {</span>
+<span class="nc" id="L203">            currentX += drawModule(postAmble, output, currentX, y, barWidth, guardBarHeight);</span>
+        }
+        
+        // draw the blank space below the guard
+<span class="nc" id="L207">        width = currentX - width;</span>
+<span class="nc" id="L208">        output.paintBackground(currentX - width, guardBarHeight, width, ((shortBarHeight + textHeight) - guardBarHeight));</span>
+
+<span class="nc" id="L210">        endTextPos = currentX;</span>
+
+        // draw trailing white space
+<span class="nc bnc" id="L213" title="All 2 branches missed.">        if (super.drawingQuietSection) {</span>
+<span class="nc" id="L214">            currentX += drawModule(getRightMargin(), output, currentX, y, barWidth, shortBarHeight + textHeight);</span>
+        }
+
+<span class="nc" id="L217">        endTextW = currentX - endTextPos;</span>
+
+<span class="nc bnc" id="L219" title="All 2 branches missed.">        if (drawingText) {</span>
+<span class="nc" id="L220">            output.drawText(leadChar, LabelLayoutFactory.createMarginLayout(startTextPos, shortBarHeight, startTextW, textHeight));</span>
+<span class="nc" id="L221">            output.drawText(firstSet, LabelLayoutFactory.createMarginLayout(firstTextPos, shortBarHeight, firstTextW, textHeight));</span>
+<span class="nc" id="L222">            output.drawText(lastSet, LabelLayoutFactory.createMarginLayout(secondTextPos, shortBarHeight, secondTextW, textHeight));</span>
+<span class="nc" id="L223">            output.drawText(endChar, LabelLayoutFactory.createMarginLayout(endTextPos, shortBarHeight, endTextW, textHeight));</span>
+        }
+
+
+<span class="nc" id="L227">        Dimension size = new Dimension((int) (currentX - x), (int) (currentY) - y);</span>
+
+<span class="nc" id="L229">        output.endDraw((int) size.getWidth(), (int) size.getHeight());</span>
+
+<span class="nc" id="L231">        return size;</span>
+    }
+
+    /**
+     * Returns the text that will be displayed underneath the barcode (if requested).
+     *
+     * @return The text label for the barcode
+     */
+    public String getLabel() {
+<span class="nc" id="L240">        return label;</span>
+    }
+
+    /**
+     * Returns the barcode width for the given resolution.
+     *
+     * @param resolution The output resolution
+     * @return The barcode width
+     */
+    protected double getBarcodeWidth(int resolution) {
+<span class="nc" id="L250">        encodeData();</span>
+
+<span class="nc" id="L252">        return barWidth * width;</span>
+    }
+
+    /**
+     * Returns the encoded data for the barcode.
+     *
+     * @return An array of modules that represent the data as a barcode
+     */
+    protected Module[] encodeData() {
+<span class="nc" id="L261">        List modules = new ArrayList();</span>
+<span class="nc" id="L262">        Module module = null;</span>
+<span class="nc" id="L263">        int len = data.length();</span>
+        char c;
+<span class="nc bnc" id="L265" title="All 2 branches missed.">        for (int i = 0; i &lt; len; i++) {</span>
+<span class="nc" id="L266">            c = data.charAt(i);</span>
+
+<span class="nc" id="L268">            module = ModuleFactory.getModule(String.valueOf(c), i);</span>
+<span class="nc" id="L269">            width += module.widthInBars();</span>
+<span class="nc" id="L270">            modules.add(module);</span>
+        }
+
+<span class="nc bnc" id="L273" title="All 2 branches missed.">        if (requiresChecksum) {</span>
+<span class="nc" id="L274">            module = ModuleFactory.getModule(calculateChecksum().getSymbol(), modules.size() - 1);</span>
+<span class="nc" id="L275">            width += module.widthInBars();</span>
+<span class="nc" id="L276">            modules.add(module);</span>
+        }
+
+<span class="nc" id="L279">        return (Module[]) modules.toArray(new Module[0]);</span>
+    }
+
+    /**
+     * Returns the checksum for the barcode, pre-encoded as a Module.
+     *
+     * @return a Mod-10 caclulated checksum, if no checksum is required Null
+     */
+    protected Module calculateChecksum() {
+<span class="nc bnc" id="L288" title="All 2 branches missed.">        if (requiresChecksum) {</span>
+<span class="nc" id="L289">            return ModuleFactory.getModuleForIndex(getMod10CheckDigit(data));</span>
+        }
+
+<span class="nc" id="L292">        return null;</span>
+    }
+
+    protected int getGuardCharSize() {
+<span class="nc" id="L296">        return ModuleFactory.GUARD_CHAR_SIZE;</span>
+    }
+
+    protected int getLeftWidth() {
+<span class="nc" id="L300">        return ModuleFactory.LEFT_WIDTH;</span>
+    }
+
+    protected Module getLeftMargin() {
+<span class="nc" id="L304">        return ModuleFactory.LEFT_MARGIN;</span>
+
+    }
+
+    protected Module getRightMargin() {
+<span class="nc" id="L309">        return ModuleFactory.RIGHT_MARGIN;</span>
+    }
+
+    /**
+     * Returns the pre-amble for the barcode.
+     *
+     * @return pre amble for the barcode
+     */
+    protected Module getPreAmble() {
+<span class="nc" id="L318">        return ModuleFactory.LEFT_GUARD;</span>
+    }
+
+    /**
+     * Returns the middle bar for the barcode.
+     *
+     * @return pre amble for the barcode
+     */
+    protected Module getCentreGuard() {
+<span class="nc" id="L327">        return ModuleFactory.CENTRE_GUARD;</span>
+    }
+
+    /**
+     * Returns the post-amble for the barcode.
+     *
+     * @return postamble for the barcode
+     */
+    protected Module getPostAmble() {
+<span class="nc" id="L336">        return ModuleFactory.RIGHT_GUARD;</span>
+    }
+
+    public static int getMod10CheckDigit(String data) {
+<span class="nc" id="L340">        int sum = 0;</span>
+<span class="nc" id="L341">        int len = data.length();</span>
+        int value;
+        
+        /*
+         * note that the for loop is from 0, as indexing for data is from 0,
+         * but the modolo 10 considers the first character position to be 1.
+         * as such 0 is odd, not even and 1 is even not odd, so compare to
+         * 1, not 0 when attempting to find if its an even or odd number.
+         */
+<span class="nc bnc" id="L350" title="All 2 branches missed.">        for (int i = 0; i &lt; len; i++) {</span>
+            try {
+<span class="nc" id="L352">                value = Integer.parseInt(String.valueOf(data.charAt(i)));</span>
+<span class="nc bnc" id="L353" title="All 2 branches missed.">                sum += calculateChecksum(value, (i % 2) == 1);</span>
+<span class="nc" id="L354">            } catch (NumberFormatException e) {</span>
+<span class="nc" id="L355">            }</span>
+        }
+
+<span class="nc" id="L358">        int checkDigit = 10 - (sum % 10);</span>
+
+<span class="nc bnc" id="L360" title="All 2 branches missed.">        if (checkDigit == 10) {</span>
+<span class="nc" id="L361">            checkDigit = 0;</span>
+        }
+
+<span class="nc" id="L364">        return checkDigit;</span>
+    }
+
+    protected static int calculateChecksum(int value, boolean even) {
+<span class="nc bnc" id="L368" title="All 2 branches missed.">        if (even) {</span>
+<span class="nc" id="L369">            return value * CHECKSUM_WEIGHT_EVEN;</span>
+        } else {
+<span class="nc" id="L371">            return value * CHECKSUM_WEIGHT_ODD;</span>
+        }
+    }
+
+    private static String validateChars(String data) throws BarcodeException {
+<span class="pc bpc" id="L376" title="1 of 2 branches missed.">        if (data == null) {</span>
+<span class="nc" id="L377">            throw new IllegalArgumentException(&quot;data param must contain a value, not null&quot;);</span>
+        }
+
+<span class="fc" id="L380">        StringCharacterIterator iter = new StringCharacterIterator(data);</span>
+<span class="fc bfc" id="L381" title="All 2 branches covered.">        for (char c = iter.first(); c != CharacterIterator.DONE; c = iter.next()) {</span>
+<span class="pc bpc" id="L382" title="1 of 2 branches missed.">            if (!ModuleFactory.hasModule(String.valueOf(c))) {</span>
+<span class="nc" id="L383">                throw new BarcodeException(&quot;Illegal character&quot;);</span>
+            }
+        }
+
+<span class="fc" id="L387">        return data;</span>
+    }
+
+    private String populateRandonWeightCheckDigit(String upc) {
+<span class="nc" id="L391">        int[][] checkDigitCalcs = {{0, 2, 4, 6, 8, 9, 1, 3, 5, 7}, {0, 3, 6, 9, 2, 5, 8, 1, 4, 7},</span>
+                                   {0, 5, 9, 4, 8, 3, 7, 2, 6, 1}};
+<span class="nc" id="L393">        int total = 0;</span>
+<span class="nc" id="L394">        int checkdigit = 0;</span>
+<span class="nc" id="L395">        char[] upcCharArray = upc.toCharArray();</span>
+
+<span class="nc" id="L397">        int digit = Character.digit(upcCharArray[7], 10);</span>
+<span class="nc" id="L398">        total += checkDigitCalcs[0][digit];</span>
+<span class="nc" id="L399">        digit = Character.digit(upcCharArray[8], 10);</span>
+<span class="nc" id="L400">        total += checkDigitCalcs[0][digit];</span>
+
+        /*
+         * calculation changes for the 9th and 10th digits which is why we are
+         * not using a loop
+         */
+<span class="nc" id="L406">        digit = Character.digit(upcCharArray[9], 10);</span>
+<span class="nc" id="L407">        total += checkDigitCalcs[1][digit];</span>
+<span class="nc" id="L408">        digit = Character.digit(upcCharArray[10], 10);</span>
+<span class="nc" id="L409">        total += checkDigitCalcs[2][digit];</span>
+
+<span class="nc bnc" id="L411" title="All 2 branches missed.">        if ((total % 10) == 0) {</span>
+<span class="nc" id="L412">            checkdigit = 0;</span>
+        } else {
+<span class="nc" id="L414">            checkdigit = (10 - (total % 10));</span>
+        }
+
+<span class="nc" id="L417">        upcCharArray[6] = String.valueOf(checkdigit).charAt(0);</span>
+<span class="nc" id="L418">        return String.valueOf(upcCharArray);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

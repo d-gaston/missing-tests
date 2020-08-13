@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>StandardTableSliceGroup.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.table</a> &gt; <span class="el_source">StandardTableSliceGroup.java</span></div><h1>StandardTableSliceGroup.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.table;
+
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import tech.tablesaw.api.CategoricalColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.selection.BitmapBackedSelection;
+import tech.tablesaw.selection.Selection;
+
+/** A group of tables formed by performing splitting operations on an original table */
+public class StandardTableSliceGroup extends TableSliceGroup {
+
+  private StandardTableSliceGroup(Table original, CategoricalColumn&lt;?&gt;... columns) {
+<span class="fc" id="L34">    super(original, splitColumnNames(columns));</span>
+<span class="fc" id="L35">    setSourceTable(getSourceTable());</span>
+<span class="fc" id="L36">    splitOn(getSplitColumnNames());</span>
+<span class="fc" id="L37">  }</span>
+
+  private static String[] splitColumnNames(CategoricalColumn&lt;?&gt;... columns) {
+<span class="fc" id="L40">    String[] splitColumnNames = new String[columns.length];</span>
+<span class="fc bfc" id="L41" title="All 2 branches covered.">    for (int i = 0; i &lt; columns.length; i++) {</span>
+<span class="fc" id="L42">      splitColumnNames[i] = columns[i].name();</span>
+    }
+<span class="fc" id="L44">    return splitColumnNames;</span>
+  }
+
+  /**
+   * Returns a viewGroup splitting the original table on the given columns. The named columns must
+   * be CategoricalColumns
+   */
+  public static StandardTableSliceGroup create(Table original, String... columnsNames) {
+<span class="fc" id="L52">    List&lt;CategoricalColumn&lt;?&gt;&gt; columns = original.categoricalColumns(columnsNames);</span>
+<span class="fc" id="L53">    return new StandardTableSliceGroup(original, columns.toArray(new CategoricalColumn&lt;?&gt;[0]));</span>
+  }
+
+  /**
+   * Returns a viewGroup splitting the original table on the given columns. The named columns must
+   * be CategoricalColumns
+   */
+  public static StandardTableSliceGroup create(Table original, CategoricalColumn&lt;?&gt;... columns) {
+<span class="fc" id="L61">    return new StandardTableSliceGroup(original, columns);</span>
+  }
+
+  /**
+   * Splits the sourceTable table into sub-tables, grouping on the columns whose names are given in
+   * splitColumnNames
+   */
+  private void splitOn(String... columnNames) {
+<span class="fc" id="L69">    Map&lt;ByteArray, Selection&gt; selectionMap = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc" id="L70">    Map&lt;ByteArray, String&gt; sliceNameMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L71">    List&lt;Column&lt;?&gt;&gt; splitColumns = getSourceTable().columns(columnNames);</span>
+<span class="fc" id="L72">    int byteSize = getByteSize(splitColumns);</span>
+
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    for (int i = 0; i &lt; getSourceTable().rowCount(); i++) {</span>
+<span class="fc" id="L75">      StringBuilder stringKey = new StringBuilder();</span>
+<span class="fc" id="L76">      ByteBuffer byteBuffer = ByteBuffer.allocate(byteSize);</span>
+<span class="fc" id="L77">      int count = 0;</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">      for (Column&lt;?&gt; col : splitColumns) {</span>
+<span class="fc" id="L79">        stringKey.append(col.getString(i));</span>
+<span class="fc bfc" id="L80" title="All 2 branches covered.">        if (count &lt; splitColumns.size() - 1) {</span>
+<span class="fc" id="L81">          stringKey.append(SPLIT_STRING);</span>
+        }
+<span class="fc" id="L83">        byteBuffer.put(col.asBytes(i));</span>
+<span class="fc" id="L84">        count++;</span>
+<span class="fc" id="L85">      }</span>
+      // Add to the matching selection.
+<span class="fc" id="L87">      ByteArray byteArray = new ByteArray(byteBuffer.array());</span>
+<span class="fc" id="L88">      Selection selection = selectionMap.getOrDefault(byteArray, new BitmapBackedSelection());</span>
+<span class="fc" id="L89">      selection.add(i);</span>
+<span class="fc" id="L90">      selectionMap.put(byteArray, selection);</span>
+<span class="fc" id="L91">      sliceNameMap.put(byteArray, stringKey.toString());</span>
+    }
+
+    // Add all slices
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    for (Entry&lt;ByteArray, Selection&gt; entry : selectionMap.entrySet()) {</span>
+<span class="fc" id="L96">      TableSlice slice = new TableSlice(getSourceTable(), entry.getValue());</span>
+<span class="fc" id="L97">      slice.setName(sliceNameMap.get(entry.getKey()));</span>
+<span class="fc" id="L98">      addSlice(slice);</span>
+<span class="fc" id="L99">    }</span>
+<span class="fc" id="L100">  }</span>
+
+  /** Wrapper class for a byte[] that implements equals and hashcode. */
+  private static class ByteArray {
+    final byte[] bytes;
+
+<span class="fc" id="L106">    ByteArray(byte[] bytes) {</span>
+<span class="fc" id="L107">      this.bytes = bytes;</span>
+<span class="fc" id="L108">    }</span>
+
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L112" title="1 of 2 branches missed.">      if (this == o) return true;</span>
+<span class="pc bpc" id="L113" title="2 of 4 branches missed.">      if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L114">      ByteArray byteArray = (ByteArray) o;</span>
+<span class="fc" id="L115">      return Arrays.equals(bytes, byteArray.bytes);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="fc" id="L120">      return Arrays.hashCode(bytes);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

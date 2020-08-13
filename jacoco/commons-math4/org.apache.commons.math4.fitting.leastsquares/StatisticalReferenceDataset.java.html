@@ -1,0 +1,374 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>StatisticalReferenceDataset.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.fitting.leastsquares</a> &gt; <span class="el_source">StatisticalReferenceDataset.java</span></div><h1>StatisticalReferenceDataset.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.fitting.leastsquares;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.util.ArrayList;
+
+import org.apache.commons.math4.analysis.MultivariateMatrixFunction;
+import org.apache.commons.math4.analysis.MultivariateVectorFunction;
+import org.apache.commons.math4.util.MathArrays;
+
+/**
+ * This class gives access to the statistical reference datasets provided by the
+ * NIST (available
+ * &lt;a href=&quot;http://www.itl.nist.gov/div898/strd/general/dataarchive.html&quot;&gt;here&lt;/a&gt;).
+ * Instances of this class can be created by invocation of the
+ * {@link StatisticalReferenceDatasetFactory}.
+ */
+public abstract class StatisticalReferenceDataset {
+    /** The name of this dataset. */
+    private final String name;
+    /** The total number of observations (data points). */
+    private final int numObservations;
+    /** The total number of parameters. */
+    private final int numParameters;
+    /** The total number of starting points for the optimizations. */
+    private final int numStartingPoints;
+    /** The values of the predictor. */
+    private final double[] x;
+    /** The values of the response. */
+    private final double[] y;
+    /**
+     * The starting values. {@code startingValues[j][i]} is the value of the
+     * {@code i}-th parameter in the {@code j}-th set of starting values.
+     */
+    private final double[][] startingValues;
+    /** The certified values of the parameters. */
+    private final double[] a;
+    /** The certified values of the standard deviation of the parameters. */
+    private final double[] sigA;
+    /** The certified value of the residual sum of squares. */
+    private double residualSumOfSquares;
+    /** The least-squares problem. */
+    private final LeastSquaresProblem problem;
+
+    /**
+     * Creates a new instance of this class from the specified data file. The
+     * file must follow the StRD format.
+     *
+     * @param in the data file
+     * @throws IOException if an I/O error occurs
+     */
+    public StatisticalReferenceDataset(final BufferedReader in)
+<span class="fc" id="L69">        throws IOException {</span>
+
+<span class="fc" id="L71">        final ArrayList&lt;String&gt; lines = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L72" title="All 2 branches covered.">        for (String line = in.readLine(); line != null; line = in.readLine()) {</span>
+<span class="fc" id="L73">            lines.add(line);</span>
+        }
+<span class="fc" id="L75">        int[] index = findLineNumbers(&quot;Data&quot;, lines);</span>
+<span class="pc bpc" id="L76" title="1 of 2 branches missed.">        if (index == null) {</span>
+<span class="nc" id="L77">            throw new AssertionError(&quot;could not find line indices for data&quot;);</span>
+        }
+<span class="fc" id="L79">        this.numObservations = index[1] - index[0] + 1;</span>
+<span class="fc" id="L80">        this.x = new double[this.numObservations];</span>
+<span class="fc" id="L81">        this.y = new double[this.numObservations];</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">        for (int i = 0; i &lt; this.numObservations; i++) {</span>
+<span class="fc" id="L83">            final String line = lines.get(index[0] + i - 1);</span>
+<span class="fc" id="L84">            final String[] tokens = line.trim().split(&quot; ++&quot;);</span>
+            // Data columns are in reverse order!!!
+<span class="fc" id="L86">            this.y[i] = Double.parseDouble(tokens[0]);</span>
+<span class="fc" id="L87">            this.x[i] = Double.parseDouble(tokens[1]);</span>
+        }
+
+<span class="fc" id="L90">        index = findLineNumbers(&quot;Starting Values&quot;, lines);</span>
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">        if (index == null) {</span>
+<span class="nc" id="L92">            throw new AssertionError(</span>
+                                     &quot;could not find line indices for starting values&quot;);
+        }
+<span class="fc" id="L95">        this.numParameters = index[1] - index[0] + 1;</span>
+
+<span class="fc" id="L97">        double[][] start = null;</span>
+<span class="fc" id="L98">        this.a = new double[numParameters];</span>
+<span class="fc" id="L99">        this.sigA = new double[numParameters];</span>
+<span class="fc bfc" id="L100" title="All 2 branches covered.">        for (int i = 0; i &lt; numParameters; i++) {</span>
+<span class="fc" id="L101">            final String line = lines.get(index[0] + i - 1);</span>
+<span class="fc" id="L102">            final String[] tokens = line.trim().split(&quot; ++&quot;);</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">            if (start == null) {</span>
+<span class="fc" id="L104">                start = new double[tokens.length - 4][numParameters];</span>
+            }
+<span class="fc bfc" id="L106" title="All 2 branches covered.">            for (int j = 2; j &lt; tokens.length - 2; j++) {</span>
+<span class="fc" id="L107">                start[j - 2][i] = Double.parseDouble(tokens[j]);</span>
+            }
+<span class="fc" id="L109">            this.a[i] = Double.parseDouble(tokens[tokens.length - 2]);</span>
+<span class="fc" id="L110">            this.sigA[i] = Double.parseDouble(tokens[tokens.length - 1]);</span>
+        }
+<span class="pc bpc" id="L112" title="1 of 2 branches missed.">        if (start == null) {</span>
+<span class="nc" id="L113">            throw new IOException(&quot;could not find starting values&quot;);</span>
+        }
+<span class="fc" id="L115">        this.numStartingPoints = start.length;</span>
+<span class="fc" id="L116">        this.startingValues = start;</span>
+
+<span class="fc" id="L118">        double dummyDouble = Double.NaN;</span>
+<span class="fc" id="L119">        String dummyString = null;</span>
+<span class="fc bfc" id="L120" title="All 2 branches covered.">        for (String line : lines) {</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">            if (line.contains(&quot;Dataset Name:&quot;)) {</span>
+<span class="fc" id="L122">                dummyString = line</span>
+<span class="fc" id="L123">                    .substring(line.indexOf(&quot;Dataset Name:&quot;) + 13,</span>
+<span class="fc" id="L124">                               line.indexOf(&quot;(&quot;)).trim();</span>
+            }
+<span class="fc bfc" id="L126" title="All 2 branches covered.">            if (line.contains(&quot;Residual Sum of Squares&quot;)) {</span>
+<span class="fc" id="L127">                final String[] tokens = line.split(&quot; ++&quot;);</span>
+<span class="fc" id="L128">                dummyDouble = Double.parseDouble(tokens[4].trim());</span>
+            }
+<span class="fc" id="L130">        }</span>
+<span class="pc bpc" id="L131" title="1 of 2 branches missed.">        if (Double.isNaN(dummyDouble)) {</span>
+<span class="nc" id="L132">            throw new IOException(</span>
+                                  &quot;could not find certified value of residual sum of squares&quot;);
+        }
+<span class="fc" id="L135">        this.residualSumOfSquares = dummyDouble;</span>
+
+<span class="pc bpc" id="L137" title="1 of 2 branches missed.">        if (dummyString == null) {</span>
+<span class="nc" id="L138">            throw new IOException(&quot;could not find dataset name&quot;);</span>
+        }
+<span class="fc" id="L140">        this.name = dummyString;</span>
+
+<span class="fc" id="L142">        this.problem = new LeastSquaresProblem();</span>
+<span class="fc" id="L143">    }</span>
+
+<span class="fc" id="L145">    class LeastSquaresProblem {</span>
+        public MultivariateVectorFunction getModelFunction() {
+<span class="fc" id="L147">            return new MultivariateVectorFunction() {</span>
+                @Override
+                public double[] value(final double[] a) {
+<span class="fc" id="L150">                    final int n = getNumObservations();</span>
+<span class="fc" id="L151">                    final double[] yhat = new double[n];</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">                    for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L153">                        yhat[i] = getModelValue(getX(i), a);</span>
+                    }
+<span class="fc" id="L155">                    return yhat;</span>
+                }
+            };
+        }
+
+        public MultivariateMatrixFunction getModelFunctionJacobian() {
+<span class="fc" id="L161">            return new MultivariateMatrixFunction() {</span>
+                @Override
+                public double[][] value(final double[] a)
+                    throws IllegalArgumentException {
+<span class="fc" id="L165">                    final int n = getNumObservations();</span>
+<span class="fc" id="L166">                    final double[][] j = new double[n][];</span>
+<span class="fc bfc" id="L167" title="All 2 branches covered.">                    for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L168">                        j[i] = getModelDerivatives(getX(i), a);</span>
+                    }
+<span class="fc" id="L170">                    return j;</span>
+                }
+            };
+        }
+    }
+
+    /**
+     * Returns the name of this dataset.
+     *
+     * @return the name of the dataset
+     */
+    public String getName() {
+<span class="fc" id="L182">        return name;</span>
+    }
+
+    /**
+     * Returns the total number of observations (data points).
+     *
+     * @return the number of observations
+     */
+    public int getNumObservations() {
+<span class="fc" id="L191">        return numObservations;</span>
+    }
+
+    /**
+     * Returns a copy of the data arrays. The data is laid out as follows &lt;li&gt;
+     * {@code data[0][i] = x[i]},&lt;/li&gt; &lt;li&gt;{@code data[1][i] = y[i]},&lt;/li&gt;
+     *
+     * @return the array of data points.
+     */
+    public double[][] getData() {
+<span class="fc" id="L201">        return new double[][] {</span>
+<span class="fc" id="L202">            MathArrays.copyOf(x), MathArrays.copyOf(y)</span>
+        };
+    }
+
+    /**
+     * Returns the x-value of the {@code i}-th data point.
+     *
+     * @param i the index of the data point
+     * @return the x-value
+     */
+    public double getX(final int i) {
+<span class="fc" id="L213">        return x[i];</span>
+    }
+
+    /**
+     * Returns the y-value of the {@code i}-th data point.
+     *
+     * @param i the index of the data point
+     * @return the y-value
+     */
+    public double getY(final int i) {
+<span class="nc" id="L223">        return y[i];</span>
+    }
+
+    /**
+     * Returns the total number of parameters.
+     *
+     * @return the number of parameters
+     */
+    public int getNumParameters() {
+<span class="nc" id="L232">        return numParameters;</span>
+    }
+
+    /**
+     * Returns the certified values of the paramters.
+     *
+     * @return the values of the parameters
+     */
+    public double[] getParameters() {
+<span class="fc" id="L241">        return MathArrays.copyOf(a);</span>
+    }
+
+    /**
+     * Returns the certified value of the {@code i}-th parameter.
+     *
+     * @param i the index of the parameter
+     * @return the value of the parameter
+     */
+    public double getParameter(final int i) {
+<span class="fc" id="L251">        return a[i];</span>
+    }
+
+    /**
+     * Reurns the certified values of the standard deviations of the parameters.
+     *
+     * @return the standard deviations of the parameters
+     */
+    public double[] getParametersStandardDeviations() {
+<span class="fc" id="L260">        return MathArrays.copyOf(sigA);</span>
+    }
+
+    /**
+     * Returns the certified value of the standard deviation of the {@code i}-th
+     * parameter.
+     *
+     * @param i the index of the parameter
+     * @return the standard deviation of the parameter
+     */
+    public double getParameterStandardDeviation(final int i) {
+<span class="nc" id="L271">        return sigA[i];</span>
+    }
+
+    /**
+     * Returns the certified value of the residual sum of squares.
+     *
+     * @return the residual sum of squares
+     */
+    public double getResidualSumOfSquares() {
+<span class="fc" id="L280">        return residualSumOfSquares;</span>
+    }
+
+    /**
+     * Returns the total number of starting points (initial guesses for the
+     * optimization process).
+     *
+     * @return the number of starting points
+     */
+    public int getNumStartingPoints() {
+<span class="nc" id="L290">        return numStartingPoints;</span>
+    }
+
+    /**
+     * Returns the {@code i}-th set of initial values of the parameters.
+     *
+     * @param i the index of the starting point
+     * @return the starting point
+     */
+    public double[] getStartingPoint(final int i) {
+<span class="fc" id="L300">        return MathArrays.copyOf(startingValues[i]);</span>
+    }
+
+    /**
+     * Returns the least-squares problem corresponding to fitting the model to
+     * the specified data.
+     *
+     * @return the least-squares problem
+     */
+    public LeastSquaresProblem getLeastSquaresProblem() {
+<span class="fc" id="L310">        return problem;</span>
+    }
+
+    /**
+     * Returns the value of the model for the specified values of the predictor
+     * variable and the parameters.
+     *
+     * @param x the predictor variable
+     * @param a the parameters
+     * @return the value of the model
+     */
+    public abstract double getModelValue(final double x, final double[] a);
+
+    /**
+     * Returns the values of the partial derivatives of the model with respect
+     * to the parameters.
+     *
+     * @param x the predictor variable
+     * @param a the parameters
+     * @return the partial derivatives
+     */
+    public abstract double[] getModelDerivatives(final double x,
+                                                 final double[] a);
+
+    /**
+     * &lt;p&gt;
+     * Parses the specified text lines, and extracts the indices of the first
+     * and last lines of the data defined by the specified {@code key}. This key
+     * must be one of
+     * &lt;/p&gt;
+     * &lt;ul&gt;
+     * &lt;li&gt;{@code &quot;Starting Values&quot;},&lt;/li&gt;
+     * &lt;li&gt;{@code &quot;Certified Values&quot;},&lt;/li&gt;
+     * &lt;li&gt;{@code &quot;Data&quot;}.&lt;/li&gt;
+     * &lt;/ul&gt;
+     * &lt;p&gt;
+     * In the NIST data files, the line indices are separated by the keywords
+     * {@code &quot;lines&quot;} and {@code &quot;to&quot;}.
+     * &lt;/p&gt;
+     *
+     * @param lines the line of text to be parsed
+     * @return an array of two {@code int}s. First value is the index of the
+     *         first line, second value is the index of the last line.
+     *         {@code null} if the line could not be parsed.
+     */
+    private static int[] findLineNumbers(final String key,
+                                         final Iterable&lt;String&gt; lines) {
+<span class="pc bpc" id="L357" title="1 of 2 branches missed.">        for (String text : lines) {</span>
+<span class="fc bfc" id="L358" title="All 4 branches covered.">            boolean flag = text.contains(key) &amp;&amp; text.contains(&quot;lines&quot;) &amp;&amp;</span>
+<span class="pc bpc" id="L359" title="2 of 4 branches missed.">                           text.contains(&quot;to&quot;) &amp;&amp; text.contains(&quot;)&quot;);</span>
+<span class="fc bfc" id="L360" title="All 2 branches covered.">            if (flag) {</span>
+<span class="fc" id="L361">                final int[] numbers = new int[2];</span>
+<span class="fc" id="L362">                final String from = text.substring(text.indexOf(&quot;lines&quot;) + 5,</span>
+<span class="fc" id="L363">                                                   text.indexOf(&quot;to&quot;));</span>
+<span class="fc" id="L364">                numbers[0] = Integer.parseInt(from.trim());</span>
+<span class="fc" id="L365">                final String to = text.substring(text.indexOf(&quot;to&quot;) + 2,</span>
+<span class="fc" id="L366">                                                 text.indexOf(&quot;)&quot;));</span>
+<span class="fc" id="L367">                numbers[1] = Integer.parseInt(to.trim());</span>
+<span class="fc" id="L368">                return numbers;</span>
+            }
+<span class="fc" id="L370">        }</span>
+<span class="nc" id="L371">        return null;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

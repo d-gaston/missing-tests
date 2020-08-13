@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CodaBarReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">CodaBarReader.java</span></div><h1>CodaBarReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitArray;
+
+import java.util.Arrays;
+import java.util.Map;
+
+/**
+ * &lt;p&gt;Decodes Codabar barcodes.&lt;/p&gt;
+ *
+ * @author Bas Vijfwinkel
+ * @author David Walker
+ */
+public final class CodaBarReader extends OneDReader {
+
+  // These values are critical for determining how permissive the decoding
+  // will be. All stripe sizes must be within the window these define, as
+  // compared to the average stripe size.
+  private static final float MAX_ACCEPTABLE = 2.0f;
+  private static final float PADDING = 1.5f;
+
+  private static final String ALPHABET_STRING = &quot;0123456789-$:/.+ABCD&quot;;
+<span class="fc" id="L44">  static final char[] ALPHABET = ALPHABET_STRING.toCharArray();</span>
+
+  /**
+   * These represent the encodings of characters, as patterns of wide and narrow bars. The 7 least-significant bits of
+   * each int correspond to the pattern of wide and narrow, with 1s representing &quot;wide&quot; and 0s representing narrow.
+   */
+<span class="fc" id="L50">  static final int[] CHARACTER_ENCODINGS = {</span>
+      0x003, 0x006, 0x009, 0x060, 0x012, 0x042, 0x021, 0x024, 0x030, 0x048, // 0-9
+      0x00c, 0x018, 0x045, 0x051, 0x054, 0x015, 0x01A, 0x029, 0x00B, 0x00E, // -$:/.+ABCD
+  };
+
+  // minimal number of characters that should be present (including start and stop characters)
+  // under normal circumstances this should be set to 3, but can be set higher
+  // as a last-ditch attempt to reduce false positives.
+  private static final int MIN_CHARACTER_LENGTH = 3;
+
+  // official start and end patterns
+<span class="fc" id="L61">  private static final char[] STARTEND_ENCODING = {'A', 'B', 'C', 'D'};</span>
+  // some Codabar generator allow the Codabar string to be closed by every
+  // character. This will cause lots of false positives!
+
+  // some industries use a checksum standard but this is not part of the original Codabar standard
+  // for more information see : http://www.mecsw.com/specs/codabar.html
+
+  // Keep some instance variables to avoid reallocations
+  private final StringBuilder decodeRowResult;
+  private int[] counters;
+  private int counterLength;
+
+<span class="fc" id="L73">  public CodaBarReader() {</span>
+<span class="fc" id="L74">    decodeRowResult = new StringBuilder(20);</span>
+<span class="fc" id="L75">    counters = new int[80];</span>
+<span class="fc" id="L76">    counterLength = 0;</span>
+<span class="fc" id="L77">  }</span>
+
+  @Override
+  public Result decodeRow(int rowNumber, BitArray row, Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException {
+
+<span class="fc" id="L82">    Arrays.fill(counters, 0);</span>
+<span class="fc" id="L83">    setCounters(row);</span>
+<span class="fc" id="L84">    int startOffset = findStartPattern();</span>
+<span class="fc" id="L85">    int nextStart = startOffset;</span>
+
+<span class="fc" id="L87">    decodeRowResult.setLength(0);</span>
+    do {
+<span class="fc" id="L89">      int charOffset = toNarrowWidePattern(nextStart);</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">      if (charOffset == -1) {</span>
+<span class="fc" id="L91">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+      // Hack: We store the position in the alphabet table into a
+      // StringBuilder, so that we can access the decoded patterns in
+      // validatePattern. We'll translate to the actual characters later.
+<span class="fc" id="L96">      decodeRowResult.append((char) charOffset);</span>
+<span class="fc" id="L97">      nextStart += 8;</span>
+      // Stop as soon as we see the end character.
+<span class="fc bfc" id="L99" title="All 2 branches covered.">      if (decodeRowResult.length() &gt; 1 &amp;&amp;</span>
+<span class="fc bfc" id="L100" title="All 2 branches covered.">          arrayContains(STARTEND_ENCODING, ALPHABET[charOffset])) {</span>
+<span class="fc" id="L101">        break;</span>
+      }
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    } while (nextStart &lt; counterLength); // no fixed end pattern so keep on reading while data is available</span>
+
+    // Look for whitespace after pattern:
+<span class="fc" id="L106">    int trailingWhitespace = counters[nextStart - 1];</span>
+<span class="fc" id="L107">    int lastPatternSize = 0;</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">    for (int i = -8; i &lt; -1; i++) {</span>
+<span class="fc" id="L109">      lastPatternSize += counters[nextStart + i];</span>
+    }
+
+    // We need to see whitespace equal to 50% of the last pattern size,
+    // otherwise this is probably a false positive. The exception is if we are
+    // at the end of the row. (I.e. the barcode barely fits.)
+<span class="fc bfc" id="L115" title="All 4 branches covered.">    if (nextStart &lt; counterLength &amp;&amp; trailingWhitespace &lt; lastPatternSize / 2) {</span>
+<span class="fc" id="L116">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc" id="L119">    validatePattern(startOffset);</span>
+
+    // Translate character table offsets to actual characters.
+<span class="fc bfc" id="L122" title="All 2 branches covered.">    for (int i = 0; i &lt; decodeRowResult.length(); i++) {</span>
+<span class="fc" id="L123">      decodeRowResult.setCharAt(i, ALPHABET[decodeRowResult.charAt(i)]);</span>
+    }
+    // Ensure a valid start and end character
+<span class="fc" id="L126">    char startchar = decodeRowResult.charAt(0);</span>
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">    if (!arrayContains(STARTEND_ENCODING, startchar)) {</span>
+<span class="nc" id="L128">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L130">    char endchar = decodeRowResult.charAt(decodeRowResult.length() - 1);</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">    if (!arrayContains(STARTEND_ENCODING, endchar)) {</span>
+<span class="fc" id="L132">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+    // remove stop/start characters character and check if a long enough string is contained
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    if (decodeRowResult.length() &lt;= MIN_CHARACTER_LENGTH) {</span>
+      // Almost surely a false positive ( start + stop + at least 1 character)
+<span class="fc" id="L138">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="pc bpc" id="L141" title="2 of 4 branches missed.">    if (hints == null || !hints.containsKey(DecodeHintType.RETURN_CODABAR_START_END)) {</span>
+<span class="fc" id="L142">      decodeRowResult.deleteCharAt(decodeRowResult.length() - 1);</span>
+<span class="fc" id="L143">      decodeRowResult.deleteCharAt(0);</span>
+    }
+
+<span class="fc" id="L146">    int runningCount = 0;</span>
+<span class="fc bfc" id="L147" title="All 2 branches covered.">    for (int i = 0; i &lt; startOffset; i++) {</span>
+<span class="fc" id="L148">      runningCount += counters[i];</span>
+    }
+<span class="fc" id="L150">    float left = runningCount;</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">    for (int i = startOffset; i &lt; nextStart - 1; i++) {</span>
+<span class="fc" id="L152">      runningCount += counters[i];</span>
+    }
+<span class="fc" id="L154">    float right = runningCount;</span>
+<span class="fc" id="L155">    return new Result(</span>
+<span class="fc" id="L156">        decodeRowResult.toString(),</span>
+        null,
+        new ResultPoint[]{
+            new ResultPoint(left, rowNumber),
+            new ResultPoint(right, rowNumber)},
+        BarcodeFormat.CODABAR);
+  }
+
+  private void validatePattern(int start) throws NotFoundException {
+    // First, sum up the total size of our four categories of stripe sizes;
+<span class="fc" id="L166">    int[] sizes = {0, 0, 0, 0};</span>
+<span class="fc" id="L167">    int[] counts = {0, 0, 0, 0};</span>
+<span class="fc" id="L168">    int end = decodeRowResult.length() - 1;</span>
+
+    // We break out of this loop in the middle, in order to handle
+    // inter-character spaces properly.
+<span class="fc" id="L172">    int pos = start;</span>
+<span class="fc" id="L173">    for (int i = 0; true; i++) {</span>
+<span class="fc" id="L174">      int pattern = CHARACTER_ENCODINGS[decodeRowResult.charAt(i)];</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">      for (int j = 6; j &gt;= 0; j--) {</span>
+        // Even j = bars, while odd j = spaces. Categories 2 and 3 are for
+        // long stripes, while 0 and 1 are for short stripes.
+<span class="fc" id="L178">        int category = (j &amp; 1) + (pattern &amp; 1) * 2;</span>
+<span class="fc" id="L179">        sizes[category] += counters[pos + j];</span>
+<span class="fc" id="L180">        counts[category]++;</span>
+<span class="fc" id="L181">        pattern &gt;&gt;= 1;</span>
+      }
+<span class="fc bfc" id="L183" title="All 2 branches covered.">      if (i &gt;= end) {</span>
+<span class="fc" id="L184">        break;</span>
+      }
+      // We ignore the inter-character space - it could be of any size.
+<span class="fc" id="L187">      pos += 8;</span>
+    }
+
+    // Calculate our allowable size thresholds using fixed-point math.
+<span class="fc" id="L191">    float[] maxes = new float[4];</span>
+<span class="fc" id="L192">    float[] mins = new float[4];</span>
+    // Define the threshold of acceptability to be the midpoint between the
+    // average small stripe and the average large stripe. No stripe lengths
+    // should be on the &quot;wrong&quot; side of that line.
+<span class="fc bfc" id="L196" title="All 2 branches covered.">    for (int i = 0; i &lt; 2; i++) {</span>
+<span class="fc" id="L197">      mins[i] = 0.0f;  // Accept arbitrarily small &quot;short&quot; stripes.</span>
+<span class="fc" id="L198">      mins[i + 2] = ((float) sizes[i] / counts[i] + (float) sizes[i + 2] / counts[i + 2]) / 2.0f;</span>
+<span class="fc" id="L199">      maxes[i] = mins[i + 2];</span>
+<span class="fc" id="L200">      maxes[i + 2] = (sizes[i + 2] * MAX_ACCEPTABLE + PADDING) / counts[i + 2];</span>
+    }
+
+    // Now verify that all of the stripes are within the thresholds.
+<span class="fc" id="L204">    pos = start;</span>
+<span class="fc" id="L205">    for (int i = 0; true; i++) {</span>
+<span class="fc" id="L206">      int pattern = CHARACTER_ENCODINGS[decodeRowResult.charAt(i)];</span>
+<span class="fc bfc" id="L207" title="All 2 branches covered.">      for (int j = 6; j &gt;= 0; j--) {</span>
+        // Even j = bars, while odd j = spaces. Categories 2 and 3 are for
+        // long stripes, while 0 and 1 are for short stripes.
+<span class="fc" id="L210">        int category = (j &amp; 1) + (pattern &amp; 1) * 2;</span>
+<span class="fc" id="L211">        int size = counters[pos + j];</span>
+<span class="fc bfc" id="L212" title="All 4 branches covered.">        if (size &lt; mins[category] || size &gt; maxes[category]) {</span>
+<span class="fc" id="L213">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+<span class="fc" id="L215">        pattern &gt;&gt;= 1;</span>
+      }
+<span class="fc bfc" id="L217" title="All 2 branches covered.">      if (i &gt;= end) {</span>
+<span class="fc" id="L218">        break;</span>
+      }
+<span class="fc" id="L220">      pos += 8;</span>
+    }
+<span class="fc" id="L222">  }</span>
+
+  /**
+   * Records the size of all runs of white and black pixels, starting with white.
+   * This is just like recordPattern, except it records all the counters, and
+   * uses our builtin &quot;counters&quot; member for storage.
+   * @param row row to count from
+   */
+  private void setCounters(BitArray row) throws NotFoundException {
+<span class="fc" id="L231">    counterLength = 0;</span>
+    // Start from the first white bit.
+<span class="fc" id="L233">    int i = row.getNextUnset(0);</span>
+<span class="fc" id="L234">    int end = row.getSize();</span>
+<span class="pc bpc" id="L235" title="1 of 2 branches missed.">    if (i &gt;= end) {</span>
+<span class="nc" id="L236">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L238">    boolean isWhite = true;</span>
+<span class="fc" id="L239">    int count = 0;</span>
+<span class="fc bfc" id="L240" title="All 2 branches covered.">    while (i &lt; end) {</span>
+<span class="fc bfc" id="L241" title="All 2 branches covered.">      if (row.get(i) != isWhite) {</span>
+<span class="fc" id="L242">        count++;</span>
+      } else {
+<span class="fc" id="L244">        counterAppend(count);</span>
+<span class="fc" id="L245">        count = 1;</span>
+<span class="fc bfc" id="L246" title="All 2 branches covered.">        isWhite = !isWhite;</span>
+      }
+<span class="fc" id="L248">      i++;</span>
+    }
+<span class="fc" id="L250">    counterAppend(count);</span>
+<span class="fc" id="L251">  }</span>
+
+  private void counterAppend(int e) {
+<span class="fc" id="L254">    counters[counterLength] = e;</span>
+<span class="fc" id="L255">    counterLength++;</span>
+<span class="fc bfc" id="L256" title="All 2 branches covered.">    if (counterLength &gt;= counters.length) {</span>
+<span class="fc" id="L257">      int[] temp = new int[counterLength * 2];</span>
+<span class="fc" id="L258">      System.arraycopy(counters, 0, temp, 0, counterLength);</span>
+<span class="fc" id="L259">      counters = temp;</span>
+    }
+<span class="fc" id="L261">  }</span>
+
+  private int findStartPattern() throws NotFoundException {
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    for (int i = 1; i &lt; counterLength; i += 2) {</span>
+<span class="fc" id="L265">      int charOffset = toNarrowWidePattern(i);</span>
+<span class="fc bfc" id="L266" title="All 4 branches covered.">      if (charOffset != -1 &amp;&amp; arrayContains(STARTEND_ENCODING, ALPHABET[charOffset])) {</span>
+        // Look for whitespace before start pattern, &gt;= 50% of width of start pattern
+        // We make an exception if the whitespace is the first element.
+<span class="fc" id="L269">        int patternSize = 0;</span>
+<span class="fc bfc" id="L270" title="All 2 branches covered.">        for (int j = i; j &lt; i + 7; j++) {</span>
+<span class="fc" id="L271">          patternSize += counters[j];</span>
+        }
+<span class="fc bfc" id="L273" title="All 4 branches covered.">        if (i == 1 || counters[i - 1] &gt;= patternSize / 2) {</span>
+<span class="fc" id="L274">          return i;</span>
+        }
+      }
+    }
+<span class="fc" id="L278">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  static boolean arrayContains(char[] array, char key) {
+<span class="pc bpc" id="L282" title="1 of 2 branches missed.">    if (array != null) {</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">      for (char c : array) {</span>
+<span class="fc bfc" id="L284" title="All 2 branches covered.">        if (c == key) {</span>
+<span class="fc" id="L285">          return true;</span>
+        }
+      }
+    }
+<span class="fc" id="L289">    return false;</span>
+  }
+
+  // Assumes that counters[position] is a bar.
+  private int toNarrowWidePattern(int position) {
+<span class="fc" id="L294">    int end = position + 7;</span>
+<span class="fc bfc" id="L295" title="All 2 branches covered.">    if (end &gt;= counterLength) {</span>
+<span class="fc" id="L296">      return -1;</span>
+    }
+
+<span class="fc" id="L299">    int[] theCounters = counters;</span>
+
+<span class="fc" id="L301">    int maxBar = 0;</span>
+<span class="fc" id="L302">    int minBar = Integer.MAX_VALUE;</span>
+<span class="fc bfc" id="L303" title="All 2 branches covered.">    for (int j = position; j &lt; end; j += 2) {</span>
+<span class="fc" id="L304">      int currentCounter = theCounters[j];</span>
+<span class="fc bfc" id="L305" title="All 2 branches covered.">      if (currentCounter &lt; minBar) {</span>
+<span class="fc" id="L306">        minBar = currentCounter;</span>
+      }
+<span class="fc bfc" id="L308" title="All 2 branches covered.">      if (currentCounter &gt; maxBar) {</span>
+<span class="fc" id="L309">        maxBar = currentCounter;</span>
+      }
+    }
+<span class="fc" id="L312">    int thresholdBar = (minBar + maxBar) / 2;</span>
+
+<span class="fc" id="L314">    int maxSpace = 0;</span>
+<span class="fc" id="L315">    int minSpace = Integer.MAX_VALUE;</span>
+<span class="fc bfc" id="L316" title="All 2 branches covered.">    for (int j = position + 1; j &lt; end; j += 2) {</span>
+<span class="fc" id="L317">      int currentCounter = theCounters[j];</span>
+<span class="fc bfc" id="L318" title="All 2 branches covered.">      if (currentCounter &lt; minSpace) {</span>
+<span class="fc" id="L319">        minSpace = currentCounter;</span>
+      }
+<span class="fc bfc" id="L321" title="All 2 branches covered.">      if (currentCounter &gt; maxSpace) {</span>
+<span class="fc" id="L322">        maxSpace = currentCounter;</span>
+      }
+    }
+<span class="fc" id="L325">    int thresholdSpace = (minSpace + maxSpace) / 2;</span>
+
+<span class="fc" id="L327">    int bitmask = 1 &lt;&lt; 7;</span>
+<span class="fc" id="L328">    int pattern = 0;</span>
+<span class="fc bfc" id="L329" title="All 2 branches covered.">    for (int i = 0; i &lt; 7; i++) {</span>
+<span class="fc bfc" id="L330" title="All 2 branches covered.">      int threshold = (i &amp; 1) == 0 ? thresholdBar : thresholdSpace;</span>
+<span class="fc" id="L331">      bitmask &gt;&gt;= 1;</span>
+<span class="fc bfc" id="L332" title="All 2 branches covered.">      if (theCounters[position + i] &gt; threshold) {</span>
+<span class="fc" id="L333">        pattern |= bitmask;</span>
+      }
+    }
+
+<span class="fc bfc" id="L337" title="All 2 branches covered.">    for (int i = 0; i &lt; CHARACTER_ENCODINGS.length; i++) {</span>
+<span class="fc bfc" id="L338" title="All 2 branches covered.">      if (CHARACTER_ENCODINGS[i] == pattern) {</span>
+<span class="fc" id="L339">        return i;</span>
+      }
+    }
+<span class="fc" id="L342">    return -1;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

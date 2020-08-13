@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractNegativeBlackBoxTestCase.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common</a> &gt; <span class="el_source">AbstractNegativeBlackBoxTestCase.java</span></div><h1>AbstractNegativeBlackBoxTestCase.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common;
+
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.BufferedImageLuminanceSource;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.LuminanceSource;
+import com.google.zxing.MultiFormatReader;
+import com.google.zxing.ReaderException;
+import com.google.zxing.Result;
+import org.junit.Test;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Logger;
+
+/**
+ * This abstract class looks for negative results, i.e. it only allows a certain number of false
+ * positives in images which should not decode. This helps ensure that we are not too lenient.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ */
+public abstract class AbstractNegativeBlackBoxTestCase extends AbstractBlackBoxTestCase {
+
+<span class="fc" id="L46">  private static final Logger log = Logger.getLogger(AbstractNegativeBlackBoxTestCase.class.getSimpleName());</span>
+
+  private final List&lt;TestResult&gt; testResults;
+
+  private static final class TestResult {
+    private final int falsePositivesAllowed;
+    private final float rotation;
+
+<span class="fc" id="L54">    TestResult(int falsePositivesAllowed, float rotation) {</span>
+<span class="fc" id="L55">      this.falsePositivesAllowed = falsePositivesAllowed;</span>
+<span class="fc" id="L56">      this.rotation = rotation;</span>
+<span class="fc" id="L57">    }</span>
+
+    int getFalsePositivesAllowed() {
+<span class="fc" id="L60">      return falsePositivesAllowed;</span>
+    }
+
+    float getRotation() {
+<span class="fc" id="L64">      return rotation;</span>
+    }
+  }
+
+  // Use the multiformat reader to evaluate all decoders in the system.
+  protected AbstractNegativeBlackBoxTestCase(String testBasePathSuffix) {
+<span class="fc" id="L70">    super(testBasePathSuffix, new MultiFormatReader(), null);</span>
+<span class="fc" id="L71">    testResults = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L72">  }</span>
+
+  protected final void addTest(int falsePositivesAllowed, float rotation) {
+<span class="fc" id="L75">    testResults.add(new TestResult(falsePositivesAllowed, rotation));</span>
+<span class="fc" id="L76">  }</span>
+
+  @Override
+  @Test
+  public void testBlackBox() throws IOException {
+<span class="fc" id="L81">    assertFalse(testResults.isEmpty());</span>
+
+<span class="fc" id="L83">    List&lt;Path&gt; imageFiles = getImageFiles();</span>
+<span class="fc" id="L84">    int[] falsePositives = new int[testResults.size()];</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    for (Path testImage : imageFiles) {</span>
+<span class="fc" id="L86">      log.info(String.format(&quot;Starting %s&quot;, testImage));</span>
+<span class="fc" id="L87">      BufferedImage image = ImageIO.read(testImage.toFile());</span>
+<span class="pc bpc" id="L88" title="1 of 2 branches missed.">      if (image == null) {</span>
+<span class="nc" id="L89">        throw new IOException(&quot;Could not read image: &quot; + testImage);</span>
+      }
+<span class="fc bfc" id="L91" title="All 2 branches covered.">      for (int x = 0; x &lt; testResults.size(); x++) {</span>
+<span class="fc" id="L92">        TestResult testResult = testResults.get(x);</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">        if (!checkForFalsePositives(image, testResult.getRotation())) {</span>
+<span class="fc" id="L94">          falsePositives[x]++;</span>
+        }
+      }
+<span class="fc" id="L97">    }</span>
+
+<span class="fc" id="L99">    int totalFalsePositives = 0;</span>
+<span class="fc" id="L100">    int totalAllowed = 0;</span>
+
+<span class="fc bfc" id="L102" title="All 2 branches covered.">    for (int x = 0; x &lt; testResults.size(); x++) {</span>
+<span class="fc" id="L103">      TestResult testResult = testResults.get(x);</span>
+<span class="fc" id="L104">      totalFalsePositives += falsePositives[x];</span>
+<span class="fc" id="L105">      totalAllowed += testResult.getFalsePositivesAllowed();</span>
+    }
+
+<span class="pc bpc" id="L108" title="1 of 2 branches missed.">    if (totalFalsePositives &lt; totalAllowed) {</span>
+<span class="nc" id="L109">      log.warning(String.format(&quot;+++ Test too lax by %d images&quot;, totalAllowed - totalFalsePositives));</span>
+<span class="pc bpc" id="L110" title="1 of 2 branches missed.">    } else if (totalFalsePositives &gt; totalAllowed) {</span>
+<span class="nc" id="L111">      log.warning(String.format(&quot;--- Test failed by %d images&quot;, totalFalsePositives - totalAllowed));</span>
+    }
+
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    for (int x = 0; x &lt; testResults.size(); x++) {</span>
+<span class="fc" id="L115">      TestResult testResult = testResults.get(x);</span>
+<span class="fc" id="L116">      log.info(String.format(&quot;Rotation %d degrees: %d of %d images were false positives (%d allowed)&quot;,</span>
+<span class="fc" id="L117">                             (int) testResult.getRotation(), falsePositives[x], imageFiles.size(),</span>
+<span class="fc" id="L118">                             testResult.getFalsePositivesAllowed()));</span>
+<span class="fc" id="L119">      assertTrue(&quot;Rotation &quot; + testResult.getRotation() + &quot; degrees: Too many false positives found&quot;,</span>
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">                 falsePositives[x] &lt;= testResult.getFalsePositivesAllowed());</span>
+    }
+<span class="fc" id="L122">  }</span>
+
+  /**
+   * Make sure ZXing does NOT find a barcode in the image.
+   *
+   * @param image The image to test
+   * @param rotationInDegrees The amount of rotation to apply
+   * @return true if nothing found, false if a non-existent barcode was detected
+   */
+  private boolean checkForFalsePositives(BufferedImage image, float rotationInDegrees) {
+<span class="fc" id="L132">    BufferedImage rotatedImage = rotateImage(image, rotationInDegrees);</span>
+<span class="fc" id="L133">    LuminanceSource source = new BufferedImageLuminanceSource(rotatedImage);</span>
+<span class="fc" id="L134">    BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));</span>
+    Result result;
+    try {
+<span class="fc" id="L137">      result = getReader().decode(bitmap);</span>
+<span class="fc" id="L138">      log.info(String.format(&quot;Found false positive: '%s' with format '%s' (rotation: %d)&quot;,</span>
+<span class="fc" id="L139">                              result.getText(), result.getBarcodeFormat(), (int) rotationInDegrees));</span>
+<span class="fc" id="L140">      return false;</span>
+<span class="fc" id="L141">    } catch (ReaderException re) {</span>
+      // continue
+    }
+
+    // Try &quot;try harder&quot; getMode
+<span class="fc" id="L146">    Map&lt;DecodeHintType,Object&gt; hints = new EnumMap&lt;&gt;(DecodeHintType.class);</span>
+<span class="fc" id="L147">    hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);</span>
+    try {
+<span class="fc" id="L149">      result = getReader().decode(bitmap, hints);</span>
+<span class="fc" id="L150">      log.info(String.format(&quot;Try harder found false positive: '%s' with format '%s' (rotation: %d)&quot;,</span>
+<span class="fc" id="L151">                              result.getText(), result.getBarcodeFormat(), (int) rotationInDegrees));</span>
+<span class="fc" id="L152">      return false;</span>
+<span class="fc" id="L153">    } catch (ReaderException re) {</span>
+      // continue
+    }
+<span class="fc" id="L156">    return true;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

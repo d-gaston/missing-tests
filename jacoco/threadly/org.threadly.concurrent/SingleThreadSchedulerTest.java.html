@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SingleThreadSchedulerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">SingleThreadSchedulerTest.java</span></div><h1>SingleThreadSchedulerTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
+
+import org.junit.Test;
+import org.threadly.BlockingTestRunnable;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.wrapper.priority.DefaultPriorityWrapper;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.util.Clock;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L19">public class SingleThreadSchedulerTest extends AbstractPrioritySchedulerTest {</span>
+  @Override
+  protected AbstractPrioritySchedulerFactory getAbstractPrioritySchedulerFactory() {
+<span class="fc" id="L22">    return new SingleThreadSchedulerFactory();</span>
+  }
+  
+  @Override
+  protected boolean isSingleThreaded() {
+<span class="fc" id="L27">    return true;</span>
+  }
+  
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test (expected = IllegalArgumentException.class)
+  public void constructorFail() {
+<span class="nc" id="L33">    new SingleThreadScheduler(null);</span>
+<span class="nc" id="L34">  }</span>
+  
+  @Test
+  public void constructorTest() {
+<span class="fc" id="L38">    assertTrue(new SingleThreadScheduler(true).sManager.execThread.isDaemon());</span>
+<span class="fc" id="L39">    assertFalse(new SingleThreadScheduler(false).sManager.execThread.isDaemon());</span>
+<span class="fc" id="L40">  }</span>
+  
+  @Test
+  public void prestartExecutionThreadTest() {
+<span class="fc" id="L44">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L45">    assertFalse(sts.sManager.execThread.isAlive());</span>
+    
+<span class="fc" id="L47">    sts.prestartExecutionThread(true);</span>
+    
+<span class="fc" id="L49">    assertTrue(sts.sManager.execThread.isAlive());</span>
+<span class="fc" id="L50">  }</span>
+  
+  @Test
+  public void isShutdownTest() {
+<span class="fc" id="L54">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L55">    assertFalse(sts.isShutdown());</span>
+    
+<span class="fc" id="L57">    executeTestRunnables(sts, 0);</span>
+<span class="fc" id="L58">    sts.shutdown();</span>
+    
+<span class="fc" id="L60">    assertTrue(sts.isShutdown());</span>
+    
+<span class="fc" id="L62">    sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L63">    executeTestRunnables(sts, 0);</span>
+<span class="fc" id="L64">    sts.shutdownNow();</span>
+    
+<span class="fc" id="L66">    assertTrue(sts.isShutdown());</span>
+<span class="fc" id="L67">  }</span>
+  
+  @Test
+  public void isTerminatedTest() throws InterruptedException {
+<span class="fc" id="L71">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L72">    assertFalse(sts.isTerminated());</span>
+<span class="fc" id="L73">    sts.shutdown();</span>
+<span class="fc" id="L74">    assertTrue(sts.isTerminated()); // termination should be immediate since no tasks were submitted</span>
+    
+<span class="fc" id="L76">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L77">    sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L79">      sts.execute(btr);</span>
+<span class="fc" id="L80">      btr.blockTillStarted();</span>
+<span class="fc" id="L81">      sts.shutdown();</span>
+      
+      // not terminated yet
+<span class="fc" id="L84">      assertFalse(sts.isTerminated());</span>
+      
+<span class="fc" id="L86">      btr.unblock();</span>
+<span class="fc" id="L87">      sts.awaitTermination();</span>
+      
+<span class="fc" id="L89">      assertTrue(sts.isTerminated());</span>
+    } finally {
+<span class="fc" id="L91">      btr.unblock();</span>
+<span class="fc" id="L92">      sts.shutdown();</span>
+    }
+<span class="fc" id="L94">  }</span>
+  
+  @Test
+  public void shutdownTest() {
+<span class="fc" id="L98">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    /* adding a run time to have greater chances that runnable 
+     * will be waiting to execute after shutdown call.
+     */
+<span class="fc" id="L102">    TestRunnable lastRunnable = // submit tasks as low priority to ensure that the shutdown lets them finish</span>
+<span class="fc" id="L103">        executeTestRunnables(new DefaultPriorityWrapper(sts, TaskPriority.Low), 5)</span>
+<span class="fc" id="L104">          .get(TEST_QTY - 1);</span>
+    
+<span class="fc" id="L106">    sts.shutdown();</span>
+    
+    // runnable should finish
+<span class="fc" id="L109">    lastRunnable.blockTillFinished();</span>
+<span class="fc" id="L110">  }</span>
+  
+  @Test
+  public void shutdownRecurringTest() {
+<span class="fc" id="L114">    final SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L115">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L116">    sts.scheduleWithFixedDelay(tr, 0, 0);</span>
+    
+<span class="fc" id="L118">    tr.blockTillStarted();</span>
+    
+<span class="fc" id="L120">    sts.shutdown();</span>
+    
+<span class="fc bfc" id="L122" title="All 2 branches covered.">    new TestCondition(() -&gt; ! sts.sManager.execThread.isAlive()).blockTillTrue();</span>
+<span class="fc" id="L123">  }</span>
+  
+  @Test
+  public void shutdownNowTest() {
+<span class="fc" id="L127">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    
+    // execute one runnable which will not complete
+<span class="fc" id="L130">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L131">    sts.execute(btr);</span>
+
+    try {
+<span class="fc" id="L134">      List&lt;TestRunnable&gt; expectedRunnables = executeTestRunnables(sts, 0);</span>
+      
+<span class="fc" id="L136">      btr.blockTillStarted();</span>
+      
+<span class="fc" id="L138">      List&lt;Runnable&gt; canceledRunnables = sts.shutdownNow();</span>
+      // unblock now so that others can run (if the unit test fails)
+<span class="fc" id="L140">      btr.unblock();</span>
+      
+<span class="fc" id="L142">      assertNotNull(canceledRunnables);</span>
+<span class="fc" id="L143">      assertTrue(canceledRunnables.containsAll(expectedRunnables));</span>
+<span class="fc" id="L144">      assertTrue(expectedRunnables.containsAll(canceledRunnables));</span>
+      
+<span class="fc" id="L146">      Iterator&lt;TestRunnable&gt; it = expectedRunnables.iterator();</span>
+<span class="fc bfc" id="L147" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L148">        assertEquals(0, it.next().getRunCount());</span>
+      }
+    } finally {
+<span class="fc" id="L151">      btr.unblock();</span>
+    }
+<span class="fc" id="L153">  }</span>
+  
+  @Test
+  public void shutdownNowIgnoreCanceledFuturesTest() {
+<span class="fc" id="L157">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L159">      Runnable nonCanceledRunnable = new TestRunnable();</span>
+<span class="fc" id="L160">      sts.submitScheduled(nonCanceledRunnable, 1000 * 60 * 60);</span>
+<span class="fc" id="L161">      ListenableFuture&lt;?&gt; future = sts.submitScheduled(DoNothingRunnable.instance(), </span>
+                                                       1000 * 60 * 60);
+      
+<span class="fc" id="L164">      future.cancel(false);</span>
+      
+<span class="fc" id="L166">      List&lt;Runnable&gt; result = sts.shutdownNow();</span>
+<span class="fc" id="L167">      assertEquals(1, result.size()); // only canceled task removed</span>
+    } finally {
+<span class="fc" id="L169">      sts.shutdown();</span>
+    }
+<span class="fc" id="L171">  }</span>
+  
+  @Test
+  public void awaitTerminationTest() throws InterruptedException {
+<span class="fc" id="L175">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    /* adding a run time to have greater chances that runnable 
+     * will be waiting to execute after shutdown call.
+     */
+<span class="fc" id="L179">    TestRunnable lastRunnable = executeTestRunnables(sts, 5).get(TEST_QTY - 1);</span>
+    
+<span class="fc" id="L181">    sts.shutdown();</span>
+<span class="fc" id="L182">    sts.awaitTermination();</span>
+    
+    // runnable should already be done
+<span class="fc" id="L185">    assertTrue(lastRunnable.ranOnce());</span>
+<span class="fc" id="L186">  }</span>
+  
+  @Test
+  public void awaitTerminationWithTimeoutTest() throws InterruptedException {
+<span class="fc" id="L190">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    /* adding a run time to have greater chances that runnable 
+     * will be waiting to execute after shutdown call.
+     */
+<span class="fc" id="L194">    TestRunnable lastRunnable = executeTestRunnables(sts, 5).get(TEST_QTY - 1);</span>
+
+<span class="fc" id="L196">    sts.shutdown();</span>
+<span class="fc" id="L197">    assertTrue(sts.awaitTermination(1000 * 10));</span>
+    
+    // runnable should already be done
+<span class="fc" id="L200">    assertTrue(lastRunnable.ranOnce());</span>
+<span class="fc" id="L201">  }</span>
+  
+  @Test
+  public void awaitTerminationWithTimeoutExpireTest() throws InterruptedException {
+<span class="fc" id="L205">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L206">    executeTestRunnables(sts, 1000 * 10);</span>
+    
+<span class="fc" id="L208">    long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L209">    sts.shutdown();</span>
+<span class="fc" id="L210">    assertFalse(sts.awaitTermination(DELAY_TIME));</span>
+
+<span class="pc bpc" id="L212" title="1 of 2 branches missed.">    assertTrue(Clock.accurateForwardProgressingMillis() - start &gt;= (DELAY_TIME - ALLOWED_VARIANCE));</span>
+<span class="fc" id="L213">  }</span>
+  
+  @Test (expected = RejectedExecutionException.class)
+  public void shutdownExecutionFail() {
+<span class="fc" id="L217">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L218">    sts.shutdown();</span>
+    
+<span class="nc" id="L220">    sts.execute(DoNothingRunnable.instance());</span>
+<span class="nc" id="L221">  }</span>
+  
+  @Test (expected = RejectedExecutionException.class)
+  public void shutdownNowExecutionFail() {
+<span class="fc" id="L225">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L226">    sts.shutdownNow();</span>
+    
+<span class="nc" id="L228">    sts.execute(DoNothingRunnable.instance());</span>
+<span class="nc" id="L229">  }</span>
+
+<span class="fc" id="L231">  private class SingleThreadSchedulerFactory implements AbstractPrioritySchedulerFactory {</span>
+<span class="fc" id="L232">    private final List&lt;SingleThreadScheduler&gt; schedulers = new ArrayList&lt;&gt;(1);</span>
+
+    @Override
+    public void shutdown() {
+<span class="fc" id="L236">      Iterator&lt;SingleThreadScheduler&gt; it = schedulers.iterator();</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L238">        it.next().shutdown();</span>
+<span class="fc" id="L239">        it.remove();</span>
+      }
+<span class="fc" id="L241">    }</span>
+
+    @Override
+    public SchedulerService makeSchedulerService(int poolSize, boolean prestartIfAvailable) {
+<span class="fc" id="L245">      SingleThreadScheduler result = makeAbstractPriorityScheduler(poolSize);</span>
+<span class="fc bfc" id="L246" title="All 2 branches covered.">      if (prestartIfAvailable) {</span>
+<span class="pc bpc" id="L247" title="1 of 2 branches missed.">        if (prestartIfAvailable) {</span>
+<span class="fc" id="L248">          result.prestartExecutionThread(true);</span>
+        }
+      }
+<span class="fc" id="L251">      return result;</span>
+    }
+
+    @Override
+    public AbstractPriorityScheduler makeAbstractPriorityScheduler(int poolSize,
+                                                                   TaskPriority defaultPriority,
+                                                                   long maxWaitForLowPriority) {
+<span class="fc" id="L258">      SingleThreadScheduler sts = new SingleThreadScheduler(defaultPriority, maxWaitForLowPriority);</span>
+<span class="fc" id="L259">      schedulers.add(sts);</span>
+      
+<span class="fc" id="L261">      return sts;</span>
+    }
+
+    @Override
+    public SingleThreadScheduler makeAbstractPriorityScheduler(int poolSize) {
+<span class="fc" id="L266">      SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L267">      schedulers.add(sts);</span>
+      
+<span class="fc" id="L269">      return sts;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

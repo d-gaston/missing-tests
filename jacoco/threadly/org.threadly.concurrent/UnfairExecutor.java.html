@@ -1,0 +1,449 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UnfairExecutor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">UnfairExecutor.java</span></div><h1>UnfairExecutor.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
+
+import org.threadly.util.AbstractService;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * A very high performance {@link SubmitterExecutor} implementation.  Though to get those 
+ * performance gains, some guarantees are reduced.  Most prominently is execution order, this 
+ * scheduler does not ensure that tasks are executed in the order they are submitted, but rather 
+ * tasks are consumed however is fastest.
+ * &lt;p&gt;
+ * This executor has an execution queue per thread.  That way each thread has a many producer, one 
+ * consumer safety guarantees.  Compared to other pools which have to deal with a many to many 
+ * thread safety issue.  Determining the thread queue may be based on a variety of information.  A 
+ * couple built in distribution solutions are {@link TaskHashXorTimeStripeGenerator} (default) and 
+ * {@link AtomicStripeGenerator}.
+ * &lt;p&gt;
+ * This scheduler will work best when the following conditions are true.  First because a long 
+ * running task can block other tasks from running (even when other threads are idle).  It is best 
+ * that tasks should be equally sized.  We also recommend having thread counts which are prime 
+ * numbers for a more even hash distribution.  It is also important to recognize that it is 
+ * generally a bad idea to block any of these threads waiting for results from processing that is 
+ * expected to happen on the same executor.
+ * 
+ * @since 4.5.0
+ */
+public class UnfairExecutor extends AbstractSubmitterExecutor {
+  /**
+   * Strategy for taking in a task and producing a long which will be translated to which thread 
+   * the task should be distributed on to.  This number is only a guide for the scheduler, the 
+   * scheduler may choose another thread depending on what internal balancing may be possible.
+   * 
+   * @since 4.5.0
+   */
+  public interface TaskStripeGenerator {
+    /**
+     * Generate an identifier for the stripe to distribute the task on to.
+     * 
+     * @param task Task which can be used for referencing in determining the stripe
+     * @return Any positive or negative long value to represent the stripe
+     */
+    public long getStripe(Runnable task);
+  }
+  
+  /**
+   * Generator which will determine the task stripe by using the identity hash of the runnable and 
+   * {@link Clock#lastKnownTimeNanos()}.  This is the fastest built in option, however submissions 
+   * of the same task many times without the clock being updated can result in a single thread 
+   * being unfairly burdened.  Because of that it is highly recommended to over-size your pool if 
+   * you are using this distributor.
+   * &lt;p&gt;
+   * A possibly more fair, but slower stripe generator would be {@link AtomicStripeGenerator}.  
+   * &lt;p&gt;
+   * This class should not be constructed, instead it should be provided via the static function 
+   * {@link TaskHashXorTimeStripeGenerator#instance()}.
+   * 
+   * @since 4.5.0
+   */
+  public static class TaskHashXorTimeStripeGenerator implements TaskStripeGenerator {
+<span class="fc" id="L73">    private static final TaskHashXorTimeStripeGenerator INSTANCE = </span>
+        new TaskHashXorTimeStripeGenerator();
+    
+    /**
+     * Provides an instance which can be provided into the constructor of {@link UnfairExecutor}.
+     * 
+     * @return TaskHashXorTimeStripeGenerator instance
+     */
+    public static TaskHashXorTimeStripeGenerator instance() {
+<span class="fc" id="L82">      return INSTANCE;</span>
+    }
+    
+    private TaskHashXorTimeStripeGenerator() {
+      // don't allow external construction
+    }
+    
+    @Override
+    public long getStripe(Runnable task) {
+<span class="fc" id="L91">      return System.identityHashCode(task) ^ Clock.lastKnownTimeNanos();</span>
+    }
+  }
+
+  /**
+   * Stripe generator which will round robin distribute tasks to threads.  Internally this uses a 
+   * {@link AtomicLong}, which means if lots of tasks are being submitted in parallel there can be 
+   * a lot of compare and swap overhead compared to {@link TaskHashXorTimeStripeGenerator}.  
+   * &lt;p&gt;
+   * This class should not be constructed, instead it should be provided via the static function 
+   * {@link AtomicStripeGenerator#instance()}.
+   * 
+   * @since 4.5.0
+   */
+  public static class AtomicStripeGenerator implements TaskStripeGenerator {
+    /**
+     * Provides an instance which can be provided into the constructor of {@link UnfairExecutor}.
+     * 
+     * @return A new AtomicStripeGenerator instance
+     */
+    public static AtomicStripeGenerator instance() {
+<span class="fc" id="L112">      return new AtomicStripeGenerator();</span>
+    }
+    
+    private final AtomicLong stripe;
+    
+<span class="fc" id="L117">    private AtomicStripeGenerator() {</span>
+      // don't allow external construction
+<span class="fc" id="L119">      stripe = new AtomicLong();</span>
+<span class="fc" id="L120">    }</span>
+    
+    @Override
+    public long getStripe(Runnable task) {
+<span class="fc" id="L124">      return stripe.getAndIncrement();</span>
+    }
+  }
+  
+  protected final Worker[] schedulers;
+  private final AtomicBoolean shutdownStarted;
+  private final TaskStripeGenerator stripeGenerator;
+  
+  /**
+   * Constructs a new {@link UnfairExecutor} with a provided thread count.  This defaults to using 
+   * daemon threads.  This also defaults to using the {@link TaskHashXorTimeStripeGenerator}.
+   * 
+   * @param threadCount Number of threads, recommended to be a prime number
+   */
+  public UnfairExecutor(int threadCount) {
+<span class="fc" id="L139">    this(threadCount, true, TaskHashXorTimeStripeGenerator.instance());</span>
+<span class="fc" id="L140">  }</span>
+  
+  /**
+   * Constructs a new {@link UnfairExecutor} with a provided thread count.  This defaults to using 
+   * daemon threads.  
+   * &lt;p&gt;
+   * Possible built in stripe generators for use would be {@link AtomicStripeGenerator} or 
+   * {@link TaskHashXorTimeStripeGenerator}.
+   * 
+   * @param threadCount Number of threads, recommended to be a prime number
+   * @param stripeGenerator Generator for figuring out how a task is assigned to a thread
+   */
+  public UnfairExecutor(int threadCount, TaskStripeGenerator stripeGenerator) {
+<span class="fc" id="L153">    this(threadCount, true, stripeGenerator);</span>
+<span class="fc" id="L154">  }</span>
+
+  /**
+   * Constructs a new {@link UnfairExecutor} with a provided thread count.    This also defaults 
+   * to using the {@link TaskHashXorTimeStripeGenerator}.
+   * 
+   * @param threadCount Number of threads, recommended to be a prime number
+   * @param useDaemonThreads {@code true} if created threads should be daemon
+   */
+  public UnfairExecutor(int threadCount, boolean useDaemonThreads) {
+<span class="fc" id="L164">    this(threadCount, useDaemonThreads, TaskHashXorTimeStripeGenerator.instance());</span>
+<span class="fc" id="L165">  }</span>
+
+  /**
+   * Constructs a new {@link UnfairExecutor} with a provided thread count.  
+   * &lt;p&gt;
+   * Possible built in stripe generators for use would be {@link AtomicStripeGenerator} or 
+   * {@link TaskHashXorTimeStripeGenerator}.
+   * 
+   * @param threadCount Number of threads, recommended to be a prime number
+   * @param useDaemonThreads {@code true} if created threads should be daemon
+   * @param stripeGenerator Generator for figuring out how a task is assigned to a thread
+   */
+  public UnfairExecutor(int threadCount, boolean useDaemonThreads, 
+                        TaskStripeGenerator stripeGenerator) {
+<span class="fc" id="L179">    this(threadCount, </span>
+<span class="fc" id="L180">         new ConfigurableThreadFactory(UnfairExecutor.class.getSimpleName() + &quot;-&quot;, true, </span>
+                                       useDaemonThreads, Thread.NORM_PRIORITY, null, null), 
+         stripeGenerator);
+<span class="fc" id="L183">  }</span>
+
+  /**
+   * Constructs a new {@link UnfairExecutor} with a provided thread count and factory.  This also 
+   * defaults to using the {@link TaskHashXorTimeStripeGenerator}.
+   * 
+   * @param threadCount Number of threads, recommended to be a prime number
+   * @param threadFactory thread factory for producing new threads within executor
+   */
+  public UnfairExecutor(int threadCount, ThreadFactory threadFactory) {
+<span class="nc" id="L193">    this(threadCount, threadFactory, TaskHashXorTimeStripeGenerator.instance());</span>
+<span class="nc" id="L194">  }</span>
+
+  /**
+   * Constructs a new {@link UnfairExecutor} with a provided thread count and factory.  
+   * &lt;p&gt;
+   * Possible built in stripe generators for use would be {@link AtomicStripeGenerator} or 
+   * {@link TaskHashXorTimeStripeGenerator}.
+   * 
+   * @param threadCount Number of threads, recommended to be a prime number
+   * @param threadFactory thread factory for producing new threads within executor
+   * @param stripeGenerator Generator for figuring out how a task is assigned to a thread
+   */
+  public UnfairExecutor(int threadCount, ThreadFactory threadFactory, 
+<span class="fc" id="L207">                        TaskStripeGenerator stripeGenerator) {</span>
+<span class="fc" id="L208">    ArgumentVerifier.assertGreaterThanZero(threadCount, &quot;threadCount&quot;);</span>
+<span class="fc" id="L209">    ArgumentVerifier.assertNotNull(stripeGenerator, &quot;stripeGenerator&quot;);</span>
+    
+<span class="fc" id="L211">    this.schedulers = new Worker[threadCount];</span>
+<span class="fc" id="L212">    this.shutdownStarted = new AtomicBoolean(false);</span>
+<span class="fc" id="L213">    this.stripeGenerator = stripeGenerator;</span>
+    
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    for (int i = 0; i &lt; threadCount; i++) {</span>
+<span class="fc" id="L216">      schedulers[i] = new Worker(threadFactory);</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">      if (i &gt; 0) {</span>
+<span class="fc" id="L218">        schedulers[i].setNeighborWorker(schedulers[i - 1]);</span>
+      }
+    }
+<span class="fc" id="L221">    schedulers[0].setNeighborWorker(schedulers[schedulers.length - 1]);</span>
+    // can only start once full neighbor chain is established
+<span class="fc" id="L223">    final Worker firstWorker = schedulers[0];</span>
+    // let first worker start all the other threads as soon as possible
+<span class="fc" id="L225">    firstWorker.addTask(new Runnable() {</span>
+      @Override
+      public void run() {
+<span class="fc bfc" id="L228" title="All 2 branches covered.">        for (Worker w : schedulers) {</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">          if (w != firstWorker) {</span>
+<span class="fc" id="L230">            w.start();</span>
+          }
+        }
+<span class="fc" id="L233">      }</span>
+    });
+<span class="fc" id="L235">    firstWorker.start();</span>
+<span class="fc" id="L236">  }</span>
+  
+  @Override
+  protected void doExecute(Runnable task) {
+<span class="fc bfc" id="L240" title="All 2 branches covered.">    if (shutdownStarted.get()) {</span>
+<span class="fc" id="L241">      throw new RejectedExecutionException(&quot;Pool is shutdown&quot;);</span>
+    }
+    
+<span class="fc" id="L244">    schedulers[(int)Math.floorMod(stripeGenerator.getStripe(task), schedulers.length)].addTask(task);</span>
+<span class="fc" id="L245">  }</span>
+
+  /**
+   * Function to check if the thread pool is currently accepting and handling tasks.
+   * 
+   * @return {@code true} if thread pool is running
+   */
+  public boolean isShutdown() {
+<span class="fc" id="L253">    return shutdownStarted.get();</span>
+  }
+
+  /**
+   * Stops any new tasks from being submitted to the pool.  But allows all tasks which are 
+   * submitted to execute, or scheduled (and have elapsed their delay time) to run.  If recurring 
+   * tasks are present they will also be unable to reschedule.  This call will not block to wait 
+   * for the shutdown of the scheduler to finish.  If {@link #shutdown()} or 
+   * {@link #shutdownNow()} has already been called, this will have no effect.  
+   * &lt;p&gt;
+   * If you wish to not want to run any queued tasks you should use {@link #shutdownNow()}.
+   */
+  public void shutdown() {
+<span class="fc bfc" id="L266" title="All 2 branches covered.">    if (shutdownStarted.compareAndSet(false, true)) {</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">      for (Worker w : schedulers) {</span>
+<span class="fc" id="L268">        w.addTask(new ShutdownTask(w));</span>
+      }
+    }
+<span class="fc" id="L271">  }</span>
+
+  /**
+   * Stops any new tasks from being submitted to the pool.  If any tasks are waiting for execution 
+   * they will be prevented from being run.  If a task is currently running it will be allowed to 
+   * finish (though this call will not block waiting for it to finish).
+   * 
+   * @return returns a list of runnables which were waiting in the queue to be run at time of shutdown
+   */
+  public List&lt;Runnable&gt; shutdownNow() {
+<span class="fc" id="L281">    shutdownStarted.set(true);</span>
+    
+<span class="fc" id="L283">    List&lt;Runnable&gt; result = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L284" title="All 2 branches covered.">    for (Worker w : schedulers) {</span>
+<span class="fc" id="L285">      w.stopIfRunning();</span>
+<span class="fc" id="L286">      Iterator&lt;Runnable&gt; it = w.taskQueue.iterator();</span>
+<span class="fc bfc" id="L287" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L288">        Runnable task = it.next();</span>
+<span class="fc" id="L289">        it.remove();</span>
+<span class="pc bpc" id="L290" title="1 of 2 branches missed.">        if (! (task instanceof ShutdownTask)) {</span>
+<span class="fc" id="L291">          result.add(task);</span>
+        }
+<span class="fc" id="L293">      }</span>
+    }
+<span class="fc" id="L295">    return result;</span>
+  }
+
+  /**
+   * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+   * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block forever.
+   * 
+   * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+   */
+  public void awaitTermination() throws InterruptedException {
+<span class="fc bfc" id="L305" title="All 2 branches covered.">    for (Worker w : schedulers) {</span>
+<span class="fc" id="L306">      w.thread.join();</span>
+    }
+<span class="fc" id="L308">  }</span>
+
+  /**
+   * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+   * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block until the 
+   * timeout is reached.
+   * 
+   * @param timeoutMillis time to block and wait for thread pool to shutdown
+   * @return {@code true} if the pool has shutdown, false if timeout was reached
+   * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+   */
+  public boolean awaitTermination(long timeoutMillis) throws InterruptedException {
+<span class="fc" id="L320">    long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    for (Worker w : schedulers) {</span>
+<span class="fc" id="L322">      long remainingWait = timeoutMillis - (Clock.lastKnownForwardProgressingMillis() - startTime);</span>
+<span class="pc bpc" id="L323" title="1 of 2 branches missed.">      if (remainingWait &gt; 0) {</span>
+<span class="fc" id="L324">        w.thread.join(remainingWait);</span>
+      }
+<span class="fc bfc" id="L326" title="All 2 branches covered.">      if (w.thread.isAlive()) {</span>
+<span class="fc" id="L327">        return false;</span>
+      }
+    }
+<span class="fc" id="L330">    return true;</span>
+  }
+  
+  @Override
+  protected void finalize() throws Throwable {
+<span class="fc" id="L335">    shutdown();</span>
+<span class="fc" id="L336">    super.finalize();</span>
+<span class="fc" id="L337">  }</span>
+  
+  /**
+   * Worker task for executing tasks on the provided thread.  This worker maintains an internal 
+   * queue for which tasks can be added on.  It will park itself once idle, and resume if tasks 
+   * are later then added.
+   * 
+   * @since 4.5.0
+   */
+  protected static class Worker extends AbstractService implements Runnable {
+    protected final Thread thread;
+    protected final Queue&lt;Runnable&gt; taskQueue;
+    private volatile boolean parked;
+    private Worker checkNeighborWorker;
+    private Worker wakupNeighborWorker;
+    
+<span class="fc" id="L353">    public Worker(ThreadFactory threadFactory) {</span>
+<span class="fc" id="L354">      thread = threadFactory.newThread(this);</span>
+<span class="pc bpc" id="L355" title="1 of 2 branches missed.">      if (thread.isAlive()) {</span>
+<span class="nc" id="L356">        throw new IllegalThreadStateException();</span>
+      }
+<span class="fc" id="L358">      taskQueue = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="fc" id="L359">      parked = false;</span>
+<span class="fc" id="L360">    }</span>
+    
+    /**
+     * Must be invoked with a non-null worker before starting.
+     * 
+     * @param w Worker to assist if we are idle
+     */
+    protected void setNeighborWorker(Worker w) {
+<span class="fc" id="L368">      checkNeighborWorker = w;</span>
+<span class="fc" id="L369">      w.wakupNeighborWorker = this;</span>
+<span class="fc" id="L370">    }</span>
+
+    @Override
+    protected void startupService() {
+<span class="pc bpc" id="L374" title="2 of 4 branches missed.">      if (checkNeighborWorker == null || wakupNeighborWorker == null) {</span>
+<span class="nc" id="L375">        throw new IllegalStateException();</span>
+      }
+<span class="fc" id="L377">      thread.start();</span>
+<span class="fc" id="L378">    }</span>
+
+    @Override
+    protected void shutdownService() {
+<span class="fc" id="L382">      LockSupport.unpark(thread);</span>
+<span class="fc" id="L383">    }</span>
+    
+    public void addTask(Runnable task) {
+<span class="fc" id="L386">      taskQueue.add(task);</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">      if (parked) {</span>
+<span class="fc" id="L388">        parked = false;</span>
+<span class="fc" id="L389">        LockSupport.unpark(thread);</span>
+<span class="fc bfc" id="L390" title="All 2 branches covered.">      } else if (wakupNeighborWorker.parked) {</span>
+<span class="fc" id="L391">        wakupNeighborWorker.parked = false;</span>
+<span class="fc" id="L392">        LockSupport.unpark(wakupNeighborWorker.thread);</span>
+      }
+<span class="fc" id="L394">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc bfc" id="L398" title="All 2 branches covered.">      while (isRunning()) {</span>
+<span class="fc" id="L399">        Runnable task = taskQueue.poll();</span>
+        // just reset status, we should only shutdown by having the service stopped
+<span class="fc" id="L401">        Thread.interrupted();</span>
+<span class="fc bfc" id="L402" title="All 2 branches covered.">        if (task != null) {</span>
+<span class="pc bpc" id="L403" title="1 of 2 branches missed.">          if (parked) {</span>
+<span class="nc" id="L404">            parked = false;</span>
+          }
+          try {
+<span class="fc" id="L407">            task.run();</span>
+<span class="fc" id="L408">          } catch (Throwable t) {</span>
+<span class="fc" id="L409">            ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L410">          }</span>
+<span class="fc bfc" id="L411" title="All 2 branches covered.">        } else if (! parked) {</span>
+          // check neighbor worker to see if they need help
+<span class="fc" id="L413">          task = checkNeighborWorker.taskQueue.poll();</span>
+<span class="fc bfc" id="L414" title="All 2 branches covered.">          if (task != null) {</span>
+            try {
+<span class="fc" id="L416">              task.run();</span>
+<span class="fc" id="L417">            } catch (Throwable t) {</span>
+<span class="fc" id="L418">              ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L419">            }</span>
+          } else {
+<span class="fc" id="L421">            parked = true;</span>
+          }
+        } else {
+<span class="fc" id="L424">          LockSupport.park();</span>
+        }
+<span class="fc" id="L426">      }</span>
+<span class="fc" id="L427">    }</span>
+  }
+  
+  /**
+   * Task for shutting down worker thread.  Used in {@link #shutdown()}.
+   * 
+   * @since 4.5.0
+   */
+  private static class ShutdownTask implements Runnable {
+    private final Worker w;
+    
+<span class="fc" id="L438">    public ShutdownTask(Worker w) {</span>
+<span class="fc" id="L439">      this.w = w;</span>
+<span class="fc" id="L440">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L444">      w.stopIfRunning();</span>
+<span class="fc" id="L445">      w.taskQueue.clear();</span>
+<span class="fc" id="L446">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

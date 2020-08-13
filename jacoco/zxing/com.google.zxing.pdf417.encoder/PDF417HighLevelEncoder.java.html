@@ -1,0 +1,585 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PDF417HighLevelEncoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.pdf417.encoder</a> &gt; <span class="el_source">PDF417HighLevelEncoder.java</span></div><h1>PDF417HighLevelEncoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2006 Jeremias Maerki in part, and ZXing Authors in part
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * This file has been modified from its original form in Barcode4J.
+ */
+
+package com.google.zxing.pdf417.encoder;
+
+import com.google.zxing.WriterException;
+import com.google.zxing.common.CharacterSetECI;
+
+import java.math.BigInteger;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+
+/**
+ * PDF417 high-level encoder following the algorithm described in ISO/IEC 15438:2001(E) in
+ * annex P.
+ */
+final class PDF417HighLevelEncoder {
+
+  /**
+   * code for Text compaction
+   */
+  private static final int TEXT_COMPACTION = 0;
+
+  /**
+   * code for Byte compaction
+   */
+  private static final int BYTE_COMPACTION = 1;
+
+  /**
+   * code for Numeric compaction
+   */
+  private static final int NUMERIC_COMPACTION = 2;
+
+  /**
+   * Text compaction submode Alpha
+   */
+  private static final int SUBMODE_ALPHA = 0;
+
+  /**
+   * Text compaction submode Lower
+   */
+  private static final int SUBMODE_LOWER = 1;
+
+  /**
+   * Text compaction submode Mixed
+   */
+  private static final int SUBMODE_MIXED = 2;
+
+  /**
+   * Text compaction submode Punctuation
+   */
+  private static final int SUBMODE_PUNCTUATION = 3;
+
+  /**
+   * mode latch to Text Compaction mode
+   */
+  private static final int LATCH_TO_TEXT = 900;
+
+  /**
+   * mode latch to Byte Compaction mode (number of characters NOT a multiple of 6)
+   */
+  private static final int LATCH_TO_BYTE_PADDED = 901;
+
+  /**
+   * mode latch to Numeric Compaction mode
+   */
+  private static final int LATCH_TO_NUMERIC = 902;
+
+  /**
+   * mode shift to Byte Compaction mode
+   */
+  private static final int SHIFT_TO_BYTE = 913;
+
+  /**
+   * mode latch to Byte Compaction mode (number of characters a multiple of 6)
+   */
+  private static final int LATCH_TO_BYTE = 924;
+
+  /**
+   * identifier for a user defined Extended Channel Interpretation (ECI)
+   */
+  private static final int ECI_USER_DEFINED = 925;
+
+  /**
+   * identifier for a general purpose ECO format
+   */
+  private static final int ECI_GENERAL_PURPOSE = 926;
+
+  /**
+   * identifier for an ECI of a character set of code page
+   */
+  private static final int ECI_CHARSET = 927;
+
+  /**
+   * Raw code table for text compaction Mixed sub-mode
+   */
+<span class="fc" id="L116">  private static final byte[] TEXT_MIXED_RAW = {</span>
+      48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 38, 13, 9, 44, 58,
+      35, 45, 46, 36, 47, 43, 37, 42, 61, 94, 0, 32, 0, 0, 0};
+
+  /**
+   * Raw code table for text compaction: Punctuation sub-mode
+   */
+<span class="fc" id="L123">  private static final byte[] TEXT_PUNCTUATION_RAW = {</span>
+      59, 60, 62, 64, 91, 92, 93, 95, 96, 126, 33, 13, 9, 44, 58,
+      10, 45, 46, 36, 47, 34, 124, 42, 40, 41, 63, 123, 125, 39, 0};
+
+<span class="fc" id="L127">  private static final byte[] MIXED = new byte[128];</span>
+<span class="fc" id="L128">  private static final byte[] PUNCTUATION = new byte[128];</span>
+
+<span class="fc" id="L130">  private static final Charset DEFAULT_ENCODING = StandardCharsets.ISO_8859_1;</span>
+
+  private PDF417HighLevelEncoder() {
+  }
+
+  static {
+    //Construct inverse lookups
+<span class="fc" id="L137">    Arrays.fill(MIXED, (byte) -1);</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">    for (int i = 0; i &lt; TEXT_MIXED_RAW.length; i++) {</span>
+<span class="fc" id="L139">      byte b = TEXT_MIXED_RAW[i];</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">      if (b &gt; 0) {</span>
+<span class="fc" id="L141">        MIXED[b] = (byte) i;</span>
+      }
+    }
+<span class="fc" id="L144">    Arrays.fill(PUNCTUATION, (byte) -1);</span>
+<span class="fc bfc" id="L145" title="All 2 branches covered.">    for (int i = 0; i &lt; TEXT_PUNCTUATION_RAW.length; i++) {</span>
+<span class="fc" id="L146">      byte b = TEXT_PUNCTUATION_RAW[i];</span>
+<span class="fc bfc" id="L147" title="All 2 branches covered.">      if (b &gt; 0) {</span>
+<span class="fc" id="L148">        PUNCTUATION[b] = (byte) i;</span>
+      }
+    }
+<span class="fc" id="L151">  }</span>
+
+  /**
+   * Performs high-level encoding of a PDF417 message using the algorithm described in annex P
+   * of ISO/IEC 15438:2001(E). If byte compaction has been selected, then only byte compaction
+   * is used.
+   *
+   * @param msg the message
+   * @param compaction compaction mode to use
+   * @param encoding character encoding used to encode in default or byte compaction
+   *  or {@code null} for default / not applicable
+   * @return the encoded message (the char values range from 0 to 928)
+   */
+  static String encodeHighLevel(String msg, Compaction compaction, Charset encoding) throws WriterException {
+
+    //the codewords 0..928 are encoded as Unicode characters
+<span class="fc" id="L167">    StringBuilder sb = new StringBuilder(msg.length());</span>
+
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    if (encoding == null) {</span>
+<span class="fc" id="L170">      encoding = DEFAULT_ENCODING;</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">    } else if (!DEFAULT_ENCODING.equals(encoding)) {</span>
+<span class="fc" id="L172">      CharacterSetECI eci = CharacterSetECI.getCharacterSetECIByName(encoding.name());</span>
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">      if (eci != null) {</span>
+<span class="fc" id="L174">        encodingECI(eci.getValue(), sb);</span>
+      }
+    }
+
+<span class="fc" id="L178">    int len = msg.length();</span>
+<span class="fc" id="L179">    int p = 0;</span>
+<span class="fc" id="L180">    int textSubMode = SUBMODE_ALPHA;</span>
+
+    // User selected encoding mode
+<span class="pc bfc" id="L183" title="All 4 branches covered.">    switch (compaction) {</span>
+      case TEXT:
+<span class="fc" id="L185">        encodeText(msg, p, len, sb, textSubMode);</span>
+<span class="fc" id="L186">        break;</span>
+      case BYTE:
+<span class="fc" id="L188">        byte[] msgBytes = msg.getBytes(encoding);</span>
+<span class="fc" id="L189">        encodeBinary(msgBytes, p, msgBytes.length, BYTE_COMPACTION, sb);</span>
+<span class="fc" id="L190">        break;</span>
+      case NUMERIC:
+<span class="fc" id="L192">        sb.append((char) LATCH_TO_NUMERIC);</span>
+<span class="fc" id="L193">        encodeNumeric(msg, p, len, sb);</span>
+<span class="fc" id="L194">        break;</span>
+      default:
+<span class="fc" id="L196">        int encodingMode = TEXT_COMPACTION; //Default mode, see 4.4.2.1</span>
+<span class="fc bfc" id="L197" title="All 2 branches covered.">        while (p &lt; len) {</span>
+<span class="fc" id="L198">          int n = determineConsecutiveDigitCount(msg, p);</span>
+<span class="pc bpc" id="L199" title="1 of 2 branches missed.">          if (n &gt;= 13) {</span>
+<span class="nc" id="L200">            sb.append((char) LATCH_TO_NUMERIC);</span>
+<span class="nc" id="L201">            encodingMode = NUMERIC_COMPACTION;</span>
+<span class="nc" id="L202">            textSubMode = SUBMODE_ALPHA; //Reset after latch</span>
+<span class="nc" id="L203">            encodeNumeric(msg, p, n, sb);</span>
+<span class="nc" id="L204">            p += n;</span>
+          } else {
+<span class="fc" id="L206">            int t = determineConsecutiveTextCount(msg, p);</span>
+<span class="pc bpc" id="L207" title="1 of 4 branches missed.">            if (t &gt;= 5 || n == len) {</span>
+<span class="pc bpc" id="L208" title="1 of 2 branches missed.">              if (encodingMode != TEXT_COMPACTION) {</span>
+<span class="nc" id="L209">                sb.append((char) LATCH_TO_TEXT);</span>
+<span class="nc" id="L210">                encodingMode = TEXT_COMPACTION;</span>
+<span class="nc" id="L211">                textSubMode = SUBMODE_ALPHA; //start with submode alpha after latch</span>
+              }
+<span class="fc" id="L213">              textSubMode = encodeText(msg, p, t, sb, textSubMode);</span>
+<span class="fc" id="L214">              p += t;</span>
+            } else {
+<span class="fc" id="L216">              int b = determineConsecutiveBinaryCount(msg, p, encoding);</span>
+<span class="pc bpc" id="L217" title="1 of 2 branches missed.">              if (b == 0) {</span>
+<span class="nc" id="L218">                b = 1;</span>
+              }
+<span class="fc" id="L220">              byte[] bytes = msg.substring(p, p + b).getBytes(encoding);</span>
+<span class="pc bpc" id="L221" title="3 of 4 branches missed.">              if (bytes.length == 1 &amp;&amp; encodingMode == TEXT_COMPACTION) {</span>
+                //Switch for one byte (instead of latch)
+<span class="nc" id="L223">                encodeBinary(bytes, 0, 1, TEXT_COMPACTION, sb);</span>
+              } else {
+                //Mode latch performed by encodeBinary()
+<span class="fc" id="L226">                encodeBinary(bytes, 0, bytes.length, encodingMode, sb);</span>
+<span class="fc" id="L227">                encodingMode = BYTE_COMPACTION;</span>
+<span class="fc" id="L228">                textSubMode = SUBMODE_ALPHA; //Reset after latch</span>
+              }
+<span class="fc" id="L230">              p += b;</span>
+            }
+          }
+<span class="fc" id="L233">        }</span>
+        break;
+    }
+
+<span class="fc" id="L237">    return sb.toString();</span>
+  }
+
+  /**
+   * Encode parts of the message using Text Compaction as described in ISO/IEC 15438:2001(E),
+   * chapter 4.4.2.
+   *
+   * @param msg            the message
+   * @param startpos       the start position within the message
+   * @param count          the number of characters to encode
+   * @param sb             receives the encoded codewords
+   * @param initialSubmode should normally be SUBMODE_ALPHA
+   * @return the text submode in which this method ends
+   */
+  private static int encodeText(CharSequence msg,
+                                int startpos,
+                                int count,
+                                StringBuilder sb,
+                                int initialSubmode) {
+<span class="fc" id="L256">    StringBuilder tmp = new StringBuilder(count);</span>
+<span class="fc" id="L257">    int submode = initialSubmode;</span>
+<span class="fc" id="L258">    int idx = 0;</span>
+    while (true) {
+<span class="fc" id="L260">      char ch = msg.charAt(startpos + idx);</span>
+<span class="pc bpc" id="L261" title="2 of 4 branches missed.">      switch (submode) {</span>
+        case SUBMODE_ALPHA:
+<span class="fc bfc" id="L263" title="All 2 branches covered.">          if (isAlphaUpper(ch)) {</span>
+<span class="pc bpc" id="L264" title="1 of 2 branches missed.">            if (ch == ' ') {</span>
+<span class="nc" id="L265">              tmp.append((char) 26); //space</span>
+            } else {
+<span class="fc" id="L267">              tmp.append((char) (ch - 65));</span>
+            }
+          } else {
+<span class="pc bpc" id="L270" title="1 of 2 branches missed.">            if (isAlphaLower(ch)) {</span>
+<span class="fc" id="L271">              submode = SUBMODE_LOWER;</span>
+<span class="fc" id="L272">              tmp.append((char) 27); //ll</span>
+<span class="fc" id="L273">              continue;</span>
+<span class="nc bnc" id="L274" title="All 2 branches missed.">            } else if (isMixed(ch)) {</span>
+<span class="nc" id="L275">              submode = SUBMODE_MIXED;</span>
+<span class="nc" id="L276">              tmp.append((char) 28); //ml</span>
+<span class="nc" id="L277">              continue;</span>
+            } else {
+<span class="nc" id="L279">              tmp.append((char) 29); //ps</span>
+<span class="nc" id="L280">              tmp.append((char) PUNCTUATION[ch]);</span>
+<span class="nc" id="L281">              break;</span>
+            }
+          }
+          break;
+        case SUBMODE_LOWER:
+<span class="fc bfc" id="L286" title="All 2 branches covered.">          if (isAlphaLower(ch)) {</span>
+<span class="fc bfc" id="L287" title="All 2 branches covered.">            if (ch == ' ') {</span>
+<span class="fc" id="L288">              tmp.append((char) 26); //space</span>
+            } else {
+<span class="fc" id="L290">              tmp.append((char) (ch - 97));</span>
+            }
+          } else {
+<span class="pc bpc" id="L293" title="1 of 2 branches missed.">            if (isAlphaUpper(ch)) {</span>
+<span class="fc" id="L294">              tmp.append((char) 27); //as</span>
+<span class="fc" id="L295">              tmp.append((char) (ch - 65));</span>
+              //space cannot happen here, it is also in &quot;Lower&quot;
+<span class="fc" id="L297">              break;</span>
+<span class="nc bnc" id="L298" title="All 2 branches missed.">            } else if (isMixed(ch)) {</span>
+<span class="nc" id="L299">              submode = SUBMODE_MIXED;</span>
+<span class="nc" id="L300">              tmp.append((char) 28); //ml</span>
+<span class="nc" id="L301">              continue;</span>
+            } else {
+<span class="nc" id="L303">              tmp.append((char) 29); //ps</span>
+<span class="nc" id="L304">              tmp.append((char) PUNCTUATION[ch]);</span>
+<span class="nc" id="L305">              break;</span>
+            }
+          }
+          break;
+        case SUBMODE_MIXED:
+<span class="nc bnc" id="L310" title="All 2 branches missed.">          if (isMixed(ch)) {</span>
+<span class="nc" id="L311">            tmp.append((char) MIXED[ch]);</span>
+          } else {
+<span class="nc bnc" id="L313" title="All 2 branches missed.">            if (isAlphaUpper(ch)) {</span>
+<span class="nc" id="L314">              submode = SUBMODE_ALPHA;</span>
+<span class="nc" id="L315">              tmp.append((char) 28); //al</span>
+<span class="nc" id="L316">              continue;</span>
+<span class="nc bnc" id="L317" title="All 2 branches missed.">            } else if (isAlphaLower(ch)) {</span>
+<span class="nc" id="L318">              submode = SUBMODE_LOWER;</span>
+<span class="nc" id="L319">              tmp.append((char) 27); //ll</span>
+<span class="nc" id="L320">              continue;</span>
+            } else {
+<span class="nc bnc" id="L322" title="All 2 branches missed.">              if (startpos + idx + 1 &lt; count) {</span>
+<span class="nc" id="L323">                char next = msg.charAt(startpos + idx + 1);</span>
+<span class="nc bnc" id="L324" title="All 2 branches missed.">                if (isPunctuation(next)) {</span>
+<span class="nc" id="L325">                  submode = SUBMODE_PUNCTUATION;</span>
+<span class="nc" id="L326">                  tmp.append((char) 25); //pl</span>
+<span class="nc" id="L327">                  continue;</span>
+                }
+              }
+<span class="nc" id="L330">              tmp.append((char) 29); //ps</span>
+<span class="nc" id="L331">              tmp.append((char) PUNCTUATION[ch]);</span>
+            }
+          }
+<span class="nc" id="L334">          break;</span>
+        default: //SUBMODE_PUNCTUATION
+<span class="nc bnc" id="L336" title="All 2 branches missed.">          if (isPunctuation(ch)) {</span>
+<span class="nc" id="L337">            tmp.append((char) PUNCTUATION[ch]);</span>
+          } else {
+<span class="nc" id="L339">            submode = SUBMODE_ALPHA;</span>
+<span class="nc" id="L340">            tmp.append((char) 29); //al</span>
+<span class="nc" id="L341">            continue;</span>
+          }
+      }
+<span class="fc" id="L344">      idx++;</span>
+<span class="fc bfc" id="L345" title="All 2 branches covered.">      if (idx &gt;= count) {</span>
+<span class="fc" id="L346">        break;</span>
+      }
+<span class="fc" id="L348">    }</span>
+<span class="fc" id="L349">    char h = 0;</span>
+<span class="fc" id="L350">    int len = tmp.length();</span>
+<span class="fc bfc" id="L351" title="All 2 branches covered.">    for (int i = 0; i &lt; len; i++) {</span>
+<span class="fc bfc" id="L352" title="All 2 branches covered.">      boolean odd = (i % 2) != 0;</span>
+<span class="fc bfc" id="L353" title="All 2 branches covered.">      if (odd) {</span>
+<span class="fc" id="L354">        h = (char) ((h * 30) + tmp.charAt(i));</span>
+<span class="fc" id="L355">        sb.append(h);</span>
+      } else {
+<span class="fc" id="L357">        h = tmp.charAt(i);</span>
+      }
+    }
+<span class="pc bpc" id="L360" title="1 of 2 branches missed.">    if ((len % 2) != 0) {</span>
+<span class="nc" id="L361">      sb.append((char) ((h * 30) + 29)); //ps</span>
+    }
+<span class="fc" id="L363">    return submode;</span>
+  }
+
+  /**
+   * Encode parts of the message using Byte Compaction as described in ISO/IEC 15438:2001(E),
+   * chapter 4.4.3. The Unicode characters will be converted to binary using the cp437
+   * codepage.
+   *
+   * @param bytes     the message converted to a byte array
+   * @param startpos  the start position within the message
+   * @param count     the number of bytes to encode
+   * @param startmode the mode from which this method starts
+   * @param sb        receives the encoded codewords
+   */
+  private static void encodeBinary(byte[] bytes,
+                                   int startpos,
+                                   int count,
+                                   int startmode,
+                                   StringBuilder sb) {
+<span class="pc bpc" id="L382" title="3 of 4 branches missed.">    if (count == 1 &amp;&amp; startmode == TEXT_COMPACTION) {</span>
+<span class="nc" id="L383">      sb.append((char) SHIFT_TO_BYTE);</span>
+    } else {
+<span class="pc bpc" id="L385" title="1 of 2 branches missed.">      if ((count % 6) == 0) {</span>
+<span class="nc" id="L386">        sb.append((char) LATCH_TO_BYTE);</span>
+      } else {
+<span class="fc" id="L388">        sb.append((char) LATCH_TO_BYTE_PADDED);</span>
+      }
+    }
+
+<span class="fc" id="L392">    int idx = startpos;</span>
+    // Encode sixpacks
+<span class="fc bfc" id="L394" title="All 2 branches covered.">    if (count &gt;= 6) {</span>
+<span class="fc" id="L395">      char[] chars = new char[5];</span>
+<span class="fc bfc" id="L396" title="All 2 branches covered.">      while ((startpos + count - idx) &gt;= 6) {</span>
+<span class="fc" id="L397">        long t = 0;</span>
+<span class="fc bfc" id="L398" title="All 2 branches covered.">        for (int i = 0; i &lt; 6; i++) {</span>
+<span class="fc" id="L399">          t &lt;&lt;= 8;</span>
+<span class="fc" id="L400">          t += bytes[idx + i] &amp; 0xff;</span>
+        }
+<span class="fc bfc" id="L402" title="All 2 branches covered.">        for (int i = 0; i &lt; 5; i++) {</span>
+<span class="fc" id="L403">          chars[i] = (char) (t % 900);</span>
+<span class="fc" id="L404">          t /= 900;</span>
+        }
+<span class="fc bfc" id="L406" title="All 2 branches covered.">        for (int i = chars.length - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L407">          sb.append(chars[i]);</span>
+        }
+<span class="fc" id="L409">        idx += 6;</span>
+<span class="fc" id="L410">      }</span>
+    }
+    //Encode rest (remaining n&lt;5 bytes if any)
+<span class="fc bfc" id="L413" title="All 2 branches covered.">    for (int i = idx; i &lt; startpos + count; i++) {</span>
+<span class="fc" id="L414">      int ch = bytes[i] &amp; 0xff;</span>
+<span class="fc" id="L415">      sb.append((char) ch);</span>
+    }
+<span class="fc" id="L417">  }</span>
+
+  private static void encodeNumeric(String msg, int startpos, int count, StringBuilder sb) {
+<span class="fc" id="L420">    int idx = 0;</span>
+<span class="fc" id="L421">    StringBuilder tmp = new StringBuilder(count / 3 + 1);</span>
+<span class="fc" id="L422">    BigInteger num900 = BigInteger.valueOf(900);</span>
+<span class="fc" id="L423">    BigInteger num0 = BigInteger.valueOf(0);</span>
+<span class="fc bfc" id="L424" title="All 2 branches covered.">    while (idx &lt; count) {</span>
+<span class="fc" id="L425">      tmp.setLength(0);</span>
+<span class="fc" id="L426">      int len = Math.min(44, count - idx);</span>
+<span class="fc" id="L427">      String part = '1' + msg.substring(startpos + idx, startpos + idx + len);</span>
+<span class="fc" id="L428">      BigInteger bigint = new BigInteger(part);</span>
+      do {
+<span class="fc" id="L430">        tmp.append((char) bigint.mod(num900).intValue());</span>
+<span class="fc" id="L431">        bigint = bigint.divide(num900);</span>
+<span class="fc bfc" id="L432" title="All 2 branches covered.">      } while (!bigint.equals(num0));</span>
+
+      //Reverse temporary string
+<span class="fc bfc" id="L435" title="All 2 branches covered.">      for (int i = tmp.length() - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L436">        sb.append(tmp.charAt(i));</span>
+      }
+<span class="fc" id="L438">      idx += len;</span>
+<span class="fc" id="L439">    }</span>
+<span class="fc" id="L440">  }</span>
+
+
+  private static boolean isDigit(char ch) {
+<span class="fc bfc" id="L444" title="All 4 branches covered.">    return ch &gt;= '0' &amp;&amp; ch &lt;= '9';</span>
+  }
+
+  private static boolean isAlphaUpper(char ch) {
+<span class="pc bpc" id="L448" title="2 of 6 branches missed.">    return ch == ' ' || (ch &gt;= 'A' &amp;&amp; ch &lt;= 'Z');</span>
+  }
+
+  private static boolean isAlphaLower(char ch) {
+<span class="pc bpc" id="L452" title="1 of 6 branches missed.">    return ch == ' ' || (ch &gt;= 'a' &amp;&amp; ch &lt;= 'z');</span>
+  }
+
+  private static boolean isMixed(char ch) {
+<span class="nc bnc" id="L456" title="All 2 branches missed.">    return MIXED[ch] != -1;</span>
+  }
+
+  private static boolean isPunctuation(char ch) {
+<span class="nc bnc" id="L460" title="All 2 branches missed.">    return PUNCTUATION[ch] != -1;</span>
+  }
+
+  private static boolean isText(char ch) {
+<span class="pc bpc" id="L464" title="4 of 10 branches missed.">    return ch == '\t' || ch == '\n' || ch == '\r' || (ch &gt;= 32 &amp;&amp; ch &lt;= 126);</span>
+  }
+
+  /**
+   * Determines the number of consecutive characters that are encodable using numeric compaction.
+   *
+   * @param msg      the message
+   * @param startpos the start position within the message
+   * @return the requested character count
+   */
+  private static int determineConsecutiveDigitCount(CharSequence msg, int startpos) {
+<span class="fc" id="L475">    int count = 0;</span>
+<span class="fc" id="L476">    int len = msg.length();</span>
+<span class="fc" id="L477">    int idx = startpos;</span>
+<span class="pc bpc" id="L478" title="1 of 2 branches missed.">    if (idx &lt; len) {</span>
+<span class="fc" id="L479">      char ch = msg.charAt(idx);</span>
+<span class="pc bpc" id="L480" title="1 of 4 branches missed.">      while (isDigit(ch) &amp;&amp; idx &lt; len) {</span>
+<span class="fc" id="L481">        count++;</span>
+<span class="fc" id="L482">        idx++;</span>
+<span class="pc bpc" id="L483" title="1 of 2 branches missed.">        if (idx &lt; len) {</span>
+<span class="fc" id="L484">          ch = msg.charAt(idx);</span>
+        }
+      }
+    }
+<span class="fc" id="L488">    return count;</span>
+  }
+
+  /**
+   * Determines the number of consecutive characters that are encodable using text compaction.
+   *
+   * @param msg      the message
+   * @param startpos the start position within the message
+   * @return the requested character count
+   */
+  private static int determineConsecutiveTextCount(CharSequence msg, int startpos) {
+<span class="fc" id="L499">    int len = msg.length();</span>
+<span class="fc" id="L500">    int idx = startpos;</span>
+<span class="fc bfc" id="L501" title="All 2 branches covered.">    while (idx &lt; len) {</span>
+<span class="fc" id="L502">      char ch = msg.charAt(idx);</span>
+<span class="fc" id="L503">      int numericCount = 0;</span>
+<span class="pc bpc" id="L504" title="2 of 6 branches missed.">      while (numericCount &lt; 13 &amp;&amp; isDigit(ch) &amp;&amp; idx &lt; len) {</span>
+<span class="fc" id="L505">        numericCount++;</span>
+<span class="fc" id="L506">        idx++;</span>
+<span class="pc bpc" id="L507" title="1 of 2 branches missed.">        if (idx &lt; len) {</span>
+<span class="fc" id="L508">          ch = msg.charAt(idx);</span>
+        }
+      }
+<span class="pc bpc" id="L511" title="1 of 2 branches missed.">      if (numericCount &gt;= 13) {</span>
+<span class="nc" id="L512">        return idx - startpos - numericCount;</span>
+      }
+<span class="fc bfc" id="L514" title="All 2 branches covered.">      if (numericCount &gt; 0) {</span>
+        //Heuristic: All text-encodable chars or digits are binary encodable
+<span class="fc" id="L516">        continue;</span>
+      }
+<span class="fc" id="L518">      ch = msg.charAt(idx);</span>
+
+      //Check if character is encodable
+<span class="fc bfc" id="L521" title="All 2 branches covered.">      if (!isText(ch)) {</span>
+<span class="fc" id="L522">        break;</span>
+      }
+<span class="fc" id="L524">      idx++;</span>
+<span class="fc" id="L525">    }</span>
+<span class="fc" id="L526">    return idx - startpos;</span>
+  }
+
+  /**
+   * Determines the number of consecutive characters that are encodable using binary compaction.
+   *
+   * @param msg      the message
+   * @param startpos the start position within the message
+   * @param encoding the charset used to convert the message to a byte array
+   * @return the requested character count
+   */
+  private static int determineConsecutiveBinaryCount(String msg, int startpos, Charset encoding)
+      throws WriterException {
+<span class="fc" id="L539">    CharsetEncoder encoder = encoding.newEncoder();</span>
+<span class="fc" id="L540">    int len = msg.length();</span>
+<span class="fc" id="L541">    int idx = startpos;</span>
+<span class="fc bfc" id="L542" title="All 2 branches covered.">    while (idx &lt; len) {</span>
+<span class="fc" id="L543">      char ch = msg.charAt(idx);</span>
+<span class="fc" id="L544">      int numericCount = 0;</span>
+
+<span class="pc bpc" id="L546" title="1 of 4 branches missed.">      while (numericCount &lt; 13 &amp;&amp; isDigit(ch)) {</span>
+<span class="fc" id="L547">        numericCount++;</span>
+        //textCount++;
+<span class="fc" id="L549">        int i = idx + numericCount;</span>
+<span class="pc bpc" id="L550" title="1 of 2 branches missed.">        if (i &gt;= len) {</span>
+<span class="nc" id="L551">          break;</span>
+        }
+<span class="fc" id="L553">        ch = msg.charAt(i);</span>
+<span class="fc" id="L554">      }</span>
+<span class="pc bpc" id="L555" title="1 of 2 branches missed.">      if (numericCount &gt;= 13) {</span>
+<span class="nc" id="L556">        return idx - startpos;</span>
+      }
+<span class="fc" id="L558">      ch = msg.charAt(idx);</span>
+
+<span class="pc bpc" id="L560" title="1 of 2 branches missed.">      if (!encoder.canEncode(ch)) {</span>
+<span class="nc" id="L561">        throw new WriterException(&quot;Non-encodable character detected: &quot; + ch + &quot; (Unicode: &quot; + (int) ch + ')');</span>
+      }
+<span class="fc" id="L563">      idx++;</span>
+<span class="fc" id="L564">    }</span>
+<span class="fc" id="L565">    return idx - startpos;</span>
+  }
+
+  private static void encodingECI(int eci, StringBuilder sb) throws WriterException {
+<span class="pc bpc" id="L569" title="2 of 4 branches missed.">    if (eci &gt;= 0 &amp;&amp; eci &lt; 900) {</span>
+<span class="fc" id="L570">      sb.append((char) ECI_CHARSET);</span>
+<span class="fc" id="L571">      sb.append((char) eci);</span>
+<span class="nc bnc" id="L572" title="All 2 branches missed.">    } else if (eci &lt; 810900) {</span>
+<span class="nc" id="L573">      sb.append((char) ECI_GENERAL_PURPOSE);</span>
+<span class="nc" id="L574">      sb.append((char) (eci / 900 - 1));</span>
+<span class="nc" id="L575">      sb.append((char) (eci % 900));</span>
+<span class="nc bnc" id="L576" title="All 2 branches missed.">    } else if (eci &lt; 811800) {</span>
+<span class="nc" id="L577">      sb.append((char) ECI_USER_DEFINED);</span>
+<span class="nc" id="L578">      sb.append((char) (810900 - eci));</span>
+    } else {
+<span class="nc" id="L580">      throw new WriterException(&quot;ECI number not in valid range from 0..811799, but was &quot; + eci);</span>
+    }
+<span class="fc" id="L582">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ConfigurableThreadFactory.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">ConfigurableThreadFactory.java</span></div><h1>ConfigurableThreadFactory.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.threadly.util.ExceptionHandler;
+import org.threadly.util.ExceptionUtils;
+/**
+ * Implementation of {@link ThreadFactory} which is configurable for the most common use cases.  
+ * Specifically, it allows you several options for how to prefix the name of threads, if returned 
+ * threads should be daemon or not, what their priority should be, and if an 
+ * {@link UncaughtExceptionHandler} should be provided to new threads.  You can construct this 
+ * with no arguments, and it's behavior will match that of 
+ * {@code Executors.defaultThreadFactory()}.
+ * 
+ * @since 2.3.0
+ */
+public class ConfigurableThreadFactory implements ThreadFactory {
+  protected static final boolean DEFAULT_NEW_THREADS_DAEMON = false;
+<span class="fc" id="L21">  private static final AtomicInteger NEXT_POOL_NUMBER = new AtomicInteger(1);</span>
+  
+  protected final ThreadGroup group;
+  protected final String threadNamePrefix;
+  protected final boolean useDaemonThreads;
+  protected final int threadPriority;
+  protected final UncaughtExceptionHandler defaultUncaughtExceptionHandler;
+  protected final ExceptionHandler defaultThreadlyExceptionHandler;
+  private final AtomicInteger nextThreadNumber;
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} with the default parameters.  Threads 
+   * produced from this should behave exactly like Executors.defaultThreadFactory(), except the 
+   * pool number provided in the thread name will be respective to the ones created from other 
+   * {@link ConfigurableThreadFactory} instances.
+   */
+  public ConfigurableThreadFactory() {
+<span class="fc" id="L38">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, Thread.NORM_PRIORITY, null, null);</span>
+<span class="fc" id="L39">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} specifying the prefix for the name of 
+   * newly created threads.  
+   * &lt;p&gt;
+   * If specified with {@code true} for {@code appendPoolIdToPrefix} it will append a unique 
+   * &quot;pool&quot; id to the prefix, giving it the format of 
+   * {@code threadNamePrefix + UNIQUE_POOL_ID + &quot;-thread-&quot;}.  If {@code appendPoolIdToPrefix} is 
+   * specified as {@code false}, only a unique thread id will be appended to the prefix.  In 
+   * either case, the produced threads name will be appended with a unique thread id for the 
+   * factory instance.
+   * 
+   * @param threadNamePrefix prefix for all threads created
+   * @param appendPoolIdToPrefix {@code true} to append a unique pool id to the thread prefix
+   */
+  public ConfigurableThreadFactory(String threadNamePrefix, boolean appendPoolIdToPrefix) {
+<span class="fc" id="L56">    this(threadNamePrefix, appendPoolIdToPrefix, </span>
+         DEFAULT_NEW_THREADS_DAEMON, Thread.NORM_PRIORITY, null, null);
+<span class="fc" id="L58">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} specifying the behavior for if threads 
+   * should be daemon or not.
+   * 
+   * @param useDaemonThreads {@code true} if produced threads should be daemon threads
+   */
+  public ConfigurableThreadFactory(boolean useDaemonThreads) {
+<span class="fc" id="L67">    this(null, true, useDaemonThreads, Thread.NORM_PRIORITY, null, null);</span>
+<span class="fc" id="L68">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} specifying the priority for produced 
+   * threads.  
+   * &lt;p&gt;
+   * If the priority is below or above the max available thread priority, this will be adjusted to 
+   * the limit of the system.
+   * 
+   * @param threadPriority Priority for newly created threads
+   */
+  public ConfigurableThreadFactory(int threadPriority) {
+<span class="fc" id="L80">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, threadPriority, null, null);</span>
+<span class="fc" id="L81">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} specifying an 
+   * {@link UncaughtExceptionHandler} that will be provided to all newly created threads.
+   * 
+   * @param defaultUncaughtExceptionHandler {@link UncaughtExceptionHandler} to provide to newly created threads
+   */
+  public ConfigurableThreadFactory(UncaughtExceptionHandler defaultUncaughtExceptionHandler) {
+<span class="fc" id="L90">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, </span>
+         Thread.NORM_PRIORITY, defaultUncaughtExceptionHandler, null);
+<span class="fc" id="L92">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} specifying an {@link ExceptionHandler} 
+   * that will be provided to all newly created threads.
+   * 
+   * @param defaultThreadlyExceptionHandler {@link ExceptionHandler} to provide to newly created threads
+   */
+  public ConfigurableThreadFactory(ExceptionHandler defaultThreadlyExceptionHandler) {
+<span class="fc" id="L101">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, </span>
+         Thread.NORM_PRIORITY, null, defaultThreadlyExceptionHandler);
+<span class="fc" id="L103">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} allowing you to provide specific values 
+   * for everything which this class allows to be configured.  You must use this constructor if 
+   * you need to adjust two or more values.  
+   * &lt;p&gt;
+   * If specified with {@code true} for {@code appendPoolIdToPrefix} it will append a unique 
+   * &quot;pool&quot; id to the prefix, giving it the format of 
+   * {@code threadNamePrefix + UNIQUE_POOL_ID + &quot;-thread-&quot;}.  If {@code appendPoolIdToPrefix} is 
+   * specified as {@code false}, only a unique thread id will be appended to the prefix.  In 
+   * either case, the produced threads name will be appended with a unique thread id for the 
+   * factory instance.
+   * &lt;p&gt;
+   * If the priority is below or above the max available thread priority, this will be adjusted to 
+   * the limit of the system.
+   * 
+   * @param threadNamePrefix prefix for all threads created, {@code null} to match default
+   * @param appendPoolIdToPrefix {@code true} to append a unique pool id to the thread prefix, 
+   *                             {@code true} to match default
+   * @param useDaemonThreads true if produced threads should be daemon threads, false to match default
+   * @param threadPriority Priority for newly created threads, {@code Thread.NORM_PRIORITY} to match default
+   * @param uncaughtExceptionHandler UncaughtExceptionHandler to provide to newly created threads, 
+   *                                 {@code null} to match default
+   * @param defaultThreadlyExceptionHandler {@link ExceptionHandler} to provide to newly created threads
+   */
+  public ConfigurableThreadFactory(String threadNamePrefix, boolean appendPoolIdToPrefix, 
+                                   boolean useDaemonThreads, int threadPriority, 
+                                   UncaughtExceptionHandler uncaughtExceptionHandler, 
+<span class="fc" id="L132">                                   ExceptionHandler defaultThreadlyExceptionHandler) {</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    if (threadPriority &gt; Thread.MAX_PRIORITY) {</span>
+<span class="fc" id="L134">      threadPriority = Thread.MAX_PRIORITY;</span>
+<span class="fc bfc" id="L135" title="All 2 branches covered.">    } else if (threadPriority &lt; Thread.MIN_PRIORITY) {</span>
+<span class="fc" id="L136">      threadPriority = Thread.MIN_PRIORITY;</span>
+    }
+<span class="fc bfc" id="L138" title="All 2 branches covered.">    if (threadNamePrefix == null) {</span>
+<span class="fc" id="L139">      threadNamePrefix = &quot;pool-&quot;;</span>
+    }
+<span class="fc bfc" id="L141" title="All 2 branches covered.">    if (appendPoolIdToPrefix) {</span>
+<span class="fc" id="L142">      threadNamePrefix += NEXT_POOL_NUMBER.getAndIncrement() + &quot;-thread-&quot;;</span>
+    }
+    
+<span class="fc" id="L145">    SecurityManager s = System.getSecurityManager();</span>
+<span class="pc bpc" id="L146" title="1 of 2 branches missed.">    if (s != null) {</span>
+<span class="nc" id="L147">      this.group = s.getThreadGroup();</span>
+    } else {
+<span class="fc" id="L149">      this.group = Thread.currentThread().getThreadGroup();</span>
+    }
+<span class="fc" id="L151">    this.threadNamePrefix = threadNamePrefix;</span>
+<span class="fc" id="L152">    this.useDaemonThreads = useDaemonThreads;</span>
+<span class="fc" id="L153">    this.threadPriority = threadPriority;</span>
+<span class="fc" id="L154">    this.defaultUncaughtExceptionHandler = uncaughtExceptionHandler;</span>
+<span class="fc" id="L155">    this.defaultThreadlyExceptionHandler = defaultThreadlyExceptionHandler;</span>
+<span class="fc" id="L156">    this.nextThreadNumber = new AtomicInteger(1);</span>
+<span class="fc" id="L157">  }</span>
+
+  @Override
+  public Thread newThread(Runnable r) {
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    if (defaultThreadlyExceptionHandler != null) {</span>
+<span class="fc" id="L162">      r = new ExceptionHandlerSettingRunnable(r);</span>
+    }
+<span class="fc" id="L164">    Thread t = new Thread(group, r, threadNamePrefix + nextThreadNumber.getAndIncrement());</span>
+    
+<span class="fc bfc" id="L166" title="All 2 branches covered.">    if (t.isDaemon() != useDaemonThreads) {</span>
+<span class="fc" id="L167">      t.setDaemon(useDaemonThreads);</span>
+    }
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    if (t.getPriority() != threadPriority) {</span>
+<span class="fc" id="L170">      t.setPriority(threadPriority);</span>
+    }
+<span class="fc bfc" id="L172" title="All 2 branches covered.">    if (defaultUncaughtExceptionHandler != null) {</span>
+<span class="fc" id="L173">      t.setUncaughtExceptionHandler(defaultUncaughtExceptionHandler);</span>
+    }
+    
+<span class="fc" id="L176">    return t;</span>
+  }
+  
+  /**
+   * Because the {@link ExceptionHandler} can not be set before the thread is started.  We must 
+   * wrap it in this implementation to set the handler before the runnable actually starts.
+   * 
+   * @since 2.4.0
+   */
+  protected class ExceptionHandlerSettingRunnable implements Runnable {
+    private final Runnable toRun;
+    
+<span class="fc" id="L188">    protected ExceptionHandlerSettingRunnable(Runnable r) {</span>
+<span class="fc" id="L189">      toRun = r;</span>
+<span class="fc" id="L190">    }</span>
+
+    @Override
+    public void run() {
+<span class="fc" id="L194">      ExceptionUtils.setThreadExceptionHandler(defaultThreadlyExceptionHandler);</span>
+<span class="fc" id="L195">      toRun.run();</span>
+<span class="fc" id="L196">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

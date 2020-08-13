@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Decoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.aztec.decoder</a> &gt; <span class="el_source">Decoder.java</span></div><h1>Decoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2010 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.aztec.decoder;
+
+import com.google.zxing.FormatException;
+import com.google.zxing.aztec.AztecDetectorResult;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.DecoderResult;
+import com.google.zxing.common.reedsolomon.GenericGF;
+import com.google.zxing.common.reedsolomon.ReedSolomonDecoder;
+import com.google.zxing.common.reedsolomon.ReedSolomonException;
+
+import java.util.Arrays;
+
+/**
+ * &lt;p&gt;The main class which implements Aztec Code decoding -- as opposed to locating and extracting
+ * the Aztec Code from an image.&lt;/p&gt;
+ *
+ * @author David Olivier
+ */
+<span class="fc" id="L35">public final class Decoder {</span>
+
+<span class="fc" id="L37">  private enum Table {</span>
+<span class="fc" id="L38">    UPPER,</span>
+<span class="fc" id="L39">    LOWER,</span>
+<span class="fc" id="L40">    MIXED,</span>
+<span class="fc" id="L41">    DIGIT,</span>
+<span class="fc" id="L42">    PUNCT,</span>
+<span class="fc" id="L43">    BINARY</span>
+  }
+
+<span class="fc" id="L46">  private static final String[] UPPER_TABLE = {</span>
+      &quot;CTRL_PS&quot;, &quot; &quot;, &quot;A&quot;, &quot;B&quot;, &quot;C&quot;, &quot;D&quot;, &quot;E&quot;, &quot;F&quot;, &quot;G&quot;, &quot;H&quot;, &quot;I&quot;, &quot;J&quot;, &quot;K&quot;, &quot;L&quot;, &quot;M&quot;, &quot;N&quot;, &quot;O&quot;, &quot;P&quot;,
+      &quot;Q&quot;, &quot;R&quot;, &quot;S&quot;, &quot;T&quot;, &quot;U&quot;, &quot;V&quot;, &quot;W&quot;, &quot;X&quot;, &quot;Y&quot;, &quot;Z&quot;, &quot;CTRL_LL&quot;, &quot;CTRL_ML&quot;, &quot;CTRL_DL&quot;, &quot;CTRL_BS&quot;
+  };
+
+<span class="fc" id="L51">  private static final String[] LOWER_TABLE = {</span>
+      &quot;CTRL_PS&quot;, &quot; &quot;, &quot;a&quot;, &quot;b&quot;, &quot;c&quot;, &quot;d&quot;, &quot;e&quot;, &quot;f&quot;, &quot;g&quot;, &quot;h&quot;, &quot;i&quot;, &quot;j&quot;, &quot;k&quot;, &quot;l&quot;, &quot;m&quot;, &quot;n&quot;, &quot;o&quot;, &quot;p&quot;,
+      &quot;q&quot;, &quot;r&quot;, &quot;s&quot;, &quot;t&quot;, &quot;u&quot;, &quot;v&quot;, &quot;w&quot;, &quot;x&quot;, &quot;y&quot;, &quot;z&quot;, &quot;CTRL_US&quot;, &quot;CTRL_ML&quot;, &quot;CTRL_DL&quot;, &quot;CTRL_BS&quot;
+  };
+
+<span class="fc" id="L56">  private static final String[] MIXED_TABLE = {</span>
+      &quot;CTRL_PS&quot;, &quot; &quot;, &quot;\1&quot;, &quot;\2&quot;, &quot;\3&quot;, &quot;\4&quot;, &quot;\5&quot;, &quot;\6&quot;, &quot;\7&quot;, &quot;\b&quot;, &quot;\t&quot;, &quot;\n&quot;,
+      &quot;\13&quot;, &quot;\f&quot;, &quot;\r&quot;, &quot;\33&quot;, &quot;\34&quot;, &quot;\35&quot;, &quot;\36&quot;, &quot;\37&quot;, &quot;@&quot;, &quot;\\&quot;, &quot;^&quot;, &quot;_&quot;,
+      &quot;`&quot;, &quot;|&quot;, &quot;~&quot;, &quot;\177&quot;, &quot;CTRL_LL&quot;, &quot;CTRL_UL&quot;, &quot;CTRL_PL&quot;, &quot;CTRL_BS&quot;
+  };
+
+<span class="fc" id="L62">  private static final String[] PUNCT_TABLE = {</span>
+      &quot;&quot;, &quot;\r&quot;, &quot;\r\n&quot;, &quot;. &quot;, &quot;, &quot;, &quot;: &quot;, &quot;!&quot;, &quot;\&quot;&quot;, &quot;#&quot;, &quot;$&quot;, &quot;%&quot;, &quot;&amp;&quot;, &quot;'&quot;, &quot;(&quot;, &quot;)&quot;,
+      &quot;*&quot;, &quot;+&quot;, &quot;,&quot;, &quot;-&quot;, &quot;.&quot;, &quot;/&quot;, &quot;:&quot;, &quot;;&quot;, &quot;&lt;&quot;, &quot;=&quot;, &quot;&gt;&quot;, &quot;?&quot;, &quot;[&quot;, &quot;]&quot;, &quot;{&quot;, &quot;}&quot;, &quot;CTRL_UL&quot;
+  };
+
+<span class="fc" id="L67">  private static final String[] DIGIT_TABLE = {</span>
+      &quot;CTRL_PS&quot;, &quot; &quot;, &quot;0&quot;, &quot;1&quot;, &quot;2&quot;, &quot;3&quot;, &quot;4&quot;, &quot;5&quot;, &quot;6&quot;, &quot;7&quot;, &quot;8&quot;, &quot;9&quot;, &quot;,&quot;, &quot;.&quot;, &quot;CTRL_UL&quot;, &quot;CTRL_US&quot;
+  };
+
+  private AztecDetectorResult ddata;
+
+  public DecoderResult decode(AztecDetectorResult detectorResult) throws FormatException {
+<span class="fc" id="L74">    ddata = detectorResult;</span>
+<span class="fc" id="L75">    BitMatrix matrix = detectorResult.getBits();</span>
+<span class="fc" id="L76">    boolean[] rawbits = extractBits(matrix);</span>
+<span class="fc" id="L77">    boolean[] correctedBits = correctBits(rawbits);</span>
+<span class="fc" id="L78">    byte[] rawBytes = convertBoolArrayToByteArray(correctedBits);</span>
+<span class="fc" id="L79">    String result = getEncodedData(correctedBits);</span>
+<span class="fc" id="L80">    DecoderResult decoderResult = new DecoderResult(rawBytes, result, null, null);</span>
+<span class="fc" id="L81">    decoderResult.setNumBits(correctedBits.length);</span>
+<span class="fc" id="L82">    return decoderResult;</span>
+  }
+
+  // This method is used for testing the high-level encoder
+  public static String highLevelDecode(boolean[] correctedBits) {
+<span class="fc" id="L87">    return getEncodedData(correctedBits);</span>
+  }
+
+  /**
+   * Gets the string encoded in the aztec code bits
+   *
+   * @return the decoded string
+   */
+  private static String getEncodedData(boolean[] correctedBits) {
+<span class="fc" id="L96">    int endIndex = correctedBits.length;</span>
+<span class="fc" id="L97">    Table latchTable = Table.UPPER; // table most recently latched to</span>
+<span class="fc" id="L98">    Table shiftTable = Table.UPPER; // table to use for the next read</span>
+<span class="fc" id="L99">    StringBuilder result = new StringBuilder(20);</span>
+<span class="fc" id="L100">    int index = 0;</span>
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    while (index &lt; endIndex) {</span>
+<span class="fc bfc" id="L102" title="All 2 branches covered.">      if (shiftTable == Table.BINARY) {</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">        if (endIndex - index &lt; 5) {</span>
+<span class="fc" id="L104">          break;</span>
+        }
+<span class="fc" id="L106">        int length = readCode(correctedBits, index, 5);</span>
+<span class="fc" id="L107">        index += 5;</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">        if (length == 0) {</span>
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">          if (endIndex - index &lt; 11) {</span>
+<span class="nc" id="L110">            break;</span>
+          }
+<span class="fc" id="L112">          length = readCode(correctedBits, index, 11) + 31;</span>
+<span class="fc" id="L113">          index += 11;</span>
+        }
+<span class="fc bfc" id="L115" title="All 2 branches covered.">        for (int charCount = 0; charCount &lt; length; charCount++) {</span>
+<span class="pc bpc" id="L116" title="1 of 2 branches missed.">          if (endIndex - index &lt; 8) {</span>
+<span class="nc" id="L117">            index = endIndex;  // Force outer loop to exit</span>
+<span class="nc" id="L118">            break;</span>
+          }
+<span class="fc" id="L120">          int code = readCode(correctedBits, index, 8);</span>
+<span class="fc" id="L121">          result.append((char) code);</span>
+<span class="fc" id="L122">          index += 8;</span>
+        }
+        // Go back to whatever mode we had been in
+<span class="fc" id="L125">        shiftTable = latchTable;</span>
+<span class="fc" id="L126">      } else {</span>
+<span class="fc bfc" id="L127" title="All 2 branches covered.">        int size = shiftTable == Table.DIGIT ? 4 : 5;</span>
+<span class="fc bfc" id="L128" title="All 2 branches covered.">        if (endIndex - index &lt; size) {</span>
+<span class="fc" id="L129">          break;</span>
+        }
+<span class="fc" id="L131">        int code = readCode(correctedBits, index, size);</span>
+<span class="fc" id="L132">        index += size;</span>
+<span class="fc" id="L133">        String str = getCharacter(shiftTable, code);</span>
+<span class="fc bfc" id="L134" title="All 2 branches covered.">        if (str.startsWith(&quot;CTRL_&quot;)) {</span>
+          // Table changes
+          // ISO/IEC 24778:2008 prescribes ending a shift sequence in the mode from which it was invoked.
+          // That's including when that mode is a shift.
+          // Our test case dlusbs.png for issue #642 exercises that.
+<span class="fc" id="L139">          latchTable = shiftTable;  // Latch the current mode, so as to return to Upper after U/S B/S</span>
+<span class="fc" id="L140">          shiftTable = getTable(str.charAt(5));</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">          if (str.charAt(6) == 'L') {</span>
+<span class="fc" id="L142">            latchTable = shiftTable;</span>
+          }
+        } else {
+<span class="fc" id="L145">          result.append(str);</span>
+          // Go back to whatever mode we had been in
+<span class="fc" id="L147">          shiftTable = latchTable;</span>
+        }
+<span class="fc" id="L149">      }</span>
+    }
+<span class="fc" id="L151">    return result.toString();</span>
+  }
+
+  /**
+   * gets the table corresponding to the char passed
+   */
+  private static Table getTable(char t) {
+<span class="fc bfc" id="L158" title="All 6 branches covered.">    switch (t) {</span>
+      case 'L':
+<span class="fc" id="L160">        return Table.LOWER;</span>
+      case 'P':
+<span class="fc" id="L162">        return Table.PUNCT;</span>
+      case 'M':
+<span class="fc" id="L164">        return Table.MIXED;</span>
+      case 'D':
+<span class="fc" id="L166">        return Table.DIGIT;</span>
+      case 'B':
+<span class="fc" id="L168">        return Table.BINARY;</span>
+      case 'U':
+      default:
+<span class="fc" id="L171">        return Table.UPPER;</span>
+    }
+  }
+
+  /**
+   * Gets the character (or string) corresponding to the passed code in the given table
+   *
+   * @param table the table used
+   * @param code the code of the character
+   */
+  private static String getCharacter(Table table, int code) {
+<span class="pc bpc" id="L182" title="1 of 6 branches missed.">    switch (table) {</span>
+      case UPPER:
+<span class="fc" id="L184">        return UPPER_TABLE[code];</span>
+      case LOWER:
+<span class="fc" id="L186">        return LOWER_TABLE[code];</span>
+      case MIXED:
+<span class="fc" id="L188">        return MIXED_TABLE[code];</span>
+      case PUNCT:
+<span class="fc" id="L190">        return PUNCT_TABLE[code];</span>
+      case DIGIT:
+<span class="fc" id="L192">        return DIGIT_TABLE[code];</span>
+      default:
+        // Should not reach here.
+<span class="nc" id="L195">        throw new IllegalStateException(&quot;Bad table&quot;);</span>
+    }
+  }
+
+  /**
+   * &lt;p&gt;Performs RS error correction on an array of bits.&lt;/p&gt;
+   *
+   * @return the corrected array
+   * @throws FormatException if the input contains too many errors
+   */
+  private boolean[] correctBits(boolean[] rawbits) throws FormatException {
+    GenericGF gf;
+    int codewordSize;
+
+<span class="fc bfc" id="L209" title="All 2 branches covered.">    if (ddata.getNbLayers() &lt;= 2) {</span>
+<span class="fc" id="L210">      codewordSize = 6;</span>
+<span class="fc" id="L211">      gf = GenericGF.AZTEC_DATA_6;</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">    } else if (ddata.getNbLayers() &lt;= 8) {</span>
+<span class="fc" id="L213">      codewordSize = 8;</span>
+<span class="fc" id="L214">      gf = GenericGF.AZTEC_DATA_8;</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    } else if (ddata.getNbLayers() &lt;= 22) {</span>
+<span class="fc" id="L216">      codewordSize = 10;</span>
+<span class="fc" id="L217">      gf = GenericGF.AZTEC_DATA_10;</span>
+    } else {
+<span class="fc" id="L219">      codewordSize = 12;</span>
+<span class="fc" id="L220">      gf = GenericGF.AZTEC_DATA_12;</span>
+    }
+
+<span class="fc" id="L223">    int numDataCodewords = ddata.getNbDatablocks();</span>
+<span class="fc" id="L224">    int numCodewords = rawbits.length / codewordSize;</span>
+<span class="pc bpc" id="L225" title="1 of 2 branches missed.">    if (numCodewords &lt; numDataCodewords) {</span>
+<span class="nc" id="L226">      throw FormatException.getFormatInstance();</span>
+    }
+<span class="fc" id="L228">    int offset = rawbits.length % codewordSize;</span>
+
+<span class="fc" id="L230">    int[] dataWords = new int[numCodewords];</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">    for (int i = 0; i &lt; numCodewords; i++, offset += codewordSize) {</span>
+<span class="fc" id="L232">      dataWords[i] = readCode(rawbits, offset, codewordSize);</span>
+    }
+
+    try {
+<span class="fc" id="L236">      ReedSolomonDecoder rsDecoder = new ReedSolomonDecoder(gf);</span>
+<span class="fc" id="L237">      rsDecoder.decode(dataWords, numCodewords - numDataCodewords);</span>
+<span class="fc" id="L238">    } catch (ReedSolomonException ex) {</span>
+<span class="fc" id="L239">      throw FormatException.getFormatInstance(ex);</span>
+<span class="fc" id="L240">    }</span>
+
+    // Now perform the unstuffing operation.
+    // First, count how many bits are going to be thrown out as stuffing
+<span class="fc" id="L244">    int mask = (1 &lt;&lt; codewordSize) - 1;</span>
+<span class="fc" id="L245">    int stuffedBits = 0;</span>
+<span class="fc bfc" id="L246" title="All 2 branches covered.">    for (int i = 0; i &lt; numDataCodewords; i++) {</span>
+<span class="fc" id="L247">      int dataWord = dataWords[i];</span>
+<span class="pc bpc" id="L248" title="2 of 4 branches missed.">      if (dataWord == 0 || dataWord == mask) {</span>
+<span class="nc" id="L249">        throw FormatException.getFormatInstance();</span>
+<span class="fc bfc" id="L250" title="All 4 branches covered.">      } else if (dataWord == 1 || dataWord == mask - 1) {</span>
+<span class="fc" id="L251">        stuffedBits++;</span>
+      }
+    }
+    // Now, actually unpack the bits and remove the stuffing
+<span class="fc" id="L255">    boolean[] correctedBits = new boolean[numDataCodewords * codewordSize - stuffedBits];</span>
+<span class="fc" id="L256">    int index = 0;</span>
+<span class="fc bfc" id="L257" title="All 2 branches covered.">    for (int i = 0; i &lt; numDataCodewords; i++) {</span>
+<span class="fc" id="L258">      int dataWord = dataWords[i];</span>
+<span class="fc bfc" id="L259" title="All 4 branches covered.">      if (dataWord == 1 || dataWord == mask - 1) {</span>
+        // next codewordSize-1 bits are all zeros or all ones
+<span class="fc bfc" id="L261" title="All 2 branches covered.">        Arrays.fill(correctedBits, index, index + codewordSize - 1, dataWord &gt; 1);</span>
+<span class="fc" id="L262">        index += codewordSize - 1;</span>
+      } else {
+<span class="fc bfc" id="L264" title="All 2 branches covered.">        for (int bit = codewordSize - 1; bit &gt;= 0; --bit) {</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">          correctedBits[index++] = (dataWord &amp; (1 &lt;&lt; bit)) != 0;</span>
+        }
+      }
+    }
+<span class="fc" id="L269">    return correctedBits;</span>
+  }
+
+  /**
+   * Gets the array of bits from an Aztec Code matrix
+   *
+   * @return the array of bits
+   */
+  private boolean[] extractBits(BitMatrix matrix) {
+<span class="fc" id="L278">    boolean compact = ddata.isCompact();</span>
+<span class="fc" id="L279">    int layers = ddata.getNbLayers();</span>
+<span class="fc bfc" id="L280" title="All 2 branches covered.">    int baseMatrixSize = (compact ? 11 : 14) + layers * 4; // not including alignment lines</span>
+<span class="fc" id="L281">    int[] alignmentMap = new int[baseMatrixSize];</span>
+<span class="fc" id="L282">    boolean[] rawbits = new boolean[totalBitsInLayer(layers, compact)];</span>
+
+<span class="fc bfc" id="L284" title="All 2 branches covered.">    if (compact) {</span>
+<span class="fc bfc" id="L285" title="All 2 branches covered.">      for (int i = 0; i &lt; alignmentMap.length; i++) {</span>
+<span class="fc" id="L286">        alignmentMap[i] = i;</span>
+      }
+    } else {
+<span class="fc" id="L289">      int matrixSize = baseMatrixSize + 1 + 2 * ((baseMatrixSize / 2 - 1) / 15);</span>
+<span class="fc" id="L290">      int origCenter = baseMatrixSize / 2;</span>
+<span class="fc" id="L291">      int center = matrixSize / 2;</span>
+<span class="fc bfc" id="L292" title="All 2 branches covered.">      for (int i = 0; i &lt; origCenter; i++) {</span>
+<span class="fc" id="L293">        int newOffset = i + i / 15;</span>
+<span class="fc" id="L294">        alignmentMap[origCenter - i - 1] = center - newOffset - 1;</span>
+<span class="fc" id="L295">        alignmentMap[origCenter + i] = center + newOffset + 1;</span>
+      }
+    }
+<span class="fc bfc" id="L298" title="All 2 branches covered.">    for (int i = 0, rowOffset = 0; i &lt; layers; i++) {</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">      int rowSize = (layers - i) * 4 + (compact ? 9 : 12);</span>
+      // The top-left most point of this layer is &lt;low, low&gt; (not including alignment lines)
+<span class="fc" id="L301">      int low = i * 2;</span>
+      // The bottom-right most point of this layer is &lt;high, high&gt; (not including alignment lines)
+<span class="fc" id="L303">      int high = baseMatrixSize - 1 - low;</span>
+      // We pull bits from the two 2 x rowSize columns and two rowSize x 2 rows
+<span class="fc bfc" id="L305" title="All 2 branches covered.">      for (int j = 0; j &lt; rowSize; j++) {</span>
+<span class="fc" id="L306">        int columnOffset = j * 2;</span>
+<span class="fc bfc" id="L307" title="All 2 branches covered.">        for (int k = 0; k &lt; 2; k++) {</span>
+          // left column
+<span class="fc" id="L309">          rawbits[rowOffset + columnOffset + k] =</span>
+<span class="fc" id="L310">              matrix.get(alignmentMap[low + k], alignmentMap[low + j]);</span>
+          // bottom row
+<span class="fc" id="L312">          rawbits[rowOffset + 2 * rowSize + columnOffset + k] =</span>
+<span class="fc" id="L313">              matrix.get(alignmentMap[low + j], alignmentMap[high - k]);</span>
+          // right column
+<span class="fc" id="L315">          rawbits[rowOffset + 4 * rowSize + columnOffset + k] =</span>
+<span class="fc" id="L316">              matrix.get(alignmentMap[high - k], alignmentMap[high - j]);</span>
+          // top row
+<span class="fc" id="L318">          rawbits[rowOffset + 6 * rowSize + columnOffset + k] =</span>
+<span class="fc" id="L319">              matrix.get(alignmentMap[high - j], alignmentMap[low + k]);</span>
+        }
+      }
+<span class="fc" id="L322">      rowOffset += rowSize * 8;</span>
+    }
+<span class="fc" id="L324">    return rawbits;</span>
+  }
+
+  /**
+   * Reads a code of given length and at given index in an array of bits
+   */
+  private static int readCode(boolean[] rawbits, int startIndex, int length) {
+<span class="fc" id="L331">    int res = 0;</span>
+<span class="fc bfc" id="L332" title="All 2 branches covered.">    for (int i = startIndex; i &lt; startIndex + length; i++) {</span>
+<span class="fc" id="L333">      res &lt;&lt;= 1;</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">      if (rawbits[i]) {</span>
+<span class="fc" id="L335">        res |= 0x01;</span>
+      }
+    }
+<span class="fc" id="L338">    return res;</span>
+  }
+
+  /**
+   * Reads a code of length 8 in an array of bits, padding with zeros
+   */
+  private static byte readByte(boolean[] rawbits, int startIndex) {
+<span class="fc" id="L345">    int n = rawbits.length - startIndex;</span>
+<span class="fc bfc" id="L346" title="All 2 branches covered.">    if (n &gt;= 8) {</span>
+<span class="fc" id="L347">      return (byte) readCode(rawbits, startIndex, 8);</span>
+    }
+<span class="fc" id="L349">    return (byte) (readCode(rawbits, startIndex, n) &lt;&lt; (8 - n));</span>
+  }
+
+  /**
+   * Packs a bit array into bytes, most significant bit first
+   */
+  static byte[] convertBoolArrayToByteArray(boolean[] boolArr) {
+<span class="fc" id="L356">    byte[] byteArr = new byte[(boolArr.length + 7) / 8];</span>
+<span class="fc bfc" id="L357" title="All 2 branches covered.">    for (int i = 0; i &lt; byteArr.length; i++) {</span>
+<span class="fc" id="L358">      byteArr[i] = readByte(boolArr, 8 * i);</span>
+    }
+<span class="fc" id="L360">    return byteArr;</span>
+  }
+
+  private static int totalBitsInLayer(int layers, boolean compact) {
+<span class="fc bfc" id="L364" title="All 2 branches covered.">    return ((compact ? 88 : 112) + 16 * layers) * layers;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

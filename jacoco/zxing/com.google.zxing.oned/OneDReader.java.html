@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>OneDReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">OneDReader.java</span></div><h1>OneDReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.ChecksumException;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Reader;
+import com.google.zxing.ReaderException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultMetadataType;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitArray;
+
+import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.Map;
+
+/**
+ * Encapsulates functionality and implementation that is common to all families
+ * of one-dimensional barcodes.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ * @author Sean Owen
+ */
+<span class="fc" id="L42">public abstract class OneDReader implements Reader {</span>
+
+  @Override
+  public Result decode(BinaryBitmap image) throws NotFoundException, FormatException {
+<span class="fc" id="L46">    return decode(image, null);</span>
+  }
+
+  // Note that we don't try rotation without the try harder flag, even if rotation was supported.
+  @Override
+  public Result decode(BinaryBitmap image,
+                       Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException, FormatException {
+    try {
+<span class="fc" id="L54">      return doDecode(image, hints);</span>
+<span class="fc" id="L55">    } catch (NotFoundException nfe) {</span>
+<span class="fc bfc" id="L56" title="All 4 branches covered.">      boolean tryHarder = hints != null &amp;&amp; hints.containsKey(DecodeHintType.TRY_HARDER);</span>
+<span class="pc bpc" id="L57" title="1 of 4 branches missed.">      if (tryHarder &amp;&amp; image.isRotateSupported()) {</span>
+<span class="fc" id="L58">        BinaryBitmap rotatedImage = image.rotateCounterClockwise();</span>
+<span class="fc" id="L59">        Result result = doDecode(rotatedImage, hints);</span>
+        // Record that we found it rotated 90 degrees CCW / 270 degrees CW
+<span class="fc" id="L61">        Map&lt;ResultMetadataType,?&gt; metadata = result.getResultMetadata();</span>
+<span class="fc" id="L62">        int orientation = 270;</span>
+<span class="fc bfc" id="L63" title="All 4 branches covered.">        if (metadata != null &amp;&amp; metadata.containsKey(ResultMetadataType.ORIENTATION)) {</span>
+          // But if we found it reversed in doDecode(), add in that result here:
+<span class="fc" id="L65">          orientation = (orientation +</span>
+<span class="fc" id="L66">              (Integer) metadata.get(ResultMetadataType.ORIENTATION)) % 360;</span>
+        }
+<span class="fc" id="L68">        result.putMetadata(ResultMetadataType.ORIENTATION, orientation);</span>
+        // Update result points
+<span class="fc" id="L70">        ResultPoint[] points = result.getResultPoints();</span>
+<span class="pc bpc" id="L71" title="1 of 2 branches missed.">        if (points != null) {</span>
+<span class="fc" id="L72">          int height = rotatedImage.getHeight();</span>
+<span class="fc bfc" id="L73" title="All 2 branches covered.">          for (int i = 0; i &lt; points.length; i++) {</span>
+<span class="fc" id="L74">            points[i] = new ResultPoint(height - points[i].getY() - 1, points[i].getX());</span>
+          }
+        }
+<span class="fc" id="L77">        return result;</span>
+      } else {
+<span class="fc" id="L79">        throw nfe;</span>
+      }
+    }
+  }
+
+  @Override
+  public void reset() {
+    // do nothing
+<span class="nc" id="L87">  }</span>
+
+  /**
+   * We're going to examine rows from the middle outward, searching alternately above and below the
+   * middle, and farther out each time. rowStep is the number of rows between each successive
+   * attempt above and below the middle. So we'd scan row middle, then middle - rowStep, then
+   * middle + rowStep, then middle - (2 * rowStep), etc.
+   * rowStep is bigger as the image is taller, but is always at least 1. We've somewhat arbitrarily
+   * decided that moving up and down by about 1/16 of the image is pretty good; we try more of the
+   * image if &quot;trying harder&quot;.
+   *
+   * @param image The image to decode
+   * @param hints Any hints that were requested
+   * @return The contents of the decoded barcode
+   * @throws NotFoundException Any spontaneous errors which occur
+   */
+  private Result doDecode(BinaryBitmap image,
+                          Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException {
+<span class="fc" id="L105">    int width = image.getWidth();</span>
+<span class="fc" id="L106">    int height = image.getHeight();</span>
+<span class="fc" id="L107">    BitArray row = new BitArray(width);</span>
+
+<span class="fc bfc" id="L109" title="All 4 branches covered.">    boolean tryHarder = hints != null &amp;&amp; hints.containsKey(DecodeHintType.TRY_HARDER);</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">    int rowStep = Math.max(1, height &gt;&gt; (tryHarder ? 8 : 5));</span>
+    int maxLines;
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    if (tryHarder) {</span>
+<span class="fc" id="L113">      maxLines = height; // Look at the whole image, not just the center</span>
+    } else {
+<span class="fc" id="L115">      maxLines = 15; // 15 rows spaced 1/32 apart is roughly the middle half of the image</span>
+    }
+
+<span class="fc" id="L118">    int middle = height / 2;</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    for (int x = 0; x &lt; maxLines; x++) {</span>
+
+      // Scanning from the middle out. Determine which row we're looking at next:
+<span class="fc" id="L122">      int rowStepsAboveOrBelow = (x + 1) / 2;</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">      boolean isAbove = (x &amp; 0x01) == 0; // i.e. is x even?</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">      int rowNumber = middle + rowStep * (isAbove ? rowStepsAboveOrBelow : -rowStepsAboveOrBelow);</span>
+<span class="fc bfc" id="L125" title="All 4 branches covered.">      if (rowNumber &lt; 0 || rowNumber &gt;= height) {</span>
+        // Oops, if we run off the top or bottom, stop
+<span class="fc" id="L127">        break;</span>
+      }
+
+      // Estimate black point for this row and load it:
+      try {
+<span class="fc" id="L132">        row = image.getBlackRow(rowNumber, row);</span>
+<span class="fc" id="L133">      } catch (NotFoundException ignored) {</span>
+<span class="fc" id="L134">        continue;</span>
+<span class="fc" id="L135">      }</span>
+
+      // While we have the image data in a BitArray, it's fairly cheap to reverse it in place to
+      // handle decoding upside down barcodes.
+<span class="fc bfc" id="L139" title="All 2 branches covered.">      for (int attempt = 0; attempt &lt; 2; attempt++) {</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">        if (attempt == 1) { // trying again?</span>
+<span class="fc" id="L141">          row.reverse(); // reverse the row and continue</span>
+          // This means we will only ever draw result points *once* in the life of this method
+          // since we want to avoid drawing the wrong points after flipping the row, and,
+          // don't want to clutter with noise from every single row scan -- just the scans
+          // that start on the center line.
+<span class="pc bpc" id="L146" title="1 of 4 branches missed.">          if (hints != null &amp;&amp; hints.containsKey(DecodeHintType.NEED_RESULT_POINT_CALLBACK)) {</span>
+<span class="nc" id="L147">            Map&lt;DecodeHintType,Object&gt; newHints = new EnumMap&lt;&gt;(DecodeHintType.class);</span>
+<span class="nc" id="L148">            newHints.putAll(hints);</span>
+<span class="nc" id="L149">            newHints.remove(DecodeHintType.NEED_RESULT_POINT_CALLBACK);</span>
+<span class="nc" id="L150">            hints = newHints;</span>
+          }
+        }
+        try {
+          // Look for a barcode
+<span class="fc" id="L155">          Result result = decodeRow(rowNumber, row, hints);</span>
+          // We found our barcode
+<span class="fc bfc" id="L157" title="All 2 branches covered.">          if (attempt == 1) {</span>
+            // But it was upside down, so note that
+<span class="fc" id="L159">            result.putMetadata(ResultMetadataType.ORIENTATION, 180);</span>
+            // And remember to flip the result points horizontally.
+<span class="fc" id="L161">            ResultPoint[] points = result.getResultPoints();</span>
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">            if (points != null) {</span>
+<span class="fc" id="L163">              points[0] = new ResultPoint(width - points[0].getX() - 1, points[0].getY());</span>
+<span class="fc" id="L164">              points[1] = new ResultPoint(width - points[1].getX() - 1, points[1].getY());</span>
+            }
+          }
+<span class="fc" id="L167">          return result;</span>
+<span class="fc" id="L168">        } catch (ReaderException re) {</span>
+          // continue -- just couldn't decode this row
+        }
+      }
+    }
+
+<span class="fc" id="L174">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  /**
+   * Records the size of successive runs of white and black pixels in a row, starting at a given point.
+   * The values are recorded in the given array, and the number of runs recorded is equal to the size
+   * of the array. If the row starts on a white pixel at the given start point, then the first count
+   * recorded is the run of white pixels starting from that point; likewise it is the count of a run
+   * of black pixels if the row begin on a black pixels at that point.
+   *
+   * @param row row to count from
+   * @param start offset into row to start at
+   * @param counters array into which to record counts
+   * @throws NotFoundException if counters cannot be filled entirely from row before running out
+   *  of pixels
+   */
+  protected static void recordPattern(BitArray row,
+                                      int start,
+                                      int[] counters) throws NotFoundException {
+<span class="fc" id="L193">    int numCounters = counters.length;</span>
+<span class="fc" id="L194">    Arrays.fill(counters, 0, numCounters, 0);</span>
+<span class="fc" id="L195">    int end = row.getSize();</span>
+<span class="fc bfc" id="L196" title="All 2 branches covered.">    if (start &gt;= end) {</span>
+<span class="fc" id="L197">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    boolean isWhite = !row.get(start);</span>
+<span class="fc" id="L200">    int counterPosition = 0;</span>
+<span class="fc" id="L201">    int i = start;</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">    while (i &lt; end) {</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">      if (row.get(i) != isWhite) {</span>
+<span class="fc" id="L204">        counters[counterPosition]++;</span>
+      } else {
+<span class="fc bfc" id="L206" title="All 2 branches covered.">        if (++counterPosition == numCounters) {</span>
+<span class="fc" id="L207">          break;</span>
+        } else {
+<span class="fc" id="L209">          counters[counterPosition] = 1;</span>
+<span class="fc bfc" id="L210" title="All 2 branches covered.">          isWhite = !isWhite;</span>
+        }
+      }
+<span class="fc" id="L213">      i++;</span>
+    }
+    // If we read fully the last section of pixels and filled up our counters -- or filled
+    // the last counter but ran off the side of the image, OK. Otherwise, a problem.
+<span class="pc bpc" id="L217" title="1 of 6 branches missed.">    if (!(counterPosition == numCounters || (counterPosition == numCounters - 1 &amp;&amp; i == end))) {</span>
+<span class="fc" id="L218">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L220">  }</span>
+
+  protected static void recordPatternInReverse(BitArray row, int start, int[] counters)
+      throws NotFoundException {
+    // This could be more efficient I guess
+<span class="fc" id="L225">    int numTransitionsLeft = counters.length;</span>
+<span class="fc" id="L226">    boolean last = row.get(start);</span>
+<span class="fc bfc" id="L227" title="All 4 branches covered.">    while (start &gt; 0 &amp;&amp; numTransitionsLeft &gt;= 0) {</span>
+<span class="fc bfc" id="L228" title="All 2 branches covered.">      if (row.get(--start) != last) {</span>
+<span class="fc" id="L229">        numTransitionsLeft--;</span>
+<span class="fc bfc" id="L230" title="All 2 branches covered.">        last = !last;</span>
+      }
+    }
+<span class="fc bfc" id="L233" title="All 2 branches covered.">    if (numTransitionsLeft &gt;= 0) {</span>
+<span class="fc" id="L234">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L236">    recordPattern(row, start + 1, counters);</span>
+<span class="fc" id="L237">  }</span>
+
+  /**
+   * Determines how closely a set of observed counts of runs of black/white values matches a given
+   * target pattern. This is reported as the ratio of the total variance from the expected pattern
+   * proportions across all pattern elements, to the length of the pattern.
+   *
+   * @param counters observed counters
+   * @param pattern expected pattern
+   * @param maxIndividualVariance The most any counter can differ before we give up
+   * @return ratio of total variance between counters and pattern compared to total pattern size
+   */
+  protected static float patternMatchVariance(int[] counters,
+                                              int[] pattern,
+                                              float maxIndividualVariance) {
+<span class="fc" id="L252">    int numCounters = counters.length;</span>
+<span class="fc" id="L253">    int total = 0;</span>
+<span class="fc" id="L254">    int patternLength = 0;</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">    for (int i = 0; i &lt; numCounters; i++) {</span>
+<span class="fc" id="L256">      total += counters[i];</span>
+<span class="fc" id="L257">      patternLength += pattern[i];</span>
+    }
+<span class="fc bfc" id="L259" title="All 2 branches covered.">    if (total &lt; patternLength) {</span>
+      // If we don't even have one pixel per unit of bar width, assume this is too small
+      // to reliably match, so fail:
+<span class="fc" id="L262">      return Float.POSITIVE_INFINITY;</span>
+    }
+
+<span class="fc" id="L265">    float unitBarWidth = (float) total / patternLength;</span>
+<span class="fc" id="L266">    maxIndividualVariance *= unitBarWidth;</span>
+
+<span class="fc" id="L268">    float totalVariance = 0.0f;</span>
+<span class="fc bfc" id="L269" title="All 2 branches covered.">    for (int x = 0; x &lt; numCounters; x++) {</span>
+<span class="fc" id="L270">      int counter = counters[x];</span>
+<span class="fc" id="L271">      float scaledPattern = pattern[x] * unitBarWidth;</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">      float variance = counter &gt; scaledPattern ? counter - scaledPattern : scaledPattern - counter;</span>
+<span class="fc bfc" id="L273" title="All 2 branches covered.">      if (variance &gt; maxIndividualVariance) {</span>
+<span class="fc" id="L274">        return Float.POSITIVE_INFINITY;</span>
+      }
+<span class="fc" id="L276">      totalVariance += variance;</span>
+    }
+<span class="fc" id="L278">    return totalVariance / total;</span>
+  }
+
+  /**
+   * &lt;p&gt;Attempts to decode a one-dimensional barcode format given a single row of
+   * an image.&lt;/p&gt;
+   *
+   * @param rowNumber row number from top of the row
+   * @param row the black/white pixel data of the row
+   * @param hints decode hints
+   * @return {@link Result} containing encoded string and start/end of barcode
+   * @throws NotFoundException if no potential barcode is found
+   * @throws ChecksumException if a potential barcode is found but does not pass its checksum
+   * @throws FormatException if a potential barcode is found but format is invalid
+   */
+  public abstract Result decodeRow(int rowNumber, BitArray row, Map&lt;DecodeHintType,?&gt; hints)
+      throws NotFoundException, ChecksumException, FormatException;
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

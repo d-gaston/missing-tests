@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MaskUtil.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.encoder</a> &gt; <span class="el_source">MaskUtil.java</span></div><h1>MaskUtil.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.encoder;
+
+/**
+ * @author Satoru Takabayashi
+ * @author Daniel Switkin
+ * @author Sean Owen
+ */
+final class MaskUtil {
+
+  // Penalty weights from section 6.8.2.1
+  private static final int N1 = 3;
+  private static final int N2 = 3;
+  private static final int N3 = 40;
+  private static final int N4 = 10;
+
+  private MaskUtil() {
+    // do nothing
+  }
+
+  /**
+   * Apply mask penalty rule 1 and return the penalty. Find repetitive cells with the same color and
+   * give penalty to them. Example: 00000 or 11111.
+   */
+  static int applyMaskPenaltyRule1(ByteMatrix matrix) {
+<span class="fc" id="L41">    return applyMaskPenaltyRule1Internal(matrix, true) + applyMaskPenaltyRule1Internal(matrix, false);</span>
+  }
+
+  /**
+   * Apply mask penalty rule 2 and return the penalty. Find 2x2 blocks with the same color and give
+   * penalty to them. This is actually equivalent to the spec's rule, which is to find MxN blocks and give a
+   * penalty proportional to (M-1)x(N-1), because this is the number of 2x2 blocks inside such a block.
+   */
+  static int applyMaskPenaltyRule2(ByteMatrix matrix) {
+<span class="fc" id="L50">    int penalty = 0;</span>
+<span class="fc" id="L51">    byte[][] array = matrix.getArray();</span>
+<span class="fc" id="L52">    int width = matrix.getWidth();</span>
+<span class="fc" id="L53">    int height = matrix.getHeight();</span>
+<span class="fc bfc" id="L54" title="All 2 branches covered.">    for (int y = 0; y &lt; height - 1; y++) {</span>
+<span class="fc" id="L55">      byte[] arrayY = array[y];</span>
+<span class="fc bfc" id="L56" title="All 2 branches covered.">      for (int x = 0; x &lt; width - 1; x++) {</span>
+<span class="fc" id="L57">        int value = arrayY[x];</span>
+<span class="fc bfc" id="L58" title="All 6 branches covered.">        if (value == arrayY[x + 1] &amp;&amp; value == array[y + 1][x] &amp;&amp; value == array[y + 1][x + 1]) {</span>
+<span class="fc" id="L59">          penalty++;</span>
+        }
+      }
+    }
+<span class="fc" id="L63">    return N2 * penalty;</span>
+  }
+
+  /**
+   * Apply mask penalty rule 3 and return the penalty. Find consecutive runs of 1:1:3:1:1:4
+   * starting with black, or 4:1:1:3:1:1 starting with white, and give penalty to them.  If we
+   * find patterns like 000010111010000, we give penalty once.
+   */
+  static int applyMaskPenaltyRule3(ByteMatrix matrix) {
+<span class="fc" id="L72">    int numPenalties = 0;</span>
+<span class="fc" id="L73">    byte[][] array = matrix.getArray();</span>
+<span class="fc" id="L74">    int width = matrix.getWidth();</span>
+<span class="fc" id="L75">    int height = matrix.getHeight();</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">      for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc" id="L78">        byte[] arrayY = array[y];  // We can at least optimize this access</span>
+<span class="fc bfc" id="L79" title="All 16 branches covered.">        if (x + 6 &lt; width &amp;&amp;</span>
+            arrayY[x] == 1 &amp;&amp;
+            arrayY[x + 1] == 0 &amp;&amp;
+            arrayY[x + 2] == 1 &amp;&amp;
+            arrayY[x + 3] == 1 &amp;&amp;
+            arrayY[x + 4] == 1 &amp;&amp;
+            arrayY[x + 5] == 0 &amp;&amp;
+            arrayY[x + 6] == 1 &amp;&amp;
+<span class="fc bfc" id="L87" title="All 4 branches covered.">            (isWhiteHorizontal(arrayY, x - 4, x) || isWhiteHorizontal(arrayY, x + 7, x + 11))) {</span>
+<span class="fc" id="L88">          numPenalties++;</span>
+        }
+<span class="fc bfc" id="L90" title="All 16 branches covered.">        if (y + 6 &lt; height &amp;&amp;</span>
+            array[y][x] == 1 &amp;&amp;
+            array[y + 1][x] == 0 &amp;&amp;
+            array[y + 2][x] == 1 &amp;&amp;
+            array[y + 3][x] == 1 &amp;&amp;
+            array[y + 4][x] == 1 &amp;&amp;
+            array[y + 5][x] == 0 &amp;&amp;
+            array[y + 6][x] == 1 &amp;&amp;
+<span class="fc bfc" id="L98" title="All 4 branches covered.">            (isWhiteVertical(array, x, y - 4, y) || isWhiteVertical(array, x, y + 7, y + 11))) {</span>
+<span class="fc" id="L99">          numPenalties++;</span>
+        }
+      }
+    }
+<span class="fc" id="L103">    return numPenalties * N3;</span>
+  }
+
+  private static boolean isWhiteHorizontal(byte[] rowArray, int from, int to) {
+<span class="fc" id="L107">    from = Math.max(from, 0);</span>
+<span class="fc" id="L108">    to = Math.min(to, rowArray.length);</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    for (int i = from; i &lt; to; i++) {</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">      if (rowArray[i] == 1) {</span>
+<span class="fc" id="L111">        return false;</span>
+      }
+    }
+<span class="fc" id="L114">    return true;</span>
+  }
+
+  private static boolean isWhiteVertical(byte[][] array, int col, int from, int to) {
+<span class="fc" id="L118">    from = Math.max(from, 0);</span>
+<span class="fc" id="L119">    to = Math.min(to, array.length);</span>
+<span class="fc bfc" id="L120" title="All 2 branches covered.">    for (int i = from; i &lt; to; i++) {</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">      if (array[i][col] == 1) {</span>
+<span class="fc" id="L122">        return false;</span>
+      }
+    }
+<span class="fc" id="L125">    return true;</span>
+  }
+
+  /**
+   * Apply mask penalty rule 4 and return the penalty. Calculate the ratio of dark cells and give
+   * penalty if the ratio is far from 50%. It gives 10 penalty for 5% distance.
+   */
+  static int applyMaskPenaltyRule4(ByteMatrix matrix) {
+<span class="fc" id="L133">    int numDarkCells = 0;</span>
+<span class="fc" id="L134">    byte[][] array = matrix.getArray();</span>
+<span class="fc" id="L135">    int width = matrix.getWidth();</span>
+<span class="fc" id="L136">    int height = matrix.getHeight();</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc" id="L138">      byte[] arrayY = array[y];</span>
+<span class="fc bfc" id="L139" title="All 2 branches covered.">      for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">        if (arrayY[x] == 1) {</span>
+<span class="fc" id="L141">          numDarkCells++;</span>
+        }
+      }
+    }
+<span class="fc" id="L145">    int numTotalCells = matrix.getHeight() * matrix.getWidth();</span>
+<span class="fc" id="L146">    int fivePercentVariances = Math.abs(numDarkCells * 2 - numTotalCells) * 10 / numTotalCells;</span>
+<span class="fc" id="L147">    return fivePercentVariances * N4;</span>
+  }
+
+  /**
+   * Return the mask bit for &quot;getMaskPattern&quot; at &quot;x&quot; and &quot;y&quot;. See 8.8 of JISX0510:2004 for mask
+   * pattern conditions.
+   */
+  static boolean getDataMaskBit(int maskPattern, int x, int y) {
+    int intermediate;
+    int temp;
+<span class="pc bpc" id="L157" title="1 of 9 branches missed.">    switch (maskPattern) {</span>
+      case 0:
+<span class="fc" id="L159">        intermediate = (y + x) &amp; 0x1;</span>
+<span class="fc" id="L160">        break;</span>
+      case 1:
+<span class="fc" id="L162">        intermediate = y &amp; 0x1;</span>
+<span class="fc" id="L163">        break;</span>
+      case 2:
+<span class="fc" id="L165">        intermediate = x % 3;</span>
+<span class="fc" id="L166">        break;</span>
+      case 3:
+<span class="fc" id="L168">        intermediate = (y + x) % 3;</span>
+<span class="fc" id="L169">        break;</span>
+      case 4:
+<span class="fc" id="L171">        intermediate = ((y / 2) + (x / 3)) &amp; 0x1;</span>
+<span class="fc" id="L172">        break;</span>
+      case 5:
+<span class="fc" id="L174">        temp = y * x;</span>
+<span class="fc" id="L175">        intermediate = (temp &amp; 0x1) + (temp % 3);</span>
+<span class="fc" id="L176">        break;</span>
+      case 6:
+<span class="fc" id="L178">        temp = y * x;</span>
+<span class="fc" id="L179">        intermediate = ((temp &amp; 0x1) + (temp % 3)) &amp; 0x1;</span>
+<span class="fc" id="L180">        break;</span>
+      case 7:
+<span class="fc" id="L182">        temp = y * x;</span>
+<span class="fc" id="L183">        intermediate = ((temp % 3) + ((y + x) &amp; 0x1)) &amp; 0x1;</span>
+<span class="fc" id="L184">        break;</span>
+      default:
+<span class="nc" id="L186">        throw new IllegalArgumentException(&quot;Invalid mask pattern: &quot; + maskPattern);</span>
+    }
+<span class="fc bfc" id="L188" title="All 2 branches covered.">    return intermediate == 0;</span>
+  }
+
+  /**
+   * Helper function for applyMaskPenaltyRule1. We need this for doing this calculation in both
+   * vertical and horizontal orders respectively.
+   */
+  private static int applyMaskPenaltyRule1Internal(ByteMatrix matrix, boolean isHorizontal) {
+<span class="fc" id="L196">    int penalty = 0;</span>
+<span class="fc bfc" id="L197" title="All 2 branches covered.">    int iLimit = isHorizontal ? matrix.getHeight() : matrix.getWidth();</span>
+<span class="fc bfc" id="L198" title="All 2 branches covered.">    int jLimit = isHorizontal ? matrix.getWidth() : matrix.getHeight();</span>
+<span class="fc" id="L199">    byte[][] array = matrix.getArray();</span>
+<span class="fc bfc" id="L200" title="All 2 branches covered.">    for (int i = 0; i &lt; iLimit; i++) {</span>
+<span class="fc" id="L201">      int numSameBitCells = 0;</span>
+<span class="fc" id="L202">      int prevBit = -1;</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">      for (int j = 0; j &lt; jLimit; j++) {</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">        int bit = isHorizontal ? array[i][j] : array[j][i];</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">        if (bit == prevBit) {</span>
+<span class="fc" id="L206">          numSameBitCells++;</span>
+        } else {
+<span class="fc bfc" id="L208" title="All 2 branches covered.">          if (numSameBitCells &gt;= 5) {</span>
+<span class="fc" id="L209">            penalty += N1 + (numSameBitCells - 5);</span>
+          }
+<span class="fc" id="L211">          numSameBitCells = 1;  // Include the cell itself.</span>
+<span class="fc" id="L212">          prevBit = bit;</span>
+        }
+      }
+<span class="fc bfc" id="L215" title="All 2 branches covered.">      if (numSameBitCells &gt;= 5) {</span>
+<span class="fc" id="L216">        penalty += N1 + (numSameBitCells - 5);</span>
+      }
+    }
+<span class="fc" id="L219">    return penalty;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

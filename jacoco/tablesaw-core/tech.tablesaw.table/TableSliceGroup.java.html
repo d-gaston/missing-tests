@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TableSliceGroup.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.table</a> &gt; <span class="el_source">TableSliceGroup.java</span></div><h1>TableSliceGroup.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.table;
+
+import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Lists;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import tech.tablesaw.aggregate.AggregateFunction;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.Column;
+
+/** A group of tables formed by performing splitting operations on an original table */
+public class TableSliceGroup implements Iterable&lt;TableSlice&gt; {
+
+  // A string that is used internally as a delimiter in creating a column name from all the grouping
+  // columns
+  protected static final String SPLIT_STRING = &quot;~~~&quot;;
+
+  // A function that splits the group column name back into the original column names for the
+  // grouping columns
+<span class="fc" id="L42">  private static final Splitter SPLITTER = Splitter.on(SPLIT_STRING);</span>
+
+  // The list of slices or views over the source table that I contain
+<span class="fc" id="L45">  private final List&lt;TableSlice&gt; subTables = new ArrayList&lt;&gt;();</span>
+
+  private final String[] splitColumnNames;
+
+  // The table that underlies all the manipulations performed here
+  private Table sourceTable;
+
+  /**
+   * Returns an instance for calculating a single summary for the given table, with no sub-groupings
+   */
+<span class="fc" id="L55">  protected TableSliceGroup(Table original) {</span>
+<span class="pc bpc" id="L56" title="1 of 2 branches missed.">    if (containsAnyTextColumns(original)) {</span>
+<span class="nc" id="L57">      sourceTable = original.copy();</span>
+<span class="nc" id="L58">      replaceTextColumnsWithStringColumns();</span>
+    } else {
+<span class="fc" id="L60">      sourceTable = original;</span>
+    }
+<span class="fc" id="L62">    splitColumnNames = new String[0];</span>
+<span class="fc" id="L63">  }</span>
+
+  private boolean containsAnyTextColumns(Table original) {
+<span class="fc bfc" id="L66" title="All 2 branches covered.">    for (Column&lt;?&gt; column : original.columns()) {</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">      if (column.type().equals(ColumnType.TEXT)) {</span>
+<span class="fc" id="L68">        return true;</span>
+      }
+<span class="fc" id="L70">    }</span>
+<span class="fc" id="L71">    return false;</span>
+  }
+
+  /**
+   * Replace any textColumns in the table with stringColumns. We do this because TextColumns don't
+   * split correctly: The split algorithm uses a byte[] version of the elements to do it's magic,
+   * and text columns have variable sized strings, so variable sized byte arrays. Determining the
+   * correct array size (maybe the largest array size for the array?) would be somewhat fraught
+   * because the size depends on the encoding and the strings do not know they're own encoding. This
+   * would need to be detected using a 3rd party library.
+   *
+   * &lt;p&gt;So replace with the equivalent stringColumn instead.
+   */
+  private void replaceTextColumnsWithStringColumns() {
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    for (int i = 0; i &lt; sourceTable.columnCount(); i++) {</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      if (sourceTable.column(i).type().equals(ColumnType.TEXT)) {</span>
+<span class="fc" id="L87">        String originalName = sourceTable.column(i).name();</span>
+<span class="fc" id="L88">        sourceTable.replaceColumn(i, sourceTable.textColumn(i).asStringColumn());</span>
+<span class="fc" id="L89">        sourceTable.column(i).setName(originalName);</span>
+      }
+    }
+<span class="fc" id="L92">  }</span>
+
+  /**
+   * Returns an instance for calculating subgroups, one for each combination of the given
+   * groupColumnNames that appear in the source table
+   */
+<span class="fc" id="L98">  protected TableSliceGroup(Table sourceTable, String[] groupColumnNames) {</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    if (containsAnyTextColumns(sourceTable)) {</span>
+<span class="fc" id="L100">      this.sourceTable = sourceTable.copy();</span>
+<span class="fc" id="L101">      replaceTextColumnsWithStringColumns();</span>
+    } else {
+<span class="fc" id="L103">      this.sourceTable = sourceTable;</span>
+    }
+<span class="fc" id="L105">    this.splitColumnNames = groupColumnNames;</span>
+<span class="fc" id="L106">  }</span>
+
+  protected String[] getSplitColumnNames() {
+<span class="fc" id="L109">    return splitColumnNames;</span>
+  }
+
+  protected int getByteSize(List&lt;Column&lt;?&gt;&gt; columns) {
+<span class="fc" id="L113">    int byteSize = 0;</span>
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    for (Column&lt;?&gt; c : columns) {</span>
+<span class="fc" id="L115">      byteSize += c.byteSize();</span>
+<span class="fc" id="L116">    }</span>
+<span class="fc" id="L117">    return byteSize;</span>
+  }
+
+  protected void addSlice(TableSlice slice) {
+<span class="fc" id="L121">    subTables.add(slice);</span>
+<span class="fc" id="L122">  }</span>
+
+  public List&lt;TableSlice&gt; getSlices() {
+<span class="fc" id="L125">    return subTables;</span>
+  }
+
+  public TableSlice get(int i) {
+<span class="fc" id="L129">    return subTables.get(i);</span>
+  }
+
+  public Table getSourceTable() {
+<span class="fc" id="L133">    return sourceTable;</span>
+  }
+
+  /** Returns the number of slices */
+  public int size() {
+<span class="fc" id="L138">    return subTables.size();</span>
+  }
+
+  /**
+   * For a subtable that is grouped by the values in more than one column, split the grouping column
+   * into separate cols and return the revised view
+   */
+  private Table splitGroupingColumn(Table groupTable) {
+
+<span class="fc bfc" id="L147" title="All 2 branches covered.">    if (splitColumnNames.length &gt; 0) {</span>
+<span class="fc" id="L148">      List&lt;Column&lt;?&gt;&gt; newColumns = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L149">      List&lt;Column&lt;?&gt;&gt; columns = sourceTable.columns(splitColumnNames);</span>
+<span class="fc bfc" id="L150" title="All 2 branches covered.">      for (Column&lt;?&gt; column : columns) {</span>
+<span class="fc" id="L151">        Column&lt;?&gt; newColumn = column.emptyCopy();</span>
+<span class="fc" id="L152">        newColumns.add(newColumn);</span>
+<span class="fc" id="L153">      }</span>
+      // iterate through the rows in the table and split each of the grouping columns into multiple
+      // columns
+<span class="fc bfc" id="L156" title="All 2 branches covered.">      for (int row = 0; row &lt; groupTable.rowCount(); row++) {</span>
+<span class="fc" id="L157">        List&lt;String&gt; strings = SPLITTER.splitToList(groupTable.stringColumn(&quot;Group&quot;).get(row));</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">        for (int col = 0; col &lt; newColumns.size(); col++) {</span>
+<span class="fc" id="L159">          newColumns.get(col).appendCell(strings.get(col));</span>
+        }
+      }
+<span class="fc bfc" id="L162" title="All 2 branches covered.">      for (int col = 0; col &lt; newColumns.size(); col++) {</span>
+<span class="fc" id="L163">        Column&lt;?&gt; c = newColumns.get(col);</span>
+<span class="fc" id="L164">        groupTable.insertColumn(col, c);</span>
+      }
+<span class="fc" id="L166">      groupTable.removeColumns(&quot;Group&quot;);</span>
+    }
+<span class="fc" id="L168">    return groupTable;</span>
+  }
+
+  /**
+   * Applies the given aggregation to the given column. The apply and combine steps of a
+   * split-apply-combine.
+   */
+  public Table aggregate(String colName1, AggregateFunction&lt;?, ?&gt;... functions) {
+    ArrayListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; columnFunctionMap =
+<span class="fc" id="L177">        ArrayListMultimap.create();</span>
+<span class="fc" id="L178">    columnFunctionMap.putAll(colName1, Lists.newArrayList(functions));</span>
+<span class="fc" id="L179">    return aggregate(columnFunctionMap);</span>
+  }
+
+  /**
+   * Applies the given aggregations to the given columns. The apply and combine steps of a
+   * split-apply-combine.
+   *
+   * @param functions map from column name to aggregation to apply on that function
+   */
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  public Table aggregate(ListMultimap&lt;String, AggregateFunction&lt;?, ?&gt;&gt; functions) {
+<span class="pc bpc" id="L190" title="1 of 2 branches missed.">    Preconditions.checkArgument(!getSlices().isEmpty());</span>
+<span class="fc" id="L191">    Table groupTable = summaryTableName(sourceTable);</span>
+<span class="fc" id="L192">    StringColumn groupColumn = StringColumn.create(&quot;Group&quot;);</span>
+<span class="fc" id="L193">    groupTable.addColumns(groupColumn);</span>
+<span class="fc" id="L194">    boolean firstFunction = true;</span>
+    for (Map.Entry&lt;String, Collection&lt;AggregateFunction&lt;?, ?&gt;&gt;&gt; entry :
+<span class="fc bfc" id="L196" title="All 2 branches covered.">        functions.asMap().entrySet()) {</span>
+<span class="fc" id="L197">      String columnName = entry.getKey();</span>
+<span class="fc bfc" id="L198" title="All 2 branches covered.">      for (AggregateFunction function : entry.getValue()) {</span>
+<span class="fc" id="L199">        String colName = aggregateColumnName(columnName, function.functionName());</span>
+<span class="fc" id="L200">        ColumnType type = function.returnType();</span>
+<span class="fc" id="L201">        Column resultColumn = type.create(colName);</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">        for (TableSlice subTable : getSlices()) {</span>
+<span class="fc" id="L203">          Object result = function.summarize(subTable.column(columnName));</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">          if (firstFunction) {</span>
+<span class="fc" id="L205">            groupColumn.append(subTable.name());</span>
+          }
+<span class="fc bfc" id="L207" title="All 2 branches covered.">          if (result instanceof Number) {</span>
+<span class="fc" id="L208">            Number number = (Number) result;</span>
+<span class="fc" id="L209">            resultColumn.append(number.doubleValue());</span>
+<span class="fc" id="L210">          } else {</span>
+<span class="fc" id="L211">            resultColumn.append(result);</span>
+          }
+<span class="fc" id="L213">        }</span>
+<span class="fc" id="L214">        groupTable.addColumns(resultColumn);</span>
+<span class="fc" id="L215">        firstFunction = false;</span>
+<span class="fc" id="L216">      }</span>
+<span class="fc" id="L217">    }</span>
+<span class="fc" id="L218">    return splitGroupingColumn(groupTable);</span>
+  }
+
+  public static Table summaryTableName(Table source) {
+<span class="fc" id="L222">    return Table.create(source.name() + &quot; summary&quot;);</span>
+  }
+
+  /**
+   * Returns an iterator over elements of type {@code T}.
+   *
+   * @return an Iterator.
+   */
+  @Override
+  public Iterator&lt;TableSlice&gt; iterator() {
+<span class="fc" id="L232">    return subTables.iterator();</span>
+  }
+
+  /**
+   * Returns a column name for aggregated data based on the given source column name and function
+   */
+  public static String aggregateColumnName(String columnName, String functionName) {
+<span class="fc" id="L239">    return String.format(&quot;%s [%s]&quot;, functionName, columnName);</span>
+  }
+
+  /**
+   * Returns a list of Tables created by reifying my list of slices (views) over the original table
+   */
+  public List&lt;Table&gt; asTableList() {
+<span class="fc" id="L246">    List&lt;Table&gt; tableList = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L247" title="All 2 branches covered.">    for (TableSlice view : this) {</span>
+<span class="fc" id="L248">      tableList.add(view.asTable());</span>
+<span class="fc" id="L249">    }</span>
+<span class="fc" id="L250">    return tableList;</span>
+  }
+
+  protected void setSourceTable(Table sourceTable) {
+<span class="fc" id="L254">    this.sourceTable = sourceTable;</span>
+<span class="fc" id="L255">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

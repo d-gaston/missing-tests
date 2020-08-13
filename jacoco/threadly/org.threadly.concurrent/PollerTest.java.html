@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PollerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">PollerTest.java</span></div><h1>PollerTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.SingleThreadScheduler;
+import org.threadly.concurrent.future.FutureUtils;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.SettableListenableFuture;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestUtils;
+import org.threadly.test.concurrent.TestableScheduler;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L24">public class PollerTest extends ThreadlyTester {</span>
+  private static final int POLL_INTERVAL = 10_000;
+
+  private TestableScheduler scheduler;
+  private Poller poller;
+
+  @Before
+  public void setup() {
+<span class="fc" id="L32">    scheduler = new TestableScheduler();</span>
+<span class="fc" id="L33">    poller = new Poller(scheduler, POLL_INTERVAL);</span>
+<span class="fc" id="L34">  }</span>
+
+  @After
+  public void cleanup() {
+<span class="fc" id="L38">    scheduler = null;</span>
+<span class="fc" id="L39">    poller = null;</span>
+<span class="fc" id="L40">  }</span>
+
+  @Test
+  public void simplePollTest() {
+<span class="fc" id="L44">    AtomicBoolean pollState = new AtomicBoolean(false);</span>
+
+<span class="fc" id="L46">    ListenableFuture&lt;?&gt; f = poller.watch(() -&gt; pollState.get());</span>
+<span class="fc" id="L47">    assertFalse(f.isDone());</span>
+
+<span class="fc" id="L49">    assertEquals(1, scheduler.advance(POLL_INTERVAL));</span>
+<span class="fc" id="L50">    assertFalse(f.isDone());</span>
+
+<span class="fc" id="L52">    pollState.set(true);</span>
+
+<span class="fc" id="L54">    assertEquals(1, scheduler.advance(POLL_INTERVAL));</span>
+<span class="fc" id="L55">    assertTrue(f.isDone());</span>
+
+<span class="fc" id="L57">    assertEquals(0, scheduler.advance(POLL_INTERVAL));</span>
+<span class="fc" id="L58">  }</span>
+
+  @Test
+  public void timeoutTest() {
+<span class="fc" id="L62">    poller = new Poller(new SingleThreadScheduler(), POLL_INTERVAL, 10);</span>
+<span class="fc" id="L63">    ListenableFuture&lt;?&gt; f = poller.watch(() -&gt; false);</span>
+<span class="fc" id="L64">    TestUtils.sleep(10);</span>
+
+<span class="pc bpc" id="L66" title="1 of 4 branches missed.">    new TestCondition(() -&gt; f.isDone() &amp;&amp; f.isCancelled())</span>
+<span class="fc" id="L67">        .blockTillTrue();// will throw if does not become true</span>
+<span class="fc" id="L68">  }</span>
+  
+  @Test
+  public void watchListenableFutureWithExtendedResultTest() {
+<span class="fc" id="L72">    ListenableFuture&lt;DoNothingRunnable&gt; lf = FutureUtils.immediateResultFuture(DoNothingRunnable.instance());</span>
+<span class="fc" id="L73">    ListenableFuture&lt;Runnable&gt; lfResult = poller.watch(lf);</span>
+    
+<span class="pc bpc" id="L75" title="1 of 2 branches missed.">    assertTrue(((ListenableFuture&lt;?&gt;)lfResult) == lf);</span>
+<span class="fc" id="L76">  }</span>
+  
+  @Test
+  public void watchAlreadyDoneFutureWithResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L80">    final Object objResult = new Object();</span>
+<span class="fc" id="L81">    ListenableFuture&lt;Object&gt; lfResult = poller.watch(new AlreadyDoneFuture() {</span>
+      @Override
+      public Object get() throws ExecutionException {
+<span class="fc" id="L84">        return objResult;</span>
+      }
+
+      @Override
+      public Object get(long timeout, TimeUnit unit) throws ExecutionException {
+<span class="nc" id="L89">        return objResult;</span>
+      }
+    });
+    
+<span class="fc" id="L93">    assertTrue(lfResult.isDone());</span>
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">    assertTrue(objResult == lfResult.get());</span>
+<span class="fc" id="L95">  }</span>
+  
+  @Test
+  public void watchAlreadyDoneFutureWithFailureTest() throws InterruptedException {
+<span class="fc" id="L99">    final Throwable rootCause = new Exception();</span>
+<span class="fc" id="L100">    ListenableFuture&lt;Object&gt; lfResult = poller.watch(new AlreadyDoneFuture() {</span>
+      @Override
+      public Object get() throws ExecutionException {
+<span class="fc" id="L103">        throw new ExecutionException(rootCause);</span>
+      }
+
+      @Override
+      public Object get(long timeout, TimeUnit unit) throws ExecutionException {
+<span class="nc" id="L108">        throw new ExecutionException(rootCause);</span>
+      }
+    });
+    
+<span class="fc" id="L112">    assertTrue(lfResult.isDone());</span>
+    try {
+<span class="nc" id="L114">      lfResult.get();</span>
+<span class="nc" id="L115">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L116">    } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">      assertTrue(e.getCause() == rootCause);</span>
+<span class="nc" id="L118">    }</span>
+<span class="fc" id="L119">  }</span>
+  
+  @Test
+  public void watchAlreadyCanceledFutureTest() {
+<span class="pc" id="L123">    Future&lt;Object&gt; canceledFuture = new FutureTask&lt;&gt;(() -&gt; { return null; });</span>
+<span class="fc" id="L124">    assertTrue(canceledFuture.cancel(true));</span>
+<span class="fc" id="L125">    ListenableFuture&lt;Object&gt; lfResult = poller.watch(canceledFuture);</span>
+    
+<span class="fc" id="L127">    assertTrue(lfResult.isDone());</span>
+<span class="fc" id="L128">    assertTrue(lfResult.isCancelled());</span>
+<span class="fc" id="L129">  }</span>
+  
+  @Test
+  public void watchIncompleteFutureWithResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L133">    poller = new Poller(scheduler, POLL_INTERVAL, POLL_INTERVAL * 2);  // must have timeout to avoid just casting SLF</span>
+<span class="fc" id="L134">    Object objResult = new Object();</span>
+<span class="fc" id="L135">    SettableListenableFuture&lt;Object&gt; slf = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L136">    ListenableFuture&lt;Object&gt; lfResult = poller.watch(slf);</span>
+    
+<span class="fc" id="L138">    assertFalse(lfResult.isDone());</span>
+    
+<span class="fc" id="L140">    slf.setResult(objResult);</span>
+<span class="fc" id="L141">    assertEquals(1, scheduler.advance(POLL_INTERVAL));</span>
+
+<span class="fc" id="L143">    assertTrue(lfResult.isDone());</span>
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">    assertTrue(objResult == lfResult.get());</span>
+<span class="fc" id="L145">  }</span>
+  
+  @Test
+  public void watchIncompleteFutureWithFailureTest() throws InterruptedException {
+<span class="fc" id="L149">    poller = new Poller(scheduler, POLL_INTERVAL, POLL_INTERVAL * 2);  // must have timeout to avoid just casting SLF</span>
+<span class="fc" id="L150">    Throwable rootCause = new Exception();</span>
+<span class="fc" id="L151">    SettableListenableFuture&lt;Object&gt; slf = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L152">    ListenableFuture&lt;Object&gt; lfResult = poller.watch(slf);</span>
+    
+<span class="fc" id="L154">    assertFalse(lfResult.isDone());</span>
+    
+<span class="fc" id="L156">    slf.setFailure(rootCause);</span>
+<span class="fc" id="L157">    assertEquals(1, scheduler.advance(POLL_INTERVAL));</span>
+    
+<span class="fc" id="L159">    assertTrue(lfResult.isDone());</span>
+    try {
+<span class="nc" id="L161">      lfResult.get();</span>
+<span class="nc" id="L162">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L163">    } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L164" title="1 of 2 branches missed.">      assertTrue(e.getCause() == rootCause);</span>
+<span class="nc" id="L165">    }</span>
+<span class="fc" id="L166">  }</span>
+  
+  @Test
+  public void watchIncompleteCanceledFutureTest() {
+<span class="fc" id="L170">    poller = new Poller(scheduler, POLL_INTERVAL, POLL_INTERVAL * 2);  // must have timeout to avoid just casting SLF</span>
+<span class="fc" id="L171">    SettableListenableFuture&lt;Object&gt; slf = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L172">    ListenableFuture&lt;Object&gt; lfResult = poller.watch(slf);</span>
+    
+<span class="fc" id="L174">    assertFalse(lfResult.isDone());</span>
+    
+<span class="fc" id="L176">    slf.cancel(false);</span>
+<span class="fc" id="L177">    assertEquals(1, scheduler.advance(POLL_INTERVAL));</span>
+    
+<span class="fc" id="L179">    assertTrue(lfResult.isDone());</span>
+<span class="fc" id="L180">    assertTrue(lfResult.isCancelled());</span>
+<span class="fc" id="L181">  }</span>
+  
+  private static abstract class AlreadyDoneFuture implements Future&lt;Object&gt; {
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+<span class="nc" id="L186">      return false;</span>
+    }
+
+    @Override
+    public boolean isCancelled() {
+<span class="fc" id="L191">      return false;</span>
+    }
+
+    @Override
+    public boolean isDone() {
+<span class="fc" id="L196">      return true;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

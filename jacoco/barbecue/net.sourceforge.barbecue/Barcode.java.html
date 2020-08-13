@@ -1,0 +1,471 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Barcode.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">barbecue$All_in_barbecue_test.exec</a> &gt; <a href="index.source.html" class="el_package">net.sourceforge.barbecue</a> &gt; <span class="el_source">Barcode.java</span></div><h1>Barcode.java</h1><pre class="source lang-java linenums">/***********************************************************************************************************************
+ * Copyright (c) 2003, International Barcode Consortium
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *
+ * Redistributions of source code must retain the above copyright notice, this list of
+ * conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright notice, this list of
+ * conditions and the following disclaimer in the documentation and/or other materials
+ * provided with the distribution.
+ * Neither the name of the International Barcode Consortium nor the names of any contributors may be used to endorse
+ * or promote products derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ ***********************************************************************************************************************/
+
+package net.sourceforge.barbecue;
+
+import net.sourceforge.barbecue.env.EnvironmentFactory;
+import net.sourceforge.barbecue.env.HeadlessEnvironment;
+import net.sourceforge.barbecue.output.GraphicsOutput;
+import net.sourceforge.barbecue.output.Output;
+import net.sourceforge.barbecue.output.OutputException;
+import net.sourceforge.barbecue.output.SizingOutput;
+
+import javax.swing.*;
+
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseEvent;
+import java.awt.print.PageFormat;
+import java.awt.print.Printable;
+import java.awt.print.PrinterException;
+import java.awt.print.PrinterJob;
+import java.text.CharacterIterator;
+import java.text.StringCharacterIterator;
+
+/**
+ * Abstract barcode class that provides functionality that is common to
+ * all barcodes. Specific barcode implementations must subclass
+ * this and provide information specific to the barcode type they are implementing.
+ *
+ * @author &lt;a href=&quot;mailto:opensource@ianbourke.com&quot;&gt;Ian Bourke&lt;/a&gt;
+ */
+public abstract class Barcode extends JComponent 
+	implements Printable {
+
+    private static final int DEFAULT_BAR_HEIGHT = 50;
+
+    protected String data;
+    protected String label;
+    protected boolean drawingText;
+<span class="fc" id="L66">    protected boolean drawingQuietSection = true;</span>
+<span class="fc" id="L67">    protected int barWidth = 2;</span>
+    protected int barHeight;
+    private Font font;
+    private Dimension size;
+    private int x;
+    private int y;
+<span class="fc" id="L73">    private int resolution = -1;</span>
+
+<span class="fc" id="L75">	protected Barcode(String data) throws BarcodeException {</span>
+<span class="fc bfc" id="L76" title="All 4 branches covered.">        if (data == null || data.length() == 0) {</span>
+<span class="fc" id="L77">            throw new BarcodeException(&quot;Data to encode cannot be empty&quot;);</span>
+        }
+<span class="fc" id="L79">        this.data = data;</span>
+<span class="fc" id="L80">        int minHeight = calculateMinimumBarHeight(getResolution());</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">        if (minHeight &gt; 0) {</span>
+<span class="fc" id="L82">            this.barHeight = minHeight;</span>
+        } else {
+<span class="fc" id="L84">            this.barHeight = Barcode.DEFAULT_BAR_HEIGHT;</span>
+        }
+<span class="fc" id="L86">        this.font = EnvironmentFactory.getEnvironment().getDefaultFont();</span>
+<span class="fc" id="L87">        this.drawingText = true;</span>
+<span class="fc" id="L88">        setBackground(Color.white);</span>
+<span class="fc" id="L89">        setForeground(Color.black);</span>
+<span class="fc" id="L90">        setOpaque(true);</span>
+
+        
+<span class="fc" id="L93">        invalidateSize();</span>
+<span class="fc" id="L94">    }</span>
+
+    /**
+     * Returns the data that the barcode is coding for.
+     *
+     * @return The barcode raw data
+     */
+    public String getData() {
+<span class="fc" id="L102">        return data;</span>
+    }
+
+    /**
+     * Sets the font to use when drawing the barcode data string underneath the barcode.
+     * &lt;p/&gt; Note that changing this setting after a barcode has been drawn will invalidate the
+     * component and may force a refresh.
+     *
+     * @param font The font to use
+     */
+    public void setFont(Font font) {
+<span class="fc" id="L113">        this.font = font;</span>
+<span class="fc" id="L114">        invalidateSize();</span>
+<span class="fc" id="L115">    }</span>
+
+    /**
+     * Indicates whether the barcode data should be shown as a string underneath the
+     * barcode or not.
+     * &lt;p/&gt; Note that changing this setting after a barcode has been drawn will invalidate the
+     * component and may force a refresh.
+     *
+     * @param drawingText True if the text should be shown, false if not
+     */
+    public void setDrawingText(boolean drawingText) {
+<span class="fc" id="L126">        this.drawingText = drawingText;</span>
+<span class="fc" id="L127">        invalidateSize();</span>
+<span class="fc" id="L128">    }</span>
+
+    /**
+     * Indicates whether the barcode is drawing a text label underneath the barcode or not.
+     *
+     * @return True if the text is drawn, false otherwise
+     */
+    public boolean isDrawingText() {
+<span class="fc" id="L136">        return drawingText;</span>
+    }
+
+    /**
+     * Indicates whether the leading and trailing white space should be rendered.
+     * &lt;p/&gt; Note that changing this setting after a barcode has been drawn will invalidate the
+     * component and may force a refresh.
+     *
+     * @param drawingQuietSection True if the quiet area/white space should be shown, false if not
+     */
+    public void setDrawingQuietSection(boolean drawingQuietSection) {
+<span class="nc" id="L147">        this.drawingQuietSection = drawingQuietSection;</span>
+<span class="nc" id="L148">        invalidateSize();</span>
+<span class="nc" id="L149">    }</span>
+
+    /**
+     * Indicates whether the barcode is drawing leading and trailing white space/quiet area.
+     *
+     * @return True if the quiet area/white space is drawn, false otherwise
+     */
+    public boolean isDrawingQuietSection() {
+<span class="nc" id="L157">        return drawingQuietSection;</span>
+    }
+
+    /**
+     * Sets the desired bar width for the barcode. This is the width (in pixels) of the
+     * thinnest bar in the barcode. Other bars will change their size relative to this.
+     * &lt;p/&gt; Note that changing this setting after a barcode has been drawn will invalidate the
+     * component and may force a refresh.
+     *
+     * @param barWidth The desired width of the thinnest bar in pixels
+     */
+    public void setBarWidth(int barWidth) {
+<span class="fc bfc" id="L169" title="All 2 branches covered.">        if (barWidth &gt;= 1) {</span>
+<span class="fc" id="L170">            this.barWidth = barWidth;</span>
+        } else {
+<span class="fc" id="L172">            this.barWidth = 1;</span>
+        }
+<span class="fc" id="L174">        invalidateSize();</span>
+<span class="fc" id="L175">    }</span>
+
+    /**
+     * Sets the desired height for the bars in the barcode (in pixels). Note that some
+     * barcode implementations will not allow the height to go below a minimum size. This
+     * is not the height of the component as a whole, as it does not specify the height of
+     * any text that may be drawn and does not include borders.
+     * &lt;p/&gt; Note that changing this setting after a barcode has been drawn will invalidate the
+     * component and may force a refresh.
+     *
+     * @param barHeight The desired height of the barcode bars in pixels
+     */
+    public void setBarHeight(int barHeight) {
+        // There is a minimum bar height that we must enforce
+<span class="fc bfc" id="L189" title="All 2 branches covered.">        if (barHeight &gt; calculateMinimumBarHeight(getResolution())) {</span>
+<span class="fc" id="L190">            this.barHeight = barHeight;</span>
+<span class="fc" id="L191">            invalidateSize();</span>
+        }
+<span class="fc" id="L193">    }</span>
+
+    /**
+     * Sets the desired output resolution for the barcode. This method should
+     * be used in cases where the barcode is either being outputted to a device
+     * other than the screen, or the barcode is being generated on a headless
+     * machine (e.g. a rack mounted server) and the screen resolution cannot be
+     * determined. Note that is the barcode is generated in either of these situations
+     * and this method has not been called, the resolution is assumed to be 72 dots
+     * per inch.
+     *
+     * @param resolution The desired output resolution (in dots per inch)
+     */
+    public void setResolution(int resolution) {
+<span class="fc bfc" id="L207" title="All 2 branches covered.">        if (resolution &gt; 0) {</span>
+<span class="fc" id="L208">            this.resolution = resolution;</span>
+<span class="fc" id="L209">            int newHeight = calculateMinimumBarHeight(getResolution());</span>
+<span class="fc bfc" id="L210" title="All 2 branches covered.">            if (newHeight &gt; this.barHeight) {</span>
+<span class="fc" id="L211">                this.barHeight = newHeight;</span>
+            }
+<span class="fc" id="L213">            invalidateSize();</span>
+        }
+<span class="fc" id="L215">    }</span>
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The X co-ordinate of the component's origin
+     */
+    public int getX() {
+<span class="fc" id="L223">        return x;</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The Y co-ordinate of the component's origin
+     */
+    public int getY() {
+<span class="fc" id="L232">        return y;</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The width of this component
+     */
+    public int getWidth() {
+<span class="fc" id="L241">        return (int) getActualSize().getWidth();</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The height of this component
+     */
+    public int getHeight() {
+<span class="fc" id="L250">        return (int) getActualSize().getHeight();</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The bounds of this component
+     */
+    public Rectangle getBounds() {
+<span class="fc" id="L259">        return getBounds(new Rectangle());</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @param rv The rectangle to set the bounds on
+     * @return The updated rv
+     */
+    public Rectangle getBounds(Rectangle rv) {
+<span class="fc" id="L269">        rv.setBounds(getX(), getY(), (int) getActualSize().getWidth() + getX(),</span>
+<span class="fc" id="L270">                (int) getActualSize().getHeight() + getY());</span>
+<span class="fc" id="L271">        return rv;</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The preferred size of this component
+     */
+    public Dimension getPreferredSize() {
+<span class="fc" id="L280">        return getActualSize();</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The minimum size of this component
+     */
+    public Dimension getMinimumSize() {
+<span class="fc" id="L289">        return getActualSize();</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The maximum size of this component
+     */
+    public Dimension getMaximumSize() {
+<span class="fc" id="L298">        return getActualSize();</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @return The actual size of this component
+     */
+    public Dimension getSize() {
+<span class="fc" id="L307">        return getActualSize();</span>
+    }
+
+    /**
+     * Renders this &lt;code&gt;Barcode&lt;/code&gt; at the specified location in
+     * the specified {@link Graphics2D Graphics2D} context.
+     * The origin of the layout is placed at x,&amp;nbsp;y.  Rendering may touch
+     * any point within &lt;code&gt;getBounds()&lt;/code&gt; of this position.  This
+     * leaves the &lt;code&gt;g2&lt;/code&gt; unchanged.
+     *
+     * @param g The graphics context
+     * @param x The horizontal value of the upper left co-ordinate of the bounding box
+     * @param y The vertical value of the upper left co-ordinate of the bounding box
+     */
+    public void draw(Graphics2D g, int x, int y) throws OutputException {
+<span class="fc" id="L322">        this.x = x;</span>
+<span class="fc" id="L323">        this.y = y;</span>
+
+<span class="fc" id="L325">        Output output = new GraphicsOutput(g, font, getForeground(), getBackground());</span>
+<span class="fc" id="L326">        size = draw(output, x, y, barWidth, barHeight);</span>
+<span class="fc" id="L327">    }</span>
+
+    public void output(Output output) throws OutputException {
+<span class="nc" id="L330">        draw(output, 0, 0, barWidth, barHeight);</span>
+<span class="nc" id="L331">    }</span>
+
+    protected abstract Module[] encodeData();
+
+    protected abstract Module calculateChecksum();
+
+    protected abstract Module getPreAmble();
+
+    protected abstract Module getPostAmble();
+
+    protected abstract Dimension draw(Output output, int x, int y, int barWidth, int barHeight) throws OutputException;
+
+    /**
+     * Returns the text that will be displayed underneath the barcode (if requested).
+     *
+     * @return The text label for the barcode
+     */
+    public String getLabel() {
+<span class="pc bpc" id="L349" title="1 of 2 branches missed.">        if (label != null) {</span>
+<span class="nc" id="L350">            return label;</span>
+        } else {
+<span class="fc" id="L352">            return beautify(data);</span>
+        }
+    }
+
+    /**
+     * Sets the human readable text to be displayed underneath the barcode.
+     * If set to null then the text will automaticaly be generated.
+     *
+     * @param label the human readable barcode text
+     * @see #getLabel()
+     */
+    public void setLabel(String label) {
+<span class="nc" id="L364">        this.label = label;</span>
+<span class="nc" id="L365">    }</span>
+
+    protected int calculateMinimumBarHeight(int resolution) {
+<span class="fc" id="L368">        return 0;</span>
+    }
+
+    /**
+     * From {@link JComponent JComponent}.
+     *
+     * @param g The graphics to paint the component onto
+     */
+    protected void paintComponent(Graphics g) {
+<span class="fc" id="L377">        super.paintComponent(g);</span>
+<span class="fc" id="L378">        Insets insets = getInsets();</span>
+        try {
+<span class="fc" id="L380">            draw((Graphics2D) g, insets.left, insets.top);</span>
+<span class="nc" id="L381">        } catch (OutputException e) {</span>
+            // Don't draw anything
+<span class="fc" id="L383">        }</span>
+<span class="fc" id="L384">    }</span>
+
+    // TODO: Move this to the output
+    protected int getResolution() {
+<span class="fc bfc" id="L388" title="All 2 branches covered.">        if (resolution &gt; 0) {</span>
+<span class="fc" id="L389">            return resolution;</span>
+        }
+<span class="fc" id="L391">        return EnvironmentFactory.getEnvironment().getResolution();</span>
+    }
+
+    protected int drawModule(Module module, Output output, int x, int y, int barWidth, int barHeight) throws OutputException {
+<span class="fc bfc" id="L395" title="All 2 branches covered.">        if (module == null) {</span>
+<span class="fc" id="L396">            return 0;</span>
+        }
+<span class="fc" id="L398">        return module.draw(output, x, y, barWidth, barHeight);</span>
+    }
+
+    protected String beautify(String s) {
+<span class="fc" id="L402">        StringBuffer buf = new StringBuffer();</span>
+<span class="fc" id="L403">        StringCharacterIterator iter = new StringCharacterIterator(s);</span>
+<span class="fc bfc" id="L404" title="All 2 branches covered.">        for (char c = iter.first(); c != CharacterIterator.DONE; c = iter.next()) {</span>
+<span class="pc bpc" id="L405" title="2 of 4 branches missed.">            if (Character.isDefined(c) &amp;&amp; !Character.isISOControl(c)) {</span>
+<span class="fc" id="L406">                buf.append(c);</span>
+            }
+        }
+<span class="fc" id="L409">        return buf.toString();</span>
+    }
+
+    private void invalidateSize() {
+<span class="fc" id="L413">        size = null;</span>
+<span class="fc" id="L414">    }</span>
+
+    private Dimension getActualSize() {
+<span class="fc bfc" id="L417" title="All 2 branches covered.">        if (size == null) {</span>
+<span class="fc" id="L418">            size = calculateSize();</span>
+        }
+<span class="fc" id="L420">        return size;</span>
+    }
+
+    private Dimension calculateSize() {
+<span class="fc" id="L424">        Dimension d = new Dimension();</span>
+<span class="fc bfc" id="L425" title="All 2 branches covered.">        if (EnvironmentFactory.getEnvironment() instanceof HeadlessEnvironment) {</span>
+            try {
+<span class="fc" id="L427">                d = draw(new SizingOutput(font, getForeground(), getBackground()), 0, 0, barWidth, barHeight);</span>
+<span class="nc" id="L428">            } catch (OutputException e) {</span>
+<span class="pc" id="L429">            }</span>
+        } else {
+            try {
+<span class="fc" id="L432">                FontMetrics fontMetrics = null;</span>
+<span class="pc bpc" id="L433" title="1 of 2 branches missed.">                if (font != null) {</span>
+<span class="fc" id="L434">                    fontMetrics = getFontMetrics(font);</span>
+                }
+<span class="fc" id="L436">                d = draw(new SizingOutput(font, fontMetrics, getForeground(), getBackground()), 0, 0, barWidth, barHeight);</span>
+<span class="nc" id="L437">            } catch (OutputException e) {</span>
+<span class="fc" id="L438">            }</span>
+        }
+
+<span class="fc" id="L441">        return d;</span>
+    }
+    
+    public int print(Graphics g, PageFormat pageFormat, int pageIndex)
+    				throws PrinterException {
+    	
+<span class="nc bnc" id="L447" title="All 2 branches missed.">    	if (pageIndex &gt;= 1) {</span>
+<span class="nc" id="L448">            return Printable.NO_SUCH_PAGE;</span>
+        }
+    	
+    	try
+    	{
+<span class="nc" id="L453">    		this.draw( (Graphics2D) g, 0, 0);</span>
+<span class="nc" id="L454">            return Printable.PAGE_EXISTS;    	</span>
+    	}
+<span class="nc" id="L456">    	catch (OutputException ex)</span>
+    	{
+<span class="nc" id="L458">    		throw new PrinterException(ex.getMessage()); </span>
+    	}
+        
+    }
+    
+    public String toString()
+    {
+<span class="nc" id="L465">    	return this.getData();</span>
+    }
+    
+
+    
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PerfTestUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4</a> &gt; <span class="el_source">PerfTestUtils.java</span></div><h1>PerfTestUtils.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4;
+
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import java.util.regex.MatchResult;
+import java.util.concurrent.Callable;
+
+import org.apache.commons.rng.UniformRandomProvider;
+import org.apache.commons.rng.simple.RandomSource;
+import org.apache.commons.rng.sampling.PermutationSampler;
+import org.apache.commons.math4.exception.MathIllegalStateException;
+import org.apache.commons.math4.exception.NumberIsTooLargeException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.stat.descriptive.StatisticalSummary;
+import org.apache.commons.math4.stat.descriptive.SummaryStatistics;
+
+/**
+ * Simple benchmarking utilities.
+ */
+<span class="nc" id="L36">public class PerfTestUtils {</span>
+    /** Formatting. */
+    private static final int DEFAULT_MAX_NAME_WIDTH = 45;
+    /** Formatting. */
+    private static final String ELLIPSIS = &quot;...&quot;;
+    /** Formatting. */
+    private static final String TO_STRING_MEMORY_ADDRESS_REGEX = &quot;@\\p{XDigit}{1,8}&quot;;
+    /** Formatting. */
+    private static final String JAVA_IDENTIFIER_REGEX =
+        &quot;(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*\\.)*\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*&quot;;
+    /** Formatting. */
+<span class="nc" id="L47">    private static final Pattern JAVA_IDENTIFIER_PATTERN =</span>
+<span class="nc" id="L48">        Pattern.compile(JAVA_IDENTIFIER_REGEX);</span>
+    /** Nanoseconds to milliseconds conversion factor ({@value}). */
+    public static final double NANO_TO_MILLI = 1e-6;
+    /** Default number of code repeat per timed block. */
+    private static final int DEFAULT_REPEAT_CHUNK = 1000;
+    /** Default number of code repeats for computing the average run time. */
+    private static final int DEFAULT_REPEAT_STAT = 10000;
+    /** RNG. */
+<span class="nc" id="L56">    private static UniformRandomProvider rng = RandomSource.create(RandomSource.WELL_19937_C);</span>
+
+    /**
+     * Timing.
+     *
+     * @param repeatChunk Each timing measurement will done done for that
+     * number of repeats of the code.
+     * @param repeatStat Timing will be averaged over that number of runs.
+     * @param runGC Call {@code System.gc()} between each timed block. When
+     * set to {@code true}, the test will run much slower.
+     * @param methods Codes being timed.
+     * @return for each of the given {@code methods}, a
+     * {@link StatisticalSummary} of the average times (in milliseconds)
+     * taken by a single call to the {@code call} method (i.e. the time
+     * taken by each timed block divided by {@code repeatChunk}).
+     */
+    @SafeVarargs
+    public static StatisticalSummary[] time(int repeatChunk,
+                                            int repeatStat,
+                                            boolean runGC,
+                                            Callable&lt;Double&gt; ... methods) {
+<span class="nc" id="L77">        final double[][][] times = timesAndResults(repeatChunk,</span>
+                                                   repeatStat,
+                                                   runGC,
+                                                   methods);
+
+<span class="nc" id="L82">        final int len = methods.length;</span>
+<span class="nc" id="L83">        final StatisticalSummary[] stats = new StatisticalSummary[len];</span>
+<span class="nc bnc" id="L84" title="All 2 branches missed.">        for (int j = 0; j &lt; len; j++) {</span>
+<span class="nc" id="L85">            final SummaryStatistics s = new SummaryStatistics();</span>
+<span class="nc bnc" id="L86" title="All 2 branches missed.">            for (int k = 0; k &lt; repeatStat; k++) {</span>
+<span class="nc" id="L87">                s.addValue(times[j][k][0]);</span>
+            }
+<span class="nc" id="L89">            stats[j] = s.getSummary();</span>
+        }
+
+<span class="nc" id="L92">        return stats;</span>
+    }
+
+    /**
+     * Timing.
+     *
+     * @param repeatChunk Each timing measurement will done done for that
+     * number of repeats of the code.
+     * @param repeatStat Timing will be averaged over that number of runs.
+     * @param runGC Call {@code System.gc()} between each timed block. When
+     * set to {@code true}, the test will run much slower.
+     * @param methods Codes being timed.
+     * @return for each of the given {@code methods} (first dimension), and
+     * each of the {@code repeatStat} runs (second dimension):
+     * &lt;ul&gt;
+     *  &lt;li&gt;
+     *   the average time (in milliseconds) taken by a single call to the
+     *   {@code call} method (i.e. the time taken by each timed block divided
+     *   by {@code repeatChunk})
+     *  &lt;/li&gt;
+     *  &lt;li&gt;
+     *   the result returned by the {@code call} method.
+     *  &lt;/li&gt;
+     * &lt;/ul&gt;
+     */
+    @SafeVarargs
+    public static double[][][] timesAndResults(int repeatChunk,
+                                               int repeatStat,
+                                               boolean runGC,
+                                               Callable&lt;Double&gt; ... methods) {
+<span class="nc" id="L122">        final int numMethods = methods.length;</span>
+<span class="nc" id="L123">        final double[][][] timesAndResults = new double[numMethods][repeatStat][2];</span>
+
+        // Indices into the array containing the methods to benchmark.
+        // The purpose is that at each repeat, the &quot;methods&quot; are called in a different order.
+<span class="nc" id="L127">        final int[] methodSequence = PermutationSampler.natural(numMethods);</span>
+
+        try {
+<span class="nc bnc" id="L130" title="All 2 branches missed.">            for (int k = 0; k &lt; repeatStat; k++) {</span>
+<span class="nc" id="L131">                PermutationSampler.shuffle(rng, methodSequence);</span>
+<span class="nc bnc" id="L132" title="All 2 branches missed.">                for (int n = 0; n &lt; numMethods; n++) {</span>
+<span class="nc" id="L133">                    final int j = methodSequence[n]; // Index of the timed method.</span>
+
+<span class="nc bnc" id="L135" title="All 2 branches missed.">                    if (runGC) {</span>
+                        // Try to perform GC outside the timed block.
+<span class="nc" id="L137">                        System.gc();</span>
+                    }
+
+<span class="nc" id="L140">                    final Callable&lt;Double&gt; r = methods[j];</span>
+<span class="nc" id="L141">                    final double[] result = new double[repeatChunk];</span>
+
+                    // Timed block.
+<span class="nc" id="L144">                    final long start = System.nanoTime();</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">                    for (int i = 0; i &lt; repeatChunk; i++) {</span>
+<span class="nc" id="L146">                        result[i] = r.call().doubleValue();</span>
+                    }
+<span class="nc" id="L148">                    final long stop = System.nanoTime();</span>
+
+                    // Collect run time.
+<span class="nc" id="L151">                    timesAndResults[j][k][0] = (stop - start) * NANO_TO_MILLI;</span>
+                    // Keep track of a randomly selected result.
+<span class="nc" id="L153">                    timesAndResults[j][k][1] = result[rng.nextInt(repeatChunk)];</span>
+                }
+            }
+<span class="nc" id="L156">        } catch (Exception e) {</span>
+            // Abort benchmarking if codes throw exceptions.
+<span class="nc" id="L158">            throw new MathIllegalStateException(LocalizedFormats.SIMPLE_MESSAGE, e.getMessage());</span>
+<span class="nc" id="L159">        }</span>
+
+<span class="nc" id="L161">        final double normFactor = 1d / repeatChunk;</span>
+<span class="nc bnc" id="L162" title="All 2 branches missed.">        for (int j = 0; j &lt; numMethods; j++) {</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">            for (int k = 0; k &lt; repeatStat; k++) {</span>
+<span class="nc" id="L164">                timesAndResults[j][k][0] *= normFactor;</span>
+            }
+        }
+
+<span class="nc" id="L168">        return timesAndResults;</span>
+    }
+
+    /**
+     * Timing and report (to standard output) the average time and standard
+     * deviation of a single call.
+     * The timing is performed by calling the
+     * {@link #time(int,int,boolean,Callable[]) time} method.
+     *
+     * @param title Title of the test (for the report).
+     * @param maxNameWidth Maximum width of the first column of the report.
+     * @param repeatChunk Each timing measurement will done done for that
+     * number of repeats of the code.
+     * @param repeatStat Timing will be averaged over that number of runs.
+     * @param runGC Call {@code System.gc()} between each timed block. When
+     * set to {@code true}, the test will run much slower.
+     * @param methods Codes being timed.
+     * @return for each of the given {@code methods}, a statistics of the
+     * average times (in milliseconds) taken by a single call to the
+     * {@code call} method (i.e. the time taken by each timed block divided
+     * by {@code repeatChunk}).
+     */
+    @SuppressWarnings(&quot;boxing&quot;)
+    public static StatisticalSummary[] timeAndReport(String title,
+                                                     int maxNameWidth,
+                                                     int repeatChunk,
+                                                     int repeatStat,
+                                                     boolean runGC,
+                                                     RunTest ... methods) {
+        // Header format.
+<span class="nc" id="L198">        final String hFormat = &quot;%s (calls per timed block: %d, timed blocks: %d, time unit: ms)&quot;;</span>
+
+        // TODO: user-defined parameter?
+<span class="nc" id="L201">        final boolean removePackageName = false;</span>
+
+        // Width of the longest name.
+<span class="nc" id="L204">        int nameLength = 0;</span>
+<span class="nc bnc" id="L205" title="All 2 branches missed.">        for (RunTest m : methods) {</span>
+<span class="nc" id="L206">            int len = shorten(m.getName(), removePackageName).length();</span>
+<span class="nc bnc" id="L207" title="All 2 branches missed.">            if (len &gt; nameLength) {</span>
+<span class="nc" id="L208">                nameLength = len;</span>
+            }
+        }
+<span class="nc bnc" id="L211" title="All 2 branches missed.">        final int actualNameLength = nameLength &lt; maxNameWidth ?</span>
+            nameLength :
+            maxNameWidth;
+<span class="nc" id="L214">        final String nameLengthFormat = &quot;%&quot; + actualNameLength + &quot;s&quot;;</span>
+
+        // Column format.
+<span class="nc" id="L217">        final String cFormat = nameLengthFormat + &quot; %9s %7s %10s %5s %4s %10s&quot;;</span>
+        // Result format.
+<span class="nc" id="L219">        final String format = nameLengthFormat + &quot; %.3e %.1e %.4e %.3f %.2f %.4e&quot;;</span>
+
+<span class="nc" id="L221">        System.out.println(String.format(hFormat,</span>
+                                         title,
+<span class="nc" id="L223">                                         repeatChunk,</span>
+<span class="nc" id="L224">                                         repeatStat));</span>
+<span class="nc" id="L225">        System.out.println(String.format(cFormat,</span>
+                                         &quot;name&quot;,
+                                         &quot;time/call&quot;,
+                                         &quot;std dev&quot;,
+                                         &quot;total time&quot;,
+                                         &quot;ratio&quot;,
+                                         &quot;cv&quot;,
+                                         &quot;difference&quot;));
+<span class="nc" id="L233">        final StatisticalSummary[] time = time(repeatChunk,</span>
+                                               repeatStat,
+                                               runGC,
+                                               methods);
+<span class="nc" id="L237">        final double refSum = time[0].getSum() * repeatChunk;</span>
+<span class="nc bnc" id="L238" title="All 2 branches missed.">        for (int i = 0, max = time.length; i &lt; max; i++) {</span>
+<span class="nc" id="L239">            final StatisticalSummary s = time[i];</span>
+<span class="nc" id="L240">            final double sum = s.getSum() * repeatChunk;</span>
+<span class="nc" id="L241">            final double mean = s.getMean();</span>
+<span class="nc" id="L242">            final double sigma = s.getStandardDeviation();</span>
+<span class="nc" id="L243">            System.out.println(String.format(format,</span>
+<span class="nc" id="L244">                                             truncate(shorten(methods[i].getName(),</span>
+                                                              removePackageName),
+                                                      actualNameLength,
+                                                      ELLIPSIS),
+<span class="nc" id="L248">                                             mean,</span>
+<span class="nc" id="L249">                                             sigma,</span>
+<span class="nc" id="L250">                                             sum,</span>
+<span class="nc" id="L251">                                             sum / refSum,</span>
+<span class="nc" id="L252">                                             sigma / mean,</span>
+<span class="nc" id="L253">                                             sum - refSum));</span>
+        }
+
+<span class="nc" id="L256">        return time;</span>
+    }
+
+    /**
+     * Timing and report (to standard output).
+     * This method calls {@link #timeAndReport(String,int,int,boolean,RunTest[])
+     * timeAndReport(title, 1000, 10000, false, methods)}.
+     *
+     * @param title Title of the test (for the report).
+     * @param methods Codes being timed.
+     * @return for each of the given {@code methods}, a statistics of the
+     * average times (in milliseconds) taken by a single call to the
+     * {@code call} method (i.e. the time taken by each timed block divided
+     * by {@code repeatChunk}).
+     */
+    public static StatisticalSummary[] timeAndReport(String title,
+                                                     RunTest ... methods) {
+<span class="nc" id="L273">        return timeAndReport(title,</span>
+                             DEFAULT_MAX_NAME_WIDTH,
+                             DEFAULT_REPEAT_CHUNK,
+                             DEFAULT_REPEAT_STAT,
+                             false,
+                             methods);
+    }
+
+    /**
+     * Utility class for storing a test label.
+     */
+    public static abstract class RunTest implements Callable&lt;Double&gt; {
+        private final String name;
+
+        /**
+         * @param name Test name.
+         */
+<span class="nc" id="L290">        public RunTest(String name) {</span>
+<span class="nc" id="L291">            this.name = name;</span>
+<span class="nc" id="L292">        }</span>
+
+        /**
+         * @return the name of this test.
+         */
+        public String getName() {
+<span class="nc" id="L298">            return name;</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public abstract Double call() throws Exception;
+    }
+
+    /**
+     * Truncates a string so that it will not be longer than the
+     * specified length.
+     *
+     * @param str String to truncate.
+     * @param maxLength Maximum length.
+     * @param ellipsis String to use in place of the part being removed
+     * from the original string.
+     * @return the truncated string.
+     * @throws NumberIsTooLargeException if the length of {@code ellipsis}
+     * is larger than {@code maxLength - 2}.
+     */
+    private static String truncate(String str,
+                                   int maxLength,
+                                   String ellipsis) {
+<span class="nc" id="L321">        final int ellSize = ellipsis.length();</span>
+<span class="nc bnc" id="L322" title="All 2 branches missed.">        if (ellSize &gt; maxLength - 2) {</span>
+<span class="nc" id="L323">            throw new NumberIsTooLargeException(ellSize, maxLength - 2, false);</span>
+        }
+
+<span class="nc" id="L326">        final int strSize = str.length();</span>
+<span class="nc bnc" id="L327" title="All 2 branches missed.">        if (strSize &lt;= maxLength) {</span>
+            // Size is OK.
+<span class="nc" id="L329">            return str;</span>
+        }
+
+<span class="nc" id="L332">        return str.substring(0, maxLength - ellSize) + ellipsis;</span>
+    }
+
+    /**
+     * Shortens a string.
+     * It will shorten package names and remove memory addresses
+     * that appear in an instance's name.
+     *
+     * @param str Orginal string.
+     * @param removePackageName Whether package name part of a
+     * fully-quallified name should be removed entirely.
+     * @return the shortened string.
+     */
+    private static String shorten(String str,
+                                  boolean removePackageName) {
+<span class="nc" id="L347">        final Matcher m = JAVA_IDENTIFIER_PATTERN.matcher(str);</span>
+<span class="nc" id="L348">        final StringBuffer sb = new StringBuffer();</span>
+<span class="nc bnc" id="L349" title="All 2 branches missed.">        while (m.find()) {</span>
+<span class="nc" id="L350">            final MatchResult r = m.toMatchResult();</span>
+<span class="nc" id="L351">            m.appendReplacement(sb, shortenPackageName(r.group(),</span>
+                                                       removePackageName));
+<span class="nc" id="L353">        }</span>
+<span class="nc" id="L354">        m.appendTail(sb);</span>
+
+<span class="nc" id="L356">        return sb.toString().replaceAll(TO_STRING_MEMORY_ADDRESS_REGEX, &quot;&quot;);</span>
+    }
+
+    /**
+     * Shortens package part of the name of a class.
+     *
+     * @param name Class name.
+     * @param remove Whether package name part of a fully-qualified
+     * name should be removed entirely.
+     * @return the shortened name.
+     */
+    private static String shortenPackageName(String name,
+                                             boolean remove) {
+<span class="nc" id="L369">        final String[] comp = name.split(&quot;\\.&quot;);</span>
+<span class="nc" id="L370">        final int last = comp.length - 1;</span>
+
+<span class="nc bnc" id="L372" title="All 2 branches missed.">        if (remove) {</span>
+<span class="nc" id="L373">            return comp[last];</span>
+        }
+
+<span class="nc" id="L376">        final StringBuilder s = new StringBuilder();</span>
+<span class="nc bnc" id="L377" title="All 2 branches missed.">        for (int i = 0; i &lt; last; i++) {</span>
+<span class="nc" id="L378">            s.append(comp[i].substring(0, 1)).append(&quot;.&quot;);</span>
+        }
+<span class="nc" id="L380">        s.append(comp[last]);</span>
+
+<span class="nc" id="L382">        return s.toString();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

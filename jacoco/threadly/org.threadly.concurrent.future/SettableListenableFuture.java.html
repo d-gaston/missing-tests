@@ -1,0 +1,443 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SettableListenableFuture.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">SettableListenableFuture.java</span></div><h1>SettableListenableFuture.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.threadly.concurrent.event.RunnableListenerHelper;
+import org.threadly.util.Clock;
+import org.threadly.util.StringUtils;
+
+/**
+ * This class is designed to be a helper when returning a single result asynchronously.  This is 
+ * particularly useful if this result is produced over multiple threads (and thus the scheduler 
+ * returned future is not useful).
+ * 
+ * @since 1.2.0
+ * @param &lt;T&gt; The result object type returned by this future
+ */
+public class SettableListenableFuture&lt;T&gt; extends AbstractCancellationMessageProvidingListenableFuture&lt;T&gt;
+                                         implements ListenableFuture&lt;T&gt;, FutureCallback&lt;T&gt; {
+  // used to represent a canceled state when no other message is available
+<span class="fc" id="L23">  private static final String EMPTY_CANCEL_STATE_MESSAGE = StringUtils.makeRandomString(64);</span>
+  
+  protected final RunnableListenerHelper listenerHelper;
+  protected final Object resultLock;
+  protected final boolean throwIfAlreadyComplete;
+  protected volatile Thread runningThread;
+  private volatile boolean done;
+  private volatile String cancelStateMessage;  // set non-null when canceled
+  private Executor executingExecutor; // since done is volatile, this does not need to be
+  private boolean resultCleared;
+  private T result;
+  private Throwable failure;
+  
+  /**
+   * Constructs a new {@link SettableListenableFuture}.  You can return this immediately and 
+   * provide a result to the object later when it is ready.  
+   * &lt;p&gt;
+   * This defaults in the behavior since version 1.2.0 where if the future has completed (either 
+   * by {@link #cancel(boolean)}, {@link #setResult(Object)}, or {@link #setFailure(Throwable)}), 
+   * any additional attempts to {@link #setResult(Object)} or {@link #setFailure(Throwable)} will 
+   * result in a {@link IllegalStateException} being thrown.
+   */
+  public SettableListenableFuture() {
+<span class="fc" id="L46">    this(true);</span>
+<span class="fc" id="L47">  }</span>
+  
+  /**
+   * Constructs a new {@link SettableListenableFuture}.  You can return this immediately and 
+   * provide a result to the object later when it is ready.  
+   * &lt;p&gt;
+   * This constructor allows you to control the behavior when results are attempt to be set after 
+   * the future has already completed (either by 
+   * {@link #cancel(boolean)}, {@link #setResult(Object)}, or {@link #setFailure(Throwable)}).  
+   * &lt;p&gt;
+   * If {@code true}, any additional attempts to {@link #setResult(Object)} or 
+   * {@link #setFailure(Throwable)} will result in a {@link IllegalStateException} being thrown.  
+   * &lt;p&gt;
+   * If {@code false}, additional attempts to set a result will just be silently ignored.
+   * 
+   * @param throwIfAlreadyComplete Defines the behavior when result or failure is set on a completed future
+   */
+  public SettableListenableFuture(boolean throwIfAlreadyComplete) {
+<span class="fc" id="L65">    this(throwIfAlreadyComplete, null);</span>
+<span class="fc" id="L66">  }</span>
+  
+  /**
+   * Constructs a new {@link SettableListenableFuture}.  You can return this immediately and 
+   * provide a result to the object later when it is ready.  
+   * &lt;p&gt;
+   * This constructor allows you to control the behavior when results are attempt to be set after 
+   * the future has already completed (either by 
+   * {@link #cancel(boolean)}, {@link #setResult(Object)}, or {@link #setFailure(Throwable)}).  
+   * &lt;p&gt;
+   * If {@code true}, any additional attempts to {@link #setResult(Object)} or 
+   * {@link #setFailure(Throwable)} will result in a {@link IllegalStateException} being thrown.  
+   * &lt;p&gt;
+   * If {@code false}, additional attempts to set a result will just be silently ignored.
+   * 
+   * @param throwIfAlreadyComplete Defines the behavior when result or failure is set on a completed future
+   * @param executingExecutor Executor this future will complete on, used for optimizations
+   */
+<span class="fc" id="L84">  protected SettableListenableFuture(boolean throwIfAlreadyComplete, Executor executingExecutor) {</span>
+<span class="fc" id="L85">    this.listenerHelper = new RunnableListenerHelper(true);</span>
+<span class="fc" id="L86">    this.resultLock = listenerHelper; // cheating to avoiding another object just for a lock</span>
+<span class="fc" id="L87">    this.throwIfAlreadyComplete = throwIfAlreadyComplete;</span>
+<span class="fc" id="L88">    this.runningThread = null;</span>
+<span class="fc" id="L89">    this.executingExecutor = executingExecutor;</span>
+<span class="fc" id="L90">    done = false;</span>
+<span class="fc" id="L91">    cancelStateMessage = null;</span>
+<span class="fc" id="L92">    resultCleared = false;</span>
+<span class="fc" id="L93">    result = null;</span>
+<span class="fc" id="L94">    failure = null;</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public void addListener(Runnable listener, Executor executor, 
+                          ListenerOptimizationStrategy optimize) {
+<span class="pc bpc" id="L100" title="3 of 10 branches missed.">    listenerHelper.addListener(listener, </span>
+                               executor == executingExecutor &amp;&amp; 
+                                   (optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone | 
+                                    optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatch) ? 
+                                 null : executor, 
+                               optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone ? 
+                                 null : executor);
+<span class="fc" id="L107">  }</span>
+  
+  @Override
+  public void addCallback(FutureCallback&lt;? super T&gt; callback, Executor executor, 
+                          ListenerOptimizationStrategy optimize) {
+<span class="pc bpc" id="L112" title="1 of 6 branches missed.">    if (executor == null | optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone) {</span>
+      // can't check `done` without synchronizing, but we can check final states optimistically
+      // because a `null` result requires us to check `done` (which needs to synchronize or we may 
+      // see an inconsistent final state), this only works for non-null results
+<span class="fc bfc" id="L116" title="All 2 branches covered.">      if (result != null) {</span>
+<span class="fc" id="L117">        callback.handleResult(result);</span>
+<span class="fc" id="L118">        return;</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">      } else if (failure != null) {</span>
+<span class="fc" id="L120">        callback.handleFailure(failure);</span>
+<span class="fc" id="L121">        return;</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      } else if (cancelStateMessage != null) {</span>
+<span class="fc" id="L123">        callback.handleFailure(new CancellationException(getCancellationExceptionMessage()));</span>
+<span class="fc" id="L124">        return;</span>
+      }
+    }
+    // This allows us to avoid synchronization (since listeners wont be invoked till final / 
+    // result state has all be set and synced).  So this allows us to avoid synchronization (which 
+    // is important as we don't want to hold the lock while invoking into the callback
+<span class="pc bpc" id="L130" title="4 of 10 branches missed.">    listenerHelper.addListener(() -&gt; {</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">                                 if (failure != null) {</span>
+<span class="fc" id="L132">                                   callback.handleFailure(failure);</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">                                 } else if (cancelStateMessage != null) {</span>
+<span class="fc" id="L134">                                   callback.handleFailure(new CancellationException(getCancellationExceptionMessage()));</span>
+                                 } else {
+<span class="fc" id="L136">                                   callback.handleResult(result);</span>
+                                 }
+<span class="fc" id="L138">                               }, </span>
+                               executor == executingExecutor &amp;&amp; 
+                                   (optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone | 
+                                    optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatch) ? 
+                                 null : executor, 
+                               optimize == ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone ? 
+                                 null : executor);
+<span class="fc" id="L145">  }</span>
+  
+  /**
+   * This call defers to {@link #setResult(Object)}.  It is implemented so that you can construct 
+   * this, return it immediately, but only later provide this as a callback to another 
+   * {@link ListenableFuture} implementation.  
+   * &lt;p&gt;
+   * This should never be invoked by the implementor, this should only be invoked by other 
+   * {@link ListenableFuture}'s.  
+   * &lt;p&gt;
+   * If this is being used to chain together {@link ListenableFuture}'s, 
+   * {@link #setResult(Object)}/{@link #setFailure(Throwable)} should never be called manually (or 
+   * an exception will occur).
+   * 
+   * @param result Result object to provide to the future to be returned from {@link #get()} call
+   */
+  @Override
+  public void handleResult(T result) {
+<span class="fc" id="L163">    setResult(result);</span>
+<span class="fc" id="L164">  }</span>
+  
+  /**
+   * This call defers to {@link #setFailure(Throwable)}.  It is implemented so that you can 
+   * construct this, return it immediately, but only later provide this as a callback to another 
+   * {@link ListenableFuture} implementation.  If the parent chained future was canceled this 
+   * implementation will attempt to cancel the future as well.
+   * &lt;p&gt;
+   * This should never be invoked by the implementor, this should only be invoked by other 
+   * {@link ListenableFuture}'s.  
+   * &lt;p&gt;
+   * If this is being used to chain together {@link ListenableFuture}'s, 
+   * {@link #setResult(Object)}/{@link #setFailure(Throwable)} should never be called manually (or 
+   * an exception will occur).
+   * 
+   * @param t Throwable to be provided as the cause from the ExecutionException thrown from {@link #get()} call
+   */
+  @Override
+  public void handleFailure(Throwable t) {
+<span class="fc bfc" id="L183" title="All 2 branches covered.">    if (t instanceof CancellationException) {</span>
+<span class="pc bpc" id="L184" title="1 of 2 branches missed.">      if (cancelStateMessage == null) {</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">        cancelStateMessage = t.getMessage() == null ? EMPTY_CANCEL_STATE_MESSAGE : t.getMessage();</span>
+<span class="fc" id="L186">        boolean interrupt = Thread.currentThread().isInterrupted();</span>
+<span class="fc bfc" id="L187" title="All 2 branches covered.">        if (! cancel(interrupt)) {</span>
+          // may have been overriden, go ahead and complete the future into a cancel state
+<span class="fc" id="L189">          internalCancel(interrupt);</span>
+        }
+<span class="fc" id="L191">      }</span>
+    } else {
+<span class="fc" id="L193">      setFailure(t);</span>
+    }
+<span class="fc" id="L195">  }</span>
+  
+  /**
+   * Call to indicate this future is done, and provide the given result.  It is expected that only 
+   * this or {@link #setFailure(Throwable)} are called.
+   * &lt;p&gt;
+   * If future has already completed and constructed with {@link #SettableListenableFuture()} or 
+   * {@code true} provided to {@link #SettableListenableFuture(boolean)} this will throw an 
+   * {@link IllegalStateException}.  If complete but constructed with a {@code false} this result 
+   * will be ignored.
+   * 
+   * @param result result to provide for {@link #get()} call, can be {@code null}
+   * @return {@code true} if the result was set (ie future did not complete in failure or cancel}
+   */
+  public boolean setResult(T result) {
+<span class="fc" id="L210">    synchronized (resultLock) {</span>
+<span class="fc bfc" id="L211" title="All 2 branches covered.">      if (! setDone(null)) {</span>
+<span class="fc" id="L212">        return false;</span>
+      }
+      
+<span class="fc" id="L215">      this.result = result;</span>
+<span class="fc" id="L216">    }</span>
+    
+    // call outside of lock
+<span class="fc" id="L219">    listenerHelper.callListeners();</span>
+<span class="fc" id="L220">    runningThread = null;</span>
+    
+<span class="fc" id="L222">    return true;</span>
+  }
+  
+  /**
+   * Call to indicate this future is done, and provide the occurred failure.  It is expected that 
+   * only this or {@link #setResult(Object)} are called, and only called once.  If the provided 
+   * failure is {@code null}, a new {@link Exception} will be created so that something is always 
+   * provided in the {@link ExecutionException} on calls to {@link #get()}.
+   * &lt;p&gt;
+   * If future has already completed and constructed with {@link #SettableListenableFuture()} or 
+   * {@code true} provided to {@link #SettableListenableFuture(boolean)} this will throw an 
+   * {@link IllegalStateException}.  If complete but constructed with a {@code false} this failure 
+   * result will be ignored.
+   * 
+   * @param failure Throwable that caused failure during computation.
+   * @return {@code true} if the failure was set (ie future did not complete with result or cancel}
+   */
+  public boolean setFailure(Throwable failure) {
+<span class="fc" id="L240">    synchronized (resultLock) {</span>
+<span class="fc bfc" id="L241" title="All 2 branches covered.">      if (! setDone(failure)) { // if failure is null, there is no point to have the stack twice</span>
+<span class="fc" id="L242">        return false;</span>
+      }
+
+<span class="fc bfc" id="L245" title="All 2 branches covered.">      if (failure == null) {</span>
+<span class="fc" id="L246">        failure = new Exception();</span>
+      }
+<span class="fc" id="L248">      this.failure = failure;</span>
+<span class="fc" id="L249">    }</span>
+    
+    // call outside of lock
+<span class="fc" id="L252">    listenerHelper.callListeners();</span>
+<span class="fc" id="L253">    runningThread = null;</span>
+    
+<span class="fc" id="L255">    return true;</span>
+  }
+  
+  /**
+   * Optional call to set the thread internally that will be generating the result for this 
+   * future.  Setting this thread allows it so that if a {@link #cancel(boolean)} call is invoked 
+   * with {@code true}, we can send an interrupt to this thread.  
+   * &lt;p&gt;
+   * The reference to this thread will be cleared after this future has completed (thus allowing 
+   * it to be garbage collected).
+   * 
+   * @param thread Thread that is generating the result for this future
+   */
+  public void setRunningThread(Thread thread) {
+<span class="fc bfc" id="L269" title="All 2 branches covered.">    if (! done) {</span>
+<span class="fc" id="L270">      this.runningThread = thread;</span>
+    }
+<span class="fc" id="L272">  }</span>
+
+  @Override
+  public boolean cancel(boolean interruptThread) {
+<span class="fc" id="L276">    return internalCancel(interruptThread);</span>
+  }
+  
+  /**
+   * This internal cancel function ensures we can set the class into a canceled state even if the 
+   * {@link #cancel(boolean)} function is overriden.  However this should only be invoked after 
+   * {@link #cancel(boolean)} was tried initially (so overriding classes can handle cancel logic 
+   * they may require).
+   * 
+   * @param interruptThread If {@code true} send an interrupt to the processing thread
+   * @return {@code true} if this future was transitioned to a canceled state
+   */
+  private boolean internalCancel(boolean interruptThread) {
+<span class="fc bfc" id="L289" title="All 2 branches covered.">    if (done) {</span>
+<span class="fc" id="L290">      return false;</span>
+    }
+    
+    boolean canceled;
+<span class="fc" id="L294">    synchronized (resultLock) {</span>
+<span class="pc bpc" id="L295" title="1 of 2 branches missed.">      canceled = ! done;</span>
+<span class="pc bpc" id="L296" title="1 of 2 branches missed.">      if (canceled) {</span>
+<span class="fc bfc" id="L297" title="All 2 branches covered.">        if (interruptThread) {</span>
+<span class="fc" id="L298">          Thread runningThread = this.runningThread;</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">          if (runningThread != null) {</span>
+<span class="fc" id="L300">            runningThread.interrupt();</span>
+          }
+        }
+        
+<span class="fc" id="L304">        setCanceled();</span>
+      }
+<span class="fc" id="L306">    }</span>
+    
+<span class="pc bpc" id="L308" title="1 of 2 branches missed.">    if (canceled) {</span>
+      // call outside of lock
+<span class="fc" id="L310">      listenerHelper.callListeners();</span>
+<span class="fc" id="L311">      runningThread = null;</span>
+    }
+    
+<span class="fc" id="L314">    return canceled;</span>
+  }
+
+  @Override
+  public boolean isCancelled() {
+<span class="fc bfc" id="L319" title="All 2 branches covered.">    return cancelStateMessage != null;</span>
+  }
+  
+  /**
+   * Clears the stored result from this set future.  This allows the result to be available for 
+   * garbage collection.  After this call, future calls to {@link #get()} will throw an 
+   * {@link IllegalStateException}.  So it is critical that this is only called after you are sure 
+   * no future calls to get the result on this future will be attempted.
+   * &lt;p&gt;
+   * The design of this is so that if you want to chain {@link ListenableFuture}'s together, you 
+   * can clear the results of old ones after their result has been consumed.  This is really only 
+   * useful in very specific instances.
+   */
+  public void clearResult() {
+<span class="fc" id="L333">    synchronized (resultLock) {</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">      if (! done) {</span>
+<span class="fc" id="L335">        throw new IllegalStateException(&quot;Result not set yet&quot;);</span>
+      }
+<span class="fc" id="L337">      resultCleared = true;</span>
+<span class="fc" id="L338">      result = null;</span>
+<span class="fc" id="L339">      failure = null;</span>
+<span class="fc" id="L340">    }</span>
+<span class="fc" id="L341">  }</span>
+
+  // MUST be synchronized on resultLock before calling
+  protected void setCanceled() {
+<span class="fc bfc" id="L345" title="All 2 branches covered.">    if (this.cancelStateMessage == null) { // may have been set earlier in the cancel process</span>
+<span class="fc" id="L346">      this.cancelStateMessage = EMPTY_CANCEL_STATE_MESSAGE;</span>
+    }
+    
+<span class="fc" id="L349">    setDone(null);</span>
+<span class="fc" id="L350">  }</span>
+  
+  // MUST be synchronized on resultLock before calling
+  protected boolean setDone(Throwable cause) {
+<span class="fc bfc" id="L354" title="All 2 branches covered.">    if (done) {</span>
+<span class="fc bfc" id="L355" title="All 2 branches covered.">      if (throwIfAlreadyComplete) {</span>
+<span class="fc" id="L356">        throw new IllegalStateException(&quot;Future already done&quot;, cause);</span>
+      }
+<span class="fc" id="L358">      return false;</span>
+    }
+    
+<span class="fc" id="L361">    done = true;</span>
+<span class="fc" id="L362">    executingExecutor = null;</span>
+    
+<span class="fc" id="L364">    resultLock.notifyAll();</span>
+<span class="fc" id="L365">    return true;</span>
+  }
+
+  @Override
+  public boolean isDone() {
+<span class="fc" id="L370">    return done;</span>
+  }
+  
+  @Override
+  protected String getCancellationExceptionMessage() {
+<span class="fc" id="L375">    String result = cancelStateMessage;</span>
+<span class="fc bfc" id="L376" title="All 2 branches covered.">    if (result == EMPTY_CANCEL_STATE_MESSAGE) { // identity check is best here</span>
+<span class="fc" id="L377">      return null;</span>
+    }
+<span class="fc" id="L379">    return result;</span>
+  }
+
+  @Override
+  public T get() throws InterruptedException, ExecutionException {
+<span class="fc" id="L384">    synchronized (resultLock) {</span>
+<span class="fc bfc" id="L385" title="All 2 branches covered.">      while (! done) {</span>
+<span class="fc" id="L386">        resultLock.wait();</span>
+      }
+      
+<span class="fc bfc" id="L389" title="All 2 branches covered.">      if (failure != null) {</span>
+<span class="fc" id="L390">        throw new ExecutionException(failure);</span>
+<span class="fc bfc" id="L391" title="All 2 branches covered.">      } else if (cancelStateMessage != null) {</span>
+<span class="fc" id="L392">        throw new CancellationException(getCancellationExceptionMessage());</span>
+<span class="fc bfc" id="L393" title="All 2 branches covered.">      } else if (resultCleared) {</span>
+<span class="fc" id="L394">        throw new IllegalStateException(&quot;Result cleared, future get's not possible&quot;);</span>
+      } else {
+<span class="fc" id="L396">        return result;</span>
+      }
+    }
+  }
+
+  @Override
+  public T get(long timeout, TimeUnit unit) throws InterruptedException, 
+                                                   ExecutionException, TimeoutException {
+<span class="fc" id="L404">    long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L405">    long timeoutInMs = unit.toMillis(timeout);</span>
+<span class="fc" id="L406">    synchronized (resultLock) {</span>
+      long remainingInMs;
+<span class="fc bfc" id="L408" title="All 2 branches covered.">      while (! done &amp;&amp; </span>
+<span class="fc bfc" id="L409" title="All 2 branches covered.">             (remainingInMs = timeoutInMs - (Clock.accurateForwardProgressingMillis() - startTime)) &gt; 0) {</span>
+<span class="fc" id="L410">        resultLock.wait(remainingInMs);</span>
+      }
+      
+<span class="fc bfc" id="L413" title="All 2 branches covered.">      if (failure != null) {</span>
+<span class="fc" id="L414">        throw new ExecutionException(failure);</span>
+<span class="fc bfc" id="L415" title="All 2 branches covered.">      } else if (cancelStateMessage != null) {</span>
+<span class="fc" id="L416">        throw new CancellationException(getCancellationExceptionMessage());</span>
+<span class="fc bfc" id="L417" title="All 2 branches covered.">      } else if (done) {</span>
+<span class="pc bpc" id="L418" title="1 of 2 branches missed.">        if (resultCleared) {</span>
+<span class="nc" id="L419">          throw new IllegalStateException(&quot;Result cleared, future get's not possible&quot;);</span>
+        }
+<span class="fc" id="L421">        return result;</span>
+      } else {
+<span class="fc" id="L423">        throw new TimeoutException();</span>
+      }
+    }
+  }
+
+  @Override
+  public StackTraceElement[] getRunningStackTrace() {
+<span class="fc" id="L430">    Thread t = runningThread;</span>
+<span class="fc bfc" id="L431" title="All 2 branches covered.">    if (t == null) {</span>
+<span class="fc" id="L432">      return null;</span>
+    } else {
+<span class="fc" id="L434">      StackTraceElement[] stack = t.getStackTrace();</span>
+<span class="pc bpc" id="L435" title="2 of 4 branches missed.">      if (stack.length == 0 || t != runningThread) {</span>
+<span class="nc" id="L436">        return null;</span>
+      } else {
+<span class="fc" id="L438">        return stack;</span>
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

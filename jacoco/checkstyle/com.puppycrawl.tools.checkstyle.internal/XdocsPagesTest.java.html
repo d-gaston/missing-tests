@@ -1,0 +1,1639 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>XdocsPagesTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.internal</a> &gt; <span class="el_source">XdocsPagesTest.java</span></div><h1>XdocsPagesTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.internal;
+
+import static java.lang.Integer.parseInt;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.hamcrest.CoreMatchers.describedAs;
+import static org.hamcrest.CoreMatchers.is;
+
+import java.beans.PropertyDescriptor;
+import java.io.File;
+import java.io.IOException;
+import java.io.StringReader;
+import java.lang.reflect.Array;
+import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.BitSet;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
+import java.util.NoSuchElementException;
+import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
+import org.apache.commons.beanutils.PropertyUtils;
+import org.junit.Assert;
+import org.junit.Test;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.puppycrawl.tools.checkstyle.Checker;
+import com.puppycrawl.tools.checkstyle.ConfigurationLoader;
+import com.puppycrawl.tools.checkstyle.ModuleFactory;
+import com.puppycrawl.tools.checkstyle.PropertiesExpander;
+import com.puppycrawl.tools.checkstyle.api.AbstractCheck;
+import com.puppycrawl.tools.checkstyle.api.AbstractFileSetCheck;
+import com.puppycrawl.tools.checkstyle.api.CheckstyleException;
+import com.puppycrawl.tools.checkstyle.api.Configuration;
+import com.puppycrawl.tools.checkstyle.api.Scope;
+import com.puppycrawl.tools.checkstyle.api.SeverityLevel;
+import com.puppycrawl.tools.checkstyle.checks.LineSeparatorOption;
+import com.puppycrawl.tools.checkstyle.checks.annotation.AnnotationUseStyleCheck.ClosingParens;
+import com.puppycrawl.tools.checkstyle.checks.annotation.AnnotationUseStyleCheck.ElementStyle;
+import com.puppycrawl.tools.checkstyle.checks.annotation.AnnotationUseStyleCheck.TrailingArrayComma;
+import com.puppycrawl.tools.checkstyle.checks.blocks.BlockOption;
+import com.puppycrawl.tools.checkstyle.checks.blocks.LeftCurlyOption;
+import com.puppycrawl.tools.checkstyle.checks.blocks.RightCurlyOption;
+import com.puppycrawl.tools.checkstyle.checks.imports.ImportOrderOption;
+import com.puppycrawl.tools.checkstyle.checks.javadoc.AbstractJavadocCheck;
+import com.puppycrawl.tools.checkstyle.checks.naming.AccessModifier;
+import com.puppycrawl.tools.checkstyle.checks.whitespace.PadOption;
+import com.puppycrawl.tools.checkstyle.checks.whitespace.WrapOption;
+import com.puppycrawl.tools.checkstyle.internal.utils.CheckUtil;
+import com.puppycrawl.tools.checkstyle.internal.utils.TestUtil;
+import com.puppycrawl.tools.checkstyle.internal.utils.XdocUtil;
+import com.puppycrawl.tools.checkstyle.internal.utils.XmlUtil;
+import com.puppycrawl.tools.checkstyle.utils.TokenUtil;
+
+<span class="fc" id="L92">public class XdocsPagesTest {</span>
+
+<span class="fc" id="L94">    private static final Path AVAILABLE_CHECKS_PATH = Paths.get(&quot;src/xdocs/checks.xml&quot;);</span>
+    private static final String LINK_TEMPLATE =
+            &quot;(?s).*&lt;a href=\&quot;config_\\w+\\.html#%1$s\&quot;&gt;(\\s)*%1$s&lt;/a&gt;.*&quot;;
+
+<span class="fc" id="L98">    private static final Pattern VERSION = Pattern.compile(&quot;\\d+\\.\\d+(\\.\\d+)?&quot;);</span>
+
+<span class="fc" id="L100">    private static final Pattern DESCRIPTION_VERSION = Pattern</span>
+<span class="fc" id="L101">            .compile(&quot;^Since Checkstyle \\d+\\.\\d+(\\.\\d+)?&quot;);</span>
+
+<span class="fc" id="L103">    private static final List&lt;String&gt; XML_FILESET_LIST = Arrays.asList(</span>
+            &quot;TreeWalker&quot;,
+            &quot;name=\&quot;Checker\&quot;&quot;,
+            &quot;name=\&quot;Header\&quot;&quot;,
+            &quot;name=\&quot;Translation\&quot;&quot;,
+            &quot;name=\&quot;SeverityMatchFilter\&quot;&quot;,
+            &quot;name=\&quot;SuppressWithPlainTextCommentFilter\&quot;&quot;,
+            &quot;name=\&quot;SuppressionFilter\&quot;&quot;,
+            &quot;name=\&quot;SuppressionSingleFilter\&quot;&quot;,
+            &quot;name=\&quot;SuppressWarningsFilter\&quot;&quot;,
+            &quot;name=\&quot;BeforeExecutionExclusionFileFilter\&quot;&quot;,
+            &quot;name=\&quot;RegexpHeader\&quot;&quot;,
+            &quot;name=\&quot;RegexpOnFilename\&quot;&quot;,
+            &quot;name=\&quot;RegexpSingleline\&quot;&quot;,
+            &quot;name=\&quot;RegexpMultiline\&quot;&quot;,
+            &quot;name=\&quot;JavadocPackage\&quot;&quot;,
+            &quot;name=\&quot;NewlineAtEndOfFile\&quot;&quot;,
+            &quot;name=\&quot;OrderedProperties\&quot;&quot;,
+            &quot;name=\&quot;UniqueProperties\&quot;&quot;,
+            &quot;name=\&quot;FileLength\&quot;&quot;,
+            &quot;name=\&quot;FileTabCharacter\&quot;&quot;
+    );
+
+<span class="fc" id="L126">    private static final Set&lt;String&gt; CHECK_PROPERTIES = getProperties(AbstractCheck.class);</span>
+<span class="fc" id="L127">    private static final Set&lt;String&gt; JAVADOC_CHECK_PROPERTIES =</span>
+<span class="fc" id="L128">            getProperties(AbstractJavadocCheck.class);</span>
+<span class="fc" id="L129">    private static final Set&lt;String&gt; FILESET_PROPERTIES = getProperties(AbstractFileSetCheck.class);</span>
+
+<span class="fc" id="L131">    private static final List&lt;String&gt; UNDOCUMENTED_PROPERTIES = Arrays.asList(</span>
+            &quot;Checker.classLoader&quot;,
+            &quot;Checker.classloader&quot;,
+            &quot;Checker.moduleClassLoader&quot;,
+            &quot;Checker.moduleFactory&quot;,
+            &quot;TreeWalker.classLoader&quot;,
+            &quot;TreeWalker.moduleFactory&quot;,
+            &quot;TreeWalker.cacheFile&quot;,
+            &quot;TreeWalker.upChild&quot;,
+            &quot;SuppressWithNearbyCommentFilter.fileContents&quot;,
+            &quot;SuppressionCommentFilter.fileContents&quot;
+    );
+
+<span class="fc" id="L144">    private static final List&lt;String&gt; PROPERTIES_ALLOWED_GET_TYPES_FROM_METHOD = Arrays.asList(</span>
+            // static field (all upper case)
+            &quot;SuppressWarningsHolder.aliasList&quot;,
+            // loads string into memory similar to file
+            &quot;Header.header&quot;,
+            &quot;RegexpHeader.header&quot;,
+            // deprecated fields
+            &quot;JavadocMethod.minLineCount&quot;,
+            &quot;JavadocMethod.allowMissingJavadoc&quot;,
+            &quot;JavadocMethod.allowMissingPropertyJavadoc&quot;,
+            &quot;JavadocMethod.ignoreMethodNamesRegex&quot;,
+            &quot;MissingDeprecated.skipNoJavadoc&quot;
+    );
+
+<span class="fc" id="L158">    private static final Set&lt;String&gt; SUN_MODULES = Collections.unmodifiableSet(</span>
+<span class="fc" id="L159">        new HashSet&lt;&gt;(CheckUtil.getConfigSunStyleModules()));</span>
+    // ignore the not yet properly covered modules while testing newly added ones
+    // add proper sections to the coverage report and integration tests
+    // and then remove this list eventually
+<span class="fc" id="L163">    private static final List&lt;String&gt; IGNORED_SUN_MODULES = Arrays.asList(</span>
+            &quot;ArrayTypeStyle&quot;,
+            &quot;AvoidNestedBlocks&quot;,
+            &quot;AvoidStarImport&quot;,
+            &quot;ConstantName&quot;,
+            &quot;DesignForExtension&quot;,
+            &quot;EmptyBlock&quot;,
+            &quot;EmptyForIteratorPad&quot;,
+            &quot;EmptyStatement&quot;,
+            &quot;EqualsHashCode&quot;,
+            &quot;FileLength&quot;,
+            &quot;FileTabCharacter&quot;,
+            &quot;FinalClass&quot;,
+            &quot;FinalParameters&quot;,
+            &quot;GenericWhitespace&quot;,
+            &quot;HiddenField&quot;,
+            &quot;HideUtilityClassConstructor&quot;,
+            &quot;IllegalImport&quot;,
+            &quot;IllegalInstantiation&quot;,
+            &quot;InnerAssignment&quot;,
+            &quot;InterfaceIsType&quot;,
+            &quot;JavadocMethod&quot;,
+            &quot;JavadocPackage&quot;,
+            &quot;JavadocStyle&quot;,
+            &quot;JavadocType&quot;,
+            &quot;JavadocVariable&quot;,
+            &quot;LeftCurly&quot;,
+            &quot;LineLength&quot;,
+            &quot;LocalFinalVariableName&quot;,
+            &quot;LocalVariableName&quot;,
+            &quot;MagicNumber&quot;,
+            &quot;MemberName&quot;,
+            &quot;MethodLength&quot;,
+            &quot;MethodName&quot;,
+            &quot;MethodParamPad&quot;,
+            &quot;MissingJavadocMethod&quot;,
+            &quot;MissingSwitchDefault&quot;,
+            &quot;ModifierOrder&quot;,
+            &quot;NeedBraces&quot;,
+            &quot;NewlineAtEndOfFile&quot;,
+            &quot;NoWhitespaceAfter&quot;,
+            &quot;NoWhitespaceBefore&quot;,
+            &quot;OperatorWrap&quot;,
+            &quot;PackageName&quot;,
+            &quot;ParameterName&quot;,
+            &quot;ParameterNumber&quot;,
+            &quot;ParenPad&quot;,
+            &quot;RedundantImport&quot;,
+            &quot;RedundantModifier&quot;,
+            &quot;RegexpSingleline&quot;,
+            &quot;RightCurly&quot;,
+            &quot;SimplifyBooleanExpression&quot;,
+            &quot;SimplifyBooleanReturn&quot;,
+            &quot;StaticVariableName&quot;,
+            &quot;TodoComment&quot;,
+            &quot;Translation&quot;,
+            &quot;TypecastParenPad&quot;,
+            &quot;TypeName&quot;,
+            &quot;UnusedImports&quot;,
+            &quot;UpperEll&quot;,
+            &quot;VisibilityModifier&quot;,
+            &quot;WhitespaceAfter&quot;,
+            &quot;WhitespaceAround&quot;
+    );
+<span class="fc" id="L227">    private static final Set&lt;String&gt; GOOGLE_MODULES = Collections.unmodifiableSet(</span>
+<span class="fc" id="L228">        new HashSet&lt;&gt;(CheckUtil.getConfigGoogleStyleModules()));</span>
+
+    @Test
+    public void testAllChecksPresentOnAvailableChecksPage() throws Exception {
+<span class="fc" id="L232">        final String availableChecks = new String(Files.readAllBytes(AVAILABLE_CHECKS_PATH), UTF_8);</span>
+
+<span class="fc" id="L234">        CheckUtil.getSimpleNames(CheckUtil.getCheckstyleChecks())</span>
+<span class="fc" id="L235">            .forEach(checkName -&gt; {</span>
+<span class="pc bpc" id="L236" title="1 of 2 branches missed.">                if (!isPresent(availableChecks, checkName)) {</span>
+<span class="nc" id="L237">                    Assert.fail(checkName + &quot; is not correctly listed on Available Checks page&quot;</span>
+                        + &quot; - add it to &quot; + AVAILABLE_CHECKS_PATH);
+                }
+<span class="fc" id="L240">            });</span>
+<span class="fc" id="L241">    }</span>
+
+    private static boolean isPresent(String availableChecks, String checkName) {
+<span class="fc" id="L244">        final String linkPattern = String.format(Locale.ROOT, LINK_TEMPLATE, checkName);</span>
+<span class="fc" id="L245">        return availableChecks.matches(linkPattern);</span>
+    }
+
+    @Test
+    public void testAllSubSections() throws Exception {
+<span class="fc bfc" id="L250" title="All 2 branches covered.">        for (Path path : XdocUtil.getXdocsFilePaths()) {</span>
+<span class="fc" id="L251">            final String input = new String(Files.readAllBytes(path), UTF_8);</span>
+<span class="fc" id="L252">            final String fileName = path.getFileName().toString();</span>
+
+<span class="fc" id="L254">            final Document document = XmlUtil.getRawXml(fileName, input, input);</span>
+<span class="fc" id="L255">            final NodeList subSections = document.getElementsByTagName(&quot;subsection&quot;);</span>
+
+<span class="fc bfc" id="L257" title="All 2 branches covered.">            for (int position = 0; position &lt; subSections.getLength(); position++) {</span>
+<span class="fc" id="L258">                final Node subSection = subSections.item(position);</span>
+<span class="fc" id="L259">                final Node name = subSection.getAttributes().getNamedItem(&quot;name&quot;);</span>
+
+<span class="fc" id="L261">                Assert.assertNotNull(&quot;All sub-sections in '&quot; + fileName + &quot;' must have a name&quot;,</span>
+                        name);
+
+<span class="fc" id="L264">                final Node id = subSection.getAttributes().getNamedItem(&quot;id&quot;);</span>
+
+<span class="fc" id="L266">                Assert.assertNotNull(&quot;All sub-sections in '&quot; + fileName + &quot;' must have an id&quot;, id);</span>
+
+                final String sectionName;
+
+<span class="fc bfc" id="L270" title="All 2 branches covered.">                if (&quot;google_style.xml&quot;.equals(fileName)) {</span>
+<span class="fc" id="L271">                    sectionName = &quot;Google&quot;;</span>
+                }
+<span class="fc bfc" id="L273" title="All 2 branches covered.">                else if (&quot;sun_style.xml&quot;.equals(fileName)) {</span>
+<span class="fc" id="L274">                    sectionName = &quot;Sun&quot;;</span>
+                }
+                else {
+<span class="fc" id="L277">                    sectionName = subSection.getParentNode().getAttributes()</span>
+<span class="fc" id="L278">                            .getNamedItem(&quot;name&quot;).getTextContent();</span>
+                }
+
+<span class="fc" id="L281">                final String nameString = name.getNodeValue();</span>
+<span class="fc" id="L282">                final String idString = id.getNodeValue();</span>
+
+<span class="fc" id="L284">                Assert.assertEquals(fileName + &quot; sub-section &quot; + nameString + &quot; for section &quot;</span>
+                        + sectionName + &quot; must match&quot;,
+<span class="fc" id="L286">                        (sectionName + &quot; &quot; + nameString).replace(' ', '_'), idString);</span>
+            }
+<span class="fc" id="L288">        }</span>
+<span class="fc" id="L289">    }</span>
+
+    @Test
+    public void testAllXmlExamples() throws Exception {
+<span class="fc bfc" id="L293" title="All 2 branches covered.">        for (Path path : XdocUtil.getXdocsFilePaths()) {</span>
+<span class="fc" id="L294">            final String input = new String(Files.readAllBytes(path), UTF_8);</span>
+<span class="fc" id="L295">            final String fileName = path.getFileName().toString();</span>
+
+<span class="fc" id="L297">            final Document document = XmlUtil.getRawXml(fileName, input, input);</span>
+<span class="fc" id="L298">            final NodeList sources = document.getElementsByTagName(&quot;source&quot;);</span>
+
+<span class="fc bfc" id="L300" title="All 2 branches covered.">            for (int position = 0; position &lt; sources.getLength(); position++) {</span>
+<span class="fc" id="L301">                final String unserializedSource = sources.item(position).getTextContent()</span>
+<span class="fc" id="L302">                        .replace(&quot;...&quot;, &quot;&quot;).trim();</span>
+
+<span class="pc bpc" id="L304" title="1 of 4 branches missed.">                if (unserializedSource.length() &gt; 1 &amp;&amp; (unserializedSource.charAt(0) != '&lt;'</span>
+<span class="pc bpc" id="L305" title="1 of 2 branches missed.">                        || unserializedSource.charAt(unserializedSource.length() - 1) != '&gt;'</span>
+                        // no dtd testing yet
+<span class="fc bfc" id="L307" title="All 2 branches covered.">                        || unserializedSource.contains(&quot;&lt;!&quot;))) {</span>
+<span class="fc" id="L308">                    continue;</span>
+                }
+
+<span class="fc" id="L311">                final String code = buildXml(unserializedSource);</span>
+                // validate only
+<span class="fc" id="L313">                XmlUtil.getRawXml(fileName, code, unserializedSource);</span>
+
+                // can't test ant structure, or old and outdated checks
+<span class="fc" id="L316">                Assert.assertTrue(&quot;Xml is invalid, old or has outdated structure&quot;,</span>
+<span class="pc bpc" id="L317" title="1 of 2 branches missed.">                        fileName.startsWith(&quot;anttask&quot;)</span>
+<span class="fc bfc" id="L318" title="All 2 branches covered.">                        || fileName.startsWith(&quot;releasenotes&quot;)</span>
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">                        || isValidCheckstyleXml(fileName, code, unserializedSource));</span>
+            }
+<span class="fc" id="L321">        }</span>
+<span class="fc" id="L322">    }</span>
+
+    private static String buildXml(String unserializedSource) throws IOException {
+        // not all examples come with the full xml structure
+<span class="fc" id="L326">        String code = unserializedSource</span>
+            // don't corrupt our own cachefile
+<span class="fc" id="L328">            .replace(&quot;target/cachefile&quot;, &quot;target/cachefile-test&quot;);</span>
+
+<span class="fc bfc" id="L330" title="All 2 branches covered.">        if (!hasFileSetClass(code)) {</span>
+<span class="fc" id="L331">            code = &quot;&lt;module name=\&quot;TreeWalker\&quot;&gt;\n&quot; + code + &quot;\n&lt;/module&gt;&quot;;</span>
+        }
+<span class="fc bfc" id="L333" title="All 2 branches covered.">        if (!code.contains(&quot;name=\&quot;Checker\&quot;&quot;)) {</span>
+<span class="fc" id="L334">            code = &quot;&lt;module name=\&quot;Checker\&quot;&gt;\n&quot; + code + &quot;\n&lt;/module&gt;&quot;;</span>
+        }
+<span class="pc bpc" id="L336" title="1 of 2 branches missed.">        if (!code.startsWith(&quot;&lt;?xml&quot;)) {</span>
+<span class="fc" id="L337">            final String dtdPath = new File(</span>
+                    &quot;src/main/resources/com/puppycrawl/tools/checkstyle/configuration_1_3.dtd&quot;)
+<span class="fc" id="L339">                    .getCanonicalPath();</span>
+
+<span class="fc" id="L341">            code = &quot;&lt;?xml version=\&quot;1.0\&quot;?&gt;\n&lt;!DOCTYPE module PUBLIC &quot;</span>
+                    + &quot;\&quot;-//Checkstyle//DTD Checkstyle Configuration 1.3//EN\&quot; \&quot;&quot; + dtdPath
+                    + &quot;\&quot;&gt;\n&quot; + code;
+        }
+<span class="fc" id="L345">        return code;</span>
+    }
+
+    private static boolean hasFileSetClass(String xml) {
+<span class="fc" id="L349">        boolean found = false;</span>
+
+<span class="fc bfc" id="L351" title="All 2 branches covered.">        for (String find : XML_FILESET_LIST) {</span>
+<span class="fc bfc" id="L352" title="All 2 branches covered.">            if (xml.contains(find)) {</span>
+<span class="fc" id="L353">                found = true;</span>
+<span class="fc" id="L354">                break;</span>
+            }
+<span class="fc" id="L356">        }</span>
+
+<span class="fc" id="L358">        return found;</span>
+    }
+
+    private static boolean isValidCheckstyleXml(String fileName, String code,
+                                                String unserializedSource)
+            throws IOException, CheckstyleException {
+        // can't process non-existent examples, or out of context snippets
+<span class="fc bfc" id="L365" title="All 4 branches covered.">        if (!code.contains(&quot;com.mycompany&quot;) &amp;&amp; !code.contains(&quot;checkstyle-packages&quot;)</span>
+<span class="fc bfc" id="L366" title="All 4 branches covered.">                &amp;&amp; !code.contains(&quot;MethodLimit&quot;) &amp;&amp; !code.contains(&quot;&lt;suppress &quot;)</span>
+<span class="fc bfc" id="L367" title="All 2 branches covered.">                &amp;&amp; !code.contains(&quot;&lt;suppress-xpath &quot;)</span>
+<span class="fc bfc" id="L368" title="All 2 branches covered.">                &amp;&amp; !code.contains(&quot;&lt;import-control &quot;)</span>
+<span class="fc bfc" id="L369" title="All 2 branches covered.">                &amp;&amp; !unserializedSource.startsWith(&quot;&lt;property &quot;)</span>
+<span class="pc bpc" id="L370" title="1 of 2 branches missed.">                &amp;&amp; !unserializedSource.startsWith(&quot;&lt;taskdef &quot;)) {</span>
+            // validate checkstyle structure and contents
+            try {
+<span class="fc" id="L373">                final Properties properties = new Properties();</span>
+
+<span class="fc" id="L375">                properties.setProperty(&quot;checkstyle.header.file&quot;,</span>
+<span class="fc" id="L376">                        new File(&quot;config/java.header&quot;).getCanonicalPath());</span>
+
+<span class="fc" id="L378">                final PropertiesExpander expander = new PropertiesExpander(properties);</span>
+<span class="fc" id="L379">                final Configuration config = ConfigurationLoader.loadConfiguration(new InputSource(</span>
+                        new StringReader(code)), expander, false);
+<span class="fc" id="L381">                final Checker checker = new Checker();</span>
+
+                try {
+<span class="fc" id="L384">                    final ClassLoader moduleClassLoader = Checker.class.getClassLoader();</span>
+<span class="fc" id="L385">                    checker.setModuleClassLoader(moduleClassLoader);</span>
+<span class="fc" id="L386">                    checker.configure(config);</span>
+                }
+                finally {
+<span class="fc" id="L389">                    checker.destroy();</span>
+                }
+            }
+<span class="nc" id="L392">            catch (CheckstyleException ex) {</span>
+<span class="nc" id="L393">                throw new CheckstyleException(fileName + &quot; has invalid Checkstyle xml (&quot;</span>
+<span class="nc" id="L394">                        + ex.getMessage() + &quot;): &quot; + unserializedSource, ex);</span>
+<span class="fc" id="L395">            }</span>
+        }
+<span class="fc" id="L397">        return true;</span>
+    }
+
+    @Test
+    public void testAllCheckSections() throws Exception {
+<span class="fc" id="L402">        final ModuleFactory moduleFactory = TestUtil.getPackageObjectFactory();</span>
+
+<span class="fc bfc" id="L404" title="All 2 branches covered.">        for (Path path : XdocUtil.getXdocsConfigFilePaths(XdocUtil.getXdocsFilePaths())) {</span>
+<span class="fc" id="L405">            final String fileName = path.getFileName().toString();</span>
+
+<span class="fc bfc" id="L407" title="All 2 branches covered.">            if (&quot;config_reporting.xml&quot;.equals(fileName)) {</span>
+<span class="fc" id="L408">                continue;</span>
+            }
+
+<span class="fc" id="L411">            final String input = new String(Files.readAllBytes(path), UTF_8);</span>
+<span class="fc" id="L412">            final Document document = XmlUtil.getRawXml(fileName, input, input);</span>
+<span class="fc" id="L413">            final NodeList sources = document.getElementsByTagName(&quot;section&quot;);</span>
+<span class="fc" id="L414">            String lastSectionName = null;</span>
+
+<span class="fc bfc" id="L416" title="All 2 branches covered.">            for (int position = 0; position &lt; sources.getLength(); position++) {</span>
+<span class="fc" id="L417">                final Node section = sources.item(position);</span>
+<span class="fc" id="L418">                final String sectionName = section.getAttributes().getNamedItem(&quot;name&quot;)</span>
+<span class="fc" id="L419">                        .getNodeValue();</span>
+
+<span class="fc bfc" id="L421" title="All 4 branches covered.">                if (&quot;Content&quot;.equals(sectionName) || &quot;Overview&quot;.equals(sectionName)) {</span>
+<span class="fc" id="L422">                    Assert.assertNull(fileName + &quot; section '&quot; + sectionName + &quot;' should be first&quot;,</span>
+                            lastSectionName);
+<span class="fc" id="L424">                    continue;</span>
+                }
+
+<span class="fc" id="L427">                Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+<span class="pc bpc" id="L428" title="1 of 2 branches missed.">                        + &quot;' shouldn't end with 'Check'&quot;, !sectionName.endsWith(&quot;Check&quot;));</span>
+<span class="fc bfc" id="L429" title="All 2 branches covered.">                if (lastSectionName != null) {</span>
+<span class="fc" id="L430">                    Assert.assertTrue(</span>
+                            fileName + &quot; section '&quot; + sectionName
+                                    + &quot;' is out of order compared to '&quot; + lastSectionName + &quot;'&quot;,
+<span class="pc bpc" id="L433" title="1 of 2 branches missed.">                            sectionName.toLowerCase(Locale.ENGLISH).compareTo(</span>
+<span class="fc" id="L434">                                    lastSectionName.toLowerCase(Locale.ENGLISH)) &gt;= 0);</span>
+                }
+
+<span class="fc" id="L437">                validateCheckSection(moduleFactory, fileName, sectionName, section);</span>
+
+<span class="fc" id="L439">                lastSectionName = sectionName;</span>
+            }
+<span class="fc" id="L441">        }</span>
+<span class="fc" id="L442">    }</span>
+
+    /**
+     * Test contains asserts in callstack, but idea does not see them.
+     * @noinspection JUnitTestMethodWithNoAssertions
+     */
+    @Test
+    public void testAllCheckSectionsEx() throws Exception {
+<span class="fc" id="L450">        final ModuleFactory moduleFactory = TestUtil.getPackageObjectFactory();</span>
+
+<span class="fc" id="L452">        final Path path = Paths.get(XdocUtil.DIRECTORY_PATH + &quot;/config.xml&quot;);</span>
+<span class="fc" id="L453">        final String fileName = path.getFileName().toString();</span>
+
+<span class="fc" id="L455">        final String input = new String(Files.readAllBytes(path), UTF_8);</span>
+<span class="fc" id="L456">        final Document document = XmlUtil.getRawXml(fileName, input, input);</span>
+<span class="fc" id="L457">        final NodeList sources = document.getElementsByTagName(&quot;section&quot;);</span>
+
+<span class="fc bfc" id="L459" title="All 2 branches covered.">        for (int position = 0; position &lt; sources.getLength(); position++) {</span>
+<span class="fc" id="L460">            final Node section = sources.item(position);</span>
+<span class="fc" id="L461">            final String sectionName = section.getAttributes().getNamedItem(&quot;name&quot;)</span>
+<span class="fc" id="L462">                    .getNodeValue();</span>
+
+<span class="fc bfc" id="L464" title="All 4 branches covered.">            if (!&quot;Checker&quot;.equals(sectionName) &amp;&amp; !&quot;TreeWalker&quot;.equals(sectionName)) {</span>
+<span class="fc" id="L465">                continue;</span>
+            }
+
+<span class="fc" id="L468">            validateCheckSection(moduleFactory, fileName, sectionName, section);</span>
+        }
+<span class="fc" id="L470">    }</span>
+
+    private static void validateCheckSection(ModuleFactory moduleFactory, String fileName,
+            String sectionName, Node section) throws Exception {
+        final Object instance;
+
+        try {
+<span class="fc" id="L477">            instance = moduleFactory.createModule(sectionName);</span>
+        }
+<span class="nc" id="L479">        catch (CheckstyleException ex) {</span>
+<span class="nc" id="L480">            throw new CheckstyleException(fileName + &quot; couldn't find class: &quot; + sectionName, ex);</span>
+<span class="fc" id="L481">        }</span>
+
+<span class="fc" id="L483">        int subSectionPos = 0;</span>
+<span class="fc bfc" id="L484" title="All 2 branches covered.">        for (Node subSection : XmlUtil.getChildrenElements(section)) {</span>
+<span class="fc bfc" id="L485" title="All 4 branches covered.">            if (subSectionPos == 0 &amp;&amp; &quot;p&quot;.equals(subSection.getNodeName())) {</span>
+<span class="fc" id="L486">                validateSinceDescriptionSection(fileName, sectionName, subSection);</span>
+<span class="fc" id="L487">                continue;</span>
+            }
+
+<span class="fc" id="L490">            final String subSectionName = subSection.getAttributes().getNamedItem(&quot;name&quot;)</span>
+<span class="fc" id="L491">                    .getNodeValue();</span>
+
+            // can be in different orders, and completely optional
+<span class="fc bfc" id="L494" title="All 2 branches covered.">            if (&quot;Notes&quot;.equals(subSectionName)</span>
+<span class="fc bfc" id="L495" title="All 2 branches covered.">                    || &quot;Rule Description&quot;.equals(subSectionName)</span>
+<span class="fc bfc" id="L496" title="All 2 branches covered.">                    || &quot;Metadata&quot;.equals(subSectionName)) {</span>
+<span class="fc" id="L497">                continue;</span>
+            }
+
+            // optional sections that can be skipped if they have nothing to report
+<span class="fc bfc" id="L501" title="All 4 branches covered.">            if (subSectionPos == 1 &amp;&amp; !&quot;Properties&quot;.equals(subSectionName)) {</span>
+<span class="fc" id="L502">                validatePropertySection(fileName, sectionName, null, instance);</span>
+<span class="fc" id="L503">                subSectionPos++;</span>
+            }
+<span class="fc bfc" id="L505" title="All 4 branches covered.">            if (subSectionPos == 4 &amp;&amp; !&quot;Error Messages&quot;.equals(subSectionName)) {</span>
+<span class="fc" id="L506">                validateErrorSection(fileName, sectionName, null, instance);</span>
+<span class="fc" id="L507">                subSectionPos++;</span>
+            }
+
+<span class="fc" id="L510">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L511">                    + &quot;' should be in order&quot;, getSubSectionName(subSectionPos),</span>
+                    subSectionName);
+
+<span class="fc bfc" id="L514" title="All 6 branches covered.">            switch (subSectionPos) {</span>
+                case 1:
+<span class="fc" id="L516">                    validatePropertySection(fileName, sectionName, subSection, instance);</span>
+<span class="fc" id="L517">                    break;</span>
+                case 3:
+<span class="fc" id="L519">                    validateUsageExample(fileName, sectionName, subSection);</span>
+<span class="fc" id="L520">                    break;</span>
+                case 4:
+<span class="fc" id="L522">                    validateErrorSection(fileName, sectionName, subSection, instance);</span>
+<span class="fc" id="L523">                    break;</span>
+                case 5:
+<span class="fc" id="L525">                    validatePackageSection(fileName, sectionName, subSection, instance);</span>
+<span class="fc" id="L526">                    break;</span>
+                case 6:
+<span class="fc" id="L528">                    validateParentSection(fileName, sectionName, subSection);</span>
+<span class="fc" id="L529">                    break;</span>
+                case 0:
+                case 2:
+                default:
+                    break;
+            }
+
+<span class="fc" id="L536">            subSectionPos++;</span>
+<span class="fc" id="L537">        }</span>
+
+<span class="fc bfc" id="L539" title="All 2 branches covered.">        if (&quot;Checker&quot;.equals(sectionName)) {</span>
+<span class="pc bpc" id="L540" title="1 of 2 branches missed.">            Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should contain up to 'Package' sub-section&quot;, subSectionPos &gt;= 6);
+        }
+        else {
+<span class="pc bpc" id="L544" title="1 of 2 branches missed.">            Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should contain up to 'Parent' sub-section&quot;, subSectionPos &gt;= 7);
+        }
+<span class="fc" id="L547">    }</span>
+
+    private static void validateSinceDescriptionSection(String fileName, String sectionName,
+            Node subSection) {
+<span class="fc" id="L551">        Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have a valid version at the start of the description like:\n&quot;
+<span class="fc" id="L553">                + DESCRIPTION_VERSION.pattern(),</span>
+<span class="fc" id="L554">                DESCRIPTION_VERSION.matcher(subSection.getTextContent().trim()).find());</span>
+<span class="fc" id="L555">    }</span>
+
+    private static Object getSubSectionName(int subSectionPos) {
+        final String result;
+
+<span class="pc bpc" id="L560" title="1 of 8 branches missed.">        switch (subSectionPos) {</span>
+            case 0:
+<span class="fc" id="L562">                result = &quot;Description&quot;;</span>
+<span class="fc" id="L563">                break;</span>
+            case 1:
+<span class="fc" id="L565">                result = &quot;Properties&quot;;</span>
+<span class="fc" id="L566">                break;</span>
+            case 2:
+<span class="fc" id="L568">                result = &quot;Examples&quot;;</span>
+<span class="fc" id="L569">                break;</span>
+            case 3:
+<span class="fc" id="L571">                result = &quot;Example of Usage&quot;;</span>
+<span class="fc" id="L572">                break;</span>
+            case 4:
+<span class="fc" id="L574">                result = &quot;Error Messages&quot;;</span>
+<span class="fc" id="L575">                break;</span>
+            case 5:
+<span class="fc" id="L577">                result = &quot;Package&quot;;</span>
+<span class="fc" id="L578">                break;</span>
+            case 6:
+<span class="fc" id="L580">                result = &quot;Parent Module&quot;;</span>
+<span class="fc" id="L581">                break;</span>
+            default:
+<span class="nc" id="L583">                result = null;</span>
+                break;
+        }
+
+<span class="fc" id="L587">        return result;</span>
+    }
+
+    private static void validatePropertySection(String fileName, String sectionName,
+            Node subSection, Object instance) throws Exception {
+<span class="fc" id="L592">        final Set&lt;String&gt; properties = getProperties(instance.getClass());</span>
+<span class="fc" id="L593">        final Class&lt;?&gt; clss = instance.getClass();</span>
+
+<span class="fc" id="L595">        fixCapturedProperties(sectionName, instance, clss, properties);</span>
+
+<span class="fc bfc" id="L597" title="All 2 branches covered.">        if (subSection != null) {</span>
+<span class="fc" id="L598">            Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+<span class="pc bpc" id="L599" title="1 of 2 branches missed.">                    + &quot;' should have no properties to show&quot;, !properties.isEmpty());</span>
+
+<span class="fc" id="L601">            final Set&lt;Node&gt; nodes = XmlUtil.getChildrenElements(subSection);</span>
+<span class="fc" id="L602">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' subsection 'Properties' should have one child node&quot;,
+<span class="fc" id="L604">                1, nodes.size());</span>
+
+<span class="fc" id="L606">            final Node table = nodes.iterator().next();</span>
+<span class="fc" id="L607">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' subsection 'Properties' has unexpected child node&quot;,
+<span class="fc" id="L609">                &quot;table&quot;, table.getNodeName());</span>
+
+<span class="fc" id="L611">            validatePropertySectionProperties(fileName, sectionName, table, instance,</span>
+                    properties);
+        }
+
+<span class="fc" id="L615">        Assert.assertTrue(fileName + &quot; section '&quot; + sectionName + &quot;' should show properties: &quot;</span>
+<span class="fc" id="L616">                + properties, properties.isEmpty());</span>
+<span class="fc" id="L617">    }</span>
+
+    private static void fixCapturedProperties(String sectionName, Object instance, Class&lt;?&gt; clss,
+            Set&lt;String&gt; properties) {
+        // remove global properties that don't need documentation
+<span class="fc bfc" id="L622" title="All 2 branches covered.">        if (hasParentModule(sectionName)) {</span>
+<span class="fc bfc" id="L623" title="All 2 branches covered.">            if (AbstractJavadocCheck.class.isAssignableFrom(clss)) {</span>
+<span class="fc" id="L624">                properties.removeAll(JAVADOC_CHECK_PROPERTIES);</span>
+
+                // override
+<span class="fc" id="L627">                properties.add(&quot;violateExecutionOnNonTightHtml&quot;);</span>
+            }
+<span class="fc bfc" id="L629" title="All 2 branches covered.">            else if (AbstractCheck.class.isAssignableFrom(clss)) {</span>
+<span class="fc" id="L630">                properties.removeAll(CHECK_PROPERTIES);</span>
+            }
+        }
+<span class="fc bfc" id="L633" title="All 2 branches covered.">        if (AbstractFileSetCheck.class.isAssignableFrom(clss)) {</span>
+<span class="fc" id="L634">            properties.removeAll(FILESET_PROPERTIES);</span>
+
+            // override
+<span class="fc" id="L637">            properties.add(&quot;fileExtensions&quot;);</span>
+        }
+
+        // remove undocumented properties
+<span class="fc" id="L641">        new HashSet&lt;&gt;(properties).stream()</span>
+<span class="fc" id="L642">            .filter(prop -&gt; UNDOCUMENTED_PROPERTIES.contains(clss.getSimpleName() + &quot;.&quot; + prop))</span>
+<span class="fc" id="L643">            .forEach(properties::remove);</span>
+
+<span class="fc bfc" id="L645" title="All 2 branches covered.">        if (AbstractCheck.class.isAssignableFrom(clss)) {</span>
+<span class="fc" id="L646">            final AbstractCheck check = (AbstractCheck) instance;</span>
+
+<span class="fc" id="L648">            final int[] acceptableTokens = check.getAcceptableTokens();</span>
+<span class="fc" id="L649">            Arrays.sort(acceptableTokens);</span>
+<span class="fc" id="L650">            final int[] defaultTokens = check.getDefaultTokens();</span>
+<span class="fc" id="L651">            Arrays.sort(defaultTokens);</span>
+<span class="fc" id="L652">            final int[] requiredTokens = check.getRequiredTokens();</span>
+<span class="fc" id="L653">            Arrays.sort(requiredTokens);</span>
+
+<span class="fc bfc" id="L655" title="All 2 branches covered.">            if (!Arrays.equals(acceptableTokens, defaultTokens)</span>
+<span class="fc bfc" id="L656" title="All 2 branches covered.">                    || !Arrays.equals(acceptableTokens, requiredTokens)) {</span>
+<span class="fc" id="L657">                properties.add(&quot;tokens&quot;);</span>
+            }
+        }
+
+<span class="fc bfc" id="L661" title="All 2 branches covered.">        if (AbstractJavadocCheck.class.isAssignableFrom(clss)) {</span>
+<span class="fc" id="L662">            final AbstractJavadocCheck check = (AbstractJavadocCheck) instance;</span>
+
+<span class="fc" id="L664">            final int[] acceptableJavadocTokens = check.getAcceptableJavadocTokens();</span>
+<span class="fc" id="L665">            Arrays.sort(acceptableJavadocTokens);</span>
+<span class="fc" id="L666">            final int[] defaultJavadocTokens = check.getDefaultJavadocTokens();</span>
+<span class="fc" id="L667">            Arrays.sort(defaultJavadocTokens);</span>
+<span class="fc" id="L668">            final int[] requiredJavadocTokens = check.getRequiredJavadocTokens();</span>
+<span class="fc" id="L669">            Arrays.sort(requiredJavadocTokens);</span>
+
+<span class="pc bpc" id="L671" title="1 of 2 branches missed.">            if (!Arrays.equals(acceptableJavadocTokens, defaultJavadocTokens)</span>
+<span class="fc bfc" id="L672" title="All 2 branches covered.">                    || !Arrays.equals(acceptableJavadocTokens, requiredJavadocTokens)) {</span>
+<span class="fc" id="L673">                properties.add(&quot;javadocTokens&quot;);</span>
+            }
+        }
+<span class="fc" id="L676">    }</span>
+
+    private static void validatePropertySectionProperties(String fileName, String sectionName,
+            Node table, Object instance, Set&lt;String&gt; properties) throws Exception {
+<span class="fc" id="L680">        boolean skip = true;</span>
+<span class="fc" id="L681">        boolean didJavadocTokens = false;</span>
+<span class="fc" id="L682">        boolean didTokens = false;</span>
+
+<span class="fc bfc" id="L684" title="All 2 branches covered.">        for (Node row : XmlUtil.getChildrenElements(table)) {</span>
+<span class="fc" id="L685">            final List&lt;Node&gt; columns = new ArrayList&lt;&gt;(XmlUtil.getChildrenElements(row));</span>
+
+<span class="fc" id="L687">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L688">                    + &quot;' should have the requested columns&quot;, 5, columns.size());</span>
+
+<span class="fc bfc" id="L690" title="All 2 branches covered.">            if (skip) {</span>
+<span class="fc" id="L691">                Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L692">                        + &quot;' should have the specific title&quot;, &quot;name&quot;, columns.get(0)</span>
+<span class="fc" id="L693">                        .getTextContent());</span>
+<span class="fc" id="L694">                Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L695">                        + &quot;' should have the specific title&quot;, &quot;description&quot;, columns.get(1)</span>
+<span class="fc" id="L696">                        .getTextContent());</span>
+<span class="fc" id="L697">                Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L698">                        + &quot;' should have the specific title&quot;, &quot;type&quot;, columns.get(2)</span>
+<span class="fc" id="L699">                        .getTextContent());</span>
+<span class="fc" id="L700">                Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L701">                        + &quot;' should have the specific title&quot;, &quot;default value&quot;, columns.get(3)</span>
+<span class="fc" id="L702">                        .getTextContent());</span>
+<span class="fc" id="L703">                Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L704">                        + &quot;' should have the specific title&quot;, &quot;since&quot;, columns.get(4)</span>
+<span class="fc" id="L705">                        .getTextContent());</span>
+
+<span class="fc" id="L707">                skip = false;</span>
+<span class="fc" id="L708">                continue;</span>
+            }
+
+<span class="fc" id="L711">            Assert.assertFalse(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should have token properties last&quot;, didTokens);
+
+<span class="fc" id="L714">            final String propertyName = columns.get(0).getTextContent();</span>
+<span class="fc" id="L715">            Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should not contain the property: &quot; + propertyName,
+<span class="fc" id="L717">                    properties.remove(propertyName));</span>
+
+<span class="fc bfc" id="L719" title="All 2 branches covered.">            if (&quot;tokens&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L720">                final AbstractCheck check = (AbstractCheck) instance;</span>
+<span class="fc" id="L721">                validatePropertySectionPropertyTokens(fileName, sectionName, check, columns);</span>
+<span class="fc" id="L722">                didTokens = true;</span>
+<span class="fc" id="L723">            }</span>
+<span class="fc bfc" id="L724" title="All 2 branches covered.">            else if (&quot;javadocTokens&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L725">                final AbstractJavadocCheck check = (AbstractJavadocCheck) instance;</span>
+<span class="fc" id="L726">                validatePropertySectionPropertyJavadocTokens(fileName, sectionName, check, columns);</span>
+<span class="fc" id="L727">                didJavadocTokens = true;</span>
+<span class="fc" id="L728">            }</span>
+            else {
+<span class="fc" id="L730">                Assert.assertFalse(fileName + &quot; section '&quot; + sectionName</span>
+                        + &quot;' should have javadoc token properties next to last, before tokens&quot;,
+                        didJavadocTokens);
+
+<span class="fc" id="L734">                validatePropertySectionPropertyEx(fileName, sectionName, instance, columns,</span>
+                        propertyName);
+            }
+
+<span class="fc" id="L738">            Assert.assertFalse(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L739">                    + &quot;' should have a version for &quot; + propertyName, columns.get(4)</span>
+<span class="fc" id="L740">                    .getTextContent().trim().isEmpty());</span>
+<span class="fc" id="L741">            Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should have a valid version for &quot; + propertyName,
+<span class="fc" id="L743">                    VERSION.matcher(columns.get(4).getTextContent().trim()).matches());</span>
+<span class="fc" id="L744">        }</span>
+<span class="fc" id="L745">    }</span>
+
+    private static void validatePropertySectionPropertyEx(String fileName, String sectionName,
+            Object instance, List&lt;Node&gt; columns, String propertyName) throws Exception {
+<span class="fc" id="L749">        Assert.assertFalse(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L750">                + &quot;' should have a description for &quot; + propertyName, columns.get(1)</span>
+<span class="fc" id="L751">                .getTextContent().trim().isEmpty());</span>
+
+<span class="fc" id="L753">        final String actualTypeName = columns.get(2).getTextContent().replace(&quot;\n&quot;, &quot;&quot;)</span>
+<span class="fc" id="L754">                .replace(&quot;\r&quot;, &quot;&quot;).replaceAll(&quot; +&quot;, &quot; &quot;).trim();</span>
+
+<span class="fc" id="L756">        Assert.assertFalse(fileName + &quot; section '&quot; + sectionName + &quot;' should have a type for &quot;</span>
+<span class="fc" id="L757">                + propertyName, actualTypeName.isEmpty());</span>
+
+<span class="fc" id="L759">        final Field field = getField(instance.getClass(), propertyName);</span>
+<span class="fc" id="L760">        final Class&lt;?&gt; fieldClss = getFieldClass(fileName, sectionName, instance, field,</span>
+                propertyName);
+
+<span class="fc" id="L763">        final String expectedTypeName = getModulePropertyExpectedTypeName(sectionName, fieldClss,</span>
+                instance, propertyName);
+<span class="fc" id="L765">        final String expectedValue = getModulePropertyExpectedValue(sectionName, propertyName,</span>
+                field, fieldClss, instance);
+
+<span class="fc" id="L768">        Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have the type for &quot; + propertyName, expectedTypeName,
+                actualTypeName);
+
+<span class="fc bfc" id="L772" title="All 2 branches covered.">        if (expectedValue != null) {</span>
+<span class="fc" id="L773">            final String actualValue = columns.get(3).getTextContent().replace(&quot;\n&quot;, &quot;&quot;)</span>
+<span class="fc" id="L774">                    .replace(&quot;\r&quot;, &quot;&quot;).replaceAll(&quot; +&quot;, &quot; &quot;).trim();</span>
+
+<span class="fc" id="L776">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should have the value for &quot; + propertyName, expectedValue,
+                    actualValue);
+        }
+<span class="fc" id="L780">    }</span>
+
+    private static void validatePropertySectionPropertyTokens(String fileName, String sectionName,
+            AbstractCheck check, List&lt;Node&gt; columns) {
+<span class="fc" id="L784">        Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L785">                + &quot;' should have the basic token description&quot;, &quot;tokens to check&quot;, columns.get(1)</span>
+<span class="fc" id="L786">                .getTextContent());</span>
+<span class="fc" id="L787">        Assert.assertEquals(</span>
+                fileName + &quot; section '&quot; + sectionName + &quot;' should have all the acceptable tokens&quot;,
+                &quot;subset of tokens &quot;
+<span class="fc" id="L790">                        + CheckUtil.getTokenText(check.getAcceptableTokens(),</span>
+<span class="fc" id="L791">                                check.getRequiredTokens()), columns.get(2).getTextContent()</span>
+<span class="fc" id="L792">                        .replaceAll(&quot;\\s+&quot;, &quot; &quot;).trim());</span>
+<span class="fc" id="L793">        Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have all the default tokens&quot;,
+<span class="fc" id="L795">                CheckUtil.getTokenText(check.getDefaultTokens(), check.getRequiredTokens()),</span>
+<span class="fc" id="L796">                columns.get(3).getTextContent().replaceAll(&quot;\\s+&quot;, &quot; &quot;).trim());</span>
+<span class="fc" id="L797">    }</span>
+
+    private static void validatePropertySectionPropertyJavadocTokens(String fileName,
+            String sectionName, AbstractJavadocCheck check, List&lt;Node&gt; columns) {
+<span class="fc" id="L801">        Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have the basic token javadoc description&quot;, &quot;javadoc tokens to check&quot;,
+<span class="fc" id="L803">                columns.get(1).getTextContent());</span>
+<span class="fc" id="L804">        Assert.assertEquals(</span>
+                fileName + &quot; section '&quot; + sectionName
+                        + &quot;' should have all the acceptable javadoc tokens&quot;,
+                &quot;subset of javadoc tokens &quot;
+<span class="fc" id="L808">                        + CheckUtil.getJavadocTokenText(check.getAcceptableJavadocTokens(),</span>
+<span class="fc" id="L809">                                check.getRequiredJavadocTokens()), columns.get(2).getTextContent()</span>
+<span class="fc" id="L810">                        .replaceAll(&quot;\\s+&quot;, &quot; &quot;).trim());</span>
+<span class="fc" id="L811">        Assert.assertEquals(</span>
+                fileName + &quot; section '&quot; + sectionName
+                        + &quot;' should have all the default javadoc tokens&quot;,
+<span class="fc" id="L814">                CheckUtil.getJavadocTokenText(check.getDefaultJavadocTokens(),</span>
+<span class="fc" id="L815">                        check.getRequiredJavadocTokens()), columns.get(3).getTextContent()</span>
+<span class="fc" id="L816">                        .replaceAll(&quot;\\s+&quot;, &quot; &quot;).trim());</span>
+<span class="fc" id="L817">    }</span>
+
+    /**
+     * Get's the name of the bean property's type for the class.
+     * @param sectionName The name of the section/module being worked on.
+     * @param fieldClass The bean property's type.
+     * @param instance The class instance to work with.
+     * @param propertyName The property name to work with.
+     * @return String form of property's type.
+     * @noinspection IfStatementWithTooManyBranches, OverlyComplexBooleanExpression
+     */
+    private static String getModulePropertyExpectedTypeName(String sectionName, Class&lt;?&gt; fieldClass,
+            Object instance, String propertyName) {
+<span class="fc" id="L830">        final String instanceName = instance.getClass().getSimpleName();</span>
+<span class="fc" id="L831">        String result = null;</span>
+
+<span class="fc bfc" id="L833" title="All 2 branches covered.">        if ((&quot;SuppressionCommentFilter&quot;.equals(sectionName)</span>
+<span class="fc bfc" id="L834" title="All 2 branches covered.">                || &quot;SuppressWithNearbyCommentFilter&quot;.equals(sectionName)</span>
+<span class="fc bfc" id="L835" title="All 2 branches covered.">                || &quot;SuppressWithPlainTextCommentFilter&quot;.equals(sectionName))</span>
+<span class="fc bfc" id="L836" title="All 2 branches covered.">                    &amp;&amp; (&quot;checkFormat&quot;.equals(propertyName)</span>
+<span class="fc bfc" id="L837" title="All 2 branches covered.">                        || &quot;messageFormat&quot;.equals(propertyName)</span>
+<span class="fc bfc" id="L838" title="All 2 branches covered.">                        || &quot;idFormat&quot;.equals(propertyName)</span>
+<span class="fc bfc" id="L839" title="All 2 branches covered.">                        || &quot;influenceFormat&quot;.equals(propertyName))</span>
+<span class="fc bfc" id="L840" title="All 2 branches covered.">                || (&quot;RegexpMultiline&quot;.equals(sectionName)</span>
+<span class="fc bfc" id="L841" title="All 2 branches covered.">                    || &quot;RegexpSingleline&quot;.equals(sectionName)</span>
+<span class="fc bfc" id="L842" title="All 2 branches covered.">                    || &quot;RegexpSinglelineJava&quot;.equals(sectionName))</span>
+<span class="fc bfc" id="L843" title="All 2 branches covered.">                    &amp;&amp; &quot;format&quot;.equals(propertyName)) {</span>
+            // dynamic custom expression
+<span class="fc" id="L845">            result = &quot;Regular Expression&quot;;</span>
+        }
+<span class="fc bfc" id="L847" title="All 2 branches covered.">        else if (&quot;CustomImportOrder&quot;.equals(sectionName)</span>
+<span class="fc bfc" id="L848" title="All 2 branches covered.">                &amp;&amp; &quot;customImportOrderRules&quot;.equals(propertyName)) {</span>
+            // specially separated list
+<span class="fc" id="L850">            result = &quot;String&quot;;</span>
+        }
+<span class="fc bfc" id="L852" title="All 2 branches covered.">        else if (fieldClass == boolean.class) {</span>
+<span class="fc" id="L853">            result = &quot;Boolean&quot;;</span>
+        }
+<span class="fc bfc" id="L855" title="All 2 branches covered.">        else if (fieldClass == int.class) {</span>
+<span class="fc" id="L856">            result = &quot;Integer&quot;;</span>
+        }
+<span class="fc bfc" id="L858" title="All 2 branches covered.">        else if (fieldClass == int[].class) {</span>
+<span class="fc bfc" id="L859" title="All 2 branches covered.">            if (isPropertyTokenType(sectionName, propertyName)) {</span>
+<span class="fc" id="L860">                result = &quot;subset of tokens TokenTypes&quot;;</span>
+            }
+            else {
+<span class="fc" id="L863">                result = &quot;Integer Set&quot;;</span>
+            }
+        }
+<span class="fc bfc" id="L866" title="All 2 branches covered.">        else if (fieldClass == double[].class) {</span>
+<span class="fc" id="L867">            result = &quot;Number Set&quot;;</span>
+        }
+<span class="fc bfc" id="L869" title="All 2 branches covered.">        else if (fieldClass == String.class) {</span>
+<span class="fc" id="L870">            result = &quot;String&quot;;</span>
+
+<span class="fc bfc" id="L872" title="All 4 branches covered.">            if (&quot;Checker&quot;.equals(sectionName) &amp;&amp; &quot;localeCountry&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L873">                result += &quot; (either the empty string or an uppercase ISO 3166 2-letter code)&quot;;</span>
+            }
+<span class="fc bfc" id="L875" title="All 4 branches covered.">            else if (&quot;Checker&quot;.equals(sectionName) &amp;&amp; &quot;localeLanguage&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L876">                result += &quot; (either the empty string or a lowercase ISO 639 code)&quot;;</span>
+            }
+        }
+<span class="fc bfc" id="L879" title="All 2 branches covered.">        else if (fieldClass == String[].class) {</span>
+<span class="pc bpc" id="L880" title="2 of 4 branches missed.">            if (propertyName.endsWith(&quot;Tokens&quot;) || propertyName.endsWith(&quot;Token&quot;)</span>
+<span class="pc bpc" id="L881" title="1 of 4 branches missed.">                    || &quot;AtclauseOrderCheck&quot;.equals(instanceName) &amp;&amp; &quot;target&quot;.equals(propertyName)</span>
+<span class="pc bpc" id="L882" title="1 of 2 branches missed.">                    || &quot;MultipleStringLiteralsCheck&quot;.equals(instanceName)</span>
+<span class="nc bnc" id="L883" title="All 2 branches missed.">                            &amp;&amp; &quot;ignoreOccurrenceContext&quot;.equals(propertyName)) {</span>
+<span class="nc" id="L884">                result = &quot;subset of tokens TokenTypes&quot;;</span>
+            }
+            else {
+<span class="fc" id="L887">                result = &quot;String Set&quot;;</span>
+            }
+        }
+<span class="fc bfc" id="L890" title="All 2 branches covered.">        else if (fieldClass == URI.class) {</span>
+<span class="fc" id="L891">            result = &quot;URI&quot;;</span>
+        }
+<span class="fc bfc" id="L893" title="All 2 branches covered.">        else if (fieldClass == Pattern.class) {</span>
+<span class="fc" id="L894">            result = &quot;Regular Expression&quot;;</span>
+        }
+<span class="fc bfc" id="L896" title="All 2 branches covered.">        else if (fieldClass == Pattern[].class) {</span>
+<span class="fc" id="L897">            result = &quot;Regular Expressions&quot;;</span>
+        }
+<span class="fc bfc" id="L899" title="All 2 branches covered.">        else if (fieldClass == SeverityLevel.class) {</span>
+<span class="fc" id="L900">            result = &quot;Severity&quot;;</span>
+        }
+<span class="fc bfc" id="L902" title="All 2 branches covered.">        else if (fieldClass == Scope.class) {</span>
+<span class="fc" id="L903">            result = &quot;Scope&quot;;</span>
+        }
+<span class="fc bfc" id="L905" title="All 2 branches covered.">        else if (fieldClass == ElementStyle.class) {</span>
+<span class="fc" id="L906">            result = &quot;Element Style&quot;;</span>
+        }
+<span class="fc bfc" id="L908" title="All 2 branches covered.">        else if (fieldClass == ClosingParens.class) {</span>
+<span class="fc" id="L909">            result = &quot;Closing Parens&quot;;</span>
+        }
+<span class="fc bfc" id="L911" title="All 2 branches covered.">        else if (fieldClass == TrailingArrayComma.class) {</span>
+<span class="fc" id="L912">            result = &quot;Trailing Comma&quot;;</span>
+        }
+<span class="fc bfc" id="L914" title="All 2 branches covered.">        else if (fieldClass == PadOption.class) {</span>
+<span class="fc" id="L915">            result = &quot;Pad Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L917" title="All 2 branches covered.">        else if (fieldClass == WrapOption.class) {</span>
+<span class="fc" id="L918">            result = &quot;Wrap Operator Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L920" title="All 2 branches covered.">        else if (fieldClass == BlockOption.class) {</span>
+<span class="fc" id="L921">            result = &quot;Block Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L923" title="All 2 branches covered.">        else if (fieldClass == LeftCurlyOption.class) {</span>
+<span class="fc" id="L924">            result = &quot;Left Curly Brace Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L926" title="All 2 branches covered.">        else if (fieldClass == RightCurlyOption.class) {</span>
+<span class="fc" id="L927">            result = &quot;Right Curly Brace Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L929" title="All 2 branches covered.">        else if (fieldClass == LineSeparatorOption.class) {</span>
+<span class="fc" id="L930">            result = &quot;Line Separator Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L932" title="All 2 branches covered.">        else if (fieldClass == ImportOrderOption.class) {</span>
+<span class="fc" id="L933">            result = &quot;Import Order Policy&quot;;</span>
+        }
+<span class="fc bfc" id="L935" title="All 2 branches covered.">        else if (fieldClass == AccessModifier[].class) {</span>
+<span class="fc" id="L936">            result = &quot;Access Modifier Set&quot;;</span>
+        }
+<span class="pc bpc" id="L938" title="1 of 2 branches missed.">        else if (&quot;PropertyCacheFile&quot;.equals(fieldClass.getSimpleName())) {</span>
+<span class="fc" id="L939">            result = &quot;File&quot;;</span>
+        }
+        else {
+<span class="nc" id="L942">            Assert.fail(&quot;Unknown property type: &quot; + fieldClass.getSimpleName());</span>
+        }
+
+<span class="fc bfc" id="L945" title="All 2 branches covered.">        if (&quot;SuppressWarningsHolder&quot;.equals(instanceName)) {</span>
+<span class="fc" id="L946">            result = result + &quot; in a format of comma separated attribute=value entries. The &quot;</span>
+                    + &quot;attribute is the fully qualified name of the Check and value is its alias.&quot;;
+        }
+
+<span class="fc" id="L950">        return result;</span>
+    }
+
+    /**
+     * Get's the name of the bean property's default value for the class.
+     * @param sectionName The name of the section/module being worked on.
+     * @param propertyName The property name to work with.
+     * @param field The bean property's field.
+     * @param fieldClass The bean property's type.
+     * @param instance The class instance to work with.
+     * @return String form of property's default value.
+     * @noinspection ReuseOfLocalVariable, OverlyNestedMethod
+     */
+    private static String getModulePropertyExpectedValue(String sectionName, String propertyName,
+            Field field, Class&lt;?&gt; fieldClass, Object instance) throws Exception {
+<span class="fc" id="L965">        String result = null;</span>
+
+<span class="fc bfc" id="L967" title="All 2 branches covered.">        if (field != null) {</span>
+<span class="fc" id="L968">            Object value = field.get(instance);</span>
+
+            // noinspection IfStatementWithTooManyBranches
+<span class="fc bfc" id="L971" title="All 4 branches covered.">            if (&quot;Checker&quot;.equals(sectionName) &amp;&amp; &quot;localeCountry&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L972">                result = &quot;default locale country for the Java Virtual Machine&quot;;</span>
+            }
+<span class="fc bfc" id="L974" title="All 4 branches covered.">            else if (&quot;Checker&quot;.equals(sectionName) &amp;&amp; &quot;localeLanguage&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L975">                result = &quot;default locale language for the Java Virtual Machine&quot;;</span>
+            }
+<span class="fc bfc" id="L977" title="All 4 branches covered.">            else if (&quot;Checker&quot;.equals(sectionName) &amp;&amp; &quot;charset&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L978">                result = &quot;System property \&quot;file.encoding\&quot;&quot;;</span>
+            }
+<span class="fc bfc" id="L980" title="All 2 branches covered.">            else if (&quot;charset&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L981">                result = &quot;the charset property of the parent Checker module&quot;;</span>
+            }
+<span class="fc bfc" id="L983" title="All 2 branches covered.">            else if (&quot;PropertyCacheFile&quot;.equals(fieldClass.getSimpleName())) {</span>
+<span class="fc" id="L984">                result = &quot;null (no cache file)&quot;;</span>
+            }
+<span class="fc bfc" id="L986" title="All 2 branches covered.">            else if (fieldClass == boolean.class) {</span>
+<span class="fc" id="L987">                result = value.toString();</span>
+            }
+<span class="fc bfc" id="L989" title="All 2 branches covered.">            else if (fieldClass == int.class) {</span>
+<span class="fc bfc" id="L990" title="All 2 branches covered.">                if (value.equals(Integer.MAX_VALUE)) {</span>
+<span class="fc" id="L991">                    result = &quot;java.lang.Integer.MAX_VALUE&quot;;</span>
+                }
+                else {
+<span class="fc" id="L994">                    result = value.toString();</span>
+                }
+            }
+<span class="fc bfc" id="L997" title="All 2 branches covered.">            else if (fieldClass == int[].class) {</span>
+<span class="fc bfc" id="L998" title="All 2 branches covered.">                if (value instanceof Collection) {</span>
+<span class="fc" id="L999">                    final Collection&lt;?&gt; collection = (Collection&lt;?&gt;) value;</span>
+<span class="fc" id="L1000">                    final int[] newArray = new int[collection.size()];</span>
+<span class="fc" id="L1001">                    final Iterator&lt;?&gt; iterator = collection.iterator();</span>
+<span class="fc" id="L1002">                    int index = 0;</span>
+
+<span class="fc bfc" id="L1004" title="All 2 branches covered.">                    while (iterator.hasNext()) {</span>
+<span class="fc" id="L1005">                        newArray[index] = (Integer) iterator.next();</span>
+<span class="fc" id="L1006">                        index++;</span>
+                    }
+
+<span class="fc" id="L1009">                    value = newArray;</span>
+                }
+
+<span class="fc bfc" id="L1012" title="All 2 branches covered.">                if (isPropertyTokenType(sectionName, propertyName)) {</span>
+<span class="fc" id="L1013">                    boolean first = true;</span>
+
+<span class="fc bfc" id="L1015" title="All 2 branches covered.">                    if (value == null) {</span>
+<span class="fc" id="L1016">                        result = &quot;no tokens&quot;;</span>
+                    }
+<span class="fc bfc" id="L1018" title="All 2 branches covered.">                    else if (value instanceof BitSet) {</span>
+<span class="fc" id="L1019">                        final BitSet list = (BitSet) value;</span>
+<span class="fc" id="L1020">                        final StringBuilder sb = new StringBuilder(20);</span>
+
+<span class="fc bfc" id="L1022" title="All 2 branches covered.">                        for (int i = 0; i &lt; list.size(); i++) {</span>
+<span class="fc bfc" id="L1023" title="All 2 branches covered.">                            if (list.get(i)) {</span>
+<span class="pc bpc" id="L1024" title="1 of 2 branches missed.">                                if (first) {</span>
+<span class="fc" id="L1025">                                    first = false;</span>
+                                }
+                                else {
+<span class="nc" id="L1028">                                    sb.append(&quot;, &quot;);</span>
+                                }
+
+<span class="fc" id="L1031">                                sb.append(TokenUtil.getTokenName(i));</span>
+                            }
+                        }
+
+<span class="fc" id="L1035">                        result = sb.toString();</span>
+<span class="fc" id="L1036">                    }</span>
+                    else {
+<span class="fc" id="L1038">                        final StringBuilder sb = new StringBuilder(20);</span>
+
+<span class="fc bfc" id="L1040" title="All 2 branches covered.">                        for (int i = 0; i &lt; Array.getLength(value); i++) {</span>
+<span class="fc bfc" id="L1041" title="All 2 branches covered.">                            if (first) {</span>
+<span class="fc" id="L1042">                                first = false;</span>
+                            }
+                            else {
+<span class="fc" id="L1045">                                sb.append(&quot;, &quot;);</span>
+                            }
+
+<span class="fc" id="L1048">                            sb.append(TokenUtil.getTokenName((int) Array.get(value, i)));</span>
+                        }
+
+<span class="fc" id="L1051">                        result = sb.toString();</span>
+                    }
+<span class="fc" id="L1053">                }</span>
+                else {
+<span class="fc" id="L1055">                    result = Arrays.toString((int[]) value).replace(&quot;[&quot;, &quot;&quot;).replace(&quot;]&quot;, &quot;&quot;);</span>
+
+<span class="pc bpc" id="L1057" title="1 of 2 branches missed.">                    if (result.isEmpty()) {</span>
+<span class="fc" id="L1058">                        result = &quot;{}&quot;;</span>
+                    }
+                }
+            }
+<span class="fc bfc" id="L1062" title="All 2 branches covered.">            else if (fieldClass == double[].class) {</span>
+<span class="fc" id="L1063">                result = Arrays.toString((double[]) value).replace(&quot;[&quot;, &quot;&quot;).replace(&quot;]&quot;, &quot;&quot;)</span>
+<span class="fc" id="L1064">                        .replace(&quot;.0&quot;, &quot;&quot;);</span>
+<span class="pc bpc" id="L1065" title="1 of 2 branches missed.">                if (result.isEmpty()) {</span>
+<span class="nc" id="L1066">                    result = &quot;{}&quot;;</span>
+                }
+            }
+<span class="fc bfc" id="L1069" title="All 2 branches covered.">            else if (fieldClass == String[].class) {</span>
+<span class="fc bfc" id="L1070" title="All 2 branches covered.">                if (value == null) {</span>
+<span class="fc" id="L1071">                    result = &quot;&quot;;</span>
+                }
+                else {
+                    final Stream&lt;?&gt; valuesStream;
+<span class="fc bfc" id="L1075" title="All 2 branches covered.">                    if (value instanceof Collection) {</span>
+<span class="fc" id="L1076">                        final Collection&lt;?&gt; collection = (Collection&lt;?&gt;) value;</span>
+<span class="fc" id="L1077">                        valuesStream = collection.stream();</span>
+<span class="fc" id="L1078">                    }</span>
+                    else {
+<span class="fc" id="L1080">                        final Object[] array = (Object[]) value;</span>
+<span class="fc" id="L1081">                        valuesStream = Arrays.stream(array);</span>
+                    }
+<span class="fc" id="L1083">                    result = valuesStream</span>
+<span class="fc" id="L1084">                        .map(String.class::cast)</span>
+<span class="fc" id="L1085">                        .sorted()</span>
+<span class="fc" id="L1086">                        .collect(Collectors.joining(&quot;, &quot;));</span>
+                }
+
+<span class="fc bfc" id="L1089" title="All 2 branches covered.">                if (result.isEmpty()) {</span>
+<span class="fc bfc" id="L1090" title="All 2 branches covered.">                    if (&quot;fileExtensions&quot;.equals(propertyName)) {</span>
+<span class="fc" id="L1091">                        result = &quot;all files&quot;;</span>
+                    }
+                    else {
+<span class="fc" id="L1094">                        result = &quot;{}&quot;;</span>
+                    }
+                }
+            }
+<span class="fc bfc" id="L1098" title="All 4 branches covered.">            else if (fieldClass == URI.class || fieldClass == String.class) {</span>
+<span class="fc bfc" id="L1099" title="All 2 branches covered.">                if (value != null) {</span>
+<span class="fc" id="L1100">                    result = '&quot;' + value.toString() + '&quot;';</span>
+                }
+            }
+<span class="fc bfc" id="L1103" title="All 2 branches covered.">            else if (fieldClass == Pattern.class) {</span>
+<span class="fc bfc" id="L1104" title="All 2 branches covered.">                if (value != null) {</span>
+<span class="fc" id="L1105">                    result = '&quot;' + value.toString().replace(&quot;\n&quot;, &quot;\\n&quot;).replace(&quot;\t&quot;, &quot;\\t&quot;)</span>
+<span class="fc" id="L1106">                            .replace(&quot;\r&quot;, &quot;\\r&quot;).replace(&quot;\f&quot;, &quot;\\f&quot;) + '&quot;';</span>
+
+<span class="fc bfc" id="L1108" title="All 2 branches covered.">                    if (&quot;\&quot;^$\&quot;&quot;.equals(result)) {</span>
+<span class="fc" id="L1109">                        result += &quot; (empty)&quot;;</span>
+                    }
+                }
+            }
+<span class="fc bfc" id="L1113" title="All 2 branches covered.">            else if (fieldClass == Pattern[].class) {</span>
+<span class="fc bfc" id="L1114" title="All 2 branches covered.">                if (value instanceof Collection) {</span>
+<span class="fc" id="L1115">                    final Collection&lt;?&gt; collection = (Collection&lt;?&gt;) value;</span>
+<span class="fc" id="L1116">                    final Pattern[] newArray = new Pattern[collection.size()];</span>
+<span class="fc" id="L1117">                    final Iterator&lt;?&gt; iterator = collection.iterator();</span>
+<span class="fc" id="L1118">                    int index = 0;</span>
+
+<span class="fc bfc" id="L1120" title="All 2 branches covered.">                    while (iterator.hasNext()) {</span>
+<span class="fc" id="L1121">                        final Object next = iterator.next();</span>
+<span class="fc" id="L1122">                        newArray[index] = (Pattern) next;</span>
+<span class="fc" id="L1123">                        index++;</span>
+<span class="fc" id="L1124">                    }</span>
+
+<span class="fc" id="L1126">                    value = newArray;</span>
+                }
+
+<span class="pc bpc" id="L1129" title="1 of 4 branches missed.">                if (value != null &amp;&amp; Array.getLength(value) &gt; 0) {</span>
+<span class="fc" id="L1130">                    final String[] newArray = new String[Array.getLength(value)];</span>
+
+<span class="fc bfc" id="L1132" title="All 2 branches covered.">                    for (int i = 0; i &lt; newArray.length; i++) {</span>
+<span class="fc" id="L1133">                        newArray[i] = ((Pattern) Array.get(value, i)).pattern();</span>
+                    }
+
+<span class="fc" id="L1136">                    result = Arrays.toString(newArray).replace(&quot;[&quot;, &quot;&quot;)</span>
+<span class="fc" id="L1137">                            .replace(&quot;]&quot;, &quot;&quot;);</span>
+<span class="fc" id="L1138">                }</span>
+                else {
+<span class="fc" id="L1140">                    result = &quot;&quot;;</span>
+                }
+
+<span class="fc bfc" id="L1143" title="All 2 branches covered.">                if (result.isEmpty()) {</span>
+<span class="fc" id="L1144">                    result = &quot;{}&quot;;</span>
+                }
+            }
+<span class="fc bfc" id="L1147" title="All 2 branches covered.">            else if (fieldClass.isEnum()) {</span>
+<span class="fc bfc" id="L1148" title="All 2 branches covered.">                if (value != null) {</span>
+<span class="fc" id="L1149">                    result = value.toString().toLowerCase(Locale.ENGLISH);</span>
+                }
+            }
+<span class="pc bpc" id="L1152" title="1 of 2 branches missed.">            else if (fieldClass == AccessModifier[].class) {</span>
+<span class="fc" id="L1153">                result = Arrays.toString((Object[]) value).replace(&quot;[&quot;, &quot;&quot;).replace(&quot;]&quot;, &quot;&quot;);</span>
+            }
+            else {
+<span class="nc" id="L1156">                Assert.fail(&quot;Unknown property type: &quot; + fieldClass.getSimpleName());</span>
+            }
+
+<span class="fc bfc" id="L1159" title="All 2 branches covered.">            if (result == null) {</span>
+<span class="fc" id="L1160">                result = &quot;null&quot;;</span>
+            }
+        }
+
+<span class="fc" id="L1164">        return result;</span>
+    }
+
+    /**
+     * Checks if the given property is takes token names as a type.
+     * @param sectionName The name of the section/module being worked on.
+     * @param propertyName The property name to work with.
+     * @return {@code true} if the property is takes token names as a type.
+     * @noinspection OverlyComplexBooleanExpression
+     */
+    private static boolean isPropertyTokenType(String sectionName, String propertyName) {
+<span class="pc bpc" id="L1175" title="1 of 4 branches missed.">        return &quot;AtclauseOrder&quot;.equals(sectionName) &amp;&amp; &quot;target&quot;.equals(propertyName)</span>
+<span class="pc bpc" id="L1176" title="1 of 4 branches missed.">            || &quot;IllegalType&quot;.equals(sectionName) &amp;&amp; &quot;memberModifiers&quot;.equals(propertyName)</span>
+<span class="fc bfc" id="L1177" title="All 2 branches covered.">            || &quot;MagicNumber&quot;.equals(sectionName)</span>
+<span class="pc bpc" id="L1178" title="1 of 2 branches missed.">                    &amp;&amp; &quot;constantWaiverParentToken&quot;.equals(propertyName)</span>
+<span class="fc bfc" id="L1179" title="All 2 branches covered.">            || &quot;MultipleStringLiterals&quot;.equals(sectionName)</span>
+<span class="pc bpc" id="L1180" title="1 of 2 branches missed.">                    &amp;&amp; &quot;ignoreOccurrenceContext&quot;.equals(propertyName)</span>
+<span class="pc bpc" id="L1181" title="1 of 4 branches missed.">            || &quot;DescendantToken&quot;.equals(sectionName) &amp;&amp; &quot;limitedTokens&quot;.equals(propertyName);</span>
+    }
+
+    private static Field getField(Class&lt;?&gt; clss, String propertyName) {
+<span class="fc" id="L1185">        Field result = null;</span>
+
+<span class="fc bfc" id="L1187" title="All 2 branches covered.">        if (clss != null) {</span>
+            try {
+<span class="fc" id="L1189">                result = clss.getDeclaredField(propertyName);</span>
+<span class="fc" id="L1190">                result.setAccessible(true);</span>
+            }
+<span class="fc" id="L1192">            catch (NoSuchFieldException ignored) {</span>
+<span class="fc" id="L1193">                result = getField(clss.getSuperclass(), propertyName);</span>
+<span class="fc" id="L1194">            }</span>
+        }
+
+<span class="fc" id="L1197">        return result;</span>
+    }
+
+    private static Class&lt;?&gt; getFieldClass(String fileName, String sectionName, Object instance,
+            Field field, String propertyName) throws Exception {
+<span class="fc" id="L1202">        Class&lt;?&gt; result = null;</span>
+
+<span class="fc bfc" id="L1204" title="All 2 branches covered.">        if (field != null) {</span>
+<span class="fc" id="L1205">            result = field.getType();</span>
+        }
+<span class="fc bfc" id="L1207" title="All 2 branches covered.">        if (result == null) {</span>
+<span class="fc" id="L1208">            Assert.assertTrue(</span>
+                    fileName + &quot; section '&quot; + sectionName + &quot;' could not find field &quot;
+                            + propertyName,
+<span class="fc" id="L1211">                    PROPERTIES_ALLOWED_GET_TYPES_FROM_METHOD.contains(sectionName + &quot;.&quot;</span>
+                            + propertyName));
+
+<span class="fc" id="L1214">            final PropertyDescriptor descriptor = PropertyUtils.getPropertyDescriptor(instance,</span>
+                    propertyName);
+<span class="fc" id="L1216">            result = descriptor.getPropertyType();</span>
+        }
+<span class="fc bfc" id="L1218" title="All 4 branches covered.">        if (result == List.class || result == Set.class) {</span>
+<span class="fc" id="L1219">            final ParameterizedType type = (ParameterizedType) field.getGenericType();</span>
+<span class="fc" id="L1220">            final Class&lt;?&gt; parameterClass = (Class&lt;?&gt;) type.getActualTypeArguments()[0];</span>
+
+<span class="fc bfc" id="L1222" title="All 2 branches covered.">            if (parameterClass == Integer.class) {</span>
+<span class="fc" id="L1223">                result = int[].class;</span>
+            }
+<span class="fc bfc" id="L1225" title="All 2 branches covered.">            else if (parameterClass == String.class) {</span>
+<span class="fc" id="L1226">                result = String[].class;</span>
+            }
+<span class="pc bpc" id="L1228" title="1 of 2 branches missed.">            else if (parameterClass == Pattern.class) {</span>
+<span class="fc" id="L1229">                result = Pattern[].class;</span>
+            }
+            else {
+<span class="nc" id="L1232">                Assert.fail(&quot;Unknown parameterized type: &quot; + parameterClass.getSimpleName());</span>
+            }
+<span class="fc" id="L1234">        }</span>
+<span class="fc bfc" id="L1235" title="All 2 branches covered.">        else if (result == BitSet.class) {</span>
+<span class="fc" id="L1236">            result = int[].class;</span>
+        }
+
+<span class="fc" id="L1239">        return result;</span>
+    }
+
+    private static void validateErrorSection(String fileName, String sectionName, Node subSection,
+            Object instance) throws Exception {
+<span class="fc" id="L1244">        final Class&lt;?&gt; clss = instance.getClass();</span>
+<span class="fc" id="L1245">        final Set&lt;Field&gt; fields = CheckUtil.getCheckMessages(clss);</span>
+<span class="fc" id="L1246">        final Set&lt;String&gt; list = new TreeSet&lt;&gt;();</span>
+
+<span class="fc bfc" id="L1248" title="All 2 branches covered.">        for (Field field : fields) {</span>
+            // below is required for package/private classes
+<span class="pc bpc" id="L1250" title="1 of 2 branches missed.">            if (!field.isAccessible()) {</span>
+<span class="fc" id="L1251">                field.setAccessible(true);</span>
+            }
+
+<span class="fc" id="L1254">            list.add(field.get(null).toString());</span>
+<span class="fc" id="L1255">        }</span>
+
+<span class="fc" id="L1257">        final StringBuilder expectedText = new StringBuilder(120);</span>
+
+<span class="fc bfc" id="L1259" title="All 2 branches covered.">        for (String s : list) {</span>
+<span class="fc" id="L1260">            expectedText.append(s);</span>
+<span class="fc" id="L1261">            expectedText.append('\n');</span>
+<span class="fc" id="L1262">        }</span>
+
+<span class="fc bfc" id="L1264" title="All 2 branches covered.">        if (expectedText.length() &gt; 0) {</span>
+<span class="fc" id="L1265">            expectedText.append(&quot;All messages can be customized if the default message doesn't &quot;</span>
+                    + &quot;suit you.\nPlease see the documentation to learn how to.&quot;);
+        }
+
+<span class="fc bfc" id="L1269" title="All 2 branches covered.">        if (subSection == null) {</span>
+<span class="fc" id="L1270">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L1271">                    + &quot;' should have the expected error keys&quot;, &quot;&quot;, expectedText.toString());</span>
+        }
+        else {
+<span class="fc" id="L1274">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L1275">                    + &quot;' should have the expected error keys&quot;, expectedText.toString().trim(),</span>
+<span class="fc" id="L1276">                    subSection.getTextContent().replaceAll(&quot;\n\\s+&quot;, &quot;\n&quot;).trim());</span>
+
+<span class="fc bfc" id="L1278" title="All 2 branches covered.">            for (Node node : XmlUtil.findChildElementsByTag(subSection, &quot;a&quot;)) {</span>
+<span class="fc" id="L1279">                final String url = node.getAttributes().getNamedItem(&quot;href&quot;).getTextContent();</span>
+<span class="fc" id="L1280">                final String linkText = node.getTextContent().trim();</span>
+                final String expectedUrl;
+
+<span class="fc bfc" id="L1283" title="All 2 branches covered.">                if (&quot;see the documentation&quot;.equals(linkText)) {</span>
+<span class="fc" id="L1284">                    expectedUrl = &quot;config.html#Custom_messages&quot;;</span>
+                }
+                else {
+<span class="fc" id="L1287">                    expectedUrl = &quot;https://github.com/search?q=&quot;</span>
+                            + &quot;path%3Asrc%2Fmain%2Fresources%2F&quot;
+<span class="fc" id="L1289">                            + clss.getPackage().getName().replace(&quot;.&quot;, &quot;%2F&quot;)</span>
+                            + &quot;+filename%3Amessages*.properties+repo%3Acheckstyle%2Fcheckstyle+%22&quot;
+                            + linkText + &quot;%22&quot;;
+                }
+
+<span class="fc" id="L1294">                Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                        + &quot;' should have matching url for '&quot; + linkText + &quot;'&quot;, expectedUrl, url);
+<span class="fc" id="L1296">            }</span>
+        }
+<span class="fc" id="L1298">    }</span>
+
+    private static void validateUsageExample(String fileName, String sectionName, Node subSection) {
+<span class="fc" id="L1301">        final String text = subSection.getTextContent().replace(&quot;Checkstyle Style&quot;, &quot;&quot;)</span>
+<span class="fc" id="L1302">                .replace(&quot;Google Style&quot;, &quot;&quot;).replace(&quot;Sun Style&quot;, &quot;&quot;).trim();</span>
+
+<span class="fc" id="L1304">        Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L1305">                + &quot;' has unknown text in 'Example of Usage': &quot; + text, text.isEmpty());</span>
+
+<span class="fc" id="L1307">        boolean hasCheckstyle = false;</span>
+<span class="fc" id="L1308">        boolean hasGoogle = false;</span>
+<span class="fc" id="L1309">        boolean hasSun = false;</span>
+
+<span class="fc bfc" id="L1311" title="All 2 branches covered.">        for (Node node : XmlUtil.findChildElementsByTag(subSection, &quot;a&quot;)) {</span>
+<span class="fc" id="L1312">            final String url = node.getAttributes().getNamedItem(&quot;href&quot;).getTextContent();</span>
+<span class="fc" id="L1313">            final String linkText = node.getTextContent().trim();</span>
+<span class="fc" id="L1314">            String expectedUrl = null;</span>
+
+<span class="fc bfc" id="L1316" title="All 2 branches covered.">            if (&quot;Checkstyle Style&quot;.equals(linkText)) {</span>
+<span class="fc" id="L1317">                hasCheckstyle = true;</span>
+<span class="fc" id="L1318">                expectedUrl = &quot;https://github.com/search?q=&quot;</span>
+                        + &quot;path%3Aconfig+filename%3Acheckstyle_checks.xml+&quot;
+                        + &quot;repo%3Acheckstyle%2Fcheckstyle+&quot; + sectionName;
+            }
+<span class="fc bfc" id="L1322" title="All 2 branches covered.">            else if (&quot;Google Style&quot;.equals(linkText)) {</span>
+<span class="fc" id="L1323">                hasGoogle = true;</span>
+<span class="fc" id="L1324">                expectedUrl = &quot;https://github.com/search?q=&quot;</span>
+                        + &quot;path%3Asrc%2Fmain%2Fresources+filename%3Agoogle_checks.xml+&quot;
+                        + &quot;repo%3Acheckstyle%2Fcheckstyle+&quot;
+                        + sectionName;
+
+<span class="fc" id="L1329">                Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                        + &quot;' should be in google_checks.xml or not reference 'Google Style'&quot;,
+<span class="fc" id="L1331">                        GOOGLE_MODULES.contains(sectionName));</span>
+            }
+<span class="pc bpc" id="L1333" title="1 of 2 branches missed.">            else if (&quot;Sun Style&quot;.equals(linkText)) {</span>
+<span class="fc" id="L1334">                hasSun = true;</span>
+<span class="fc" id="L1335">                expectedUrl = &quot;https://github.com/search?q=&quot;</span>
+                        + &quot;path%3Asrc%2Fmain%2Fresources+filename%3Asun_checks.xml+&quot;
+                        + &quot;repo%3Acheckstyle%2Fcheckstyle+&quot;
+                        + sectionName;
+
+<span class="fc" id="L1340">                Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                        + &quot;' should be in sun_checks.xml or not reference 'Sun Style'&quot;,
+<span class="fc" id="L1342">                        SUN_MODULES.contains(sectionName));</span>
+            }
+
+<span class="fc" id="L1345">            Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+                    + &quot;' should have matching url&quot;, expectedUrl, url);
+<span class="fc" id="L1347">        }</span>
+
+<span class="fc" id="L1349">        Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have a checkstyle section&quot;, hasCheckstyle);
+<span class="fc bfc" id="L1351" title="All 2 branches covered.">        Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have a google section since it is in it's config&quot;, hasGoogle
+<span class="pc bpc" id="L1353" title="1 of 2 branches missed.">                || !GOOGLE_MODULES.contains(sectionName));</span>
+<span class="fc bfc" id="L1354" title="All 2 branches covered.">        Assert.assertTrue(fileName + &quot; section '&quot; + sectionName</span>
+                + &quot;' should have a sun section since it is in it's config&quot;,
+<span class="pc bpc" id="L1356" title="1 of 2 branches missed.">                hasSun || !SUN_MODULES.contains(sectionName));</span>
+<span class="fc" id="L1357">    }</span>
+
+    private static void validatePackageSection(String fileName, String sectionName,
+            Node subSection, Object instance) {
+<span class="fc" id="L1361">        Assert.assertEquals(fileName + &quot; section '&quot; + sectionName</span>
+<span class="fc" id="L1362">                + &quot;' should have matching package&quot;, instance.getClass().getPackage().getName(),</span>
+<span class="fc" id="L1363">                subSection.getTextContent().trim());</span>
+<span class="fc" id="L1364">    }</span>
+
+    private static void validateParentSection(String fileName, String sectionName,
+            Node subSection) {
+        final String expected;
+
+<span class="fc bfc" id="L1370" title="All 4 branches covered.">        if (!&quot;TreeWalker&quot;.equals(sectionName) &amp;&amp; hasParentModule(sectionName)) {</span>
+<span class="fc" id="L1371">            expected = &quot;TreeWalker&quot;;</span>
+        }
+        else {
+<span class="fc" id="L1374">            expected = &quot;Checker&quot;;</span>
+        }
+
+<span class="fc" id="L1377">        Assert.assertEquals(</span>
+                fileName + &quot; section '&quot; + sectionName + &quot;' should have matching parent&quot;,
+                expected, subSection
+<span class="fc" id="L1380">                        .getTextContent().trim());</span>
+<span class="fc" id="L1381">    }</span>
+
+    private static boolean hasParentModule(String sectionName) {
+<span class="fc" id="L1384">        final String search = &quot;\&quot;&quot; + sectionName + &quot;\&quot;&quot;;</span>
+<span class="fc" id="L1385">        boolean result = true;</span>
+
+<span class="fc bfc" id="L1387" title="All 2 branches covered.">        for (String find : XML_FILESET_LIST) {</span>
+<span class="fc bfc" id="L1388" title="All 2 branches covered.">            if (find.contains(search)) {</span>
+<span class="fc" id="L1389">                result = false;</span>
+<span class="fc" id="L1390">                break;</span>
+            }
+<span class="fc" id="L1392">        }</span>
+
+<span class="fc" id="L1394">        return result;</span>
+    }
+
+    private static Set&lt;String&gt; getProperties(Class&lt;?&gt; clss) {
+<span class="fc" id="L1398">        final Set&lt;String&gt; result = new TreeSet&lt;&gt;();</span>
+<span class="fc" id="L1399">        final PropertyDescriptor[] map = PropertyUtils.getPropertyDescriptors(clss);</span>
+
+<span class="fc bfc" id="L1401" title="All 2 branches covered.">        for (PropertyDescriptor p : map) {</span>
+<span class="fc bfc" id="L1402" title="All 2 branches covered.">            if (p.getWriteMethod() != null) {</span>
+<span class="fc" id="L1403">                result.add(p.getName());</span>
+            }
+        }
+
+<span class="fc" id="L1407">        return result;</span>
+    }
+
+    @Test
+    public void testAllStyleRules() throws Exception {
+<span class="fc bfc" id="L1412" title="All 2 branches covered.">        for (Path path : XdocUtil.getXdocsStyleFilePaths(XdocUtil.getXdocsFilePaths())) {</span>
+<span class="fc" id="L1413">            final String fileName = path.getFileName().toString();</span>
+<span class="fc" id="L1414">            final String styleName = fileName.substring(0, fileName.lastIndexOf('_'));</span>
+<span class="fc" id="L1415">            final String input = new String(Files.readAllBytes(path), UTF_8);</span>
+<span class="fc" id="L1416">            final Document document = XmlUtil.getRawXml(fileName, input, input);</span>
+<span class="fc" id="L1417">            final NodeList sources = document.getElementsByTagName(&quot;tr&quot;);</span>
+
+            final Set&lt;String&gt; styleChecks;
+<span class="pc bpc" id="L1420" title="4 of 10 branches missed.">            switch (styleName) {</span>
+                case &quot;google&quot;:
+<span class="fc" id="L1422">                    styleChecks = new HashSet&lt;&gt;(GOOGLE_MODULES);</span>
+<span class="fc" id="L1423">                    break;</span>
+
+                case &quot;sun&quot;:
+<span class="fc" id="L1426">                    styleChecks = new HashSet&lt;&gt;(SUN_MODULES);</span>
+<span class="fc" id="L1427">                    styleChecks.removeAll(IGNORED_SUN_MODULES);</span>
+<span class="fc" id="L1428">                    break;</span>
+
+                default:
+<span class="nc" id="L1431">                    Assert.fail(&quot;Missing modules list for style file '&quot; + fileName + &quot;'&quot;);</span>
+<span class="nc" id="L1432">                    styleChecks = null;</span>
+            }
+
+<span class="fc" id="L1435">            String lastRuleName = null;</span>
+<span class="fc" id="L1436">            String[] lastRuleNumberParts = null;</span>
+
+<span class="fc bfc" id="L1438" title="All 2 branches covered.">            for (int position = 0; position &lt; sources.getLength(); position++) {</span>
+<span class="fc" id="L1439">                final Node row = sources.item(position);</span>
+<span class="fc" id="L1440">                final List&lt;Node&gt; columns = new ArrayList&lt;&gt;(</span>
+<span class="fc" id="L1441">                        XmlUtil.findChildElementsByTag(row, &quot;td&quot;));</span>
+
+<span class="fc bfc" id="L1443" title="All 2 branches covered.">                if (columns.isEmpty()) {</span>
+<span class="fc" id="L1444">                    continue;</span>
+                }
+
+<span class="fc" id="L1447">                final String ruleName = columns.get(1).getTextContent().trim();</span>
+<span class="fc" id="L1448">                lastRuleNumberParts = validateRuleNameOrder(</span>
+                        fileName, lastRuleName, lastRuleNumberParts, ruleName);
+
+<span class="pc bpc" id="L1451" title="1 of 2 branches missed.">                if (!&quot;--&quot;.equals(ruleName)) {</span>
+<span class="fc" id="L1452">                    validateStyleAnchors(XmlUtil.findChildElementsByTag(columns.get(0), &quot;a&quot;),</span>
+                            fileName, ruleName);
+                }
+
+<span class="fc" id="L1456">                validateStyleModules(XmlUtil.findChildElementsByTag(columns.get(2), &quot;a&quot;),</span>
+<span class="fc" id="L1457">                        XmlUtil.findChildElementsByTag(columns.get(3), &quot;a&quot;), styleChecks, styleName,</span>
+                        ruleName);
+
+<span class="fc" id="L1460">                lastRuleName = ruleName;</span>
+            }
+
+            // these modules aren't documented, but are added to the config
+<span class="fc" id="L1464">            styleChecks.remove(&quot;BeforeExecutionExclusionFileFilter&quot;);</span>
+<span class="fc" id="L1465">            styleChecks.remove(&quot;TreeWalker&quot;);</span>
+<span class="fc" id="L1466">            styleChecks.remove(&quot;Checker&quot;);</span>
+
+<span class="fc" id="L1468">            Assert.assertTrue(fileName + &quot; requires the following check(s) to appear: &quot;</span>
+<span class="fc" id="L1469">                    + styleChecks, styleChecks.isEmpty());</span>
+<span class="fc" id="L1470">        }</span>
+<span class="fc" id="L1471">    }</span>
+
+    private static String[] validateRuleNameOrder(String fileName, String lastRuleName,
+                                                  String[] lastRuleNumberParts, String ruleName) {
+<span class="fc" id="L1475">        final String[] ruleNumberParts = ruleName.split(&quot; &quot;, 2)[0].split(&quot;\\.&quot;);</span>
+
+<span class="fc bfc" id="L1477" title="All 2 branches covered.">        if (lastRuleName != null) {</span>
+<span class="fc" id="L1478">            final int ruleNumberPartsAmount = ruleNumberParts.length;</span>
+<span class="fc" id="L1479">            final int lastRuleNumberPartsAmount = lastRuleNumberParts.length;</span>
+<span class="fc" id="L1480">            final String outOfOrderReason = fileName + &quot; rule '&quot; + ruleName</span>
+                    + &quot;' is out of order compared to '&quot; + lastRuleName + &quot;'&quot;;
+<span class="fc" id="L1482">            boolean lastRuleNumberPartWasEqual = false;</span>
+            int partIndex;
+<span class="pc bpc" id="L1484" title="1 of 2 branches missed.">            for (partIndex = 0; partIndex &lt; ruleNumberPartsAmount; partIndex++) {</span>
+<span class="fc bfc" id="L1485" title="All 2 branches covered.">                if (lastRuleNumberPartsAmount &lt;= partIndex) {</span>
+                    // equal up to here and last rule has less parts,
+                    // thus order is correct, stop comparing
+<span class="fc" id="L1488">                    break;</span>
+                }
+
+<span class="fc" id="L1491">                final String ruleNumberPart = ruleNumberParts[partIndex];</span>
+<span class="fc" id="L1492">                final String lastRuleNumberPart = lastRuleNumberParts[partIndex];</span>
+<span class="fc" id="L1493">                final boolean ruleNumberPartsAreNumeric = IntStream.concat(</span>
+<span class="fc" id="L1494">                        ruleNumberPart.chars(),</span>
+<span class="fc" id="L1495">                        lastRuleNumberPart.chars()</span>
+<span class="fc" id="L1496">                ).allMatch(Character::isDigit);</span>
+
+<span class="pc bpc" id="L1498" title="1 of 2 branches missed.">                if (ruleNumberPartsAreNumeric) {</span>
+<span class="fc" id="L1499">                    final int numericRuleNumberPart = parseInt(ruleNumberPart);</span>
+<span class="fc" id="L1500">                    final int numericLastRuleNumberPart = parseInt(lastRuleNumberPart);</span>
+<span class="pc bpc" id="L1501" title="1 of 2 branches missed.">                    Assert.assertThat(</span>
+                            outOfOrderReason,
+<span class="fc" id="L1503">                            numericRuleNumberPart &lt; numericLastRuleNumberPart,</span>
+<span class="fc" id="L1504">                            describedAs(&quot;'%0' should not be less than '%1'&quot;,</span>
+<span class="fc" id="L1505">                                    is(false),</span>
+<span class="fc" id="L1506">                                    numericRuleNumberPart, numericLastRuleNumberPart));</span>
+<span class="fc" id="L1507">                }</span>
+                else {
+<span class="nc" id="L1509">                    Assert.assertThat(</span>
+                            outOfOrderReason,
+<span class="nc bnc" id="L1511" title="All 2 branches missed.">                            ruleNumberPart.compareToIgnoreCase(lastRuleNumberPart) &lt; 0,</span>
+<span class="nc" id="L1512">                            describedAs(&quot;'%0' should not be less than '%1'&quot;,</span>
+<span class="nc" id="L1513">                                    is(false),</span>
+                                    ruleNumberPart, lastRuleNumberPart));
+                }
+<span class="fc" id="L1516">                lastRuleNumberPartWasEqual = ruleNumberPart.equalsIgnoreCase(lastRuleNumberPart);</span>
+<span class="fc bfc" id="L1517" title="All 2 branches covered.">                if (!lastRuleNumberPartWasEqual) {</span>
+                    // number part is not equal but properly ordered,
+                    // thus order is correct, stop comparing
+<span class="fc" id="L1520">                    break;</span>
+                }
+            }
+<span class="pc bpc" id="L1523" title="3 of 4 branches missed.">            if (ruleNumberPartsAmount == partIndex &amp;&amp; lastRuleNumberPartWasEqual) {</span>
+<span class="nc bnc" id="L1524" title="All 2 branches missed.">                if (lastRuleNumberPartsAmount == partIndex) {</span>
+<span class="nc" id="L1525">                    Assert.fail(fileName + &quot; rule '&quot; + ruleName + &quot;' and rule '&quot;</span>
+                            + lastRuleName + &quot;' have the same rule number&quot;);
+                }
+                else {
+<span class="nc" id="L1529">                    Assert.fail(outOfOrderReason);</span>
+                }
+            }
+        }
+
+<span class="fc" id="L1534">        return ruleNumberParts;</span>
+    }
+
+    private static void validateStyleAnchors(Set&lt;Node&gt; anchors, String fileName, String ruleName) {
+<span class="fc" id="L1538">        Assert.assertEquals(fileName + &quot; rule '&quot; + ruleName + &quot;' must have two row anchors&quot;, 2,</span>
+<span class="fc" id="L1539">                anchors.size());</span>
+
+<span class="fc" id="L1541">        final int space = ruleName.indexOf(' ');</span>
+<span class="pc bpc" id="L1542" title="1 of 2 branches missed.">        Assert.assertTrue(fileName + &quot; rule '&quot; + ruleName</span>
+                + &quot;' must have have a space between the rule's number and the rule's name&quot;,
+                space != -1);
+
+<span class="fc" id="L1546">        final String ruleNumber = ruleName.substring(0, space);</span>
+
+<span class="fc" id="L1548">        int position = 1;</span>
+
+<span class="fc bfc" id="L1550" title="All 2 branches covered.">        for (Node anchor : anchors) {</span>
+            final String actualUrl;
+            final String expectedUrl;
+
+<span class="fc bfc" id="L1554" title="All 2 branches covered.">            if (position == 1) {</span>
+<span class="fc" id="L1555">                actualUrl = anchor.getAttributes().getNamedItem(&quot;name&quot;).getTextContent();</span>
+<span class="fc" id="L1556">                expectedUrl = ruleNumber;</span>
+            }
+            else {
+<span class="fc" id="L1559">                actualUrl = anchor.getAttributes().getNamedItem(&quot;href&quot;).getTextContent();</span>
+<span class="fc" id="L1560">                expectedUrl = &quot;#&quot; + ruleNumber;</span>
+            }
+
+<span class="fc" id="L1563">            Assert.assertEquals(fileName + &quot; rule '&quot; + ruleName + &quot;' anchor &quot; + position</span>
+                    + &quot; should have matching name/url&quot;, expectedUrl, actualUrl);
+
+<span class="fc" id="L1566">            position++;</span>
+<span class="fc" id="L1567">        }</span>
+<span class="fc" id="L1568">    }</span>
+
+    private static void validateStyleModules(Set&lt;Node&gt; checks, Set&lt;Node&gt; configs,
+            Set&lt;String&gt; styleChecks, String styleName, String ruleName) {
+<span class="fc" id="L1572">        final Iterator&lt;Node&gt; itrChecks = checks.iterator();</span>
+<span class="fc" id="L1573">        final Iterator&lt;Node&gt; itrConfigs = configs.iterator();</span>
+
+<span class="fc bfc" id="L1575" title="All 2 branches covered.">        while (itrChecks.hasNext()) {</span>
+<span class="fc" id="L1576">            final Node module = itrChecks.next();</span>
+<span class="fc" id="L1577">            final String moduleName = module.getTextContent().trim();</span>
+
+<span class="fc" id="L1579">            if (!module.getAttributes().getNamedItem(&quot;href&quot;).getTextContent()</span>
+<span class="fc bfc" id="L1580" title="All 2 branches covered.">                    .startsWith(&quot;config_&quot;)) {</span>
+<span class="fc" id="L1581">                continue;</span>
+            }
+
+<span class="fc" id="L1584">            Assert.assertTrue(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot; + moduleName</span>
+<span class="pc bpc" id="L1585" title="1 of 2 branches missed.">                    + &quot;' shouldn't end with 'Check'&quot;, !moduleName.endsWith(&quot;Check&quot;));</span>
+
+<span class="fc" id="L1587">            styleChecks.remove(moduleName);</span>
+
+<span class="fc bfc" id="L1589" title="All 2 branches covered.">            for (String configName : new String[] {&quot;config&quot;, &quot;test&quot;}) {</span>
+<span class="fc" id="L1590">                Node config = null;</span>
+
+                try {
+<span class="fc" id="L1593">                    config = itrConfigs.next();</span>
+                }
+<span class="nc" id="L1595">                catch (NoSuchElementException ignore) {</span>
+<span class="nc" id="L1596">                    Assert.fail(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot;</span>
+                            + moduleName + &quot;' is missing the config link: &quot; + configName);
+<span class="fc" id="L1598">                }</span>
+
+<span class="fc" id="L1600">                Assert.assertEquals(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot;</span>
+                        + moduleName + &quot;' has mismatched config/test links&quot;, configName,
+<span class="fc" id="L1602">                        config.getTextContent().trim());</span>
+
+<span class="fc" id="L1604">                final String configUrl = config.getAttributes().getNamedItem(&quot;href&quot;)</span>
+<span class="fc" id="L1605">                        .getTextContent();</span>
+
+<span class="fc bfc" id="L1607" title="All 2 branches covered.">                if (&quot;config&quot;.equals(configName)) {</span>
+<span class="fc" id="L1608">                    final String expectedUrl = &quot;https://github.com/search?q=&quot;</span>
+                            + &quot;path%3Asrc%2Fmain%2Fresources+filename%3A&quot; + styleName
+                            + &quot;_checks.xml+repo%3Acheckstyle%2Fcheckstyle+&quot; + moduleName;
+
+<span class="fc" id="L1612">                    Assert.assertEquals(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot;</span>
+                                    + moduleName + &quot;' should have matching &quot; + configName + &quot; url&quot;,
+                            expectedUrl, configUrl);
+<span class="fc" id="L1615">                }</span>
+<span class="pc bpc" id="L1616" title="1 of 2 branches missed.">                else if (&quot;test&quot;.equals(configName)) {</span>
+<span class="fc" id="L1617">                    Assert.assertTrue(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot;</span>
+                                    + moduleName + &quot;' should have matching &quot; + configName + &quot; url&quot;,
+<span class="fc" id="L1619">                            configUrl.startsWith(&quot;https://github.com/checkstyle/checkstyle/&quot;</span>
+                                    + &quot;blob/master/src/it/java/com/&quot; + styleName
+                                    + &quot;/checkstyle/test/&quot;));
+<span class="fc" id="L1622">                    Assert.assertTrue(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot;</span>
+                                    + moduleName + &quot;' should have matching &quot; + configName + &quot; url&quot;,
+<span class="fc" id="L1624">                            configUrl.endsWith(&quot;/&quot; + moduleName + &quot;Test.java&quot;));</span>
+
+<span class="fc" id="L1626">                    Assert.assertTrue(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' module '&quot;</span>
+                            + moduleName + &quot;' should have a test that exists&quot;,
+<span class="fc" id="L1628">                            new File(configUrl.substring(53)</span>
+<span class="fc" id="L1629">                                    .replace('/', File.separatorChar)).exists());</span>
+                }
+            }
+<span class="fc" id="L1632">        }</span>
+
+<span class="fc" id="L1634">        Assert.assertFalse(styleName + &quot;_style.xml rule '&quot; + ruleName + &quot;' has too many configs&quot;,</span>
+<span class="fc" id="L1635">                itrConfigs.hasNext());</span>
+<span class="fc" id="L1636">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

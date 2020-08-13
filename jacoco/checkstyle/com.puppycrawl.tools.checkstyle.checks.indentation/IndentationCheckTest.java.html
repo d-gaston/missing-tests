@@ -1,0 +1,2157 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>IndentationCheckTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.checks.indentation</a> &gt; <span class="el_source">IndentationCheckTest.java</span></div><h1>IndentationCheckTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.checks.indentation;
+
+import static com.puppycrawl.tools.checkstyle.checks.indentation.IndentationCheck.MSG_CHILD_ERROR;
+import static com.puppycrawl.tools.checkstyle.checks.indentation.IndentationCheck.MSG_CHILD_ERROR_MULTI;
+import static com.puppycrawl.tools.checkstyle.checks.indentation.IndentationCheck.MSG_ERROR;
+import static com.puppycrawl.tools.checkstyle.checks.indentation.IndentationCheck.MSG_ERROR_MULTI;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.junit.Test;
+
+import com.puppycrawl.tools.checkstyle.AbstractModuleTestSupport;
+import com.puppycrawl.tools.checkstyle.Checker;
+import com.puppycrawl.tools.checkstyle.DefaultConfiguration;
+import com.puppycrawl.tools.checkstyle.api.AuditEvent;
+import com.puppycrawl.tools.checkstyle.api.AuditListener;
+import com.puppycrawl.tools.checkstyle.api.Configuration;
+import com.puppycrawl.tools.checkstyle.utils.CommonUtil;
+
+/**
+ * Unit test for IndentationCheck.
+ */
+<span class="fc" id="L56">public class IndentationCheckTest extends AbstractModuleTestSupport {</span>
+
+<span class="fc" id="L58">    private static final Pattern LINE_WITH_COMMENT_REGEX =</span>
+<span class="fc" id="L59">                    Pattern.compile(&quot;.*?//indent:(\\d+)(?: ioffset:(\\d+))?&quot;</span>
+                        + &quot; exp:(&gt;=)?(\\d+(?:,\\d+)*?)( warn)?$&quot;);
+
+<span class="fc" id="L62">    private static final IndentComment[] EMPTY_INDENT_COMMENT_ARRAY = new IndentComment[0];</span>
+
+    private static IndentComment[] getLinesWithWarnAndCheckComments(String aFileName,
+            final int tabWidth)
+                    throws IOException {
+<span class="fc" id="L67">        final List&lt;IndentComment&gt; result = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L68">        try (BufferedReader br = Files.newBufferedReader(Paths.get(aFileName),</span>
+                StandardCharsets.UTF_8)) {
+<span class="fc" id="L70">            int lineNumber = 1;</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">            for (String line = br.readLine(); line != null; line = br.readLine()) {</span>
+<span class="fc" id="L72">                final Matcher match = LINE_WITH_COMMENT_REGEX.matcher(line);</span>
+<span class="fc bfc" id="L73" title="All 2 branches covered.">                if (match.matches()) {</span>
+<span class="fc" id="L74">                    final IndentComment warn = new IndentComment(match, lineNumber);</span>
+<span class="fc" id="L75">                    final int actualIndent = getLineStart(line, tabWidth);</span>
+
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">                    if (actualIndent != warn.getIndent()) {</span>
+<span class="nc" id="L78">                        throw new IllegalStateException(String.format(Locale.ROOT,</span>
+                                        &quot;File \&quot;%1$s\&quot; has incorrect indentation in comment. &quot;
+                                                        + &quot;Line %2$d: comment:%3$d, actual:%4$d.&quot;,
+                                        aFileName,
+<span class="nc" id="L82">                                        lineNumber,</span>
+<span class="nc" id="L83">                                        warn.getIndent(),</span>
+<span class="nc" id="L84">                                        actualIndent));</span>
+                    }
+
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">                    if (!isCommentConsistent(warn)) {</span>
+<span class="nc" id="L88">                        throw new IllegalStateException(String.format(Locale.ROOT,</span>
+                                        &quot;File \&quot;%1$s\&quot; has inconsistent comment on line %2$d&quot;,
+                                        aFileName,
+<span class="nc" id="L91">                                        lineNumber));</span>
+                    }
+
+<span class="fc bfc" id="L94" title="All 2 branches covered.">                    if (warn.isWarning()) {</span>
+<span class="fc" id="L95">                        result.add(warn);</span>
+                    }
+<span class="fc" id="L97">                }</span>
+<span class="pc bpc" id="L98" title="1 of 2 branches missed.">                else if (!line.isEmpty()) {</span>
+<span class="nc" id="L99">                    throw new IllegalStateException(String.format(Locale.ROOT,</span>
+                                    &quot;File \&quot;%1$s\&quot; has no indentation comment or its format &quot;
+                                                    + &quot;malformed. Error on line: %2$d&quot;,
+                                    aFileName,
+<span class="nc" id="L103">                                    lineNumber));</span>
+                }
+<span class="fc" id="L105">                lineNumber++;</span>
+            }
+        }
+<span class="fc" id="L108">        return result.toArray(EMPTY_INDENT_COMMENT_ARRAY);</span>
+    }
+
+    private static boolean isCommentConsistent(IndentComment comment) {
+<span class="fc" id="L112">        final String[] levels = comment.getExpectedWarning().split(&quot;, &quot;);</span>
+<span class="fc" id="L113">        final int indent = comment.getIndent() + comment.getIndentOffset();</span>
+        final boolean result;
+<span class="fc bfc" id="L115" title="All 2 branches covered.">        if (levels.length &gt; 1) {</span>
+            // multi
+<span class="fc" id="L117">            final boolean containsActualLevel =</span>
+<span class="fc" id="L118">                            Arrays.asList(levels).contains(String.valueOf(indent));</span>
+
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">            result = containsActualLevel != comment.isWarning();</span>
+<span class="fc" id="L121">        }</span>
+        else {
+<span class="fc" id="L123">            final int expectedWarning = Integer.parseInt(comment.getExpectedWarning());</span>
+
+<span class="fc bfc" id="L125" title="All 2 branches covered.">            if (comment.isExpectedNonStrict()) {</span>
+                // non-strict
+<span class="fc bfc" id="L127" title="All 2 branches covered.">                final boolean test = indent &gt;= expectedWarning;</span>
+<span class="pc bpc" id="L128" title="1 of 2 branches missed.">                result = test != comment.isWarning();</span>
+<span class="fc" id="L129">            }</span>
+            else {
+                // single
+<span class="fc bfc" id="L132" title="All 2 branches covered.">                final boolean test = expectedWarning == indent;</span>
+<span class="pc bpc" id="L133" title="1 of 2 branches missed.">                result = test != comment.isWarning();</span>
+            }
+        }
+<span class="fc" id="L136">        return result;</span>
+    }
+
+    private static int getLineStart(String line, final int tabWidth) {
+<span class="fc" id="L140">        int lineStart = 0;</span>
+<span class="pc bpc" id="L141" title="1 of 2 branches missed.">        for (int index = 0; index &lt; line.length(); ++index) {</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">            if (!Character.isWhitespace(line.charAt(index))) {</span>
+<span class="fc" id="L143">                lineStart = CommonUtil.lengthExpandedTabs(line, index, tabWidth);</span>
+<span class="fc" id="L144">                break;</span>
+            }
+        }
+<span class="fc" id="L147">        return lineStart;</span>
+    }
+
+    private void verifyWarns(Configuration config, String filePath,
+                    String... expected)
+                    throws Exception {
+<span class="fc" id="L153">        final int tabWidth = Integer.parseInt(config.getAttribute(&quot;tabWidth&quot;));</span>
+<span class="fc" id="L154">        final IndentComment[] linesWithWarn =</span>
+<span class="fc" id="L155">                        getLinesWithWarnAndCheckComments(filePath, tabWidth);</span>
+<span class="fc" id="L156">        verify(config, filePath, expected, linesWithWarn);</span>
+<span class="fc" id="L157">        assertEquals(&quot;Expected warning count in UT does not match warn&quot;</span>
+                        + &quot; comment count in input file&quot;, linesWithWarn.length,
+                        expected.length);
+<span class="fc" id="L160">    }</span>
+
+    private void verify(Configuration config, String filePath, String[] expected,
+            final IndentComment... linesWithWarn) throws Exception {
+<span class="fc" id="L164">        final Checker checker = createChecker(config);</span>
+<span class="fc" id="L165">        checker.addListener(new IndentAudit(linesWithWarn));</span>
+<span class="fc" id="L166">        verify(checker, filePath, expected);</span>
+<span class="fc" id="L167">    }</span>
+
+    @Override
+    protected String getPackageLocation() {
+<span class="fc" id="L171">        return &quot;com/puppycrawl/tools/checkstyle/checks/indentation/indentation&quot;;</span>
+    }
+
+    @Test
+    public void testGetRequiredTokens() {
+<span class="fc" id="L176">        final IndentationCheck checkObj = new IndentationCheck();</span>
+<span class="fc" id="L177">        final int[] requiredTokens = checkObj.getRequiredTokens();</span>
+<span class="fc" id="L178">        final HandlerFactory handlerFactory = new HandlerFactory();</span>
+<span class="fc" id="L179">        final int[] expected = handlerFactory.getHandledTypes();</span>
+<span class="fc" id="L180">        Arrays.sort(expected);</span>
+<span class="fc" id="L181">        Arrays.sort(requiredTokens);</span>
+<span class="fc" id="L182">        assertArrayEquals(&quot;Default required tokens are invalid&quot;, expected, requiredTokens);</span>
+<span class="fc" id="L183">    }</span>
+
+    @Test
+    public void testGetAcceptableTokens() {
+<span class="fc" id="L187">        final IndentationCheck checkObj = new IndentationCheck();</span>
+<span class="fc" id="L188">        final int[] acceptableTokens = checkObj.getAcceptableTokens();</span>
+<span class="fc" id="L189">        final HandlerFactory handlerFactory = new HandlerFactory();</span>
+<span class="fc" id="L190">        final int[] expected = handlerFactory.getHandledTypes();</span>
+<span class="fc" id="L191">        Arrays.sort(expected);</span>
+<span class="fc" id="L192">        Arrays.sort(acceptableTokens);</span>
+<span class="fc" id="L193">        assertArrayEquals(&quot;Default acceptable tokens are invalid&quot;, expected, acceptableTokens);</span>
+<span class="fc" id="L194">    }</span>
+
+    @Test
+    public void testThrowsIndentProperty() {
+<span class="fc" id="L198">        final IndentationCheck indentationCheck = new IndentationCheck();</span>
+
+<span class="fc" id="L200">        indentationCheck.setThrowsIndent(1);</span>
+
+<span class="fc" id="L202">        assertEquals(&quot;Invalid throws indent&quot;, 1, indentationCheck.getThrowsIndent());</span>
+<span class="fc" id="L203">    }</span>
+
+    @Test
+    public void testStrictCondition() throws Exception {
+<span class="fc" id="L207">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L208">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L209">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L210">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L211">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L212">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L213">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L214">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L215">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L216">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L217">        verifyWarns(checkConfig, getPath(&quot;InputIndentationStrictCondition.java&quot;), expected);</span>
+<span class="fc" id="L218">    }</span>
+
+    @Test
+    public void forbidOldStyle() throws Exception {
+<span class="fc" id="L222">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L223">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L224">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L225">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L226">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L227">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L228">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L229">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L230">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L231">        final String[] expected = {</span>
+<span class="fc" id="L232">            &quot;20: &quot; + getCheckMessage(MSG_ERROR, &quot;int&quot;, 29, 12),</span>
+<span class="fc" id="L233">            &quot;21: &quot; + getCheckMessage(MSG_ERROR, &quot;int&quot;, 29, 12),</span>
+        };
+<span class="fc" id="L235">        verifyWarns(checkConfig, getPath(&quot;InputIndentationMethodCStyle.java&quot;), expected);</span>
+<span class="fc" id="L236">    }</span>
+
+    @Test
+    public void testZeroCaseLevel() throws Exception {
+<span class="fc" id="L240">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L241">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L242">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L243">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L244">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L245">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L246">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L247">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L248">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L249">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L250">        verifyWarns(checkConfig, getPath(&quot;InputIndentationZeroCaseLevel.java&quot;), expected);</span>
+<span class="fc" id="L251">    }</span>
+
+    @Test
+    public void testAndroidStyle() throws Exception {
+<span class="fc" id="L255">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L256">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L257">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L258">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L259">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L260">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L261">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L262">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L263">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L264">        final String[] expected = {</span>
+<span class="fc" id="L265">            &quot;42: &quot; + getCheckMessage(MSG_ERROR, &quot;extends&quot;, 3, 8),</span>
+<span class="fc" id="L266">            &quot;44: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 3, 4),</span>
+<span class="fc" id="L267">            &quot;47: &quot; + getCheckMessage(MSG_ERROR, &quot;foo&quot;, 8, 12),</span>
+<span class="fc" id="L268">            &quot;50: &quot; + getCheckMessage(MSG_ERROR, &quot;int&quot;, 8, 12),</span>
+<span class="fc" id="L269">            &quot;53: &quot; + getCheckMessage(MSG_ERROR, &quot;true&quot;, 13, 16),</span>
+<span class="fc" id="L270">            &quot;56: &quot; + getCheckMessage(MSG_ERROR, &quot;+&quot;, 16, 20),</span>
+<span class="fc" id="L271">            &quot;57: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 8, 12),</span>
+<span class="fc" id="L272">            &quot;60: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 11, 12),</span>
+<span class="fc" id="L273">            &quot;62: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 7, 8),</span>
+        };
+<span class="fc" id="L275">        verifyWarns(checkConfig, getPath(&quot;InputIndentationAndroidStyle.java&quot;), expected);</span>
+<span class="fc" id="L276">    }</span>
+
+    @Test
+    public void testMethodCallLineWrap() throws Exception {
+<span class="fc" id="L280">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L282">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L283">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L284">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L285">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L286">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L287">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L288">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L289">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L290">        final String[] expected = {</span>
+<span class="fc" id="L291">            &quot;53: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 18, 20),</span>
+<span class="fc" id="L292">            &quot;54: &quot; + getCheckMessage(MSG_ERROR, &quot;method call rparen&quot;, 14, 16),</span>
+<span class="fc" id="L293">            &quot;75: &quot; + getCheckMessage(MSG_ERROR, &quot;lambda arguments&quot;, 12, 16),</span>
+        };
+<span class="fc" id="L295">        verifyWarns(checkConfig, getPath(&quot;InputIndentationMethodCallLineWrap.java&quot;), expected);</span>
+<span class="fc" id="L296">    }</span>
+
+    @Test
+    public void testDifficultAnnotations() throws Exception {
+<span class="fc" id="L300">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L302">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L303">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L304">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L305">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L306">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L307">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L308">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L309">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L310">        final String[] expected = {</span>
+<span class="fc" id="L311">            &quot;40: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 0, 4),</span>
+<span class="fc" id="L312">            &quot;41: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 0, 4),</span>
+<span class="fc" id="L313">            &quot;50: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 6, 8),</span>
+        };
+<span class="fc" id="L315">        verifyWarns(checkConfig, getPath(&quot;InputIndentationDifficultAnnotations.java&quot;), expected);</span>
+<span class="fc" id="L316">    }</span>
+
+    @Test
+    public void testAnnotationClosingParenthesisEndsInSameIndentationAsOpening() throws Exception {
+<span class="fc" id="L320">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L322">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L323">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L324">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+
+<span class="fc" id="L326">        final String[] expected = {</span>
+<span class="fc" id="L327">            &quot;34: &quot; + getCheckMessage(MSG_ERROR, &quot;)&quot;, 16, 0),</span>
+<span class="fc" id="L328">            &quot;36: &quot; + getCheckMessage(MSG_ERROR, &quot;)&quot;, 16, 0),</span>
+<span class="fc" id="L329">            &quot;40: &quot; + getCheckMessage(MSG_ERROR, &quot;)&quot;, 8, 4),</span>
+<span class="fc" id="L330">            &quot;42: &quot; + getCheckMessage(MSG_ERROR, &quot;)&quot;, 8, 4),</span>
+<span class="fc" id="L331">            &quot;46: &quot; + getCheckMessage(MSG_ERROR, &quot;)&quot;, 8, 4),</span>
+        };
+
+<span class="fc" id="L334">        verifyWarns(checkConfig,</span>
+<span class="fc" id="L335">            getPath(&quot;InputIndentation&quot;</span>
+                + &quot;AnnotationClosingParenthesisEndsInSameIndentationAsOpening.java&quot;),
+                expected);
+<span class="fc" id="L338">    }</span>
+
+    @Test
+    public void testAnonClassesFromGuava() throws Exception {
+<span class="fc" id="L342">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L344">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L345">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L346">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L347">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L348">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L349">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L350">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L351">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L352">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L353">        verifyWarns(checkConfig, getPath(&quot;InputIndentationFromGuava2.java&quot;), expected);</span>
+<span class="fc" id="L354">    }</span>
+
+    @Test
+    public void testAnnotations() throws Exception {
+<span class="fc" id="L358">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L360">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L361">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L362">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L363">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L364">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L365">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L366">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L367">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L368">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L369">        verifyWarns(checkConfig, getPath(&quot;InputIndentationFromGuava.java&quot;), expected);</span>
+<span class="fc" id="L370">    }</span>
+
+    @Test
+    public void testCorrectIfAndParameters() throws Exception {
+<span class="fc" id="L374">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L376">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L377">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L378">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L379">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L380">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L381">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L382">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L383">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L384">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L385">        verifyWarns(checkConfig, getPath(&quot;InputIndentationCorrectIfAndParameter.java&quot;), expected);</span>
+<span class="fc" id="L386">    }</span>
+
+    @Test
+    public void testAnonymousClasses() throws Exception {
+<span class="fc" id="L390">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L392">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L393">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L394">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L395">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L396">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L397">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L398">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L399">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L400">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L401">        verifyWarns(checkConfig, getPath(&quot;InputIndentationAnonymousClasses.java&quot;), expected);</span>
+<span class="fc" id="L402">    }</span>
+
+    @Test
+    public void testArrays() throws Exception {
+<span class="fc" id="L406">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L408">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L409">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L410">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L411">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L412">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L413">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L414">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L415">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L416">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L417">        verifyWarns(checkConfig, getPath(&quot;InputIndentationArrays.java&quot;), expected);</span>
+<span class="fc" id="L418">    }</span>
+
+    @Test
+    public void testLabels() throws Exception {
+<span class="fc" id="L422">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L424">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L425">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L426">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L427">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L428">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L429">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L430">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L431">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L432">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L433">        verifyWarns(checkConfig, getPath(&quot;InputIndentationLabels.java&quot;), expected);</span>
+<span class="fc" id="L434">    }</span>
+
+    @Test
+    public void testClassesAndMethods() throws Exception {
+<span class="fc" id="L438">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L440">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L441">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L442">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L443">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L444">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L445">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L446">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L447">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L448">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L449">        verifyWarns(checkConfig, getPath(&quot;InputIndentationClassesMethods.java&quot;), expected);</span>
+<span class="fc" id="L450">    }</span>
+
+    @Test
+    public void testCtorCall() throws Exception {
+<span class="fc" id="L454">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L456">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L457">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L458">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L459">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L460">        final String[] expected = {</span>
+<span class="fc" id="L461">            &quot;28: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 6),</span>
+<span class="fc" id="L462">            &quot;29: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 6),</span>
+<span class="fc" id="L463">            &quot;30: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 6),</span>
+<span class="fc" id="L464">            &quot;34: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 6),</span>
+<span class="fc" id="L465">            &quot;35: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 6),</span>
+<span class="fc" id="L466">            &quot;39: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 6),</span>
+<span class="fc" id="L467">            &quot;40: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 8),</span>
+<span class="fc" id="L468">            &quot;41: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 8),</span>
+<span class="fc" id="L469">            &quot;45: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 6),</span>
+<span class="fc" id="L470">            &quot;46: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 8),</span>
+<span class="fc" id="L471">            &quot;50: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 6),</span>
+<span class="fc" id="L472">            &quot;51: &quot; + getCheckMessage(MSG_ERROR, &quot;(&quot;, 4, 8),</span>
+<span class="fc" id="L473">            &quot;52: &quot; + getCheckMessage(MSG_ERROR, &quot;x&quot;, 4, 8),</span>
+<span class="fc" id="L474">            &quot;56: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 6),</span>
+<span class="fc" id="L475">            &quot;57: &quot; + getCheckMessage(MSG_ERROR, &quot;method call lparen&quot;, 4, 6),</span>
+<span class="fc" id="L476">            &quot;62: &quot; + getCheckMessage(MSG_ERROR, &quot;.&quot;, 4, 10),</span>
+<span class="fc" id="L477">            &quot;63: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 8),</span>
+<span class="fc" id="L478">            &quot;68: &quot; + getCheckMessage(MSG_ERROR, &quot;super&quot;, 4, 10),</span>
+<span class="fc" id="L479">            &quot;69: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 4, 8),</span>
+        };
+<span class="fc" id="L481">        verifyWarns(checkConfig, getPath(&quot;InputIndentationCtorCall.java&quot;), expected);</span>
+<span class="fc" id="L482">    }</span>
+
+    @Test
+    public void testMembers() throws Exception {
+<span class="fc" id="L486">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L488">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L489">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L490">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L491">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L492">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L493">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L494">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L495">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L496">        final String[] expected = {</span>
+<span class="fc" id="L497">            &quot;22: &quot; + getCheckMessage(MSG_ERROR, &quot;=&quot;, 5, 6),</span>
+<span class="fc" id="L498">            &quot;57: &quot; + getCheckMessage(MSG_ERROR, &quot;class def rcurly&quot;, 3, 2),</span>
+        };
+
+<span class="fc" id="L501">        verifyWarns(checkConfig, getPath(&quot;InputIndentationMembers.java&quot;), expected);</span>
+<span class="fc" id="L502">    }</span>
+
+    @Test
+    public void testInvalidLabel() throws Exception {
+<span class="fc" id="L506">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L508">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L509">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L510">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L511">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L512">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L513">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L514">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L515">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L516">        final String[] expected = {</span>
+<span class="fc" id="L517">            &quot;24: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 10, &quot;8, 12&quot;),</span>
+<span class="fc" id="L518">            &quot;33: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 2, &quot;4, 8&quot;),</span>
+<span class="fc" id="L519">            &quot;36: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 18, &quot;8, 12&quot;),</span>
+<span class="fc" id="L520">            &quot;37: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 18, 8),</span>
+<span class="fc" id="L521">            &quot;39: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 6, &quot;8, 12&quot;),</span>
+<span class="fc" id="L522">            &quot;41: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 6, &quot;8, 12&quot;),</span>
+        };
+<span class="fc" id="L524">        verifyWarns(checkConfig, getPath(&quot;InputIndentationInvalidLabelIndent.java&quot;), expected);</span>
+<span class="fc" id="L525">    }</span>
+
+    @Test
+    public void testInvalidLabelWithWhileLoop() throws Exception {
+<span class="fc" id="L529">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L531">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L532">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L533">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L534">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L535">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L536">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L537">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L538">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L539">        final String[] expected = {</span>
+<span class="fc" id="L540">            &quot;18: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 9, &quot;4, 8&quot;),</span>
+<span class="fc" id="L541">            &quot;19: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;label&quot;, 9, &quot;8, 12&quot;),</span>
+        };
+<span class="fc" id="L543">        verifyWarns(checkConfig, getPath(&quot;InputIndentationInvalidLabelWithWhileLoopIndent.java&quot;),</span>
+            expected);
+<span class="fc" id="L545">    }</span>
+
+    @Test
+    public void testValidLabel() throws Exception {
+<span class="fc" id="L549">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L551">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L552">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L553">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L554">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L555">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L556">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L557">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L558">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L559">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L560">        verifyWarns(checkConfig, getPath(&quot;InputIndentationValidLabelIndent.java&quot;), expected);</span>
+<span class="fc" id="L561">    }</span>
+
+    @Test
+    public void testValidIfWithChecker() throws Exception {
+<span class="fc" id="L565">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L567">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L568">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L569">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L570">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L571">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L572">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L573">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L574">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L575">        final String fileName = getPath(&quot;InputIndentationValidIfIndent.java&quot;);</span>
+<span class="fc" id="L576">        final String[] expected = {</span>
+<span class="fc" id="L577">            &quot;231: &quot; + getCheckMessage(MSG_ERROR, &quot;(&quot;, 8, 12),</span>
+        };
+<span class="fc" id="L579">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L580">    }</span>
+
+    @Test
+    public void testValidDotWithChecker()
+            throws Exception {
+<span class="fc" id="L585">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L587">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L588">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L589">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L590">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L591">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L592">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L593">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L594">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L595">        final String fileName = getPath(&quot;InputIndentationValidDotIndent.java&quot;);</span>
+<span class="fc" id="L596">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L597">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L598">    }</span>
+
+    @Test
+    public void testValidMethodWithChecker()
+            throws Exception {
+<span class="fc" id="L603">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L605">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L606">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L607">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L608">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L609">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L610">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L611">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L612">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L613">        final String fileName = getPath(&quot;InputIndentationValidMethodIndent.java&quot;);</span>
+<span class="fc" id="L614">        final String[] expected = {</span>
+<span class="fc" id="L615">            &quot;129: &quot; + getCheckMessage(MSG_ERROR, &quot;void&quot;, 4, 8),</span>
+<span class="fc" id="L616">            &quot;130: &quot; + getCheckMessage(MSG_ERROR, &quot;method5&quot;, 4, 8),</span>
+        };
+<span class="fc" id="L618">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L619">    }</span>
+
+    @Test
+    public void testInvalidMethodWithChecker()
+            throws Exception {
+<span class="fc" id="L624">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L626">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L627">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L628">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L629">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L630">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L631">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L632">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L633">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L634">        final String fileName = getPath(&quot;InputIndentationInvalidMethodIndent.java&quot;);</span>
+<span class="fc" id="L635">        final String[] expected = {</span>
+<span class="fc" id="L636">            &quot;23: &quot; + getCheckMessage(MSG_ERROR, &quot;ctor def rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L637">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;ctor def modifier&quot;, 6, 4),</span>
+<span class="fc" id="L638">            &quot;27: &quot; + getCheckMessage(MSG_ERROR, &quot;ctor def lcurly&quot;, 2, 4),</span>
+<span class="fc" id="L639">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;ctor def rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L640">            &quot;31: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 2, 4),</span>
+<span class="fc" id="L641">            &quot;32: &quot; + getCheckMessage(MSG_ERROR, &quot;method def rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L642">            &quot;69: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 5, 4),</span>
+<span class="fc" id="L643">            &quot;70: &quot; + getCheckMessage(MSG_ERROR, &quot;final&quot;, 5, 9),</span>
+<span class="fc" id="L644">            &quot;71: &quot; + getCheckMessage(MSG_ERROR, &quot;void&quot;, 5, 9),</span>
+<span class="fc" id="L645">            &quot;72: &quot; + getCheckMessage(MSG_ERROR, &quot;method5&quot;, 4, 9),</span>
+<span class="fc" id="L646">            &quot;80: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 3, 4),</span>
+<span class="fc" id="L647">            &quot;81: &quot; + getCheckMessage(MSG_ERROR, &quot;final&quot;, 3, 7),</span>
+<span class="fc" id="L648">            &quot;82: &quot; + getCheckMessage(MSG_ERROR, &quot;void&quot;, 3, 7),</span>
+<span class="fc" id="L649">            &quot;83: &quot; + getCheckMessage(MSG_ERROR, &quot;method6&quot;, 5, 7),</span>
+<span class="fc" id="L650">            &quot;93: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 4, 8),</span>
+<span class="fc" id="L651">            &quot;98: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 6, 8),</span>
+<span class="fc" id="L652">            &quot;99: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 6, 8),</span>
+<span class="fc" id="L653">            &quot;100: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 10, 12),</span>
+<span class="fc" id="L654">            &quot;101: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L655">            &quot;104: &quot; + getCheckMessage(MSG_ERROR, &quot;Arrays&quot;, 10, 12),</span>
+<span class="fc" id="L656">            &quot;113: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 10, 12),</span>
+<span class="fc" id="L657">            &quot;122: &quot; + getCheckMessage(MSG_ERROR, &quot;new&quot;, 10, 12),</span>
+<span class="fc" id="L658">            &quot;126: &quot; + getCheckMessage(MSG_ERROR, &quot;new&quot;, 10, 12),</span>
+<span class="fc" id="L659">            &quot;127: &quot; + getCheckMessage(MSG_ERROR, &quot;)&quot;, 6, 8),</span>
+<span class="fc" id="L660">            &quot;131: &quot; + getCheckMessage(MSG_ERROR, &quot;method call rparen&quot;, 6, 8),</span>
+<span class="fc" id="L661">            &quot;145: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 10, 12),</span>
+<span class="fc" id="L662">            &quot;148: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 10, 12),</span>
+<span class="fc" id="L663">            &quot;158: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 6, 12),</span>
+<span class="fc" id="L664">            &quot;170: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 4, 8),</span>
+<span class="fc" id="L665">            &quot;175: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 4, 8),</span>
+<span class="fc" id="L666">            &quot;179: &quot; + getCheckMessage(MSG_ERROR, &quot;int&quot;, 0, 8),</span>
+<span class="fc" id="L667">            &quot;180: &quot; + getCheckMessage(MSG_ERROR, &quot;method9&quot;, 4, 8),</span>
+<span class="fc" id="L668">            &quot;190: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 12, 8),</span>
+        };
+<span class="fc" id="L670">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L671">    }</span>
+
+    @Test
+    public void testInvalidSwitchWithChecker()
+            throws Exception {
+<span class="fc" id="L676">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L678">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L679">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L680">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L681">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L682">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L683">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L684">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L685">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L686">        final String fileName = getPath(&quot;InputIndentationInvalidSwitchIndent.java&quot;);</span>
+<span class="fc" id="L687">        final String[] expected = {</span>
+<span class="fc" id="L688">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;switch&quot;, 6, 8),</span>
+<span class="fc" id="L689">            &quot;32: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 10, 12),</span>
+<span class="fc" id="L690">            &quot;33: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 14, 16),</span>
+<span class="fc" id="L691">            &quot;37: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 14, 16),</span>
+<span class="fc" id="L692">            &quot;39: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 14, 12),</span>
+<span class="fc" id="L693">            &quot;40: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 10, 12),</span>
+<span class="fc" id="L694">            &quot;43: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 10, 12),</span>
+<span class="fc" id="L695">            &quot;44: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 14, 16),</span>
+<span class="fc" id="L696">            &quot;45: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 14, 16),</span>
+<span class="fc" id="L697">            &quot;53: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 14, 16),</span>
+<span class="fc" id="L698">            &quot;54: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 18, 16),</span>
+<span class="fc" id="L699">            &quot;55: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 10, 12),</span>
+<span class="fc" id="L700">            &quot;59: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 10, 12),</span>
+<span class="fc" id="L701">            &quot;62: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 14, 12),</span>
+<span class="fc" id="L702">            &quot;66: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 14, 12),</span>
+<span class="fc" id="L703">            &quot;69: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 10, 12),</span>
+<span class="fc" id="L704">            &quot;76: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 14, 16),</span>
+<span class="fc" id="L705">            &quot;81: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 14, 16),</span>
+<span class="fc" id="L706">            &quot;89: &quot; + getCheckMessage(MSG_ERROR, &quot;switch rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L707">            &quot;92: &quot; + getCheckMessage(MSG_ERROR, &quot;switch lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L708">            &quot;93: &quot; + getCheckMessage(MSG_ERROR, &quot;switch rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L709">            &quot;95: &quot; + getCheckMessage(MSG_ERROR, &quot;switch lcurly&quot;, 10, 8),</span>
+<span class="fc" id="L710">            &quot;96: &quot; + getCheckMessage(MSG_ERROR, &quot;switch rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L711">            &quot;99: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 8, 12),</span>
+<span class="fc" id="L712">            &quot;100: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 12, 16),</span>
+<span class="fc" id="L713">            &quot;101: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 16, 20),</span>
+<span class="fc" id="L714">            &quot;102: &quot; + getCheckMessage(MSG_ERROR, &quot;else&quot;, 12, 16),</span>
+<span class="fc" id="L715">            &quot;103: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 16, 20),</span>
+        };
+<span class="fc" id="L717">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L718">    }</span>
+
+    @Test
+    public void testValidSwitchWithChecker()
+            throws Exception {
+<span class="fc" id="L723">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L725">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L726">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L727">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L728">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L729">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L730">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L731">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L732">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L733">        final String fileName = getPath(&quot;InputIndentationValidSwitchIndent.java&quot;);</span>
+<span class="fc" id="L734">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L735">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L736">    }</span>
+
+    @Test
+    public void testValidArrayInitDefaultIndentWithChecker()
+            throws Exception {
+<span class="fc" id="L741">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L743">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L744">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L745">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L746">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L747">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L748">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L749">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L750">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L751">        final String fileName = getPath(&quot;InputIndentationValidArrayInitDefaultIndent.java&quot;);</span>
+<span class="fc" id="L752">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L753">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L754">    }</span>
+
+    @Test
+    public void testValidArrayInitWithChecker()
+            throws Exception {
+<span class="fc" id="L759">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L761">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L762">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L763">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L764">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L765">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L766">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L767">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L768">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L769">        final String fileName = getPath(&quot;InputIndentationValidArrayInitIndent.java&quot;);</span>
+<span class="fc" id="L770">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L771">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L772">    }</span>
+
+    @Test
+    public void testInvalidArrayInitWithChecker()
+            throws Exception {
+<span class="fc" id="L777">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L779">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L780">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L781">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L782">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L783">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L784">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L785">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L786">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L787">        final String fileName = getPath(&quot;InputIndentationInvalidArrayInitIndent.java&quot;);</span>
+<span class="fc" id="L788">        final String[] expected = {</span>
+<span class="fc" id="L789">            &quot;21: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 2, 4),</span>
+<span class="fc" id="L790">            &quot;22: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 6, 4),</span>
+<span class="fc" id="L791">            &quot;24: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 2, 4),</span>
+<span class="fc" id="L792">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 6, 4),</span>
+<span class="fc" id="L793">            &quot;29: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 8, 10),</span>
+<span class="fc" id="L794">            &quot;30: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization rcurly&quot;, 4, &quot;6, 10&quot;),</span>
+<span class="fc" id="L795">            &quot;33: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 9, 8),</span>
+<span class="fc" id="L796">            &quot;34: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 7, 8),</span>
+<span class="fc" id="L797">            &quot;35: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 9, 8),</span>
+<span class="fc" id="L798">            &quot;40: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization lcurly&quot;, 2, &quot;4, 8&quot;),</span>
+<span class="fc" id="L799">            &quot;44: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization rcurly&quot;, 6, &quot;4, 8&quot;),</span>
+<span class="fc" id="L800">            &quot;48: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization lcurly&quot;, 2, &quot;4, 8&quot;),</span>
+<span class="fc" id="L801">            &quot;52: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;array initialization&quot;, 20,</span>
+                &quot;8, 31, 33&quot;),
+<span class="fc" id="L803">            &quot;53: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;array initialization&quot;, 4, &quot;8, 31, 33&quot;),</span>
+<span class="fc" id="L804">            &quot;58: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 6, 8),</span>
+<span class="fc" id="L805">            &quot;63: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 2, 4),</span>
+<span class="fc" id="L806">            &quot;65: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 6, 4),</span>
+<span class="fc" id="L807">            &quot;66: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization rcurly&quot;, 2, &quot;6, 10&quot;),</span>
+<span class="fc" id="L808">            &quot;69: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 6, 8),</span>
+<span class="fc" id="L809">            &quot;76: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 10, 12),</span>
+<span class="fc" id="L810">            &quot;89: &quot; + getCheckMessage(MSG_ERROR, &quot;1&quot;, 8, 12),</span>
+<span class="fc" id="L811">            &quot;100: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 10, 12),</span>
+<span class="fc" id="L812">            &quot;101: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 14, 12),</span>
+<span class="fc" id="L813">            &quot;104: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 10, 12),</span>
+<span class="fc" id="L814">            &quot;105: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 14, 12),</span>
+<span class="fc" id="L815">            &quot;106: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization rcurly&quot;, 6, &quot;8, 12&quot;),</span>
+<span class="fc" id="L816">            &quot;109: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization lcurly&quot;, 6, &quot;8, 12&quot;),</span>
+<span class="fc" id="L817">            &quot;110: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 14, 12),</span>
+<span class="fc" id="L818">            &quot;111: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;array initialization&quot;, 10, 12),</span>
+<span class="fc" id="L819">            &quot;112: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;array initialization rcurly&quot;, 6, &quot;8, 12&quot;),</span>
+        };
+
+        //Test input for this test case is not checked due to issue #693.
+<span class="fc" id="L823">        verify(checkConfig, fileName, expected);</span>
+<span class="fc" id="L824">    }</span>
+
+    @Test
+    public void testValidTryWithChecker()
+            throws Exception {
+<span class="fc" id="L829">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L831">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L832">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L833">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L834">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L835">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L836">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L837">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L838">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L839">        final String fileName = getPath(&quot;InputIndentationValidTryIndent.java&quot;);</span>
+<span class="fc" id="L840">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L841">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L842">    }</span>
+
+    @Test
+    public void testInvalidTryWithChecker()
+            throws Exception {
+<span class="fc" id="L847">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L849">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L850">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L851">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L852">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L853">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L854">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L855">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L856">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L857">        final String fileName = getPath(&quot;InputIndentationInvalidTryIndent.java&quot;);</span>
+<span class="fc" id="L858">        final String[] expected = {</span>
+<span class="fc" id="L859">            &quot;25: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 9, 8),</span>
+<span class="fc" id="L860">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;try rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L861">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;catch rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L862">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 4, 8),</span>
+<span class="fc" id="L863">            &quot;31: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 8, 12),</span>
+<span class="fc" id="L864">            &quot;32: &quot; + getCheckMessage(MSG_ERROR, &quot;try rcurly&quot;, 4, 8),</span>
+<span class="fc" id="L865">            &quot;33: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;finally&quot;, 8, 12),</span>
+<span class="fc" id="L866">            &quot;38: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 8, 12),</span>
+<span class="fc" id="L867">            &quot;43: &quot; + getCheckMessage(MSG_ERROR, &quot;try rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L868">            &quot;45: &quot; + getCheckMessage(MSG_ERROR, &quot;catch rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L869">            &quot;52: &quot; + getCheckMessage(MSG_ERROR, &quot;catch rcurly&quot;, 5, 8),</span>
+<span class="fc" id="L870">            &quot;59: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 10, 12),</span>
+<span class="fc" id="L871">            &quot;60: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 14, 12),</span>
+<span class="fc" id="L872">            &quot;61: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 10, 12),</span>
+<span class="fc" id="L873">            &quot;63: &quot; + getCheckMessage(MSG_ERROR, &quot;catch&quot;, 6, 8),</span>
+<span class="fc" id="L874">            &quot;70: &quot; + getCheckMessage(MSG_ERROR, &quot;try lcurly&quot;, 10, 8),</span>
+<span class="fc" id="L875">            &quot;72: &quot; + getCheckMessage(MSG_ERROR, &quot;try rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L876">            &quot;74: &quot; + getCheckMessage(MSG_ERROR, &quot;catch lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L877">            &quot;77: &quot; + getCheckMessage(MSG_ERROR, &quot;catch rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L878">            &quot;80: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 10, 12),</span>
+<span class="fc" id="L879">            &quot;86: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 0, 8),</span>
+<span class="fc" id="L880">            &quot;87: &quot; + getCheckMessage(MSG_ERROR, &quot;try rcurly&quot;, 0, 8),</span>
+<span class="fc" id="L881">            &quot;88: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 0, 12),</span>
+<span class="fc" id="L882">            &quot;89: &quot; + getCheckMessage(MSG_ERROR, &quot;catch rcurly&quot;, 0, 8),</span>
+<span class="fc" id="L883">            &quot;91: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 0, 8),</span>
+<span class="fc" id="L884">            &quot;92: &quot; + getCheckMessage(MSG_ERROR, &quot;try rcurly&quot;, 0, 8),</span>
+<span class="fc" id="L885">            &quot;93: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;catch&quot;, 0, 12),</span>
+<span class="fc" id="L886">            &quot;94: &quot; + getCheckMessage(MSG_ERROR, &quot;catch rcurly&quot;, 0, 8),</span>
+        };
+<span class="fc" id="L888">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L889">    }</span>
+
+    @Test
+    public void testInvalidClassDefWithChecker()
+            throws Exception {
+<span class="fc" id="L894">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L896">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L897">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L898">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L899">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L900">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L901">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L902">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L903">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L904">        final String fileName = getPath(&quot;InputIndentationInvalidClassDefIndent.java&quot;);</span>
+<span class="fc" id="L905">        final String[] expected = {</span>
+<span class="fc" id="L906">            &quot;22: &quot; + getCheckMessage(MSG_ERROR, &quot;class def modifier&quot;, 2, 0),</span>
+<span class="fc" id="L907">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;class def lcurly&quot;, 2, 0),</span>
+<span class="fc" id="L908">            &quot;31: &quot; + getCheckMessage(MSG_ERROR, &quot;class def rcurly&quot;, 2, 0),</span>
+<span class="fc" id="L909">            &quot;34: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 2, 0),</span>
+<span class="fc" id="L910">            &quot;38: &quot; + getCheckMessage(MSG_ERROR, &quot;class def rcurly&quot;, 2, 0),</span>
+<span class="fc" id="L911">            &quot;43: &quot; + getCheckMessage(MSG_ERROR, &quot;extends&quot;, 2, 4),</span>
+<span class="fc" id="L912">            &quot;44: &quot; + getCheckMessage(MSG_ERROR, &quot;implements&quot;, 2, 4),</span>
+<span class="fc" id="L913">            &quot;50: &quot; + getCheckMessage(MSG_ERROR, &quot;extends&quot;, 2, 4),</span>
+<span class="fc" id="L914">            &quot;58: &quot; + getCheckMessage(MSG_ERROR, &quot;implements&quot;, 2, 4),</span>
+<span class="fc" id="L915">            &quot;59: &quot; + getCheckMessage(MSG_ERROR, &quot;java&quot;, 2, 4),</span>
+<span class="fc" id="L916">            &quot;64: &quot; + getCheckMessage(MSG_ERROR, &quot;class def modifier&quot;, 2, 0),</span>
+<span class="fc" id="L917">            &quot;65: &quot; + getCheckMessage(MSG_ERROR, &quot;class def lcurly&quot;, 2, 0),</span>
+<span class="fc" id="L918">            &quot;73: &quot; + getCheckMessage(MSG_ERROR, &quot;class def rcurly&quot;, 2, 0),</span>
+<span class="fc" id="L919">            &quot;77: &quot; + getCheckMessage(MSG_ERROR, &quot;extends&quot;, 2, 4),</span>
+<span class="fc" id="L920">            &quot;86: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 2, 4),</span>
+<span class="fc" id="L921">            &quot;88: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 6, 4),</span>
+<span class="fc" id="L922">            &quot;91: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 2, 4),</span>
+<span class="fc" id="L923">            &quot;95: &quot; + getCheckMessage(MSG_ERROR, &quot;member def modifier&quot;, 6, 8),</span>
+<span class="fc" id="L924">            &quot;101: &quot; + getCheckMessage(MSG_ERROR, &quot;int&quot;, 10, 12),</span>
+<span class="fc" id="L925">            &quot;106: &quot; + getCheckMessage(MSG_ERROR, &quot;member def modifier&quot;, 6, 8),</span>
+<span class="fc" id="L926">            &quot;111: &quot; + getCheckMessage(MSG_ERROR, &quot;class def rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L927">            &quot;113: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 6, 4),</span>
+<span class="fc" id="L928">            &quot;119: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 6, 8),</span>
+<span class="fc" id="L929">            &quot;122: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 10, 8),</span>
+<span class="fc" id="L930">            &quot;124: &quot; + getCheckMessage(MSG_ERROR, &quot;class def rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L931">            &quot;127: &quot; + getCheckMessage(MSG_ERROR, &quot;member def type&quot;, 10, 12),</span>
+<span class="fc" id="L932">            &quot;132: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 10, 8),</span>
+<span class="fc" id="L933">            &quot;133: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def lcurly&quot;, 8, &quot;10, 14&quot;),</span>
+<span class="fc" id="L934">            &quot;137: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def rcurly&quot;, 8, &quot;10, 14&quot;),</span>
+<span class="fc" id="L935">            &quot;141: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def lcurly&quot;, 6, &quot;8, 12&quot;),</span>
+<span class="fc" id="L936">            &quot;142: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 12, 10),</span>
+<span class="fc" id="L937">            &quot;144: &quot; + getCheckMessage(MSG_ERROR, &quot;method def rcurly&quot;, 12, 10),</span>
+<span class="fc" id="L938">            &quot;145: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def rcurly&quot;, 6, &quot;8, 12&quot;),</span>
+<span class="fc" id="L939">            &quot;150: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 10, 12),</span>
+<span class="fc" id="L940">            &quot;152: &quot; + getCheckMessage(MSG_ERROR, &quot;method def rcurly&quot;, 10, 12),</span>
+<span class="fc" id="L941">            &quot;188: &quot; + getCheckMessage(MSG_ERROR, &quot;class&quot;, 0, 4),</span>
+        };
+<span class="fc" id="L943">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L944">    }</span>
+
+    @Test
+    public void testInvalidBlockWithChecker()
+            throws Exception {
+<span class="fc" id="L949">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L951">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L952">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L953">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L954">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L955">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L956">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L957">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L958">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L959">        final String fileName = getPath(&quot;InputIndentationInvalidBlockIndent.java&quot;);</span>
+<span class="fc" id="L960">        final String[] expected = {</span>
+<span class="fc" id="L961">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 7, 8),</span>
+<span class="fc" id="L962">            &quot;27: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L963">            &quot;29: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L964">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L965">            &quot;32: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L966">            &quot;34: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L967">            &quot;35: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L968">            &quot;38: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L969">            &quot;39: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 13, 12),</span>
+<span class="fc" id="L970">            &quot;41: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 13, 12),</span>
+<span class="fc" id="L971">            &quot;42: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 9, 8),</span>
+<span class="fc" id="L972">            &quot;45: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L973">            &quot;46: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 10, 12),</span>
+<span class="fc" id="L974">            &quot;48: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 10, 12),</span>
+<span class="fc" id="L975">            &quot;49: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L976">            &quot;52: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L977">            &quot;55: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 10, 12),</span>
+<span class="fc" id="L978">            &quot;59: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 10, 12),</span>
+<span class="fc" id="L979">            &quot;63: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 10, 12),</span>
+<span class="fc" id="L980">            &quot;68: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 10, 12),</span>
+<span class="fc" id="L981">            &quot;70: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 10, 12),</span>
+<span class="fc" id="L982">            &quot;71: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 14, 16),</span>
+<span class="fc" id="L983">            &quot;86: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 10, 12),</span>
+<span class="fc" id="L984">            &quot;95: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization&quot;, 2, 4),</span>
+<span class="fc" id="L985">            &quot;96: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization&quot;, 6, 4),</span>
+<span class="fc" id="L986">            &quot;100: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;static initialization&quot;, 7, 8),</span>
+<span class="fc" id="L987">            &quot;103: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization&quot;, 6, 4),</span>
+<span class="fc" id="L988">            &quot;105: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization rcurly&quot;, 2, 4),</span>
+<span class="fc" id="L989">            &quot;107: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization&quot;, 2, 4),</span>
+<span class="fc" id="L990">            &quot;109: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L991">            &quot;111: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization&quot;, 2, 4),</span>
+<span class="fc" id="L992">            &quot;113: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;static initialization&quot;, 6, 8),</span>
+<span class="fc" id="L993">            &quot;116: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization lcurly&quot;, 2, 4),</span>
+<span class="fc" id="L994">            &quot;117: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;static initialization&quot;, 6, 8),</span>
+<span class="fc" id="L995">            &quot;118: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L996">            &quot;123: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;static initialization&quot;, 6, 8),</span>
+<span class="fc" id="L997">            &quot;128: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;static initialization&quot;, 4, 8),</span>
+<span class="fc" id="L998">            &quot;129: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization rcurly&quot;, 2, 4),</span>
+<span class="fc" id="L999">            &quot;134: &quot; + getCheckMessage(MSG_ERROR, &quot;static initialization rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L1000">            &quot;137: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 2, 4),</span>
+<span class="fc" id="L1001">            &quot;138: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 6, 4),</span>
+<span class="fc" id="L1002">            &quot;141: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 2, 4),</span>
+<span class="fc" id="L1003">            &quot;143: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 6, 4),</span>
+<span class="fc" id="L1004">            &quot;145: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 6, 4),</span>
+<span class="fc" id="L1005">            &quot;147: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 2, 4),</span>
+<span class="fc" id="L1006">            &quot;150: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 6, 8),</span>
+        };
+<span class="fc" id="L1008">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1009">    }</span>
+
+    @Test
+    public void testInvalidIfWithChecker()
+            throws Exception {
+<span class="fc" id="L1014">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1016">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1017">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1018">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1019">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1020">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1021">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1022">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1023">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1024">        final String fileName = getPath(&quot;InputIndentationInvalidIfIndent.java&quot;);</span>
+<span class="fc" id="L1025">        final String[] expected = {</span>
+<span class="fc" id="L1026">            &quot;55: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 1, 8),</span>
+<span class="fc" id="L1027">            &quot;60: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 9, 8),</span>
+<span class="fc" id="L1028">            &quot;61: &quot; + getCheckMessage(MSG_ERROR, &quot;if lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1029">            &quot;62: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1030">            &quot;64: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 6, 8),</span>
+<span class="fc" id="L1031">            &quot;65: &quot; + getCheckMessage(MSG_ERROR, &quot;if lcurly&quot;, 5, 8),</span>
+<span class="fc" id="L1032">            &quot;66: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 5, 8),</span>
+<span class="fc" id="L1033">            &quot;70: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1034">            &quot;71: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1035">            &quot;74: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 9, 8),</span>
+
+<span class="fc" id="L1037">            &quot;75: &quot; + getCheckMessage(MSG_ERROR, &quot;if lcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1038">            &quot;77: &quot; + getCheckMessage(MSG_ERROR, &quot;else&quot;, 9, 8),</span>
+<span class="fc" id="L1039">            &quot;79: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1040">            &quot;82: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 10, 8),</span>
+<span class="fc" id="L1041">            &quot;83: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1042">            &quot;84: &quot; + getCheckMessage(MSG_ERROR, &quot;else&quot;, 9, 8),</span>
+<span class="fc" id="L1043">            &quot;85: &quot; + getCheckMessage(MSG_ERROR, &quot;else lcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1044">            &quot;86: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 9, 8),</span>
+
+<span class="fc" id="L1046">            &quot;90: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 9, 8),</span>
+<span class="fc" id="L1047">            &quot;91: &quot; + getCheckMessage(MSG_ERROR, &quot;if lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1048">            &quot;92: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1049">            &quot;93: &quot; + getCheckMessage(MSG_ERROR, &quot;else lcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1050">            &quot;94: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1051">            &quot;97: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 6, 8),</span>
+<span class="fc" id="L1052">            &quot;98: &quot; + getCheckMessage(MSG_ERROR, &quot;if lcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1053">            &quot;99: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1054">            &quot;100: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1055">            &quot;103: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 5, 8),</span>
+<span class="fc" id="L1056">            &quot;104: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 11, 8),</span>
+<span class="fc" id="L1057">            &quot;105: &quot; + getCheckMessage(MSG_ERROR, &quot;else&quot;, 5, 8),</span>
+<span class="fc" id="L1058">            &quot;106: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 11, 8),</span>
+
+<span class="fc" id="L1060">            &quot;126: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 14, 12),</span>
+<span class="fc" id="L1061">            &quot;131: &quot; + getCheckMessage(MSG_ERROR, &quot;if lcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1062">            &quot;132: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 10, 12),</span>
+<span class="fc" id="L1063">            &quot;137: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 14, 12),</span>
+<span class="fc" id="L1064">            &quot;138: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 10, 12),</span>
+<span class="fc" id="L1065">            &quot;140: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 10, 12),</span>
+<span class="fc" id="L1066">            &quot;141: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 8, 12),</span>
+
+<span class="fc" id="L1068">            &quot;148: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 16, 12),</span>
+<span class="fc" id="L1069">            &quot;149: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1070">            &quot;152: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 16, 12),</span>
+<span class="fc" id="L1071">            &quot;158: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 0, 12),</span>
+<span class="fc" id="L1072">            &quot;162: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 40, 12),</span>
+<span class="fc" id="L1073">            &quot;169: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 14, 12),</span>
+
+<span class="fc" id="L1075">            &quot;172: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 14, 12),</span>
+<span class="fc" id="L1076">            &quot;178: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 10, 12),</span>
+<span class="fc" id="L1077">            &quot;180: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 10, 12),</span>
+<span class="fc" id="L1078">            &quot;184: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 10, 8),</span>
+<span class="fc" id="L1079">            &quot;185: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 14, 12),</span>
+<span class="fc" id="L1080">            &quot;186: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1081">            &quot;187: &quot; + getCheckMessage(MSG_ERROR, &quot;else&quot;, 10, 8),</span>
+
+<span class="fc" id="L1083">            &quot;188: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;else&quot;, 14, 12),</span>
+<span class="fc" id="L1084">            &quot;189: &quot; + getCheckMessage(MSG_ERROR, &quot;else rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1085">            &quot;192: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 9, 12),</span>
+<span class="fc" id="L1086">            &quot;193: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 11, 12),</span>
+<span class="fc" id="L1087">            &quot;197: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 10, 12),</span>
+<span class="fc" id="L1088">            &quot;200: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1089">            &quot;207: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 10, 12),</span>
+<span class="fc" id="L1090">            &quot;209: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 10, 12),</span>
+
+<span class="fc" id="L1092">            &quot;225: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 10, 12),</span>
+<span class="fc" id="L1093">            &quot;229: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 18, 20),</span>
+<span class="fc" id="L1094">            &quot;240: &quot; + getCheckMessage(MSG_ERROR, &quot;if rparen&quot;, 10, 8),</span>
+<span class="fc" id="L1095">            &quot;245: &quot; + getCheckMessage(MSG_ERROR, &quot;if rparen&quot;, 6, 8),</span>
+<span class="fc" id="L1096">            &quot;251: &quot; + getCheckMessage(MSG_ERROR, &quot;if lparen&quot;, 6, 8),</span>
+<span class="fc" id="L1097">            &quot;253: &quot; + getCheckMessage(MSG_ERROR, &quot;if rparen&quot;, 6, 8),</span>
+<span class="fc" id="L1098">            &quot;256: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 0, 8),</span>
+<span class="fc" id="L1099">            &quot;257: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 0, 12),</span>
+<span class="fc" id="L1100">            &quot;258: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 0, 12),</span>
+<span class="fc" id="L1101">            &quot;259: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 0, 8),</span>
+<span class="fc" id="L1102">            &quot;260: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 0, 8),</span>
+<span class="fc" id="L1103">            &quot;262: &quot; + getCheckMessage(MSG_ERROR, &quot;else&quot;, 0, 8),</span>
+        };
+<span class="fc" id="L1105">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1106">    }</span>
+
+    @Test
+    public void testInvalidWhileWithChecker()
+            throws Exception {
+<span class="fc" id="L1111">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1113">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1114">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1115">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1116">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1117">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1118">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1119">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1120">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1121">        final String fileName = getPath(&quot;InputIndentationInvalidWhileIndent.java&quot;);</span>
+<span class="fc" id="L1122">        final String[] expected = {</span>
+<span class="fc" id="L1123">            &quot;25: &quot; + getCheckMessage(MSG_ERROR, &quot;while&quot;, 9, 8),</span>
+<span class="fc" id="L1124">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 7, 8),</span>
+<span class="fc" id="L1125">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;while&quot;, 7, 8),</span>
+<span class="fc" id="L1126">            &quot;29: &quot; + getCheckMessage(MSG_ERROR, &quot;while lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1127">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 9, 8),</span>
+
+<span class="fc" id="L1129">            &quot;32: &quot; + getCheckMessage(MSG_ERROR, &quot;while&quot;, 9, 8),</span>
+<span class="fc" id="L1130">            &quot;33: &quot; + getCheckMessage(MSG_ERROR, &quot;while lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L1131">            &quot;34: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;while&quot;, 14, 12),</span>
+<span class="fc" id="L1132">            &quot;35: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 6, 8),</span>
+
+<span class="fc" id="L1134">            &quot;37: &quot; + getCheckMessage(MSG_ERROR, &quot;while&quot;, 10, 8),</span>
+<span class="fc" id="L1135">            &quot;39: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1136">            &quot;41: &quot; + getCheckMessage(MSG_ERROR, &quot;while&quot;, 10, 8),</span>
+<span class="fc" id="L1137">            &quot;44: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 10, 8),</span>
+
+<span class="fc" id="L1139">            &quot;46: &quot; + getCheckMessage(MSG_ERROR, &quot;while&quot;, 6, 8),</span>
+<span class="fc" id="L1140">            &quot;47: &quot; + getCheckMessage(MSG_ERROR, &quot;while lcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1141">            &quot;50: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L1142">            &quot;53: &quot; + getCheckMessage(MSG_ERROR, &quot;if&quot;, 14, 12),</span>
+<span class="fc" id="L1143">            &quot;54: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;if&quot;, 18, 16),</span>
+<span class="fc" id="L1144">            &quot;55: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 14, 12),</span>
+<span class="fc" id="L1145">            &quot;56: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;while&quot;, 14, 12),</span>
+<span class="fc" id="L1146">            &quot;57: &quot; + getCheckMessage(MSG_ERROR, &quot;while rcurly&quot;, 10, 8),</span>
+
+<span class="fc" id="L1148">            &quot;60: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;while&quot;, 10, 12),</span>
+<span class="fc" id="L1149">            &quot;66: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;while&quot;, 10, 12),</span>
+<span class="fc" id="L1150">            &quot;71: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;while&quot;, 10, 12),</span>
+<span class="fc" id="L1151">            &quot;78: &quot; + getCheckMessage(MSG_ERROR, &quot;while rparen&quot;, 5, 8),</span>
+<span class="fc" id="L1152">            &quot;85: &quot; + getCheckMessage(MSG_ERROR, &quot;while rparen&quot;, 10, 8),</span>
+<span class="fc" id="L1153">            &quot;92: &quot; + getCheckMessage(MSG_ERROR, &quot;while rparen&quot;, 10, 8),</span>
+<span class="fc" id="L1154">            &quot;99: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;while&quot;, 8, 12),</span>
+        };
+<span class="fc" id="L1156">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1157">    }</span>
+
+    @Test
+    public void testInvalidInvalidAnonymousClass() throws Exception {
+<span class="fc" id="L1161">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1163">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1164">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1165">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1166">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1167">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1168">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1169">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1170">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1171">        final String fileName = getPath(&quot;InputIndentationInvalidAnonymousClassIndent.java&quot;);</span>
+<span class="fc" id="L1172">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1173">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1174">    }</span>
+
+    @Test
+    public void testInvalidForWithChecker()
+            throws Exception {
+<span class="fc" id="L1179">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1181">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1182">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1183">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1184">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1185">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1186">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1187">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1188">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1189">        final String fileName = getPath(&quot;InputIndentationInvalidForIndent.java&quot;);</span>
+<span class="fc" id="L1190">        final String[] expected = {</span>
+<span class="fc" id="L1191">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;for&quot;, 6, 8),</span>
+<span class="fc" id="L1192">            &quot;27: &quot; + getCheckMessage(MSG_ERROR, &quot;for rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1193">            &quot;29: &quot; + getCheckMessage(MSG_ERROR, &quot;for&quot;, 9, 8),</span>
+<span class="fc" id="L1194">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;for lcurly&quot;, 6, 8),</span>
+<span class="fc" id="L1195">            &quot;31: &quot; + getCheckMessage(MSG_ERROR, &quot;for rcurly&quot;, 6, 8),</span>
+<span class="fc" id="L1196">            &quot;35: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 10, 12),</span>
+
+<span class="fc" id="L1198">            &quot;36: &quot; + getCheckMessage(MSG_ERROR, &quot;for rcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1199">            &quot;39: &quot; + getCheckMessage(MSG_ERROR, &quot;for lcurly&quot;, 10, 8),</span>
+<span class="fc" id="L1200">            &quot;40: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 10, 12),</span>
+<span class="fc" id="L1201">            &quot;48: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 10, 12),</span>
+<span class="fc" id="L1202">            &quot;54: &quot; + getCheckMessage(MSG_ERROR, &quot;for&quot;, 7, 8),</span>
+
+<span class="fc" id="L1204">            &quot;55: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 10, 12),</span>
+<span class="fc" id="L1205">            &quot;64: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 7, 12),</span>
+
+<span class="fc" id="L1207">            &quot;69: &quot; + getCheckMessage(MSG_ERROR, &quot;for&quot;, 6, 8),</span>
+<span class="fc" id="L1208">            &quot;70: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 10, 12),</span>
+<span class="fc" id="L1209">            &quot;71: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 14, 16),</span>
+<span class="fc" id="L1210">            &quot;72: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 10, 12),</span>
+<span class="fc" id="L1211">            &quot;81: &quot; + getCheckMessage(MSG_ERROR, &quot;for rparen&quot;, 12, 8),</span>
+<span class="fc" id="L1212">            &quot;86: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 2, 4),</span>
+<span class="fc" id="L1213">            &quot;87: &quot; + getCheckMessage(MSG_ERROR, &quot;for&quot;, 4, 8),</span>
+<span class="fc" id="L1214">            &quot;88: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 8, 12),</span>
+<span class="fc" id="L1215">            &quot;89: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 6, 12),</span>
+<span class="fc" id="L1216">            &quot;90: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method call&quot;, 8, 16),</span>
+<span class="fc" id="L1217">            &quot;92: &quot; + getCheckMessage(MSG_ERROR, &quot;for&quot;, 0, 8),</span>
+<span class="fc" id="L1218">            &quot;93: &quot; + getCheckMessage(MSG_ERROR, &quot;for lparen&quot;, 0, 8),</span>
+<span class="fc" id="L1219">            &quot;94: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 0, 12),</span>
+<span class="fc" id="L1220">            &quot;95: &quot; + getCheckMessage(MSG_ERROR, &quot;;&quot;, 0, 4),</span>
+<span class="fc" id="L1221">            &quot;96: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 0, 12),</span>
+<span class="fc" id="L1222">            &quot;97: &quot; + getCheckMessage(MSG_ERROR, &quot;;&quot;, 0, 4),</span>
+<span class="fc" id="L1223">            &quot;98: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;for&quot;, 0, 12),</span>
+        };
+<span class="fc" id="L1225">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1226">    }</span>
+
+    @Test
+    public void testValidForWithChecker()
+            throws Exception {
+<span class="fc" id="L1231">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1233">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1234">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1235">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1236">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1237">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1238">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1239">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1240">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1241">        final String fileName = getPath(&quot;InputIndentationValidForIndent.java&quot;);</span>
+<span class="fc" id="L1242">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1243">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1244">    }</span>
+
+    @Test
+    public void testValidDoWhileWithChecker()
+            throws Exception {
+<span class="fc" id="L1249">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1251">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1252">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1253">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1254">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1255">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1256">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1257">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1258">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1259">        final String fileName = getPath(&quot;InputIndentationValidDoWhileIndent.java&quot;);</span>
+<span class="fc" id="L1260">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1261">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1262">    }</span>
+
+    @Test
+    public void testInvalidDoWhileWithChecker()
+            throws Exception {
+<span class="fc" id="L1267">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1269">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1270">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1271">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1272">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1273">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1274">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1275">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1276">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1277">        final String fileName = getPath(&quot;InputIndentationInvalidDoWhileIndent.java&quot;);</span>
+<span class="fc" id="L1278">        final String[] expected = {</span>
+<span class="fc" id="L1279">            &quot;7: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1280">            &quot;8: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1281">            &quot;9: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1282">            &quot;10: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while rcurly&quot;, 0, 8),</span>
+<span class="fc" id="L1283">            &quot;11: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1284">            &quot;12: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while while&quot;, 0, 8),</span>
+<span class="fc" id="L1285">            &quot;13: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1286">            &quot;14: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while lcurly&quot;, 0, 8),</span>
+<span class="fc" id="L1287">            &quot;15: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1288">            &quot;16: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while while&quot;, 0, 8),</span>
+<span class="fc" id="L1289">            &quot;17: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while lparen&quot;, 0, 8),</span>
+<span class="fc" id="L1290">            &quot;18: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1291">            &quot;19: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while lparen&quot;, 0, 8),</span>
+<span class="fc" id="L1292">            &quot;20: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1293">            &quot;21: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while lparen&quot;, 0, 8),</span>
+<span class="fc" id="L1294">            &quot;22: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;do..while&quot;, 0, 8),</span>
+<span class="fc" id="L1295">            &quot;23: &quot; + getCheckMessage(MSG_ERROR, &quot;do..while rparen&quot;, 0, 8),</span>
+        };
+<span class="fc" id="L1297">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1298">    }</span>
+
+    @Test
+    public void testValidBlockWithChecker()
+            throws Exception {
+<span class="fc" id="L1303">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1305">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1306">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1307">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1308">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1309">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1310">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1311">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1312">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1313">        final String fileName = getPath(&quot;InputIndentationValidBlockIndent.java&quot;);</span>
+<span class="fc" id="L1314">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1315">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1316">    }</span>
+
+    @Test
+    public void testValidWhileWithChecker()
+            throws Exception {
+<span class="fc" id="L1321">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1323">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1324">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1325">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1326">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1327">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1328">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1329">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1330">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1331">        final String fileName = getPath(&quot;InputIndentationValidWhileIndent.java&quot;);</span>
+<span class="fc" id="L1332">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1333">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1334">    }</span>
+
+    @Test
+    public void testValidClassDefWithChecker()
+            throws Exception {
+<span class="fc" id="L1339">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1341">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1342">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1343">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1344">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1345">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1346">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1347">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1348">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1349">        final String fileName = getPath(&quot;InputIndentationValidClassDefIndent.java&quot;);</span>
+<span class="fc" id="L1350">        final String[] expected = {</span>
+<span class="fc" id="L1351">            &quot;49: &quot; + getCheckMessage(MSG_ERROR, &quot;class&quot;, 0, 4),</span>
+<span class="fc" id="L1352">            &quot;71: &quot; + getCheckMessage(MSG_ERROR, &quot;int&quot;, 8, 12),</span>
+        };
+<span class="fc" id="L1354">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1355">    }</span>
+
+    @Test
+    public void testValidInterfaceDefWithChecker()
+            throws Exception {
+<span class="fc" id="L1360">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1362">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1363">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1364">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1365">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1366">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1367">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1368">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1369">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1370">        final String fileName = getPath(&quot;InputIndentationValidInterfaceDefIndent.java&quot;);</span>
+<span class="fc" id="L1371">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1372">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1373">    }</span>
+
+    @Test
+    public void testValidCommaWithChecker()
+            throws Exception {
+<span class="fc" id="L1378">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1380">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1381">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1382">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1383">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1384">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1385">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1386">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1387">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1388">        final String fileName = getPath(&quot;InputIndentationValidCommaIndent.java&quot;);</span>
+<span class="fc" id="L1389">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1390">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1391">    }</span>
+
+    @Test
+    public void testTabs() throws Exception {
+<span class="fc" id="L1395">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1397">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1398">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1399">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1400">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1401">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1402">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1403">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1404">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1405">        final String[] expected = {</span>
+<span class="fc" id="L1406">            &quot;29: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 9, 8),</span>
+        };
+<span class="fc" id="L1408">        verifyWarns(checkConfig, getPath(&quot;InputIndentationUseTabs.java&quot;), expected);</span>
+<span class="fc" id="L1409">    }</span>
+
+    @Test
+    public void testIndentationLevel() throws Exception {
+<span class="fc" id="L1413">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1415">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1416">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1417">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1418">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1419">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1420">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1421">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1422">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1423">        final String[] expected = {</span>
+<span class="fc" id="L1424">            &quot;29: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;ctor def&quot;, 5, 4),</span>
+        };
+<span class="fc" id="L1426">        verifyWarns(checkConfig, getPath(&quot;InputIndentationUseTwoSpaces.java&quot;), expected);</span>
+<span class="fc" id="L1427">    }</span>
+
+    @Test
+    public void testThrowsIndentationLevel() throws Exception {
+<span class="fc" id="L1431">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1433">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1434">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1435">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1436">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1437">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1438">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1439">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1440">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1441">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1442">        verifyWarns(checkConfig, getPath(&quot;InputIndentationInvalidThrowsIndent.java&quot;), expected);</span>
+<span class="fc" id="L1443">    }</span>
+
+    @Test
+    public void testThrowsIndentationLevel2() throws Exception {
+<span class="fc" id="L1447">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1449">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;1&quot;);</span>
+<span class="fc" id="L1450">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L1451">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;3&quot;);</span>
+<span class="fc" id="L1452">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1453">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;5&quot;);</span>
+<span class="fc" id="L1454">        final String[] expected = {</span>
+<span class="fc" id="L1455">            &quot;7: &quot; + getCheckMessage(MSG_ERROR, &quot;Exception&quot;, 0, 6),</span>
+<span class="fc" id="L1456">            &quot;10: &quot; + getCheckMessage(MSG_ERROR, &quot;NullPointerException&quot;, 0, 6),</span>
+<span class="fc" id="L1457">            &quot;13: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+<span class="fc" id="L1458">            &quot;16: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+<span class="fc" id="L1459">            &quot;18: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+<span class="fc" id="L1460">            &quot;19: &quot; + getCheckMessage(MSG_ERROR, &quot;Exception&quot;, 0, 6),</span>
+<span class="fc" id="L1461">            &quot;22: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+<span class="fc" id="L1462">            &quot;23: &quot; + getCheckMessage(MSG_ERROR, &quot;Exception&quot;, 0, 6),</span>
+<span class="fc" id="L1463">            &quot;24: &quot; + getCheckMessage(MSG_ERROR, &quot;NullPointerException&quot;, 0, 6),</span>
+<span class="fc" id="L1464">            &quot;27: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+<span class="fc" id="L1465">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;Exception&quot;, 0, 6),</span>
+<span class="fc" id="L1466">            &quot;31: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+<span class="fc" id="L1467">            &quot;37: &quot; + getCheckMessage(MSG_ERROR, &quot;throws&quot;, 0, 6),</span>
+        };
+<span class="fc" id="L1469">        verifyWarns(checkConfig, getPath(&quot;InputIndentationInvalidThrowsIndent2.java&quot;), expected);</span>
+<span class="fc" id="L1470">    }</span>
+
+    @Test
+    public void testCaseLevel() throws Exception {
+<span class="fc" id="L1474">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1476">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1477">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1478">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1479">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1480">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1481">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1482">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1483">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1484">        final String[] expected = {</span>
+<span class="fc" id="L1485">            &quot;27: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;case&quot;, 10, 8),</span>
+        };
+<span class="fc" id="L1487">        verifyWarns(checkConfig, getPath(&quot;InputIndentationCaseLevel.java&quot;), expected);</span>
+<span class="fc" id="L1488">    }</span>
+
+    @Test
+    public void testBraceAdjustment() throws Exception {
+<span class="fc" id="L1492">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1494">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1495">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1496">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1497">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1498">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1499">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1500">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1501">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1502">        final String[] expected = {</span>
+<span class="fc" id="L1503">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;if rcurly&quot;, 8, 10),</span>
+        };
+<span class="fc" id="L1505">        verifyWarns(checkConfig, getPath(&quot;InputIndentationBraceAdjustment.java&quot;), expected);</span>
+<span class="fc" id="L1506">    }</span>
+
+    @Test
+    public void testInvalidAssignWithChecker() throws Exception {
+<span class="fc" id="L1510">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1512">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1513">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1514">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1515">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1516">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1517">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1518">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1519">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1520">        final String[] expected = {</span>
+<span class="fc" id="L1521">            &quot;22: &quot; + getCheckMessage(MSG_ERROR, &quot;getLineNo&quot;, 10, 12),</span>
+<span class="fc" id="L1522">            &quot;24: &quot; + getCheckMessage(MSG_ERROR, &quot;getLine&quot;, 10, 12),</span>
+<span class="fc" id="L1523">            &quot;28: &quot; + getCheckMessage(MSG_ERROR, &quot;=&quot;, 9, 12),</span>
+<span class="fc" id="L1524">            &quot;29: &quot; + getCheckMessage(MSG_ERROR, &quot;1&quot;, 10, 12),</span>
+        };
+<span class="fc" id="L1526">        verifyWarns(checkConfig, getPath(&quot;InputIndentationInvalidAssignIndent.java&quot;), expected);</span>
+<span class="fc" id="L1527">    }</span>
+
+    @Test
+    public void testInvalidImportIndent() throws Exception {
+<span class="fc" id="L1531">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1532">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1533">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1534">        final String[] expected = {</span>
+<span class="fc" id="L1535">            &quot;4: &quot; + getCheckMessage(MSG_ERROR, &quot;.&quot;, 2, 4),</span>
+<span class="fc" id="L1536">            &quot;5: &quot; + getCheckMessage(MSG_ERROR, &quot;import&quot;, 1, 0),</span>
+        };
+<span class="fc" id="L1538">        verifyWarns(checkConfig, getPath(&quot;InputIndentationInvalidImportIndent.java&quot;), expected);</span>
+<span class="fc" id="L1539">    }</span>
+
+    @Test
+    public void testValidAssignWithChecker() throws Exception {
+<span class="fc" id="L1543">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1545">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1546">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1547">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1548">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1549">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1550">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1551">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1552">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1553">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1554">        verifyWarns(checkConfig, getPath(&quot;InputIndentationValidAssignIndent.java&quot;), expected);</span>
+<span class="fc" id="L1555">    }</span>
+
+    @Test
+    public void test15Extensions() throws Exception {
+<span class="fc" id="L1559">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1561">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1562">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1563">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1564">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1565">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1566">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1567">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1568">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1569">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1570">        verifyWarns(checkConfig, getPath(&quot;InputIndentation15Extensions.java&quot;), expected);</span>
+<span class="fc" id="L1571">    }</span>
+
+    @Test
+    public void testTryResources() throws Exception {
+<span class="fc" id="L1575">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1577">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1578">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1579">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1580">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1581">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1582">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1583">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1584">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1585">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1586">        verifyWarns(checkConfig, getPath(&quot;InputIndentationValidTryResourcesIndent.java&quot;),</span>
+               expected);
+<span class="fc" id="L1588">    }</span>
+
+    @Test
+    public void testSwitchCustom() throws Exception {
+<span class="fc" id="L1592">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+
+<span class="fc" id="L1594">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1595">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1596">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1597">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1598">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1599">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1600">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1601">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1602">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1603">        verifyWarns(checkConfig, getPath(&quot;InputIndentationSwitchCustom.java&quot;),</span>
+               expected);
+<span class="fc" id="L1605">    }</span>
+
+    @Test
+    public void testSynchronizedStatement() throws Exception {
+<span class="fc" id="L1609">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1610">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1611">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1612">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1613">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1614">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1615">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1616">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1617">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1618">        final String[] expected = {</span>
+<span class="fc" id="L1619">            &quot;27: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;synchronized&quot;, 0, 12),</span>
+<span class="fc" id="L1620">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;synchronized lparen&quot;, 12, 8),</span>
+        };
+<span class="fc" id="L1622">        verifyWarns(checkConfig, getPath(&quot;InputIndentationSynchronizedStatement.java&quot;), expected);</span>
+<span class="fc" id="L1623">    }</span>
+
+    @Test
+    public void testSynchronizedMethod() throws Exception {
+<span class="fc" id="L1627">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1628">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1629">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1630">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1631">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1632">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L1633">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1634">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1635">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1636">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1637">        verifyWarns(checkConfig, getPath(&quot;InputIndentationSynchronizedMethod.java&quot;), expected);</span>
+<span class="fc" id="L1638">    }</span>
+
+    @Test
+    public void testAnonymousClassInMethod() throws Exception {
+<span class="fc" id="L1642">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1643">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1644">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1645">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1646">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1647">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1648">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1649">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1650">        final String[] expected = {</span>
+<span class="fc" id="L1651">            &quot;19: &quot; + getCheckMessage(MSG_ERROR, &quot;method def modifier&quot;, 8, 2),</span>
+<span class="fc" id="L1652">            &quot;20: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;method def&quot;, 16, 4),</span>
+<span class="fc" id="L1653">            &quot;21: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;method def modifier&quot;, 24, &quot;18, 20, 22&quot;),</span>
+<span class="fc" id="L1654">            &quot;23: &quot; + getCheckMessage(MSG_CHILD_ERROR_MULTI, &quot;method def&quot;, 32, &quot;20, 22, 24&quot;),</span>
+<span class="fc" id="L1655">            &quot;24: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;method def rcurly&quot;, 24, &quot;18, 20, 22&quot;),</span>
+<span class="fc" id="L1656">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;method def rcurly&quot;, 8, 2),</span>
+        };
+<span class="fc" id="L1658">        verifyWarns(checkConfig, getPath(&quot;InputIndentationAnonymousClassInMethod.java&quot;), expected);</span>
+<span class="fc" id="L1659">    }</span>
+
+    @Test
+    public void testAnonymousClassInMethodWithCurlyOnNewLine() throws Exception {
+<span class="fc" id="L1663">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1664">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1665">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1666">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1667">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1668">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1669">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1670">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1671">        final String[] expected = {</span>
+<span class="fc" id="L1672">            &quot;40: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def rcurly&quot;, 18, &quot;8, 12, 16&quot;),</span>
+<span class="fc" id="L1673">            &quot;42: &quot; + getCheckMessage(MSG_ERROR, &quot;new&quot;, 14, 16),</span>
+<span class="fc" id="L1674">            &quot;48: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def rcurly&quot;, 14, &quot;8, 12, 16&quot;),</span>
+<span class="fc" id="L1675">            &quot;60: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def lcurly&quot;, 18, &quot;8, 12, 16&quot;),</span>
+<span class="fc" id="L1676">            &quot;66: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def rcurly&quot;, 18, &quot;8, 12, 16&quot;),</span>
+<span class="fc" id="L1677">            &quot;69: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def lcurly&quot;, 14, &quot;8, 12, 16&quot;),</span>
+<span class="fc" id="L1678">            &quot;75: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;object def rcurly&quot;, 14, &quot;8, 12, 16&quot;),</span>
+        };
+<span class="fc" id="L1680">        verifyWarns(checkConfig,</span>
+<span class="fc" id="L1681">            getPath(&quot;InputIndentationAnonymousClassInMethodCurlyOnNewLine.java&quot;), expected);</span>
+<span class="fc" id="L1682">    }</span>
+
+    @Test
+    public void testAnnotationDefinition() throws Exception {
+<span class="fc" id="L1686">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1687">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1688">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1689">        verifyWarns(checkConfig, getPath(&quot;InputIndentationAnnotationDefinition.java&quot;), expected);</span>
+<span class="fc" id="L1690">    }</span>
+
+    @Test
+    public void testPackageDeclaration() throws Exception {
+<span class="fc" id="L1694">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1695">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1696">        final String[] expected = {</span>
+<span class="fc" id="L1697">            &quot;1: &quot; + getCheckMessage(MSG_ERROR, &quot;package def&quot;, 1, 0),</span>
+        };
+<span class="fc" id="L1699">        verifyWarns(checkConfig, getPath(&quot;InputIndentationPackageDeclaration.java&quot;), expected);</span>
+<span class="fc" id="L1700">    }</span>
+
+    @Test
+    public void testPackageDeclaration2() throws Exception {
+<span class="fc" id="L1704">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1705">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1706">        final String[] expected = {</span>
+<span class="fc" id="L1707">            &quot;2: &quot; + getCheckMessage(MSG_ERROR, &quot;package def&quot;, 1, 0),</span>
+        };
+<span class="fc" id="L1709">        verifyWarns(checkConfig,</span>
+<span class="fc" id="L1710">            getPath(&quot;package-info.java&quot;), expected);</span>
+<span class="fc" id="L1711">    }</span>
+
+    @Test
+    public void testPackageDeclaration3() throws Exception {
+<span class="fc" id="L1715">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1716">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1717">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1718">        verifyWarns(checkConfig, getPath(&quot;InputIndentationPackageDeclaration3.java&quot;), expected);</span>
+<span class="fc" id="L1719">    }</span>
+
+    @Test
+    public void testPackageDeclaration4() throws Exception {
+<span class="fc" id="L1723">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1724">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1725">        final String[] expected = {</span>
+<span class="fc" id="L1726">            &quot;2: &quot; + getCheckMessage(MSG_ERROR, &quot;com&quot;, 0, 4),</span>
+<span class="fc" id="L1727">            &quot;3: &quot; + getCheckMessage(MSG_ERROR, &quot;checks&quot;, 0, 4),</span>
+        };
+<span class="fc" id="L1729">        verifyWarns(checkConfig, getPath(&quot;InputIndentationPackageDeclaration4.java&quot;), expected);</span>
+<span class="fc" id="L1730">    }</span>
+
+    @Test
+    public void testLambda1() throws Exception {
+<span class="fc" id="L1734">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1735">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1736">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1737">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1738">        final String[] expected = {</span>
+<span class="fc" id="L1739">            &quot;46: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 5, 4),</span>
+<span class="fc" id="L1740">            &quot;47: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 5, 4),</span>
+<span class="fc" id="L1741">            &quot;50: &quot; + getCheckMessage(MSG_ERROR, &quot;lambda arguments&quot;, 9, 8),</span>
+<span class="fc" id="L1742">            &quot;51: &quot; + getCheckMessage(MSG_ERROR, &quot;lambda&quot;, 11, 12),</span>
+<span class="fc" id="L1743">            &quot;52: &quot; + getCheckMessage(MSG_ERROR, &quot;block lcurly&quot;, 9, 8),</span>
+<span class="fc" id="L1744">            &quot;64: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 7, 6),</span>
+<span class="fc" id="L1745">            &quot;65: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 5, 4),</span>
+<span class="fc" id="L1746">            &quot;179: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 9, 10),</span>
+<span class="fc" id="L1747">            &quot;180: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;block&quot;, 11, 10),</span>
+<span class="fc" id="L1748">            &quot;185: &quot; + getCheckMessage(MSG_ERROR, &quot;block rcurly&quot;, 7, 8),</span>
+        };
+<span class="fc" id="L1750">        verifyWarns(checkConfig, getPath(&quot;InputIndentationLambda1.java&quot;), expected);</span>
+<span class="fc" id="L1751">    }</span>
+
+    @Test
+    public void testLambda2() throws Exception {
+<span class="fc" id="L1755">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1756">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1757">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1758">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;8&quot;);</span>
+<span class="fc" id="L1759">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1760">        verifyWarns(checkConfig, getPath(&quot;InputIndentationLambda2.java&quot;), expected);</span>
+<span class="fc" id="L1761">    }</span>
+
+    @Test
+    public void testSeparatedStatements() throws Exception {
+<span class="fc" id="L1765">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1766">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1767">        final String fileName = getPath(&quot;InputIndentationSeparatedStatements.java&quot;);</span>
+<span class="fc" id="L1768">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1769">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1770">    }</span>
+
+    @Test
+    public void testSeparatedLineWithJustSpaces() throws Exception {
+<span class="fc" id="L1774">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1775">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1776">        final String fileName = getPath(&quot;InputIndentationSeparatedStatementWithSpaces.java&quot;);</span>
+<span class="fc" id="L1777">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1778">        verify(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1779">    }</span>
+
+    @Test
+    public void testTwoStatementsPerLine() throws Exception {
+<span class="fc" id="L1783">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1784">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1785">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1786">        final String fileName = getPath(&quot;InputIndentationTwoStatementsPerLine.java&quot;);</span>
+<span class="fc" id="L1787">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1788">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1789">    }</span>
+
+    @Test
+    public void testMethodChaining() throws Exception {
+<span class="fc" id="L1793">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1794">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1795">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1796">        final String fileName = getPath(&quot;InputIndentationChainedMethods.java&quot;);</span>
+<span class="fc" id="L1797">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1798">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1799">    }</span>
+
+    @Test
+    public void testMultipleAnnotationsWithWrappedLines() throws Exception {
+<span class="fc" id="L1803">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1804">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1805">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1806">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L1807">        final String fileName =</span>
+<span class="fc" id="L1808">            getPath(&quot;InputIndentationCorrectMultipleAnnotationsWithWrappedLines.java&quot;);</span>
+<span class="fc" id="L1809">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1810">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1811">    }</span>
+
+    @Test
+    public void testMethodPrecedeByAnnotationsWithParameterOnSeparateLine() throws Exception {
+<span class="fc" id="L1815">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1816">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1817">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1818">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1819">        checkConfig.addAttribute(&quot;caseIndent&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1820">        checkConfig.addAttribute(&quot;throwsIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1821">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1822">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;2&quot;);</span>
+<span class="fc" id="L1823">        final String fileName =</span>
+<span class="fc" id="L1824">            getPath(&quot;InputIndentationMethodPrecededByAnnotationWithParameterOnSeparateLine.java&quot;);</span>
+<span class="fc" id="L1825">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L1826">        verify(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1827">    }</span>
+
+    @Test
+    public void testAnnotationIncorrect() throws Exception {
+<span class="fc" id="L1831">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1832">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1833">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1834">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1835">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1836">        final String fileName =</span>
+<span class="fc" id="L1837">            getPath(&quot;InputIndentationAnnotationIncorrect.java&quot;);</span>
+<span class="fc" id="L1838">        final String[] expected = {</span>
+<span class="fc" id="L1839">            &quot;11: &quot; + getCheckMessage(MSG_ERROR, &quot;(&quot;, 4, 8),</span>
+<span class="fc" id="L1840">            &quot;14: &quot; + getCheckMessage(MSG_ERROR, &quot;(&quot;, 8, 12),</span>
+<span class="fc" id="L1841">            &quot;19: &quot; + getCheckMessage(MSG_ERROR, &quot;(&quot;, 4, 8),</span>
+        };
+<span class="fc" id="L1843">        verify(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1844">    }</span>
+
+    @Test
+    public void testInputAnnotationScopeIndentationCheck() throws Exception {
+<span class="fc" id="L1848">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1849">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1850">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1851">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L1852">        final String fileName = getPath(&quot;InputIndentationAnnotationScopeIndentationCheck.java&quot;);</span>
+<span class="fc" id="L1853">        final String[] expected = {</span>
+<span class="fc" id="L1854">            &quot;9: &quot; + getCheckMessage(MSG_ERROR, &quot;}&quot;, 8, 0),</span>
+        };
+<span class="fc" id="L1856">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1857">    }</span>
+
+    @Test
+    public void testInputAnnotationDefIndentationCheck() throws Exception {
+<span class="fc" id="L1861">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1862">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1863">        checkConfig.addAttribute(&quot;arrayInitIndent&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1864">        checkConfig.addAttribute(&quot;basicOffset&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1865">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1866">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1867">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L1868">        final String fileName = getPath(&quot;InputIndentationCustomAnnotation.java&quot;);</span>
+<span class="fc" id="L1869">        final String[] expected = {</span>
+<span class="fc" id="L1870">            &quot;14: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 5, 0),</span>
+<span class="fc" id="L1871">            &quot;15: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def rcurly&quot;, 5, 0),</span>
+<span class="fc" id="L1872">            &quot;16: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 5, 0),</span>
+<span class="fc" id="L1873">            &quot;17: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation field def modifier&quot;, 0, 4),</span>
+<span class="fc" id="L1874">            &quot;18: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def rcurly&quot;, 5, 0),</span>
+<span class="fc" id="L1875">            &quot;20: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 3, 0),</span>
+<span class="fc" id="L1876">            &quot;22: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation field def modifier&quot;, 0, 4),</span>
+<span class="fc" id="L1877">            &quot;23: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def rcurly&quot;, 5, 0),</span>
+<span class="fc" id="L1878">            &quot;25: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 5, 0),</span>
+<span class="fc" id="L1879">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;AnnotationWithLineWrap&quot;, 5, 0),</span>
+<span class="fc" id="L1880">            &quot;30: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 5, 0),</span>
+<span class="fc" id="L1881">            &quot;31: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 3, 0),</span>
+<span class="fc" id="L1882">            &quot;34: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation field def modifier&quot;, 5, 4),</span>
+<span class="fc" id="L1883">            &quot;35: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 3, 4),</span>
+<span class="fc" id="L1884">            &quot;36: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 0, 4),</span>
+<span class="fc" id="L1885">            &quot;37: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 0, 4),</span>
+<span class="fc" id="L1886">            &quot;38: &quot; + getCheckMessage(MSG_ERROR, &quot;AnnotationInnerLineWrap&quot;, 8, 4),</span>
+<span class="fc" id="L1887">            &quot;41: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation field def modifier&quot;, 7, 8),</span>
+<span class="fc" id="L1888">            &quot;58: &quot; + getCheckMessage(MSG_ERROR, &quot;AnnotationInnerLineWrap2&quot;, 4, 0),</span>
+<span class="fc" id="L1889">            &quot;59: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation field def modifier&quot;, 3, 4),</span>
+<span class="fc" id="L1890">            &quot;60: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation field def modifier&quot;, 7, 4),</span>
+<span class="fc" id="L1891">            &quot;61: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def rcurly&quot;, 4, 0),</span>
+<span class="fc" id="L1892">            &quot;72: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 3, 4),</span>
+<span class="fc" id="L1893">            &quot;117: &quot; + getCheckMessage(MSG_ERROR, &quot;annotation def modifier&quot;, 5, 4),</span>
+<span class="fc" id="L1894">            &quot;128: &quot; + getCheckMessage(MSG_ERROR, &quot;interface&quot;, 1, 0),</span>
+<span class="fc" id="L1895">            &quot;134: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 11, 0),</span>
+<span class="fc" id="L1896">            &quot;137: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 16, 0),</span>
+<span class="fc" id="L1897">            &quot;144: &quot; + getCheckMessage(MSG_ERROR, &quot;@&quot;, 12, 4),</span>
+<span class="fc" id="L1898">            &quot;148: &quot; + getCheckMessage(MSG_ERROR, &quot;class def ident&quot;, 16, 0),</span>
+        };
+<span class="fc" id="L1900">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1901">    }</span>
+
+    @Test
+    public void testTryResourcesStrict() throws Exception {
+<span class="fc" id="L1905">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1906">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1907">        checkConfig.addAttribute(&quot;forceStrictCondition&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L1908">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1909">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1910">        final String fileName = getPath(&quot;InputIndentationTryWithResourcesStrict.java&quot;);</span>
+<span class="fc" id="L1911">        final String[] expected = {</span>
+<span class="fc" id="L1912">            &quot;26: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 0, 12),</span>
+<span class="fc" id="L1913">            &quot;28: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;try rparen&quot;, 13, &quot;8, 12&quot;),</span>
+<span class="fc" id="L1914">            &quot;33: &quot; + getCheckMessage(MSG_ERROR, &quot;newBufferedWriter&quot;, 0, 16),</span>
+<span class="fc" id="L1915">            &quot;39: &quot; + getCheckMessage(MSG_ERROR, &quot;newBufferedWriter&quot;, 0, 12),</span>
+<span class="fc" id="L1916">            &quot;59: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 20, 16),</span>
+<span class="fc" id="L1917">            &quot;84: &quot; + getCheckMessage(MSG_ERROR, &quot;writ&quot;, 19, 12),</span>
+<span class="fc" id="L1918">            &quot;91: &quot; + getCheckMessage(MSG_ERROR, &quot;writ&quot;, 19, 16),</span>
+<span class="fc" id="L1919">            &quot;98: &quot; + getCheckMessage(MSG_ERROR, &quot;writ&quot;, 21, 16),</span>
+<span class="fc" id="L1920">            &quot;113: &quot; + getCheckMessage(MSG_ERROR, &quot;zipFileName&quot;, 17, 16),</span>
+<span class="fc" id="L1921">            &quot;120: &quot; + getCheckMessage(MSG_ERROR, &quot;zipFileName&quot;, 15, 16),</span>
+<span class="fc" id="L1922">            &quot;130: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 7, 8),</span>
+<span class="fc" id="L1923">            &quot;135: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 15, 12),</span>
+<span class="fc" id="L1924">            &quot;141: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 11, 12),</span>
+<span class="fc" id="L1925">            &quot;142: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 9, 12),</span>
+<span class="fc" id="L1926">            &quot;146: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 11, 12),</span>
+<span class="fc" id="L1927">            &quot;147: &quot; + getCheckMessage(MSG_ERROR, &quot;newBufferedWriter&quot;, 11, 16),</span>
+<span class="fc" id="L1928">            &quot;148: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 13, 12),</span>
+<span class="fc" id="L1929">            &quot;150: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 7, 8),</span>
+<span class="fc" id="L1930">            &quot;151: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;try rparen&quot;, 7, &quot;8, 12&quot;),</span>
+<span class="fc" id="L1931">            &quot;155: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 9, 8),</span>
+<span class="fc" id="L1932">            &quot;161: &quot; + getCheckMessage(MSG_ERROR, &quot;.&quot;, 13, 12),</span>
+<span class="fc" id="L1933">            &quot;167: &quot; + getCheckMessage(MSG_ERROR, &quot;.&quot;, 11, 12),</span>
+        };
+<span class="fc" id="L1935">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1936">    }</span>
+
+    @Test
+    public void testTryResourcesNotStrict() throws Exception {
+<span class="fc" id="L1940">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L1941">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1942">        checkConfig.addAttribute(&quot;braceAdjustment&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L1943">        checkConfig.addAttribute(&quot;lineWrappingIndentation&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L1944">        final String fileName = getPath(&quot;InputIndentationTryResourcesNotStrict.java&quot;);</span>
+<span class="fc" id="L1945">        final String[] expected = {</span>
+<span class="fc" id="L1946">            &quot;27: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 0, 12),</span>
+<span class="fc" id="L1947">            &quot;33: &quot; + getCheckMessage(MSG_ERROR, &quot;newBufferedWriter&quot;, 0, 16),</span>
+<span class="fc" id="L1948">            &quot;39: &quot; + getCheckMessage(MSG_ERROR, &quot;newBufferedWriter&quot;, 0, 12),</span>
+<span class="fc" id="L1949">            &quot;120: &quot; + getCheckMessage(MSG_ERROR, &quot;zipFileName&quot;, 15, 16),</span>
+<span class="fc" id="L1950">            &quot;130: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 7, 8),</span>
+<span class="fc" id="L1951">            &quot;135: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 15, 12),</span>
+<span class="fc" id="L1952">            &quot;141: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 11, 12),</span>
+<span class="fc" id="L1953">            &quot;142: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 9, 12),</span>
+<span class="fc" id="L1954">            &quot;146: &quot; + getCheckMessage(MSG_ERROR, &quot;try resource&quot;, 11, 12),</span>
+<span class="fc" id="L1955">            &quot;147: &quot; + getCheckMessage(MSG_ERROR, &quot;newBufferedWriter&quot;, 11, 16),</span>
+<span class="fc" id="L1956">            &quot;148: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;try&quot;, 13, 12),</span>
+<span class="fc" id="L1957">            &quot;150: &quot; + getCheckMessage(MSG_ERROR, &quot;try&quot;, 7, 8),</span>
+<span class="fc" id="L1958">            &quot;151: &quot; + getCheckMessage(MSG_ERROR_MULTI, &quot;try rparen&quot;, 7, &quot;8, 12&quot;),</span>
+<span class="fc" id="L1959">            &quot;164: &quot; + getCheckMessage(MSG_ERROR, &quot;.&quot;, 8, 12),</span>
+<span class="fc" id="L1960">            &quot;172: &quot; + getCheckMessage(MSG_ERROR, &quot;new&quot;, 11, 12),</span>
+        };
+<span class="fc" id="L1962">        verifyWarns(checkConfig, fileName, expected);</span>
+<span class="fc" id="L1963">    }</span>
+
+    /**
+     * Verifies that the arguments of {@link IndentationCheck#MSG_ERROR},
+     * {@link IndentationCheck#MSG_CHILD_ERROR}, {@link IndentationCheck#MSG_CHILD_ERROR_MULTI},
+     * {@link IndentationCheck#MSG_CHILD_ERROR_MULTI} are in appropriate order.
+     *
+     * &lt;p&gt;In other tests, the argument 0 and text before it are chopped off and only the rest of
+     * messages are verified. Therefore, the argument 0 is required to be the first argument in
+     * the messages above. If we update the messages in the future, it is required to keep the
+     * arguments in appropriate order to ensure other tests will work.&lt;/p&gt;
+     *
+     * @see IndentComment#getExpectedMessagePostfix(String)
+     */
+    @Test
+    public void testArgumentOrderOfErrorMessages() {
+<span class="fc" id="L1979">        final String[] arguments = {&quot;##0##&quot;, &quot;##1##&quot;, &quot;##2##&quot;};</span>
+<span class="fc" id="L1980">        final String[] messages = {</span>
+<span class="fc" id="L1981">            getCheckMessage(MSG_ERROR, (Object[]) arguments),</span>
+<span class="fc" id="L1982">            getCheckMessage(MSG_CHILD_ERROR, (Object[]) arguments),</span>
+<span class="fc" id="L1983">            getCheckMessage(MSG_ERROR_MULTI, (Object[]) arguments),</span>
+<span class="fc" id="L1984">            getCheckMessage(MSG_CHILD_ERROR_MULTI, (Object[]) arguments),</span>
+        };
+<span class="fc" id="L1986">        final boolean isInOrder = Arrays.stream(messages).allMatch(msg -&gt; {</span>
+<span class="fc" id="L1987">            final int indexOfArgumentZero = msg.indexOf(arguments[0]);</span>
+<span class="fc" id="L1988">            return Arrays.stream(arguments).mapToInt(msg::indexOf)</span>
+<span class="pc bpc" id="L1989" title="1 of 2 branches missed.">                    .allMatch(index -&gt; index &gt;= indexOfArgumentZero);</span>
+        });
+<span class="fc" id="L1991">        assertTrue(</span>
+                &quot;the argument 0 of error messages (indentation.error, indentation.child.error,&quot;
+                        + &quot; indentation.error.multi, indentation.child.error.multi)&quot;
+                        + &quot; is required to be the first argument of them&quot;,
+                isInOrder);
+<span class="fc" id="L1996">    }</span>
+
+    @Test
+    public void testEmptyArray() throws Exception {
+<span class="fc" id="L2000">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L2001">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L2002">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+<span class="fc" id="L2003">        verifyWarns(checkConfig, getPath(&quot;InputIndentationEmptyArray.java&quot;), expected);</span>
+<span class="fc" id="L2004">    }</span>
+
+    @Test
+    public void testNewHandler() throws Exception {
+<span class="fc" id="L2008">        final DefaultConfiguration checkConfig = createModuleConfig(IndentationCheck.class);</span>
+<span class="fc" id="L2009">        checkConfig.addAttribute(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L2010">        final String[] expected = {</span>
+<span class="fc" id="L2011">            &quot;8: &quot; + getCheckMessage(MSG_ERROR, &quot;Object&quot;, 0, 12),</span>
+<span class="fc" id="L2012">            &quot;10: &quot; + getCheckMessage(MSG_ERROR, &quot;(&quot;, 0, 12),</span>
+<span class="fc" id="L2013">            &quot;13: &quot; + getCheckMessage(MSG_CHILD_ERROR, &quot;operator new&quot;, 0, 8),</span>
+<span class="fc" id="L2014">            &quot;15: &quot; + getCheckMessage(MSG_ERROR, &quot;operator new lparen&quot;, 0, 8),</span>
+        };
+<span class="fc" id="L2016">        verifyWarns(checkConfig, getPath(&quot;InputIndentationNewHandler.java&quot;), expected);</span>
+<span class="fc" id="L2017">    }</span>
+
+    private static final class IndentAudit implements AuditListener {
+
+        private final IndentComment[] comments;
+        private int position;
+
+<span class="fc" id="L2024">        /* package */ IndentAudit(IndentComment... comments) {</span>
+<span class="fc" id="L2025">            this.comments = Arrays.copyOf(comments, comments.length);</span>
+<span class="fc" id="L2026">        }</span>
+
+        @Override
+        public void auditStarted(AuditEvent event) {
+            // No code needed
+<span class="fc" id="L2031">        }</span>
+
+        @Override
+        public void auditFinished(AuditEvent event) {
+            // No code needed
+<span class="fc" id="L2036">        }</span>
+
+        @Override
+        public void fileStarted(AuditEvent event) {
+            // No code needed
+<span class="fc" id="L2041">        }</span>
+
+        @Override
+        public void fileFinished(AuditEvent event) {
+            // No code needed
+<span class="fc" id="L2046">        }</span>
+
+        @Override
+        public void addError(AuditEvent event) {
+<span class="fc" id="L2050">            final int line = event.getLine();</span>
+<span class="fc" id="L2051">            final String message = event.getMessage();</span>
+
+<span class="pc bpc" id="L2053" title="1 of 2 branches missed.">            if (position &gt;= comments.length) {</span>
+<span class="nc" id="L2054">                fail(&quot;found a warning when none was expected for #&quot; + position + &quot; at line &quot; + line</span>
+                        + &quot; with message &quot; + message);
+            }
+
+<span class="fc" id="L2058">            final IndentComment comment = comments[position];</span>
+<span class="fc" id="L2059">            position++;</span>
+
+<span class="fc" id="L2061">            final String possibleExceptedMessages = Arrays.stream(comment.getExpectedMessages())</span>
+<span class="fc" id="L2062">                    .reduce(&quot;&quot;, (cur, next) -&gt; cur + &quot;\&quot;&quot; + next + &quot;\&quot;, &quot;);</span>
+<span class="fc" id="L2063">            final String assertMessage = String.format(</span>
+                    Locale.ROOT,
+                    &quot;input expected warning #%d at line %d to report one of the following: %s&quot;
+                            + &quot;but got instead: %d: %s&quot;,
+<span class="fc" id="L2067">                    position, comment.getLineNumber(), possibleExceptedMessages, line, message);</span>
+<span class="pc bpc" id="L2068" title="1 of 2 branches missed.">            assertTrue(assertMessage, line == comment.getLineNumber()</span>
+<span class="pc bpc" id="L2069" title="1 of 2 branches missed.">                    &amp;&amp; Arrays.stream(comment.getExpectedMessages()).anyMatch(message::endsWith));</span>
+<span class="fc" id="L2070">        }</span>
+
+        @Override
+        public void addException(AuditEvent event, Throwable throwable) {
+            // No code needed
+<span class="nc" id="L2075">        }</span>
+
+    }
+
+    private static final class IndentComment {
+
+        /** Used to locate the index of argument zero of error messages. */
+        private static final String FAKE_ARGUMENT_ZERO = &quot;##0##&quot;;
+        private final int lineNumber;
+        private final int indent;
+        /** Used for when violations report nodes not first on the line. */
+        private final int indentOffset;
+        private final boolean expectedNonStrict;
+        private final String expectedWarning;
+        private final boolean warning;
+
+<span class="fc" id="L2091">        /* package */ IndentComment(Matcher match, int lineNumber) {</span>
+<span class="fc" id="L2092">            this.lineNumber = lineNumber;</span>
+<span class="fc" id="L2093">            indent = Integer.parseInt(match.group(1));</span>
+<span class="pc bpc" id="L2094" title="1 of 2 branches missed.">            if (match.group(2) == null) {</span>
+<span class="fc" id="L2095">                indentOffset = 0;</span>
+            }
+            else {
+<span class="nc" id="L2098">                indentOffset = Integer.parseInt(match.group(2));</span>
+            }
+<span class="fc bfc" id="L2100" title="All 2 branches covered.">            expectedNonStrict = match.group(3) != null;</span>
+<span class="fc" id="L2101">            expectedWarning = match.group(4).replace(&quot;,&quot;, &quot;, &quot;);</span>
+<span class="fc bfc" id="L2102" title="All 2 branches covered.">            warning = match.group(5) != null;</span>
+<span class="fc" id="L2103">        }</span>
+
+        public String[] getExpectedMessages() {
+            final String[] expectedMessages;
+<span class="fc bfc" id="L2107" title="All 2 branches covered.">            if (expectedWarning.contains(&quot;,&quot;)) {</span>
+<span class="fc" id="L2108">                expectedMessages = new String[] {</span>
+<span class="fc" id="L2109">                    getExpectedMessagePostfix(MSG_ERROR_MULTI),</span>
+<span class="fc" id="L2110">                    getExpectedMessagePostfix(MSG_CHILD_ERROR_MULTI),</span>
+                };
+            }
+            else {
+<span class="fc" id="L2114">                expectedMessages = new String[] {</span>
+<span class="fc" id="L2115">                    getExpectedMessagePostfix(MSG_ERROR),</span>
+<span class="fc" id="L2116">                    getExpectedMessagePostfix(MSG_CHILD_ERROR),</span>
+                };
+            }
+<span class="fc" id="L2119">            return expectedMessages;</span>
+        }
+
+        private String getExpectedMessagePostfix(final String messageKey) {
+<span class="fc" id="L2123">            final String msg = getCheckMessage(IndentationCheck.class, messageKey,</span>
+<span class="fc" id="L2124">                    FAKE_ARGUMENT_ZERO, indent + indentOffset, expectedWarning);</span>
+<span class="fc" id="L2125">            final int indexOfMsgPostfix = msg.indexOf(FAKE_ARGUMENT_ZERO)</span>
+<span class="fc" id="L2126">                    + FAKE_ARGUMENT_ZERO.length();</span>
+<span class="fc" id="L2127">            return msg.substring(indexOfMsgPostfix);</span>
+        }
+
+        public int getLineNumber() {
+<span class="fc" id="L2131">            return lineNumber;</span>
+        }
+
+        public int getIndent() {
+<span class="fc" id="L2135">            return indent;</span>
+        }
+
+        public int getIndentOffset() {
+<span class="fc" id="L2139">            return indentOffset;</span>
+        }
+
+        public boolean isExpectedNonStrict() {
+<span class="fc" id="L2143">            return expectedNonStrict;</span>
+        }
+
+        public String getExpectedWarning() {
+<span class="fc" id="L2147">            return expectedWarning;</span>
+        }
+
+        public boolean isWarning() {
+<span class="fc" id="L2151">            return warning;</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

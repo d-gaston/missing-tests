@@ -1,0 +1,540 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PackedLocalDate.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.columns.dates</a> &gt; <span class="el_source">PackedLocalDate.java</span></div><h1>PackedLocalDate.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.columns.dates;
+
+import static java.time.DayOfWeek.FRIDAY;
+import static java.time.DayOfWeek.MONDAY;
+import static java.time.DayOfWeek.SATURDAY;
+import static java.time.DayOfWeek.SUNDAY;
+import static java.time.DayOfWeek.THURSDAY;
+import static java.time.DayOfWeek.TUESDAY;
+import static java.time.DayOfWeek.WEDNESDAY;
+import static java.time.Month.APRIL;
+import static java.time.Month.AUGUST;
+import static java.time.Month.DECEMBER;
+import static java.time.Month.FEBRUARY;
+import static java.time.Month.JANUARY;
+import static java.time.Month.JULY;
+import static java.time.Month.JUNE;
+import static java.time.Month.MARCH;
+import static java.time.Month.MAY;
+import static java.time.Month.NOVEMBER;
+import static java.time.Month.OCTOBER;
+import static java.time.Month.SEPTEMBER;
+import static java.time.temporal.ChronoField.EPOCH_DAY;
+import static java.time.temporal.ChronoField.YEAR;
+import static tech.tablesaw.columns.DateAndTimePredicates.isEqualTo;
+import static tech.tablesaw.columns.DateAndTimePredicates.isGreaterThanOrEqualTo;
+import static tech.tablesaw.columns.DateAndTimePredicates.isLessThan;
+import static tech.tablesaw.columns.DateAndTimePredicates.isLessThanOrEqualTo;
+
+import com.google.common.base.Strings;
+import com.google.common.primitives.Ints;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.Month;
+import java.time.chrono.IsoChronology;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalField;
+import java.time.temporal.WeekFields;
+import java.util.Locale;
+import tech.tablesaw.columns.numbers.IntColumnType;
+
+/**
+ * A short localdate packed into a single int value. It uses a short for year so the range is about
+ * +-30,000 years
+ *
+ * &lt;p&gt;The bytes are packed into the int as: First two bytes: short (year) next byte (month of year)
+ * last byte (day of month)
+ */
+<span class="nc" id="L62">public class PackedLocalDate {</span>
+
+  /** The number of days in a 400 year cycle. */
+  private static final int DAYS_PER_CYCLE = 146097;
+  /**
+   * The number of days from year zero to year 1970. There are five 400 year cycles from year zero
+   * to 2000. There are 7 leap years from 1970 to 2000.
+   */
+  private static final long DAYS_0000_TO_1970 = (DAYS_PER_CYCLE * 5L) - (30L * 365L + 7L);
+
+  public static byte getDayOfMonth(int date) {
+<span class="fc" id="L73">    return (byte) date; // last byte</span>
+  }
+
+  public static short getYear(int date) {
+    // get first two bytes, then convert to a short
+<span class="fc" id="L78">    byte byte1 = (byte) (date &gt;&gt; 24);</span>
+<span class="fc" id="L79">    byte byte2 = (byte) (date &gt;&gt; 16);</span>
+<span class="fc" id="L80">    return (short) ((byte1 &lt;&lt; 8) + (byte2 &amp; 0xFF));</span>
+  }
+
+  public static LocalDate asLocalDate(int date) {
+<span class="pc bpc" id="L84" title="1 of 2 branches missed.">    if (date == IntColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L85">      return null;</span>
+    }
+
+<span class="fc" id="L88">    return LocalDate.of(getYear(date), getMonthValue(date), getDayOfMonth(date));</span>
+  }
+
+  public static byte getMonthValue(int date) {
+    // get the third byte
+<span class="fc" id="L93">    return (byte) (date &gt;&gt; 8);</span>
+  }
+
+  public static int pack(LocalDate date) {
+<span class="fc bfc" id="L97" title="All 2 branches covered.">    if (date == null) {</span>
+<span class="fc" id="L98">      return DateColumnType.missingValueIndicator();</span>
+    }
+<span class="fc" id="L100">    return pack((short) date.getYear(), (byte) date.getMonthValue(), (byte) date.getDayOfMonth());</span>
+  }
+
+  public static int pack(short yr, byte m, byte d) {
+<span class="fc" id="L104">    byte byte1 = (byte) ((yr &gt;&gt; 8) &amp; 0xff);</span>
+<span class="fc" id="L105">    byte byte2 = (byte) yr;</span>
+<span class="fc" id="L106">    return Ints.fromBytes(byte1, byte2, m, d);</span>
+  }
+
+  public static int pack(int yr, int m, int d) {
+<span class="fc" id="L110">    byte byte1 = (byte) ((yr &gt;&gt; 8) &amp; 0xff);</span>
+<span class="fc" id="L111">    byte byte2 = (byte) yr;</span>
+<span class="fc" id="L112">    return Ints.fromBytes(byte1, byte2, (byte) m, (byte) d);</span>
+  }
+
+  public static String toDateString(int date) {
+<span class="pc bpc" id="L116" title="1 of 2 branches missed.">    if (date == Integer.MIN_VALUE) {</span>
+<span class="nc" id="L117">      return &quot;&quot;;</span>
+    }
+
+<span class="fc" id="L120">    return getYear(date)</span>
+        + &quot;-&quot;
+<span class="fc" id="L122">        + Strings.padStart(Byte.toString(getMonthValue(date)), 2, '0')</span>
+        + &quot;-&quot;
+<span class="fc" id="L124">        + Strings.padStart(Byte.toString(getDayOfMonth(date)), 2, '0');</span>
+  }
+
+  public static int getDayOfYear(int packedDate) {
+<span class="fc" id="L128">    return getMonth(packedDate).firstDayOfYear(isLeapYear(packedDate))</span>
+<span class="fc" id="L129">        + getDayOfMonth(packedDate)</span>
+        - 1;
+  }
+
+  public static boolean isLeapYear(int packedDate) {
+<span class="fc" id="L134">    return IsoChronology.INSTANCE.isLeapYear(getYear(packedDate));</span>
+  }
+
+  public static Month getMonth(int packedDate) {
+<span class="fc" id="L138">    return Month.of(getMonthValue(packedDate));</span>
+  }
+
+  public static int lengthOfMonth(int packedDate) {
+<span class="fc bfc" id="L142" title="All 3 branches covered.">    switch (getMonthValue(packedDate)) {</span>
+      case 2:
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">        return (isLeapYear(packedDate) ? 29 : 28);</span>
+      case 4:
+      case 6:
+      case 9:
+      case 11:
+<span class="fc" id="L149">        return 30;</span>
+      default:
+<span class="fc" id="L151">        return 31;</span>
+    }
+  }
+
+  /** Returns the epoch day in a form consistent with the java standard */
+  public static long toEpochDay(int packedDate) {
+<span class="fc" id="L157">    long y = getYear(packedDate);</span>
+<span class="fc" id="L158">    long m = getMonthValue(packedDate);</span>
+<span class="fc" id="L159">    long total = 0;</span>
+<span class="fc" id="L160">    total += 365 * y;</span>
+<span class="pc bpc" id="L161" title="1 of 2 branches missed.">    if (y &gt;= 0) {</span>
+<span class="fc" id="L162">      total += (y + 3) / 4 - (y + 99) / 100 + (y + 399) / 400;</span>
+    } else {
+<span class="nc" id="L164">      total -= y / -4 - y / -100 + y / -400;</span>
+    }
+<span class="fc" id="L166">    total += ((367 * m - 362) / 12);</span>
+<span class="fc" id="L167">    total += getDayOfMonth(packedDate) - 1;</span>
+<span class="fc bfc" id="L168" title="All 2 branches covered.">    if (m &gt; 2) {</span>
+<span class="fc" id="L169">      total--;</span>
+<span class="fc bfc" id="L170" title="All 2 branches covered.">      if (!isLeapYear(packedDate)) {</span>
+<span class="fc" id="L171">        total--;</span>
+      }
+    }
+<span class="fc" id="L174">    return total - DAYS_0000_TO_1970;</span>
+  }
+
+  public static DayOfWeek getDayOfWeek(int packedDate) {
+<span class="fc" id="L178">    int dow0 = Math.floorMod((int) toEpochDay(packedDate) + 3, 7);</span>
+<span class="fc" id="L179">    return DayOfWeek.of(dow0 + 1);</span>
+  }
+
+  /**
+   * Returns the quarter of the year of the given date as an int from 1 to 4, or -1, if the argument
+   * is the MISSING_VALUE for DateColumn
+   */
+  public static int getQuarter(int packedDate) {
+<span class="pc bpc" id="L187" title="1 of 2 branches missed.">    if (packedDate == DateColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L188">      return -1;</span>
+    }
+<span class="fc" id="L190">    Month month = getMonth(packedDate);</span>
+<span class="pc bfc" id="L191" title="All 4 branches covered.">    switch (month) {</span>
+      case JANUARY:
+      case FEBRUARY:
+      case MARCH:
+<span class="fc" id="L195">        return 1;</span>
+      case APRIL:
+      case MAY:
+      case JUNE:
+<span class="fc" id="L199">        return 2;</span>
+      case JULY:
+      case AUGUST:
+      case SEPTEMBER:
+<span class="fc" id="L203">        return 3;</span>
+      case OCTOBER:
+      case NOVEMBER:
+      default: // must be december
+<span class="fc" id="L207">        return 4;</span>
+    }
+  }
+
+  public static boolean isInQ1(int packedDate) {
+<span class="fc bfc" id="L212" title="All 2 branches covered.">    return getQuarter(packedDate) == 1;</span>
+  }
+
+  public static boolean isInQ2(int packedDate) {
+<span class="fc bfc" id="L216" title="All 2 branches covered.">    return getQuarter(packedDate) == 2;</span>
+  }
+
+  public static boolean isInQ3(int packedDate) {
+<span class="fc bfc" id="L220" title="All 2 branches covered.">    return getQuarter(packedDate) == 3;</span>
+  }
+
+  public static boolean isInQ4(int packedDate) {
+<span class="fc bfc" id="L224" title="All 2 branches covered.">    return getQuarter(packedDate) == 4;</span>
+  }
+
+  public static boolean isAfter(int packedDate, int value) {
+<span class="fc bfc" id="L228" title="All 2 branches covered.">    return packedDate &gt; value;</span>
+  }
+
+  public static boolean isEqualTo(int packedDate, int value) {
+<span class="fc" id="L232">    return isEqualTo.test(packedDate, value);</span>
+  }
+
+  public static boolean isBefore(int packedDate, int value) {
+<span class="fc" id="L236">    return isLessThan.test(packedDate, value);</span>
+  }
+
+  public static boolean isOnOrBefore(int packedDate, int value) {
+<span class="fc" id="L240">    return isLessThanOrEqualTo.test(packedDate, value);</span>
+  }
+
+  public static boolean isOnOrAfter(int packedDate, int value) {
+<span class="fc" id="L244">    return isGreaterThanOrEqualTo.test(packedDate, value);</span>
+  }
+
+  public static boolean isDayOfWeek(int packedDate, DayOfWeek dayOfWeek) {
+<span class="fc" id="L248">    DayOfWeek dow = getDayOfWeek(packedDate);</span>
+<span class="fc bfc" id="L249" title="All 2 branches covered.">    return dayOfWeek == dow;</span>
+  }
+
+  public static boolean isSunday(int packedDate) {
+<span class="fc" id="L253">    return isDayOfWeek(packedDate, SUNDAY);</span>
+  }
+
+  public static boolean isMonday(int packedDate) {
+<span class="fc" id="L257">    return isDayOfWeek(packedDate, MONDAY);</span>
+  }
+
+  public static boolean isTuesday(int packedDate) {
+<span class="fc" id="L261">    return isDayOfWeek(packedDate, TUESDAY);</span>
+  }
+
+  public static boolean isWednesday(int packedDate) {
+<span class="fc" id="L265">    return isDayOfWeek(packedDate, WEDNESDAY);</span>
+  }
+
+  public static boolean isThursday(int packedDate) {
+<span class="fc" id="L269">    return isDayOfWeek(packedDate, THURSDAY);</span>
+  }
+
+  public static boolean isFriday(int packedDate) {
+<span class="fc" id="L273">    return isDayOfWeek(packedDate, FRIDAY);</span>
+  }
+
+  public static boolean isSaturday(int packedDate) {
+<span class="fc" id="L277">    return isDayOfWeek(packedDate, SATURDAY);</span>
+  }
+
+  public static boolean isFirstDayOfMonth(int packedDate) {
+<span class="fc bfc" id="L281" title="All 2 branches covered.">    return getDayOfMonth(packedDate) == 1;</span>
+  }
+
+  public static boolean isInJanuary(int packedDate) {
+<span class="fc bfc" id="L285" title="All 2 branches covered.">    return getMonth(packedDate) == JANUARY;</span>
+  }
+
+  public static boolean isInFebruary(int packedDate) {
+<span class="fc bfc" id="L289" title="All 2 branches covered.">    return getMonth(packedDate) == FEBRUARY;</span>
+  }
+
+  public static boolean isInMarch(int packedDate) {
+<span class="fc bfc" id="L293" title="All 2 branches covered.">    return getMonth(packedDate) == MARCH;</span>
+  }
+
+  public static boolean isInApril(int packedDate) {
+<span class="fc bfc" id="L297" title="All 2 branches covered.">    return getMonth(packedDate) == APRIL;</span>
+  }
+
+  public static boolean isInMay(int packedDate) {
+<span class="fc bfc" id="L301" title="All 2 branches covered.">    return getMonth(packedDate) == MAY;</span>
+  }
+
+  public static boolean isInJune(int packedDate) {
+<span class="fc bfc" id="L305" title="All 2 branches covered.">    return getMonth(packedDate) == JUNE;</span>
+  }
+
+  public static boolean isInJuly(int packedDate) {
+<span class="fc bfc" id="L309" title="All 2 branches covered.">    return getMonth(packedDate) == JULY;</span>
+  }
+
+  public static boolean isInAugust(int packedDate) {
+<span class="fc bfc" id="L313" title="All 2 branches covered.">    return getMonth(packedDate) == AUGUST;</span>
+  }
+
+  public static boolean isInSeptember(int packedDate) {
+<span class="fc bfc" id="L317" title="All 2 branches covered.">    return getMonth(packedDate) == SEPTEMBER;</span>
+  }
+
+  public static boolean isInOctober(int packedDate) {
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    return getMonth(packedDate) == OCTOBER;</span>
+  }
+
+  public static boolean isInNovember(int packedDate) {
+<span class="fc bfc" id="L325" title="All 2 branches covered.">    return getMonth(packedDate) == NOVEMBER;</span>
+  }
+
+  public static boolean isInDecember(int packedDate) {
+<span class="fc bfc" id="L329" title="All 2 branches covered.">    return getMonth(packedDate) == DECEMBER;</span>
+  }
+
+  public static boolean isLastDayOfMonth(int packedDate) {
+<span class="fc bfc" id="L333" title="All 2 branches covered.">    return getDayOfMonth(packedDate) == lengthOfMonth(packedDate);</span>
+  }
+
+  public static int withDayOfMonth(int dayOfMonth, int packedDate) {
+<span class="fc" id="L337">    byte d = (byte) dayOfMonth;</span>
+<span class="fc" id="L338">    byte m = getMonthValue(packedDate);</span>
+<span class="fc" id="L339">    short y = getYear(packedDate);</span>
+<span class="fc" id="L340">    return pack(y, m, d);</span>
+  }
+
+  public static int withMonth(int month, int packedDate) {
+<span class="fc" id="L344">    byte day = getDayOfMonth(packedDate);</span>
+<span class="fc" id="L345">    byte _month = (byte) month;</span>
+<span class="fc" id="L346">    short year = getYear(packedDate);</span>
+<span class="fc" id="L347">    return pack(year, _month, day);</span>
+  }
+
+  public static int withYear(int year, int packedDate) {
+<span class="fc" id="L351">    byte day = getDayOfMonth(packedDate);</span>
+<span class="fc" id="L352">    byte month = getMonthValue(packedDate);</span>
+<span class="fc" id="L353">    short _year = (short) year;</span>
+<span class="fc" id="L354">    return pack(_year, month, day);</span>
+  }
+
+  public static int plusYears(int yearsToAdd, int packedDate) {
+<span class="pc bpc" id="L358" title="1 of 2 branches missed.">    if (yearsToAdd == 0) {</span>
+<span class="nc" id="L359">      return packedDate;</span>
+    }
+<span class="fc" id="L361">    byte d = getDayOfMonth(packedDate);</span>
+<span class="fc" id="L362">    byte m = getMonthValue(packedDate);</span>
+<span class="fc" id="L363">    short y = getYear(packedDate);</span>
+
+<span class="fc" id="L365">    int newYear = YEAR.checkValidIntValue(y + yearsToAdd);</span>
+<span class="fc" id="L366">    return resolvePreviousValid(newYear, m, d);</span>
+  }
+
+  public static int minusYears(int years, int packedDate) {
+<span class="fc" id="L370">    return plusYears(-years, packedDate);</span>
+  }
+
+  public static int plusMonths(int months, int packedDate) {
+<span class="pc bpc" id="L374" title="1 of 2 branches missed.">    if (months == 0) {</span>
+<span class="nc" id="L375">      return packedDate;</span>
+    }
+
+<span class="fc" id="L378">    byte d = getDayOfMonth(packedDate);</span>
+<span class="fc" id="L379">    byte m = getMonthValue(packedDate);</span>
+<span class="fc" id="L380">    short y = getYear(packedDate);</span>
+
+<span class="fc" id="L382">    long monthCount = y * 12L + (m - 1);</span>
+<span class="fc" id="L383">    long calcMonths = monthCount + months;</span>
+<span class="fc" id="L384">    int newYear = YEAR.checkValidIntValue(Math.floorDiv((int) calcMonths, 12));</span>
+<span class="fc" id="L385">    int newMonth = Math.floorMod((int) calcMonths, 12) + 1;</span>
+<span class="fc" id="L386">    return resolvePreviousValid(newYear, newMonth, d);</span>
+  }
+
+  public static int minusMonths(int months, int packedDate) {
+<span class="fc" id="L390">    return plusMonths(-months, packedDate);</span>
+  }
+
+  public static int plusWeeks(int valueToAdd, int packedDate) {
+<span class="fc" id="L394">    return plusDays(valueToAdd * 7, packedDate);</span>
+  }
+
+  public static int minusWeeks(int valueToSubtract, int packedDate) {
+<span class="fc" id="L398">    return minusDays(valueToSubtract * 7, packedDate);</span>
+  }
+
+  public static int plusDays(int days, int packedDate) {
+<span class="pc bpc" id="L402" title="1 of 2 branches missed.">    if (days == 0) {</span>
+<span class="nc" id="L403">      return packedDate;</span>
+    }
+
+<span class="fc" id="L406">    byte d = getDayOfMonth(packedDate);</span>
+<span class="fc" id="L407">    byte m = getMonthValue(packedDate);</span>
+<span class="fc" id="L408">    short y = getYear(packedDate);</span>
+
+<span class="fc" id="L410">    long dom = d + days;</span>
+<span class="fc bfc" id="L411" title="All 2 branches covered.">    if (dom &gt; 0) {</span>
+<span class="fc bfc" id="L412" title="All 2 branches covered.">      if (dom &lt;= 28) {</span>
+<span class="fc" id="L413">        return pack(y, m, (byte) dom);</span>
+<span class="pc bpc" id="L414" title="1 of 2 branches missed.">      } else if (dom &lt;= 59) { // 59th Jan is 28th Feb, 59th Feb is 31st Mar</span>
+<span class="fc" id="L415">        long monthLen = lengthOfMonth(packedDate);</span>
+<span class="fc bfc" id="L416" title="All 2 branches covered.">        if (dom &lt;= monthLen) {</span>
+<span class="fc" id="L417">          return pack(y, m, (byte) dom);</span>
+<span class="fc bfc" id="L418" title="All 2 branches covered.">        } else if (m &lt; 12) {</span>
+<span class="fc" id="L419">          return pack(y, (byte) (m + 1), (byte) (dom - monthLen));</span>
+        } else {
+<span class="fc" id="L421">          YEAR.checkValidValue(y + 1);</span>
+<span class="fc" id="L422">          return pack((short) (y + 1), (byte) 1, (byte) (dom - monthLen));</span>
+        }
+      }
+    }
+
+<span class="fc" id="L427">    long mjDay = Math.addExact(toEpochDay(packedDate), days);</span>
+<span class="fc" id="L428">    return ofEpochDay(mjDay);</span>
+  }
+
+  public static int minusDays(int days, int packedDate) {
+<span class="fc" id="L432">    return plusDays(-days, packedDate);</span>
+  }
+
+  public static boolean isInYear(int next, int year) {
+<span class="fc bfc" id="L436" title="All 2 branches covered.">    return getYear(next) == year;</span>
+  }
+
+  public static int lengthOfYear(int packedDate) {
+<span class="fc bfc" id="L440" title="All 2 branches covered.">    return (isLeapYear(packedDate) ? 366 : 365);</span>
+  }
+
+  private static int resolvePreviousValid(int year, int month, int day) {
+<span class="fc" id="L444">    int dayResult = day;</span>
+<span class="fc bfc" id="L445" title="All 3 branches covered.">    switch (month) {</span>
+      case 2:
+<span class="fc bfc" id="L447" title="All 2 branches covered.">        dayResult = Math.min(day, IsoChronology.INSTANCE.isLeapYear(year) ? 29 : 28);</span>
+<span class="fc" id="L448">        break;</span>
+      case 4:
+      case 6:
+      case 9:
+      case 11:
+<span class="fc" id="L453">        dayResult = Math.min(day, 30);</span>
+        break;
+    }
+<span class="fc" id="L456">    return pack((short) year, (byte) month, (byte) dayResult);</span>
+  }
+
+  public static int getWeekOfYear(int packedDateTime) {
+<span class="nc" id="L460">    LocalDate date = asLocalDate(packedDateTime);</span>
+<span class="nc" id="L461">    TemporalField woy = WeekFields.of(Locale.getDefault()).weekOfWeekBasedYear();</span>
+<span class="nc" id="L462">    return date.get(woy);</span>
+  }
+
+  private static int ofEpochDay(long epochDay) {
+<span class="fc" id="L466">    EPOCH_DAY.checkValidValue(epochDay);</span>
+<span class="fc" id="L467">    long zeroDay = epochDay + DAYS_0000_TO_1970;</span>
+    // find the march-based year
+<span class="fc" id="L469">    zeroDay -= 60; // adjust to 0000-03-01 so leap day is at end of four year cycle</span>
+<span class="fc" id="L470">    long adjust = 0;</span>
+<span class="pc bpc" id="L471" title="1 of 2 branches missed.">    if (zeroDay &lt; 0) {</span>
+      // adjust negative years to positive for calculation
+<span class="nc" id="L473">      long adjustCycles = (zeroDay + 1) / DAYS_PER_CYCLE - 1;</span>
+<span class="nc" id="L474">      adjust = adjustCycles * 400;</span>
+<span class="nc" id="L475">      zeroDay += -adjustCycles * DAYS_PER_CYCLE;</span>
+    }
+<span class="fc" id="L477">    long yearEst = (400 * zeroDay + 591) / DAYS_PER_CYCLE;</span>
+<span class="fc" id="L478">    long doyEst = zeroDay - (365 * yearEst + yearEst / 4 - yearEst / 100 + yearEst / 400);</span>
+<span class="pc bpc" id="L479" title="1 of 2 branches missed.">    if (doyEst &lt; 0) {</span>
+      // fix estimate
+<span class="nc" id="L481">      yearEst--;</span>
+<span class="nc" id="L482">      doyEst = zeroDay - (365 * yearEst + yearEst / 4 - yearEst / 100 + yearEst / 400);</span>
+    }
+<span class="fc" id="L484">    yearEst += adjust; // reset any negative year</span>
+<span class="fc" id="L485">    int marchDoy0 = (int) doyEst;</span>
+
+    // convert march-based values back to january-based
+<span class="fc" id="L488">    int marchMonth0 = (marchDoy0 * 5 + 2) / 153;</span>
+<span class="fc" id="L489">    int month = (marchMonth0 + 2) % 12 + 1;</span>
+<span class="fc" id="L490">    int dom = marchDoy0 - (marchMonth0 * 306 + 5) / 10 + 1;</span>
+<span class="fc" id="L491">    yearEst += marchMonth0 / 10;</span>
+
+    // check year now we are certain it is correct
+<span class="fc" id="L494">    int year = YEAR.checkValidIntValue(yearEst);</span>
+<span class="fc" id="L495">    return pack((short) year, (byte) month, (byte) dom);</span>
+  }
+
+  public static int plus(int valueToAdd, ChronoUnit unit, int packedDate) {
+<span class="pc bpc" id="L499" title="1 of 5 branches missed.">    switch (unit) {</span>
+      case YEARS:
+<span class="fc" id="L501">        return plusYears(valueToAdd, packedDate);</span>
+      case MONTHS:
+<span class="fc" id="L503">        return plusMonths(valueToAdd, packedDate);</span>
+      case WEEKS:
+<span class="fc" id="L505">        return plusWeeks(valueToAdd, packedDate);</span>
+      case DAYS:
+<span class="fc" id="L507">        return plusDays(valueToAdd, packedDate);</span>
+      default:
+<span class="nc" id="L509">        throw new IllegalArgumentException(&quot;Unsupported Temporal Unit&quot;);</span>
+    }
+  }
+
+  public static int minus(int valueToAdd, ChronoUnit unit, int packedDate) {
+<span class="nc" id="L514">    return plus(-valueToAdd, unit, packedDate);</span>
+  }
+
+  public static int daysUntil(int packedDateEnd, int packedDateStart) {
+<span class="fc" id="L518">    return (int) (toEpochDay(packedDateEnd) - toEpochDay(packedDateStart));</span>
+  }
+
+  public static int weeksUntil(int packedDateEnd, int packedDateStart) {
+<span class="fc" id="L522">    return (int) (toEpochDay(packedDateEnd) - toEpochDay(packedDateStart)) / 7;</span>
+  }
+
+  public static int monthsUntil(int packedDateEnd, int packedDateStart) {
+
+<span class="fc" id="L527">    int start = getMonthInternal(packedDateStart) * 32 + getDayOfMonth(packedDateStart);</span>
+<span class="fc" id="L528">    int end = getMonthInternal(packedDateEnd) * 32 + getDayOfMonth(packedDateEnd);</span>
+<span class="fc" id="L529">    return (end - start) / 32;</span>
+  }
+
+  public static int yearsUntil(int packedDateEnd, int packedDateStart) {
+<span class="fc" id="L533">    return monthsUntil(packedDateEnd, packedDateStart) / 12;</span>
+  }
+
+  private static int getMonthInternal(int packedDate) {
+<span class="fc" id="L537">    return (getYear(packedDate) * 12 + getMonthValue(packedDate) - 1);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

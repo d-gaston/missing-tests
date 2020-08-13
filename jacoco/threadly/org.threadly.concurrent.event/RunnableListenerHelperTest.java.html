@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RunnableListenerHelperTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.event</a> &gt; <span class="el_source">RunnableListenerHelperTest.java</span></div><h1>RunnableListenerHelperTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.event;
+
+import static org.junit.Assert.*;
+
+import java.util.concurrent.Executor;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.PriorityScheduler;
+import org.threadly.concurrent.SameThreadSubmitterExecutor;
+import org.threadly.concurrent.StrictPriorityScheduler;
+import org.threadly.concurrent.TestRuntimeFailureRunnable;
+import org.threadly.util.SuppressedStackRuntimeException;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L20">public class RunnableListenerHelperTest extends ThreadlyTester {</span>
+  @BeforeClass
+  public static void setupClass() {
+<span class="fc" id="L23">    setIgnoreExceptionHandler();</span>
+<span class="fc" id="L24">  }</span>
+  
+  protected RunnableListenerHelper onceHelper;
+  protected RunnableListenerHelper repeatedHelper;
+  
+  @Before
+  public void setup() {
+<span class="fc" id="L31">    onceHelper = new RunnableListenerHelper(true);</span>
+<span class="fc" id="L32">    repeatedHelper = new RunnableListenerHelper(false);</span>
+<span class="fc" id="L33">  }</span>
+  
+  @After
+  public void cleanup() {
+<span class="fc" id="L37">    onceHelper = null;</span>
+<span class="fc" id="L38">    repeatedHelper = null;</span>
+<span class="fc" id="L39">  }</span>
+  
+  @Test
+  public void getSubscribedListenersTest() {
+<span class="fc" id="L43">    assertTrue(onceHelper.getSubscribedListeners().isEmpty());</span>
+<span class="fc" id="L44">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L45">    onceHelper.addListener(tr);</span>
+<span class="fc" id="L46">    assertTrue(onceHelper.getSubscribedListeners().contains(tr));</span>
+<span class="fc" id="L47">    onceHelper.removeListener(tr);</span>
+<span class="fc" id="L48">    assertTrue(onceHelper.getSubscribedListeners().isEmpty());</span>
+<span class="fc" id="L49">  }</span>
+  
+  @Test
+  public void getSubscribedListenersInThreadOnlyTest() {
+<span class="fc" id="L53">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L54">    onceHelper.addListener(tr);</span>
+<span class="fc" id="L55">    assertTrue(onceHelper.getSubscribedListeners().contains(tr));</span>
+<span class="fc" id="L56">  }</span>
+  
+  @Test
+  public void getSubscribedListenersExecutorOnlyTest() {
+<span class="fc" id="L60">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L61">    onceHelper.addListener(tr, SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L62">    assertTrue(onceHelper.getSubscribedListeners().contains(tr));</span>
+<span class="fc" id="L63">  }</span>
+  
+  @Test
+  public void getSubscribedListenersMixedExecutionTest() {
+<span class="fc" id="L67">    TestRunnable tr1 = new TestRunnable();</span>
+<span class="fc" id="L68">    TestRunnable tr2 = new TestRunnable();</span>
+<span class="fc" id="L69">    onceHelper.addListener(tr1);</span>
+<span class="fc" id="L70">    onceHelper.addListener(tr2, SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L71">    assertTrue(onceHelper.getSubscribedListeners().contains(tr1));</span>
+<span class="fc" id="L72">    assertTrue(onceHelper.getSubscribedListeners().contains(tr2));</span>
+<span class="fc" id="L73">  }</span>
+  
+  @Test
+  public void addNullListenerTest() {
+<span class="fc" id="L77">    onceHelper.addListener(null);</span>
+<span class="fc" id="L78">    repeatedHelper.addListener(null);</span>
+    // no exception thrown
+<span class="fc" id="L80">  }</span>
+  
+  @Test
+  public void runListenerNoExecutorTest() {
+<span class="fc" id="L84">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L85">    onceHelper.addListener(tr);</span>
+<span class="fc" id="L86">    onceHelper.callListeners();</span>
+    
+<span class="fc" id="L88">    assertTrue(tr.ranOnce());</span>
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">    assertTrue(Thread.currentThread() == tr.lastRanThread);</span>
+<span class="fc" id="L90">  }</span>
+  
+  @Test
+  public void runListenerExecutorTest() {
+<span class="fc" id="L94">    PriorityScheduler executor = new StrictPriorityScheduler(1);</span>
+    try {
+<span class="fc" id="L96">      TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L97">      onceHelper.addListener(tr, executor);</span>
+<span class="fc" id="L98">      onceHelper.callListeners();</span>
+<span class="fc" id="L99">      tr.blockTillFinished();</span>
+      
+<span class="fc" id="L101">      assertTrue(tr.ranOnce());</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">      assertTrue(Thread.currentThread() != tr.lastRanThread);</span>
+    } finally {
+<span class="fc" id="L104">      executor.shutdownNow();</span>
+    }
+<span class="fc" id="L106">  }</span>
+  
+  @Test
+  public void runListenerCatchExecptionTest() {
+<span class="fc" id="L110">    TestRunnable tr = new TestRunnable() {</span>
+      @Override
+      public void handleRunFinish() {
+<span class="fc" id="L113">        throw new SuppressedStackRuntimeException();</span>
+      }
+    };
+<span class="fc" id="L116">    onceHelper.addListener(tr);</span>
+<span class="fc" id="L117">    onceHelper.callListeners();</span>
+    
+<span class="fc" id="L119">    assertTrue(tr.ranOnce());</span>
+<span class="fc" id="L120">  }</span>
+  
+  @Test (expected = RuntimeException.class)
+  public void runListenerThrowExecptionTest() {
+<span class="fc" id="L124">    onceHelper.callListeners();</span>
+<span class="fc" id="L125">    TestRunnable tr = new TestRunnable() {</span>
+      @Override
+      public void handleRunFinish() {
+<span class="fc" id="L128">        throw new SuppressedStackRuntimeException();</span>
+      }
+    };
+<span class="nc" id="L131">    onceHelper.addListener(tr);</span>
+<span class="nc" id="L132">    fail(&quot;Execption should have thrown&quot;);</span>
+<span class="nc" id="L133">  }</span>
+  
+  @Test
+  public void registeredListenerCountTest() {
+<span class="fc" id="L137">    assertEquals(0, onceHelper.registeredListenerCount());</span>
+<span class="fc" id="L138">    assertEquals(0, repeatedHelper.registeredListenerCount());</span>
+    
+<span class="fc" id="L140">    onceHelper.addListener(DoNothingRunnable.instance());</span>
+<span class="fc" id="L141">    repeatedHelper.addListener(DoNothingRunnable.instance());</span>
+    
+<span class="fc" id="L143">    assertEquals(1, onceHelper.registeredListenerCount());</span>
+<span class="fc" id="L144">    assertEquals(1, repeatedHelper.registeredListenerCount());</span>
+    
+<span class="fc" id="L146">    onceHelper.callListeners();</span>
+<span class="fc" id="L147">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L149">    assertEquals(0, onceHelper.registeredListenerCount());</span>
+<span class="fc" id="L150">    assertEquals(1, repeatedHelper.registeredListenerCount());</span>
+    
+
+<span class="fc" id="L153">    repeatedHelper.addListener(DoNothingRunnable.instance(), SameThreadSubmitterExecutor.instance());</span>
+    
+<span class="fc" id="L155">    assertEquals(2, repeatedHelper.registeredListenerCount());</span>
+<span class="fc" id="L156">  }</span>
+  
+  @Test
+  public void addAndCallListenersTest() {
+<span class="fc" id="L160">    TestRunnable onceTR = new TestRunnable();</span>
+<span class="fc" id="L161">    TestRunnable repeatedTR = new TestRunnable();</span>
+<span class="fc" id="L162">    onceHelper.addListener(onceTR);</span>
+<span class="fc" id="L163">    repeatedHelper.addListener(repeatedTR);</span>
+<span class="fc" id="L164">    onceHelper.callListeners();</span>
+<span class="fc" id="L165">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L167">    assertTrue(onceTR.ranOnce());</span>
+<span class="fc" id="L168">    assertTrue(repeatedTR.ranOnce());</span>
+    
+<span class="fc" id="L170">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L172">    assertTrue(onceTR.ranOnce());</span>
+<span class="fc" id="L173">    assertEquals(2, repeatedTR.getRunCount());</span>
+<span class="fc" id="L174">  }</span>
+  
+  @Test
+  public void addAfterCalledTest() {
+<span class="fc" id="L178">    TestRunnable onceTR = new TestRunnable();</span>
+<span class="fc" id="L179">    TestRunnable repeatedTR = new TestRunnable();</span>
+<span class="fc" id="L180">    onceHelper.callListeners();</span>
+<span class="fc" id="L181">    repeatedHelper.callListeners();</span>
+<span class="fc" id="L182">    onceHelper.addListener(onceTR);</span>
+<span class="fc" id="L183">    repeatedHelper.addListener(repeatedTR);</span>
+    
+<span class="fc" id="L185">    assertTrue(onceTR.ranOnce());</span>
+<span class="fc" id="L186">    assertFalse(repeatedTR.ranOnce());</span>
+    
+<span class="fc" id="L188">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L190">    assertTrue(onceTR.ranOnce());</span>
+<span class="fc" id="L191">    assertTrue(repeatedTR.ranOnce());</span>
+<span class="fc" id="L192">  }</span>
+  
+  @Test
+  public void listenerExceptionAfterCallTest() {
+<span class="fc" id="L196">    TestRuntimeFailureRunnable listener = new TestRuntimeFailureRunnable();</span>
+
+<span class="fc" id="L198">    onceHelper.callListeners();</span>
+    
+    try {
+<span class="nc" id="L201">      onceHelper.addListener(listener);</span>
+<span class="nc" id="L202">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L203">    } catch (RuntimeException e) {</span>
+      // expected
+<span class="nc" id="L205">    }</span>
+    
+<span class="fc" id="L207">    assertTrue(listener.ranOnce());</span>
+<span class="fc" id="L208">  }</span>
+  
+  @Test (expected = RuntimeException.class)
+  public void callListenersFail() {
+<span class="fc" id="L212">    onceHelper.callListeners();</span>
+    // should fail on subsequent calls
+<span class="nc" id="L214">    onceHelper.callListeners();</span>
+<span class="nc" id="L215">  }</span>
+  
+  @Test
+  public void removeListenerTest() {
+<span class="fc" id="L219">    removeListenerTest(null);</span>
+<span class="fc" id="L220">  }</span>
+  
+  @Test
+  public void removeExecutorListenerTest() {
+<span class="fc" id="L224">    removeListenerTest(SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L225">  }</span>
+  
+  private void removeListenerTest(Executor executor) {
+<span class="fc" id="L228">    TestRunnable onceTR = new TestRunnable();</span>
+<span class="fc" id="L229">    TestRunnable repeatedTR = new TestRunnable();</span>
+    
+<span class="fc" id="L231">    assertFalse(onceHelper.removeListener(onceTR));</span>
+<span class="fc" id="L232">    assertFalse(repeatedHelper.removeListener(repeatedTR));</span>
+    
+<span class="fc" id="L234">    onceHelper.addListener(onceTR, executor);</span>
+<span class="fc" id="L235">    repeatedHelper.addListener(repeatedTR, executor);</span>
+
+    // should be false for the opposite
+<span class="fc" id="L238">    assertFalse(onceHelper.removeListener(repeatedTR));</span>
+<span class="fc" id="L239">    assertFalse(repeatedHelper.removeListener(onceTR));</span>
+    
+<span class="fc" id="L241">    assertTrue(onceHelper.removeListener(onceTR));</span>
+<span class="fc" id="L242">    assertTrue(repeatedHelper.removeListener(repeatedTR));</span>
+<span class="fc" id="L243">  }</span>
+  
+  @Test
+  public void removeListenerAfterCallTest() {
+<span class="fc" id="L247">    TestRunnable onceTR = new TestRunnable();</span>
+<span class="fc" id="L248">    TestRunnable repeatedTR = new TestRunnable();</span>
+    
+<span class="fc" id="L250">    assertFalse(onceHelper.removeListener(onceTR));</span>
+<span class="fc" id="L251">    assertFalse(repeatedHelper.removeListener(repeatedTR));</span>
+    
+<span class="fc" id="L253">    onceHelper.addListener(onceTR);</span>
+<span class="fc" id="L254">    repeatedHelper.addListener(repeatedTR);</span>
+    
+<span class="fc" id="L256">    onceHelper.callListeners();</span>
+<span class="fc" id="L257">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L259">    assertFalse(onceHelper.removeListener(onceTR));</span>
+<span class="fc" id="L260">    assertTrue(repeatedHelper.removeListener(repeatedTR));</span>
+<span class="fc" id="L261">  }</span>
+  
+  @Test
+  public void removeListenerFromCallingThreadTest() {
+<span class="fc" id="L265">    removeListenerFromCallingThreadTest(null);</span>
+<span class="fc" id="L266">  }</span>
+  
+  @Test
+  public void removeExecutorListenerFromCallingThreadTest() {
+<span class="fc" id="L270">    removeListenerFromCallingThreadTest(SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L271">  }</span>
+  
+  private void removeListenerFromCallingThreadTest(Executor executor) {
+<span class="fc" id="L274">    final TestRunnable removedRunnable = new TestRunnable();</span>
+<span class="fc" id="L275">    repeatedHelper.addListener(new TestRunnable());</span>
+<span class="fc" id="L276">    repeatedHelper.addListener(new TestRunnable(), executor);</span>
+<span class="fc" id="L277">    repeatedHelper.addListener(new TestRunnable(), executor);</span>
+<span class="fc" id="L278">    repeatedHelper.addListener(new Runnable() {</span>
+      @Override
+      public void run() {
+<span class="fc" id="L281">        repeatedHelper.removeListener(removedRunnable);</span>
+<span class="fc" id="L282">      }</span>
+    }, executor);
+<span class="fc" id="L284">    repeatedHelper.addListener(new TestRunnable(), executor);</span>
+<span class="fc" id="L285">    repeatedHelper.addListener(new TestRunnable(), executor);</span>
+<span class="fc" id="L286">    repeatedHelper.addListener(removedRunnable, executor);</span>
+<span class="fc" id="L287">    repeatedHelper.addListener(new TestRunnable(), executor);</span>
+<span class="fc" id="L288">    repeatedHelper.addListener(new TestRunnable(), executor);</span>
+<span class="fc" id="L289">    repeatedHelper.addListener(new TestRunnable());</span>
+    
+<span class="fc" id="L291">    repeatedHelper.callListeners();</span>
+    
+    // call again and verify it did not run again
+<span class="fc" id="L294">    repeatedHelper.callListeners();</span>
+<span class="fc" id="L295">    assertEquals(1, removedRunnable.getRunCount());</span>
+<span class="fc" id="L296">  }</span>
+  
+  @Test
+  public void clearListenersTest() {
+<span class="fc" id="L300">    TestRunnable onceTR = new TestRunnable();</span>
+<span class="fc" id="L301">    TestRunnable repeatedTR = new TestRunnable();</span>
+<span class="fc" id="L302">    onceHelper.addListener(onceTR);</span>
+<span class="fc" id="L303">    repeatedHelper.addListener(repeatedTR);</span>
+    
+<span class="fc" id="L305">    onceHelper.clearListeners();</span>
+<span class="fc" id="L306">    repeatedHelper.clearListeners();</span>
+    
+<span class="fc" id="L308">    onceHelper.callListeners();</span>
+<span class="fc" id="L309">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L311">    assertFalse(onceTR.ranOnce());</span>
+<span class="fc" id="L312">    assertFalse(repeatedTR.ranOnce());</span>
+<span class="fc" id="L313">  }</span>
+  
+  @Test
+  public void addListenerFromCallingThread() {
+<span class="fc" id="L317">    addListenerFromCallingThread(null);</span>
+<span class="fc" id="L318">  }</span>
+  
+  @Test
+  public void addExecutorListenerFromCallingThread() {
+<span class="fc" id="L322">    addListenerFromCallingThread(SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L323">  }</span>
+  
+  private void addListenerFromCallingThread(Executor executor) {
+<span class="fc" id="L326">    final TestRunnable addedTR = new TestRunnable();</span>
+<span class="fc" id="L327">    TestRunnable tr = new TestRunnable() {</span>
+      @Override
+      public void handleRunFinish() {
+<span class="fc" id="L330">          repeatedHelper.addListener(addedTR, executor);</span>
+<span class="fc" id="L331">      }</span>
+    };
+<span class="fc" id="L333">    repeatedHelper.addListener(tr, executor);</span>
+<span class="fc" id="L334">    repeatedHelper.addListener(DoNothingRunnable.instance(), executor);</span>
+    
+<span class="fc" id="L336">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L338">    assertTrue(tr.ranOnce());</span>
+<span class="fc" id="L339">    assertEquals(0, addedTR.getRunCount());</span>
+    
+<span class="fc" id="L341">    repeatedHelper.callListeners();</span>
+    
+<span class="fc" id="L343">    assertEquals(2, tr.getRunCount());</span>
+<span class="fc" id="L344">    assertEquals(1, addedTR.getRunCount());</span>
+<span class="fc" id="L345">  }</span>
+  
+<span class="fc" id="L347">  private static class TestRunnable extends org.threadly.test.concurrent.TestRunnable {</span>
+<span class="fc" id="L348">    private volatile Thread lastRanThread = null;</span>
+    
+    @Override
+    public void handleRunStart() {
+<span class="fc" id="L352">      lastRanThread = Thread.currentThread();</span>
+<span class="fc" id="L353">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

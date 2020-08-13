@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AsyncVerifier.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.test.concurrent</a> &gt; <span class="el_source">AsyncVerifier.java</span></div><h1>AsyncVerifier.java</h1><pre class="source lang-java linenums">package org.threadly.test.concurrent;
+
+import java.util.concurrent.TimeoutException;
+
+import org.threadly.util.Clock;
+
+/**
+ * A simple class for verifying multi-threaded unit tests.  If any thread has a failed a failed 
+ * {@code assert} or call to {@link #fail()} the main threads call to {@link #waitForTest()} will 
+ * throw an exception to indicate the test as a failure.
+ * &lt;p&gt;
+ * This class also provides a way to control the flow of a unit test by blocking main test thread 
+ * until {@link #signalComplete()} is called from the other thread.
+ * 
+ * @since 1.0.0
+ */
+public class AsyncVerifier {
+  protected static final int DEFAULT_TIMEOUT = 1000 * 10;
+  
+  protected final Object notifyLock;
+  private int signalCount;
+  private RuntimeException failure;
+  
+  /**
+   * Constructs a new {@link AsyncVerifier}.
+   */
+<span class="fc" id="L27">  public AsyncVerifier() {</span>
+<span class="fc" id="L28">    notifyLock = new Object();</span>
+<span class="fc" id="L29">    signalCount = 0;</span>
+<span class="fc" id="L30">    failure = null;</span>
+<span class="fc" id="L31">  }</span>
+  
+  /**
+   * Waits for a default of 10 seconds, or until signalComplete has been called once, or until a 
+   * failure occurs.  If signalComplete has been called before this, this call will never block.
+   * 
+   * @throws InterruptedException Thrown if thread is interrupted while waiting
+   * @throws TimeoutException Thrown if timeout occurs without signalComplete being called
+   */
+  public void waitForTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L41">    waitForTest(DEFAULT_TIMEOUT, 1);</span>
+<span class="fc" id="L42">  }</span>
+  
+  /**
+   * Waits a specified amount of time, or until signalComplete has been called once, or until a 
+   * failure occurs.  If signalComplete has been called before this, this call will never block.
+   * 
+   * @param timeoutInMs Timeout to wait for signalComplete action to occur
+   * @throws InterruptedException Thrown if thread is interrupted while waiting
+   * @throws TimeoutException Thrown if timeout occurs without signalComplete being called
+   */
+  public void waitForTest(long timeoutInMs) throws InterruptedException, TimeoutException {
+<span class="fc" id="L53">    waitForTest(timeoutInMs, 1);</span>
+<span class="fc" id="L54">  }</span>
+  
+  /**
+   * Waits a specified amount of time, or until signalComplete has been called a specified amount 
+   * of times, or until a failure occurs.
+   * &lt;p&gt;
+   * If {@link #waitForTest()} is being called multiple times on the same instance, the 
+   * signalComplete count is NOT reset.  So you must either create new instances, or pass in a 
+   * larger value for the expected signalComplete count.
+   * 
+   * @param timeoutInMs Timeout to wait for signalComplete action to occur
+   * @param signalCount Amount of signalComplete calls to expect before unblocking
+   * @throws InterruptedException Thrown if thread is interrupted while waiting
+   * @throws TimeoutException Thrown if timeout occurs without signalComplete being called
+   */
+  public void waitForTest(long timeoutInMs, int signalCount) throws InterruptedException, 
+                                                                    TimeoutException {
+<span class="fc" id="L71">    long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L72">    long remainingWaitTime = timeoutInMs;</span>
+<span class="fc" id="L73">    synchronized (notifyLock) {</span>
+<span class="fc bfc" id="L74" title="All 6 branches covered.">      while (this.signalCount &lt; signalCount &amp;&amp; </span>
+             remainingWaitTime &gt; 0 &amp;&amp; 
+             failure == null) {
+<span class="fc" id="L77">        notifyLock.wait(remainingWaitTime);</span>
+        
+<span class="fc" id="L79">        remainingWaitTime = timeoutInMs - (Clock.accurateForwardProgressingMillis() - startTime);</span>
+      }
+<span class="fc" id="L81">    }</span>
+    
+<span class="fc bfc" id="L83" title="All 2 branches covered.">    if (failure != null) {</span>
+<span class="fc" id="L84">      throw failure;</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    } else if (remainingWaitTime &lt;= 0) {</span>
+<span class="fc" id="L86">      throw new TimeoutException();</span>
+    }
+    // if neither are true we exited normally
+<span class="fc" id="L89">  }</span>
+  
+  /**
+   * Call to indicate that this thread has finished, and should notify the waiting main test 
+   * thread that the test may be complete.
+   */
+  public void signalComplete() {
+<span class="fc" id="L96">    synchronized (notifyLock) {</span>
+<span class="fc" id="L97">      signalCount++;</span>
+      
+<span class="fc" id="L99">      notifyLock.notifyAll();</span>
+<span class="fc" id="L100">    }</span>
+<span class="fc" id="L101">  }</span>
+  
+  /**
+   * Verifies that the passed in condition is true.  If it is not an exception is thrown in this 
+   * thread, as well as possibly any blocking thread waiting at {@link #waitForTest()}.
+   * 
+   * @param condition condition to verify is {@code true}
+   */
+  public void assertTrue(boolean condition) {
+<span class="fc bfc" id="L110" title="All 2 branches covered.">    if (! condition) {</span>
+<span class="fc" id="L111">      synchronized (notifyLock) {</span>
+<span class="fc" id="L112">        failure = new TestFailure(&quot;assertTrue failure&quot;);</span>
+        
+<span class="fc" id="L114">        notifyLock.notifyAll();</span>
+<span class="fc" id="L115">      }</span>
+      
+<span class="fc" id="L117">      throw failure;</span>
+    }
+<span class="fc" id="L119">  }</span>
+  
+  /**
+   * Verifies that the passed in condition is false.  If it is not an exception is thrown in this 
+   * thread, as well as possibly any blocking thread waiting at {@link #waitForTest()}.
+   * 
+   * @param condition condition to verify is {@code false}
+   */
+  public void assertFalse(boolean condition) {
+<span class="fc bfc" id="L128" title="All 2 branches covered.">    if (condition) {</span>
+<span class="fc" id="L129">      synchronized (notifyLock) {</span>
+<span class="fc" id="L130">        failure = new TestFailure(&quot;assertFalse failure&quot;);</span>
+        
+<span class="fc" id="L132">        notifyLock.notifyAll();</span>
+<span class="fc" id="L133">      }</span>
+      
+<span class="fc" id="L135">      throw failure;</span>
+    }
+<span class="fc" id="L137">  }</span>
+  
+  /**
+   * Verifies that the passed in object is null.  If it is not null an exception is thrown in this 
+   * thread, as well as possibly any blocking thread waiting at {@link #waitForTest()}.
+   * 
+   * @param o Object to verify is {@code null}
+   */
+  public void assertNull(Object o) {
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    if (o != null) {</span>
+<span class="fc" id="L147">      synchronized (notifyLock) {</span>
+<span class="fc" id="L148">        failure = new TestFailure(&quot;Object is not null: &quot; + o);</span>
+        
+<span class="fc" id="L150">        notifyLock.notifyAll();</span>
+<span class="fc" id="L151">      }</span>
+      
+<span class="fc" id="L153">      throw failure;</span>
+    }
+<span class="fc" id="L155">  }</span>
+  
+  /**
+   * Verifies that the passed in object is not null.  If it is null an exception is thrown in this 
+   * thread, as well as possibly any blocking thread waiting at {@link #waitForTest()}.
+   * 
+   * @param o Object to verify is not {@code null}
+   */
+  public void assertNotNull(Object o) {
+<span class="fc bfc" id="L164" title="All 2 branches covered.">    if (o == null) {</span>
+<span class="fc" id="L165">      synchronized (notifyLock) {</span>
+<span class="fc" id="L166">        failure = new TestFailure(&quot;Object is null&quot;);</span>
+        
+<span class="fc" id="L168">        notifyLock.notifyAll();</span>
+<span class="fc" id="L169">      }</span>
+      
+<span class="fc" id="L171">      throw failure;</span>
+    }
+<span class="fc" id="L173">  }</span>
+  
+  /**
+   * Verifies that the passed in values are equal using the o1.equals(o2) relationship.  If this 
+   * check fails an exception is thrown in this thread, as well as any blocking thread waiting at 
+   * {@link #waitForTest()}.
+   * 
+   * @param o1 First object to compare against
+   * @param o2 Second object to compare against
+   */
+  public void assertEquals(Object o1, Object o2) {
+<span class="pc bpc" id="L184" title="1 of 8 branches missed.">    boolean nullMissmatch = (o1 == null &amp;&amp; o2 != null) || </span>
+                              (o1 != null &amp;&amp; o2 == null);
+<span class="pc bpc" id="L186" title="1 of 6 branches missed.">    if (nullMissmatch || </span>
+<span class="fc bfc" id="L187" title="All 2 branches covered.">        ! ((o1 == null &amp;&amp; o2 == null) || o1.equals(o2))) {</span>
+<span class="fc" id="L188">      synchronized (notifyLock) {</span>
+<span class="fc" id="L189">        failure = new TestFailure(o1 + &quot; != &quot; + o2);</span>
+        
+<span class="fc" id="L191">        notifyLock.notifyAll();</span>
+<span class="fc" id="L192">      }</span>
+      
+<span class="fc" id="L194">      throw failure;</span>
+    }
+<span class="fc" id="L196">  }</span>
+  
+  /**
+   * Marks a failure with no cause.  This causes an exception to be thrown in the calling thread, 
+   * as well was any blocking thread waiting at {@link #waitForTest()}.
+   */
+  public void fail() {
+<span class="nc" id="L203">    fail(&quot;&quot;);</span>
+<span class="nc" id="L204">  }</span>
+  
+  /**
+   * Marks a failure with a specified message.  This causes an exception to be thrown in the 
+   * calling thread, as well was any blocking thread waiting at {@link #waitForTest()}.
+   * 
+   * @param message Message to be provided in failure exception
+   */
+  public void fail(String message) {
+<span class="fc" id="L213">    synchronized (notifyLock) {</span>
+<span class="fc" id="L214">      failure = new TestFailure(message);</span>
+      
+<span class="fc" id="L216">      notifyLock.notifyAll();</span>
+<span class="fc" id="L217">    }</span>
+    
+<span class="fc" id="L219">    throw failure;</span>
+  }
+  
+  /**
+   * Marks a failure with a specified throwable cause.  This causes an exception to be thrown in 
+   * the calling thread, as well was any blocking thread waiting at {@link #waitForTest()}.
+   * 
+   * @param cause Throwable cause to be provided in failure exception
+   */
+  public void fail(Throwable cause) {
+<span class="fc" id="L229">    synchronized (notifyLock) {</span>
+<span class="fc" id="L230">      failure = new TestFailure(cause);</span>
+      
+<span class="fc" id="L232">      notifyLock.notifyAll();</span>
+<span class="fc" id="L233">    }</span>
+    
+<span class="fc" id="L235">    throw failure;</span>
+  }
+  
+  /**
+   * Small exception to represent when a test failure occurs.
+   * 
+   * @since 1.0.0
+   */
+  protected static class TestFailure extends RuntimeException {
+    private static final long serialVersionUID = -4683332806581392944L;
+
+    private TestFailure(String failureMsg) {
+<span class="fc" id="L247">      super(failureMsg);</span>
+<span class="fc" id="L248">    }</span>
+
+    private TestFailure(Throwable cause) {
+<span class="fc" id="L251">      super(cause);</span>
+<span class="fc" id="L252">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

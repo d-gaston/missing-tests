@@ -1,0 +1,467 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KeyDistributedScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper</a> &gt; <span class="el_source">KeyDistributedScheduler.java</span></div><h1>KeyDistributedScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper;
+
+import java.util.concurrent.Callable;
+
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.SameThreadSubmitterExecutor;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.concurrent.future.ListenableRunnableFuture;
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * This is a class which is more full featured than {@link KeyDistributedExecutor}, but it does 
+ * require a scheduler implementation in order to be able to perform scheduling.
+ * &lt;p&gt;
+ * The same guarantees and restrictions for the {@link KeyDistributedExecutor} also exist for this 
+ * class.  Please read the javadoc for {@link KeyDistributedExecutor} to understand more about how 
+ * this operates.
+ * 
+ * @since 4.6.0 (since 1.0.0 as org.threadly.concurrent.TaskSchedulerDistributor)
+ */
+public class KeyDistributedScheduler extends KeyDistributedExecutor {
+  protected final SubmitterScheduler scheduler;
+
+  /**
+   * Constructor to use a provided scheduler implementation for running tasks.  
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16.  This also does not 
+   * attempt to have an accurate queue size for the {@link #getTaskQueueSize(Object)} call (thus 
+   * preferring high performance).
+   * 
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   */
+  public KeyDistributedScheduler(SubmitterScheduler scheduler) {
+<span class="fc" id="L38">    this(scheduler, Integer.MAX_VALUE, false);</span>
+<span class="fc" id="L39">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.  
+   * &lt;p&gt;
+   * This constructor allows you to specify if you want accurate queue sizes to be tracked for 
+   * given thread keys.  There is a performance hit associated with this, so this should only be 
+   * enabled if {@link #getTaskQueueSize(Object)} calls will be used.  
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16.
+   * 
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  public KeyDistributedScheduler(SubmitterScheduler scheduler, boolean accurateQueueSize) {
+<span class="fc" id="L55">    this(scheduler, Integer.MAX_VALUE, accurateQueueSize);</span>
+<span class="fc" id="L56">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.  
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16.  This also does not 
+   * attempt to have an accurate queue size for the {@link #getTaskQueueSize(Object)} call (thus 
+   * preferring high performance).
+   * 
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   */
+  public KeyDistributedScheduler(SubmitterScheduler scheduler, int maxTasksPerCycle) {
+<span class="fc" id="L76">    this(scheduler, maxTasksPerCycle, false);</span>
+<span class="fc" id="L77">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.  
+   * &lt;p&gt;
+   * This also allows you to specify if you want accurate queue sizes to be tracked for given 
+   * thread keys.  There is a performance hit associated with this, so this should only be enabled 
+   * if {@link #getTaskQueueSize(Object)} calls will be used.
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16. 
+   * 
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  public KeyDistributedScheduler(SubmitterScheduler scheduler, int maxTasksPerCycle, 
+                                 boolean accurateQueueSize) {
+<span class="fc" id="L101">    super(scheduler, maxTasksPerCycle, accurateQueueSize);</span>
+    
+<span class="fc" id="L103">    this.scheduler = scheduler;</span>
+<span class="fc" id="L104">  }</span>
+  
+  /**
+   * Constructor to use a provided scheduler implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor does not attempt to have an accurate queue size for the 
+   * {@link #getTaskQueueSize(Object)} call (thus preferring high performance).
+   * 
+   * @deprecated Please use {@link #KeyDistributedScheduler(SubmitterScheduler)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   */
+  @Deprecated
+  public KeyDistributedScheduler(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, 
+                                 SubmitterScheduler scheduler) {
+<span class="nc" id="L121">    this(scheduler, Integer.MAX_VALUE, false);</span>
+<span class="nc" id="L122">  }</span>
+  
+  /**
+   * Constructor to use a provided scheduler implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to specify if you want accurate queue sizes to be tracked for 
+   * given thread keys.  There is a performance hit associated with this, so this should only be 
+   * enabled if {@link #getTaskQueueSize(Object)} calls will be used.
+   * 
+   * @deprecated Please use {@link #KeyDistributedScheduler(SubmitterScheduler, boolean)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  @Deprecated
+  public KeyDistributedScheduler(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, 
+                                 SubmitterScheduler scheduler, boolean accurateQueueSize) {
+<span class="nc" id="L141">    this(scheduler, Integer.MAX_VALUE, accurateQueueSize);</span>
+<span class="nc" id="L142">  }</span>
+  
+  /**
+   * Constructor to use a provided scheduler implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.
+   * &lt;p&gt;
+   * This constructor does not attempt to have an accurate queue size for the 
+   * {@link #getTaskQueueSize(Object)} call (thus preferring high performance).
+   * 
+   * @deprecated Please use {@link #KeyDistributedScheduler(SubmitterScheduler, int)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   */
+  @Deprecated
+  public KeyDistributedScheduler(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, 
+                                 SubmitterScheduler scheduler, int maxTasksPerCycle) {
+<span class="nc" id="L166">    this(scheduler, maxTasksPerCycle, false);</span>
+<span class="nc" id="L167">  }</span>
+  
+  /**
+   * Constructor to use a provided scheduler implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.
+   * &lt;p&gt;
+   * This also allows you to specify if you want accurate queue sizes to be tracked for given 
+   * thread keys.  There is a performance hit associated with this, so this should only be enabled 
+   * if {@link #getTaskQueueSize(Object)} calls will be used.
+   * 
+   * @deprecated Please use {@link #KeyDistributedScheduler(SubmitterScheduler, int, boolean)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param scheduler A multi-threaded scheduler to distribute tasks to.  Ideally has as many 
+   *                  possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  @Deprecated
+  public KeyDistributedScheduler(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, 
+                                 SubmitterScheduler scheduler, 
+                                 int maxTasksPerCycle, boolean accurateQueueSize) {
+<span class="nc" id="L194">    this(scheduler, maxTasksPerCycle, accurateQueueSize);</span>
+<span class="nc" id="L195">  }</span>
+  
+  /**
+   * Returns a scheduler implementation where all tasks submitted on this scheduler will run on 
+   * the provided key.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @return scheduler which will only execute based on the provided key
+   */
+  public SubmitterScheduler getSchedulerForKey(Object threadKey) {
+<span class="fc" id="L205">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+    
+<span class="fc" id="L207">    return new KeyScheduler(threadKey);</span>
+  }
+
+  /**
+   * Schedule a one time task with a given delay that will not run concurrently based off the 
+   * thread key.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to execute
+   * @param delayInMs Time to wait to execute task
+   */
+  public void schedule(Object threadKey, Runnable task, long delayInMs) {
+<span class="fc" id="L219">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+<span class="fc" id="L220">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L221">    ArgumentVerifier.assertNotNegative(delayInMs, &quot;delayInMs&quot;);</span>
+    
+<span class="fc bfc" id="L223" title="All 2 branches covered.">    if (delayInMs == 0) {</span>
+<span class="fc" id="L224">      addTask(threadKey, task, executor);</span>
+    } else {
+<span class="fc" id="L226">      scheduler.schedule(new AddTask(threadKey, task), delayInMs);</span>
+    }
+<span class="fc" id="L228">  }</span>
+
+  /**
+   * Schedule a task with a given delay.  There is a slight increase in load when using 
+   * {@link #submitScheduled(Object, Runnable, long)} over 
+   * {@link #schedule(Object, Runnable, long)}.  So this should only be used when the future 
+   * is necessary.
+   * &lt;p&gt;
+   * The {@link ListenableFuture#get()} method will return {@code null} once the runnable has completed.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task runnable to execute
+   * @param delayInMs time in milliseconds to wait to execute task
+   * @return a future to know when the task has completed
+   */
+  public ListenableFuture&lt;?&gt; submitScheduled(Object threadKey, Runnable task, long delayInMs) {
+<span class="fc" id="L244">    return submitScheduled(threadKey, task, null, delayInMs);</span>
+  }
+
+  /**
+   * Schedule a task with a given delay.  The future {@link ListenableFuture#get()} method will 
+   * return null once the runnable has completed.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task runnable to execute
+   * @param result result to be returned from resulting {@link ListenableFuture#get()} when runnable completes
+   * @param delayInMs time in milliseconds to wait to execute task
+   * @return a future to know when the task has completed
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Object threadKey, Runnable task, 
+                                                 T result, long delayInMs) {
+<span class="fc" id="L260">    return submitScheduled(threadKey, RunnableCallableAdapter.adapt(task, result), delayInMs);</span>
+  }
+
+  /**
+   * Schedule a {@link Callable} with a given delay.  This is needed when a result needs to be 
+   * consumed from the callable.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task callable to be executed
+   * @param delayInMs time in milliseconds to wait to execute task
+   * @return a future to know when the task has completed and get the result of the callable
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Object threadKey, 
+                                                 Callable&lt;T&gt; task,  long delayInMs) {
+<span class="fc" id="L275">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+<span class="fc" id="L276">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L277">    ArgumentVerifier.assertNotNegative(delayInMs, &quot;delayInMs&quot;);</span>
+
+<span class="fc" id="L279">    ListenableRunnableFuture&lt;T&gt; rf = new ListenableFutureTask&lt;&gt;(false, task);</span>
+    
+<span class="fc bfc" id="L281" title="All 2 branches covered.">    if (delayInMs == 0) {</span>
+<span class="fc" id="L282">      addTask(threadKey, rf, executor);</span>
+    } else {
+<span class="fc" id="L284">      scheduler.schedule(new AddTask(threadKey, rf), delayInMs);</span>
+    }
+    
+<span class="fc" id="L287">    return rf;</span>
+  }
+  
+  /**
+   * Schedule a fixed delay recurring task to run.  The recurring delay time will be from the 
+   * point where execution has finished.  So the execution frequency is the 
+   * {@code recurringDelay + runtime} for the provided task.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed.
+   * @param initialDelay Delay in milliseconds until first run.
+   * @param recurringDelay Delay in milliseconds for running task after last finish.
+   */
+  public void scheduleTaskWithFixedDelay(Object threadKey, Runnable task, 
+                                         long initialDelay, long recurringDelay) {
+<span class="fc" id="L302">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+<span class="fc" id="L303">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L304">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+<span class="fc" id="L305">    ArgumentVerifier.assertNotNegative(recurringDelay, &quot;recurringDelay&quot;);</span>
+    
+<span class="fc" id="L307">    RecrringDelayTask rdt = new RecrringDelayTask(threadKey, task, recurringDelay);</span>
+<span class="fc bfc" id="L308" title="All 2 branches covered.">    if (initialDelay == 0) {</span>
+<span class="fc" id="L309">      addTask(threadKey, rdt, executor);</span>
+    } else {
+<span class="fc" id="L311">      scheduler.schedule(new AddTask(threadKey, rdt), initialDelay);</span>
+    }
+<span class="fc" id="L313">  }</span>
+  
+  /**
+   * Schedule a fixed rate recurring task to run.  The recurring delay will be the same, 
+   * regardless of how long task execution takes.  A given runnable will not run concurrently 
+   * (unless it is submitted to the scheduler multiple times).  Instead of execution takes longer 
+   * than the period, the next run will occur immediately (given thread availability in the pool).  
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task runnable to be executed
+   * @param initialDelay delay in milliseconds until first run
+   * @param period amount of time in milliseconds between the start of recurring executions
+   */
+  public void scheduleTaskAtFixedRate(Object threadKey, Runnable task, 
+                                      long initialDelay, long period) {
+<span class="fc" id="L328">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+<span class="fc" id="L329">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L330">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+<span class="fc" id="L331">    ArgumentVerifier.assertGreaterThanZero(period, &quot;period&quot;);</span>
+    
+<span class="fc" id="L333">    RecrringRateTask rrt = new RecrringRateTask(threadKey, task, period);</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">    if (initialDelay == 0) {</span>
+<span class="fc" id="L335">      addTask(threadKey, rrt, executor);</span>
+    } else {
+<span class="fc" id="L337">      scheduler.schedule(new AddTask(threadKey, rrt), initialDelay);</span>
+    }
+<span class="fc" id="L339">  }</span>
+  
+  /**
+   * Task which will run delayed to add a task into the queue when ready.
+   * 
+   * @since 1.0.0
+   */
+  protected class AddTask implements Runnable, RunnableContainer {
+    protected final Object key;
+    protected final Runnable task;
+    
+<span class="fc" id="L350">    protected AddTask(Object key, Runnable task) {</span>
+<span class="fc" id="L351">      this.key = key;</span>
+<span class="fc" id="L352">      this.task = task;</span>
+<span class="fc" id="L353">    }</span>
+
+    @Override
+    public void run() {
+<span class="fc" id="L357">      addTask(key, task, SameThreadSubmitterExecutor.instance());</span>
+<span class="fc" id="L358">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L362">      return task;</span>
+    }
+  }
+  
+  /**
+   * Container for runnables which run with a fixed delay after the previous run.
+   * 
+   * @since 3.1.0
+   */
+  protected class RecrringDelayTask implements Runnable, RunnableContainer {
+    protected final Object key;
+    protected final Runnable task;
+    protected final long recurringDelay;
+    
+<span class="fc" id="L376">    protected RecrringDelayTask(Object key, Runnable task, long recurringDelay) {</span>
+<span class="fc" id="L377">      this.key = key;</span>
+<span class="fc" id="L378">      this.task = task;</span>
+<span class="fc" id="L379">      this.recurringDelay = recurringDelay;</span>
+<span class="fc" id="L380">    }</span>
+    
+    @Override
+    public void run() {
+      try {
+<span class="fc" id="L385">        task.run();</span>
+      } finally {
+<span class="fc" id="L387">        scheduler.schedule(new AddTask(key, this), recurringDelay);</span>
+      }
+<span class="fc" id="L389">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L393">      return task;</span>
+    }
+  }
+  
+  /**
+   * Container for runnables which run with a fixed rate, regardless of execution time.
+   * 
+   * @since 3.1.0
+   */
+  protected class RecrringRateTask implements Runnable, RunnableContainer {
+    protected final Object key;
+    protected final Runnable task;
+    protected final long recurringPeriod;
+    
+<span class="fc" id="L407">    protected RecrringRateTask(Object key, Runnable task, long recurringPeriod) {</span>
+<span class="fc" id="L408">      this.key = key;</span>
+<span class="fc" id="L409">      this.task = task;</span>
+<span class="fc" id="L410">      this.recurringPeriod = recurringPeriod;</span>
+<span class="fc" id="L411">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L415">      scheduler.schedule(new AddTask(key, this), recurringPeriod);</span>
+<span class="fc" id="L416">      task.run();</span>
+<span class="fc" id="L417">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="nc" id="L421">      return task;</span>
+    }
+  }
+  
+  /**
+   * Simple simple scheduler implementation that submits executions and scheduling on a given key.
+   * 
+   * @since 2.5.0
+   */
+  protected class KeyScheduler extends KeySubmitter implements SubmitterScheduler {
+<span class="fc" id="L431">    protected KeyScheduler(Object threadKey) {</span>
+<span class="fc" id="L432">      super(threadKey);</span>
+<span class="fc" id="L433">    }</span>
+
+    @Override
+    public void schedule(Runnable task, long delayInMs) {
+<span class="fc" id="L437">      KeyDistributedScheduler.this.schedule(threadKey, task, delayInMs);</span>
+<span class="fc" id="L438">    }</span>
+
+    @Override
+    public ListenableFuture&lt;?&gt; submitScheduled(Runnable task, long delayInMs) {
+<span class="fc" id="L442">      return submitScheduled(task, null, delayInMs);</span>
+    }
+
+    @Override
+    public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Runnable task, T result, long delayInMs) {
+<span class="fc" id="L447">      return KeyDistributedScheduler.this.submitScheduled(threadKey, task, result, delayInMs);</span>
+    }
+
+    @Override
+    public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Callable&lt;T&gt; task, long delayInMs) {
+<span class="fc" id="L452">      return KeyDistributedScheduler.this.submitScheduled(threadKey, task, delayInMs);</span>
+    }
+
+    @Override
+    public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay) {
+<span class="fc" id="L457">      KeyDistributedScheduler.this.scheduleTaskWithFixedDelay(threadKey, task, </span>
+                                                              initialDelay, recurringDelay);
+<span class="fc" id="L459">    }</span>
+
+    @Override
+    public void scheduleAtFixedRate(Runnable task, long initialDelay, long period) {
+<span class="fc" id="L463">      KeyDistributedScheduler.this.scheduleTaskAtFixedRate(threadKey, task, initialDelay, period);</span>
+<span class="fc" id="L464">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

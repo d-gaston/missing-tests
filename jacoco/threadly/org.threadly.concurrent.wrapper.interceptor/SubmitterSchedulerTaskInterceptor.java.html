@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SubmitterSchedulerTaskInterceptor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.interceptor</a> &gt; <span class="el_source">SubmitterSchedulerTaskInterceptor.java</span></div><h1>SubmitterSchedulerTaskInterceptor.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.interceptor;
+
+import java.util.concurrent.Callable;
+import java.util.function.BiFunction;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * Class to wrap {@link SubmitterScheduler} pool so that tasks can be intercepted and either 
+ * wrapped, or modified, before being submitted to the pool.  This class can be passed a lambda to
+ * {@link #SubmitterSchedulerTaskInterceptor(SubmitterScheduler, BiFunction)}, or 
+ * {@link #wrapTask(Runnable, boolean)} can be overridden to provide the task which should be 
+ * submitted to the {@link SubmitterScheduler}.  Please see the javadocs of 
+ * {@link #wrapTask(Runnable, boolean)} for more details about ways a task can be modified or 
+ * wrapped.
+ * &lt;p&gt;
+ * Other variants of task wrappers: {@link ExecutorTaskInterceptor}, 
+ * {@link SchedulerServiceTaskInterceptor}, {@link PrioritySchedulerTaskInterceptor}.
+ * 
+ * @since 4.6.0
+ */
+public class SubmitterSchedulerTaskInterceptor extends ExecutorTaskInterceptor 
+                                               implements SubmitterScheduler {
+  protected final SubmitterScheduler parentScheduler;
+  protected final BiFunction&lt;Runnable, Boolean, Runnable&gt; taskManipulator;
+
+  /**
+   * When using this constructor, {@link #wrapTask(Runnable, boolean)} must be overridden to 
+   * handle the task manipulation before the task is submitted to the provided 
+   * {@link SubmitterScheduler}.  Please see the javadocs of {@link #wrapTask(Runnable, boolean)} 
+   * for more details about ways a task can be modified or wrapped.
+   * 
+   * @param parentExecutor An instance of {@link Executor} to wrap
+   */
+  protected SubmitterSchedulerTaskInterceptor(SubmitterScheduler parentScheduler) {
+<span class="fc" id="L38">    this(parentScheduler, </span>
+<span class="fc" id="L39">         (r, s) -&gt; { throw new RuntimeException(&quot;Must override wrapTask(Runnable, Boolean)&quot;); });</span>
+<span class="fc" id="L40">  }</span>
+  
+  /**
+   * Constructs a wrapper for {@link SubmitterScheduler} pool so that tasks can be intercepted 
+   * and modified, before being submitted to the pool.
+   * 
+   * @param parentScheduler An instance of {@link SubmitterScheduler} to wrap
+   * @param taskManipulator A lambda to manipulate a {@link Runnable} that was submitted for execution
+   */
+  public SubmitterSchedulerTaskInterceptor(SubmitterScheduler parentScheduler, 
+                                           BiFunction&lt;Runnable, Boolean, Runnable&gt; taskManipulator) {
+<span class="fc" id="L51">    super(parentScheduler);</span>
+<span class="fc" id="L52">    ArgumentVerifier.assertNotNull(taskManipulator, &quot;taskManipulator&quot;);</span>
+    
+<span class="fc" id="L54">    this.parentScheduler = parentScheduler;</span>
+<span class="fc" id="L55">    this.taskManipulator = taskManipulator;</span>
+<span class="fc" id="L56">  }</span>
+  
+  /**
+   * Overridden version which delegates to {@link #wrapTask(Runnable, boolean)}.  There should be 
+   * no reason to override this, instead just ensure that {@link #wrapTask(Runnable, boolean)} is 
+   * implemented.
+   */
+  @Override
+  public final Runnable wrapTask(Runnable task) {
+<span class="fc" id="L65">    return wrapTask(task, false);</span>
+  }
+  
+  /**
+   * Implementation to modify a provided task.  The provided runnable will be the one submitted to 
+   * the Executor, unless a {@link Callable} was submitted, in which case a 
+   * {@link ListenableFutureTask} will be provided.  In the last condition the original callable 
+   * can be retrieved by invoking {@link ListenableFutureTask#getContainedCallable()}.  The returned 
+   * task can not be null, but could be either the original task, a modified task, a wrapper to the 
+   * provided task, or if no action is desired 
+   * {@link org.threadly.concurrent.DoNothingRunnable#instance()} may be provided.  However caution 
+   * should be used in that if a {@link ListenableFutureTask} is provided, and then never returned 
+   * (and not canceled), then the future will never complete (and thus possibly forever blocked).  
+   * So if you are doing conditional checks for {@link ListenableFutureTask} and may not 
+   * execute/return the provided task, then you should be careful to ensure 
+   * {@link ListenableFutureTask#cancel(boolean)} is invoked.
+   * &lt;p&gt;
+   * Public visibility for javadoc visibility.
+   * 
+   * @param task A runnable that was submitted for execution
+   * @param recurring {@code true} if the provided task is a recurring task
+   * @return A non-null task that will be provided to the parent executor
+   */
+  public Runnable wrapTask(Runnable task, boolean recurring) {
+<span class="fc" id="L89">    return this.taskManipulator.apply(task, recurring);</span>
+  }
+
+  @Override
+  public void schedule(Runnable task, long delayInMs) {
+<span class="fc bfc" id="L94" title="All 2 branches covered.">    parentScheduler.schedule(task == null ? null : wrapTask(task, false), delayInMs);</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Runnable task, T result, long delayInMs) {
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    return parentScheduler.submitScheduled(task == null ? null : wrapTask(task, false), </span>
+                                           result, delayInMs);
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Callable&lt;T&gt; task, long delayInMs) {
+<span class="fc" id="L105">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L107">    ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, this);</span>
+
+<span class="fc" id="L109">    parentScheduler.schedule(wrapTask(lft, false), delayInMs);</span>
+    
+<span class="fc" id="L111">    return lft;</span>
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay) {
+<span class="fc bfc" id="L116" title="All 2 branches covered.">    parentScheduler.scheduleWithFixedDelay(task == null ? null : wrapTask(task, true), </span>
+                                           initialDelay, recurringDelay);
+<span class="fc" id="L118">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period) {
+<span class="pc bpc" id="L122" title="1 of 2 branches missed.">    parentScheduler.scheduleAtFixedRate(task == null ? null : wrapTask(task, true), </span>
+                                        initialDelay, period);
+<span class="fc" id="L124">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,645 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TimeColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">TimeColumn.java</span></div><h1>TimeColumn.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import static tech.tablesaw.columns.DateAndTimePredicates.isMissing;
+import static tech.tablesaw.columns.DateAndTimePredicates.isNotMissing;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import it.unimi.dsi.fastutil.ints.IntIterator;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
+import java.nio.ByteBuffer;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+import tech.tablesaw.columns.AbstractColumn;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.times.PackedLocalTime;
+import tech.tablesaw.columns.times.TimeColumnFormatter;
+import tech.tablesaw.columns.times.TimeColumnType;
+import tech.tablesaw.columns.times.TimeFillers;
+import tech.tablesaw.columns.times.TimeFilters;
+import tech.tablesaw.columns.times.TimeMapFunctions;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.sorting.comparators.DescendingIntComparator;
+
+/** A column in a base table that contains float values */
+public class TimeColumn extends AbstractColumn&lt;TimeColumn, LocalTime&gt;
+    implements CategoricalColumn&lt;LocalTime&gt;,
+        TimeFilters,
+        TimeFillers&lt;TimeColumn&gt;,
+        TimeMapFunctions {
+
+<span class="fc" id="L56">  private final IntComparator descendingIntComparator = DescendingIntComparator.instance();</span>
+
+<span class="fc" id="L58">  private TimeColumnFormatter printFormatter = new TimeColumnFormatter();</span>
+
+  private IntArrayList data;
+
+<span class="fc" id="L62">  private final IntComparator comparator =</span>
+      (r1, r2) -&gt; {
+<span class="nc" id="L64">        int f1 = getIntInternal(r1);</span>
+<span class="nc" id="L65">        int f2 = getIntInternal(r2);</span>
+<span class="nc" id="L66">        return Integer.compare(f1, f2);</span>
+      };
+
+  private TimeColumn(String name, IntArrayList times) {
+<span class="fc" id="L70">    super(TimeColumnType.instance(), name);</span>
+<span class="fc" id="L71">    data = times;</span>
+<span class="fc" id="L72">  }</span>
+
+  private TimeColumn(String name) {
+<span class="fc" id="L75">    super(TimeColumnType.instance(), name);</span>
+<span class="fc" id="L76">    data = new IntArrayList(DEFAULT_ARRAY_SIZE);</span>
+<span class="fc" id="L77">  }</span>
+
+  public static boolean valueIsMissing(int i) {
+<span class="fc" id="L80">    return TimeColumnType.valueIsMissing(i);</span>
+  }
+
+  public static TimeColumn create(String name) {
+<span class="fc" id="L84">    return new TimeColumn(name);</span>
+  }
+
+  public static TimeColumn create(String name, List&lt;LocalTime&gt; data) {
+<span class="nc" id="L88">    TimeColumn column = new TimeColumn(name, new IntArrayList(data.size()));</span>
+<span class="nc bnc" id="L89" title="All 2 branches missed.">    for (LocalTime time : data) {</span>
+<span class="nc" id="L90">      column.append(time);</span>
+<span class="nc" id="L91">    }</span>
+<span class="nc" id="L92">    return column;</span>
+  }
+
+  public static TimeColumn create(String name, LocalTime[] data) {
+<span class="fc" id="L96">    TimeColumn column = new TimeColumn(name, new IntArrayList(data.length));</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">    for (LocalTime time : data) {</span>
+<span class="fc" id="L98">      column.append(time);</span>
+    }
+<span class="fc" id="L100">    return column;</span>
+  }
+
+  public static TimeColumn create(String name, int initialSize) {
+<span class="fc" id="L104">    TimeColumn column = new TimeColumn(name, new IntArrayList(initialSize));</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">    for (int i = 0; i &lt; initialSize; i++) {</span>
+<span class="fc" id="L106">      column.appendMissing();</span>
+    }
+<span class="fc" id="L108">    return column;</span>
+  }
+
+  public static TimeColumn create(String name, Stream&lt;LocalTime&gt; stream) {
+<span class="nc" id="L112">    TimeColumn column = create(name);</span>
+<span class="nc" id="L113">    stream.forEach(val -&gt; column.append(val));</span>
+<span class="nc" id="L114">    return column;</span>
+  }
+
+  @Override
+  public TimeColumn appendMissing() {
+<span class="fc" id="L119">    appendInternal(TimeColumnType.missingValueIndicator());</span>
+<span class="fc" id="L120">    return this;</span>
+  }
+
+  @Override
+  public TimeColumn subset(int[] rows) {
+<span class="fc" id="L125">    final TimeColumn c = this.emptyCopy();</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">    for (final int row : rows) {</span>
+<span class="fc" id="L127">      c.appendInternal(getIntInternal(row));</span>
+    }
+<span class="fc" id="L129">    return c;</span>
+  }
+
+  @Override
+  public TimeColumn lag(int n) {
+<span class="fc bfc" id="L134" title="All 2 branches covered.">    int srcPos = n &gt;= 0 ? 0 : 0 - n;</span>
+<span class="fc" id="L135">    int[] dest = new int[size()];</span>
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    int destPos = n &lt;= 0 ? 0 : n;</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">    int length = n &gt;= 0 ? size() - n : size() + n;</span>
+
+<span class="fc bfc" id="L139" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L140">      dest[i] = TimeColumnType.missingValueIndicator();</span>
+    }
+
+<span class="fc" id="L143">    System.arraycopy(data.toIntArray(), srcPos, dest, destPos, length);</span>
+
+<span class="fc" id="L145">    TimeColumn copy = emptyCopy(size());</span>
+<span class="fc" id="L146">    copy.data = new IntArrayList(dest);</span>
+<span class="fc" id="L147">    copy.setName(name() + &quot; lag(&quot; + n + &quot;)&quot;);</span>
+<span class="fc" id="L148">    return copy;</span>
+  }
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="nc" id="L153">    return valueIsMissing(getIntInternal(rowNumber));</span>
+  }
+
+  public int size() {
+<span class="fc" id="L157">    return data.size();</span>
+  }
+
+  public TimeColumn appendInternal(int f) {
+<span class="fc" id="L161">    data.add(f);</span>
+<span class="fc" id="L162">    return this;</span>
+  }
+
+  public TimeColumn append(LocalTime time) {
+    int value;
+<span class="fc bfc" id="L167" title="All 2 branches covered.">    if (time == null) {</span>
+<span class="fc" id="L168">      value = TimeColumnType.missingValueIndicator();</span>
+    } else {
+<span class="fc" id="L170">      value = PackedLocalTime.pack(time);</span>
+    }
+<span class="fc" id="L172">    appendInternal(value);</span>
+<span class="fc" id="L173">    return this;</span>
+  }
+
+  @Override
+  public TimeColumn appendObj(Object obj) {
+<span class="pc bpc" id="L178" title="1 of 2 branches missed.">    if (obj == null) {</span>
+<span class="nc" id="L179">      return appendMissing();</span>
+    }
+<span class="pc bpc" id="L181" title="1 of 2 branches missed.">    if (!(obj instanceof LocalTime)) {</span>
+<span class="nc" id="L182">      throw new IllegalArgumentException(</span>
+<span class="nc" id="L183">          &quot;Cannot append &quot; + obj.getClass().getName() + &quot; to TimeColumn&quot;);</span>
+    }
+<span class="fc" id="L185">    return append((LocalTime) obj);</span>
+  }
+
+  @Override
+  public TimeColumn removeMissing() {
+<span class="nc" id="L190">    TimeColumn noMissing = emptyCopy();</span>
+<span class="nc" id="L191">    IntIterator iterator = intIterator();</span>
+<span class="nc bnc" id="L192" title="All 2 branches missed.">    while (iterator.hasNext()) {</span>
+<span class="nc" id="L193">      int i = iterator.nextInt();</span>
+<span class="nc bnc" id="L194" title="All 2 branches missed.">      if (!valueIsMissing(i)) {</span>
+<span class="nc" id="L195">        noMissing.appendInternal(i);</span>
+      }
+<span class="nc" id="L197">    }</span>
+<span class="nc" id="L198">    return noMissing;</span>
+  }
+
+  @Override
+  public String getString(int row) {
+<span class="nc" id="L203">    return printFormatter.format(getPackedTime(row));</span>
+  }
+
+  @Override
+  public String getUnformattedString(int row) {
+<span class="fc" id="L208">    return PackedLocalTime.toShortTimeString(getPackedTime(row));</span>
+  }
+
+  public void setPrintFormatter(DateTimeFormatter dateTimeFormatter, String missingValueString) {
+<span class="nc" id="L212">    Preconditions.checkNotNull(dateTimeFormatter);</span>
+<span class="nc" id="L213">    Preconditions.checkNotNull(missingValueString);</span>
+<span class="nc" id="L214">    this.printFormatter = new TimeColumnFormatter(dateTimeFormatter, missingValueString);</span>
+<span class="nc" id="L215">  }</span>
+
+  public void setPrintFormatter(DateTimeFormatter dateTimeFormatter) {
+<span class="nc" id="L218">    Preconditions.checkNotNull(dateTimeFormatter);</span>
+<span class="nc" id="L219">    this.printFormatter = new TimeColumnFormatter(dateTimeFormatter);</span>
+<span class="nc" id="L220">  }</span>
+
+  @Override
+  public TimeColumn emptyCopy() {
+<span class="fc" id="L224">    TimeColumn empty = create(name());</span>
+<span class="fc" id="L225">    empty.printFormatter = printFormatter;</span>
+<span class="fc" id="L226">    return empty;</span>
+  }
+
+  @Override
+  public TimeColumn emptyCopy(int rowSize) {
+<span class="fc" id="L231">    TimeColumn column = TimeColumn.create(name(), rowSize);</span>
+<span class="fc" id="L232">    column.printFormatter = printFormatter;</span>
+<span class="fc" id="L233">    return column;</span>
+  }
+
+  @Override
+  public TimeColumn copy() {
+<span class="fc" id="L238">    TimeColumn column = emptyCopy(size());</span>
+<span class="fc" id="L239">    column.data = data.clone();</span>
+<span class="fc" id="L240">    return column;</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="fc" id="L245">    data.clear();</span>
+<span class="fc" id="L246">  }</span>
+
+  /** Returns the entire contents of this column as a list */
+  public List&lt;LocalTime&gt; asList() {
+<span class="fc" id="L250">    List&lt;LocalTime&gt; times = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L251" title="All 2 branches covered.">    for (LocalTime time : this) {</span>
+<span class="fc" id="L252">      times.add(time);</span>
+<span class="fc" id="L253">    }</span>
+<span class="fc" id="L254">    return times;</span>
+  }
+
+  @Override
+  public void sortAscending() {
+<span class="fc" id="L259">    int[] sorted = data.toIntArray();</span>
+<span class="fc" id="L260">    Arrays.parallelSort(sorted);</span>
+<span class="fc" id="L261">    this.data = new IntArrayList(sorted);</span>
+<span class="fc" id="L262">  }</span>
+
+  @Override
+  public void sortDescending() {
+<span class="fc" id="L266">    IntArrays.parallelQuickSort(data.elements(), descendingIntComparator);</span>
+<span class="fc" id="L267">  }</span>
+
+  public LocalTime max() {
+
+<span class="pc bpc" id="L271" title="1 of 2 branches missed.">    if (isEmpty()) {</span>
+<span class="nc" id="L272">      return null;</span>
+    }
+<span class="fc" id="L274">    int max = getIntInternal(0);</span>
+
+<span class="fc bfc" id="L276" title="All 2 branches covered.">    for (int aData : data) {</span>
+<span class="fc bfc" id="L277" title="All 2 branches covered.">      max = (max &gt; aData) ? max : aData;</span>
+<span class="fc" id="L278">    }</span>
+
+<span class="pc bpc" id="L280" title="1 of 2 branches missed.">    if (max == TimeColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L281">      return null;</span>
+    }
+<span class="fc" id="L283">    return PackedLocalTime.asLocalTime(max);</span>
+  }
+
+  public LocalTime min() {
+
+<span class="pc bpc" id="L288" title="1 of 2 branches missed.">    if (isEmpty()) {</span>
+<span class="nc" id="L289">      return null;</span>
+    }
+
+<span class="fc" id="L292">    int min = Integer.MAX_VALUE;</span>
+
+<span class="fc bfc" id="L294" title="All 2 branches covered.">    for (int aData : data) {</span>
+<span class="fc bfc" id="L295" title="All 2 branches covered.">      if (aData != TimeColumnType.missingValueIndicator()) {</span>
+<span class="fc bfc" id="L296" title="All 2 branches covered.">        min = (min &lt; aData) ? min : aData;</span>
+      }
+<span class="fc" id="L298">    }</span>
+<span class="pc bpc" id="L299" title="1 of 2 branches missed.">    if (min == Integer.MAX_VALUE) {</span>
+<span class="nc" id="L300">      return null;</span>
+    }
+<span class="fc" id="L302">    return PackedLocalTime.asLocalTime(min);</span>
+  }
+
+  @Override
+  public Table summary() {
+
+<span class="fc" id="L308">    Table table = Table.create(&quot;Column: &quot; + name());</span>
+<span class="fc" id="L309">    StringColumn measure = StringColumn.create(&quot;Measure&quot;);</span>
+<span class="fc" id="L310">    StringColumn value = StringColumn.create(&quot;Value&quot;);</span>
+<span class="fc" id="L311">    table.addColumns(measure);</span>
+<span class="fc" id="L312">    table.addColumns(value);</span>
+
+<span class="fc" id="L314">    measure.append(&quot;Count&quot;);</span>
+<span class="fc" id="L315">    value.append(String.valueOf(size()));</span>
+
+<span class="fc" id="L317">    measure.append(&quot;Missing&quot;);</span>
+<span class="fc" id="L318">    value.append(String.valueOf(countMissing()));</span>
+
+<span class="fc" id="L320">    measure.append(&quot;Earliest&quot;);</span>
+<span class="fc" id="L321">    value.append(String.valueOf(min()));</span>
+
+<span class="fc" id="L323">    measure.append(&quot;Latest&quot;);</span>
+<span class="fc" id="L324">    value.append(String.valueOf(max()));</span>
+
+<span class="fc" id="L326">    return table;</span>
+  }
+
+  /** Returns the count of missing values in this column */
+  @Override
+  public int countMissing() {
+<span class="fc" id="L332">    int count = 0;</span>
+<span class="fc bfc" id="L333" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">      if (getIntInternal(i) == TimeColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L335">        count++;</span>
+      }
+    }
+<span class="fc" id="L338">    return count;</span>
+  }
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L343">    IntOpenHashSet hashSet = new IntOpenHashSet(data);</span>
+<span class="fc" id="L344">    return hashSet.size();</span>
+  }
+
+  @Override
+  public TimeColumn unique() {
+<span class="fc" id="L349">    IntSet ints = new IntOpenHashSet(data);</span>
+<span class="fc" id="L350">    TimeColumn column = emptyCopy(ints.size());</span>
+<span class="fc" id="L351">    column.data = IntArrayList.wrap(ints.toIntArray());</span>
+<span class="fc" id="L352">    column.setName(name() + &quot; Unique values&quot;);</span>
+<span class="fc" id="L353">    return column;</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="fc" id="L358">    return data.isEmpty();</span>
+  }
+
+  @Override
+  public TimeColumn appendCell(String object) {
+<span class="fc" id="L363">    appendInternal(PackedLocalTime.pack(TimeColumnType.DEFAULT_PARSER.parse(object)));</span>
+<span class="fc" id="L364">    return this;</span>
+  }
+
+  @Override
+  public TimeColumn appendCell(String object, AbstractColumnParser&lt;?&gt; parser) {
+<span class="fc" id="L369">    return appendObj(parser.parse(object));</span>
+  }
+
+  @Override
+  public int getIntInternal(int index) {
+<span class="fc" id="L374">    return data.getInt(index);</span>
+  }
+
+  protected int getPackedTime(int index) {
+<span class="fc" id="L378">    return getIntInternal(index);</span>
+  }
+
+  public LocalTime get(int index) {
+<span class="fc" id="L382">    return PackedLocalTime.asLocalTime(getIntInternal(index));</span>
+  }
+
+  @Override
+  public IntComparator rowComparator() {
+<span class="nc" id="L387">    return comparator;</span>
+  }
+
+  /** @deprecated Use intIterator(), or getIntInternal() instead) */
+  @Deprecated
+  public IntArrayList data() {
+<span class="nc" id="L393">    return data;</span>
+  }
+
+  public double getDouble(int i) {
+<span class="nc" id="L397">    return getIntInternal(i);</span>
+  }
+
+  public double[] asDoubleArray() {
+<span class="nc" id="L401">    double[] doubles = new double[data.size()];</span>
+<span class="nc bnc" id="L402" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L403">      doubles[i] = data.getInt(i);</span>
+    }
+<span class="nc" id="L405">    return doubles;</span>
+  }
+
+  public DoubleColumn asDoubleColumn() {
+<span class="nc" id="L409">    return DoubleColumn.create(name(), asDoubleArray());</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L414">    return &quot;LocalTime column: &quot; + name();</span>
+  }
+
+  @Override
+  public TimeColumn append(Column&lt;LocalTime&gt; column) {
+<span class="pc bpc" id="L419" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L420">    TimeColumn timeCol = (TimeColumn) column;</span>
+<span class="fc" id="L421">    final int size = timeCol.size();</span>
+<span class="fc bfc" id="L422" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L423">      appendInternal(timeCol.getIntInternal(i));</span>
+    }
+<span class="fc" id="L425">    return this;</span>
+  }
+
+  @Override
+  public TimeColumn append(Column&lt;LocalTime&gt; column, int row) {
+<span class="pc bpc" id="L430" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L431">    return appendInternal(((TimeColumn) column).getIntInternal(row));</span>
+  }
+
+  @Override
+  public TimeColumn set(int row, Column&lt;LocalTime&gt; column, int sourceRow) {
+<span class="pc bpc" id="L436" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L437">    return set(row, ((TimeColumn) column).getIntInternal(sourceRow));</span>
+  }
+
+  /**
+   * Returns the largest (&quot;top&quot;) n values in the column. Does not change the order in this column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the largest observations
+   */
+  public List&lt;LocalTime&gt; top(int n) {
+<span class="fc" id="L448">    List&lt;LocalTime&gt; top = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L449">    int[] values = data.toIntArray();</span>
+<span class="fc" id="L450">    IntArrays.parallelQuickSort(values, descendingIntComparator);</span>
+<span class="pc bpc" id="L451" title="1 of 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="fc" id="L452">      top.add(PackedLocalTime.asLocalTime(values[i]));</span>
+    }
+<span class="fc" id="L454">    return top;</span>
+  }
+
+  /**
+   * Returns the smallest (&quot;bottom&quot;) n values in the column, Does not change the order in this
+   * column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the smallest n observations
+   */
+  public List&lt;LocalTime&gt; bottom(int n) {
+<span class="fc" id="L466">    List&lt;LocalTime&gt; bottom = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L467">    int[] values = data.toIntArray();</span>
+<span class="fc" id="L468">    IntArrays.parallelQuickSort(values);</span>
+<span class="fc" id="L469">    int rowCount = 0;</span>
+<span class="fc" id="L470">    int validCount = 0;</span>
+<span class="pc bpc" id="L471" title="1 of 4 branches missed.">    while (validCount &lt; n &amp;&amp; rowCount &lt; size()) {</span>
+<span class="fc" id="L472">      int value = values[rowCount];</span>
+<span class="fc bfc" id="L473" title="All 2 branches covered.">      if (value != TimeColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L474">        bottom.add(PackedLocalTime.asLocalTime(value));</span>
+<span class="fc" id="L475">        validCount++;</span>
+      }
+<span class="fc" id="L477">      rowCount++;</span>
+<span class="fc" id="L478">    }</span>
+<span class="fc" id="L479">    return bottom;</span>
+  }
+
+  public TimeColumn set(int index, int value) {
+<span class="fc" id="L483">    data.set(index, value);</span>
+<span class="fc" id="L484">    return this;</span>
+  }
+
+  public TimeColumn set(int index, LocalTime value) {
+<span class="fc" id="L488">    set(index, PackedLocalTime.pack(value));</span>
+<span class="fc" id="L489">    return this;</span>
+  }
+
+  /**
+   * Conditionally update this column, replacing current values with newValue for all rows where the
+   * current value matches the selection criteria
+   *
+   * &lt;p&gt;Example: myColumn.set(myColumn.valueIsMissing(), LocalTime.now()); // no more missing values
+   */
+  public TimeColumn set(Selection rowSelection, LocalTime newValue) {
+<span class="fc bfc" id="L499" title="All 2 branches covered.">    for (int row : rowSelection) {</span>
+<span class="fc" id="L500">      set(row, newValue);</span>
+<span class="fc" id="L501">    }</span>
+<span class="fc" id="L502">    return this;</span>
+  }
+
+  public IntIterator intIterator() {
+<span class="fc" id="L506">    return data.iterator();</span>
+  }
+
+  public boolean contains(LocalTime time) {
+<span class="fc" id="L510">    int t = PackedLocalTime.pack(time);</span>
+<span class="fc" id="L511">    return data.contains(t);</span>
+  }
+
+  @Override
+  public TimeColumn setMissing(int i) {
+<span class="nc" id="L516">    data.set(i, TimeColumnType.missingValueIndicator());</span>
+<span class="nc" id="L517">    return this;</span>
+  }
+
+  @Override
+  public Selection isMissing() {
+<span class="fc" id="L522">    return eval(isMissing);</span>
+  }
+
+  @Override
+  public Selection isNotMissing() {
+<span class="fc" id="L527">    return eval(isNotMissing);</span>
+  }
+
+  @Override
+  public int byteSize() {
+<span class="fc" id="L532">    return type().byteSize();</span>
+  }
+
+  /** Returns the contents of the cell at rowNumber as a byte[] */
+  @Override
+  public byte[] asBytes(int rowNumber) {
+<span class="fc" id="L538">    return ByteBuffer.allocate(byteSize()).putInt(getIntInternal(rowNumber)).array();</span>
+  }
+
+  /**
+   * Returns an iterator over elements of type {@code T}.
+   *
+   * @return an Iterator.
+   */
+  @Override
+  public Iterator&lt;LocalTime&gt; iterator() {
+
+<span class="fc" id="L549">    return new Iterator&lt;LocalTime&gt;() {</span>
+
+<span class="fc" id="L551">      final IntIterator intIterator = intIterator();</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L555">        return intIterator.hasNext();</span>
+      }
+
+      @Override
+      public LocalTime next() {
+<span class="fc" id="L560">        return PackedLocalTime.asLocalTime(intIterator.nextInt());</span>
+      }
+    };
+  }
+
+  @Override
+  public TimeColumn where(Selection selection) {
+<span class="fc" id="L567">    return subset(selection.toArray());</span>
+  }
+
+  // fillWith methods
+
+  private TimeColumn fillWith(
+      int count, Iterator&lt;LocalTime&gt; iterator, Consumer&lt;LocalTime&gt; acceptor) {
+<span class="nc bnc" id="L574" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="nc bnc" id="L575" title="All 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L576">        break;</span>
+      }
+<span class="nc" id="L578">      acceptor.accept(iterator.next());</span>
+    }
+<span class="nc" id="L580">    return this;</span>
+  }
+
+  @Override
+  public LocalTime[] asObjectArray() {
+<span class="fc" id="L585">    final LocalTime[] output = new LocalTime[data.size()];</span>
+<span class="fc bfc" id="L586" title="All 2 branches covered.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="fc" id="L587">      output[i] = get(i);</span>
+    }
+<span class="fc" id="L589">    return output;</span>
+  }
+
+  @Override
+  public TimeColumn fillWith(Iterator&lt;LocalTime&gt; iterator) {
+<span class="nc" id="L594">    int[] r = new int[1];</span>
+<span class="nc" id="L595">    fillWith(size(), iterator, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L596">    return this;</span>
+  }
+
+  private TimeColumn fillWith(
+      int count, Iterable&lt;LocalTime&gt; iterable, Consumer&lt;LocalTime&gt; acceptor) {
+<span class="fc" id="L601">    Iterator&lt;LocalTime&gt; iterator = iterable.iterator();</span>
+<span class="fc bfc" id="L602" title="All 2 branches covered.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="pc bpc" id="L603" title="1 of 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L604">        iterator = iterable.iterator();</span>
+<span class="nc bnc" id="L605" title="All 2 branches missed.">        if (!iterator.hasNext()) {</span>
+<span class="nc" id="L606">          break;</span>
+        }
+      }
+<span class="fc" id="L609">      acceptor.accept(iterator.next());</span>
+    }
+<span class="fc" id="L611">    return this;</span>
+  }
+
+  @Override
+  public TimeColumn fillWith(Iterable&lt;LocalTime&gt; iterable) {
+<span class="fc" id="L616">    int[] r = new int[1];</span>
+<span class="fc" id="L617">    fillWith(size(), iterable, date -&gt; set(r[0]++, date));</span>
+<span class="fc" id="L618">    return this;</span>
+  }
+
+  private TimeColumn fillWith(
+      int count, Supplier&lt;LocalTime&gt; supplier, Consumer&lt;LocalTime&gt; acceptor) {
+<span class="nc bnc" id="L623" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+      try {
+<span class="nc" id="L625">        acceptor.accept(supplier.get());</span>
+<span class="nc" id="L626">      } catch (Exception e) {</span>
+<span class="nc" id="L627">        break;</span>
+<span class="nc" id="L628">      }</span>
+    }
+<span class="nc" id="L630">    return this;</span>
+  }
+
+  @Override
+  public TimeColumn fillWith(Supplier&lt;LocalTime&gt; supplier) {
+<span class="nc" id="L635">    int[] r = new int[1];</span>
+<span class="nc" id="L636">    fillWith(size(), supplier, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L637">    return this;</span>
+  }
+
+  @Override
+  public int compare(LocalTime o1, LocalTime o2) {
+<span class="nc" id="L642">    return o1.compareTo(o2);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

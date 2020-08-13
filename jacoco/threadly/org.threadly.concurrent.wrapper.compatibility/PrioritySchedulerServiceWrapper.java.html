@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PrioritySchedulerServiceWrapper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.compatibility</a> &gt; <span class="el_source">PrioritySchedulerServiceWrapper.java</span></div><h1>PrioritySchedulerServiceWrapper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.compatibility;
+
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
+
+import org.threadly.concurrent.PriorityScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.ThreadlyInternalAccessor;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.concurrent.future.ListenableRunnableFuture;
+import org.threadly.concurrent.wrapper.priority.DefaultPriorityWrapper;
+
+/**
+ * This is a wrapper for {@link PriorityScheduler} to be a drop in replacement for any 
+ * {@link java.util.concurrent.ScheduledExecutorService} (AKA the 
+ * {@link java.util.concurrent.ScheduledThreadPoolExecutor} 
+ * interface). It does make some performance sacrifices to adhere to this interface, but those are 
+ * pretty minimal.  The largest compromise in here is easily scheduleAtFixedRate (which you should 
+ * read the javadocs for if you need).
+ * 
+ * @since 4.6.0 (since 1.0.0 as org.threadly.concurrent.PriorityScheduledExecutorServiceWrapper)
+ */
+public class PrioritySchedulerServiceWrapper extends AbstractExecutorServiceWrapper {
+  protected final PriorityScheduler pScheduler;
+  protected final TaskPriority taskPriority;
+  
+  /**
+   * Constructs a new wrapper to adhere to the 
+   * {@link java.util.concurrent.ScheduledExecutorService} interface.
+   * 
+   * @param scheduler {@link PriorityScheduler} implementation to rely on
+   */
+  public PrioritySchedulerServiceWrapper(PriorityScheduler scheduler) {
+<span class="fc" id="L36">    this(scheduler, null);</span>
+<span class="fc" id="L37">  }</span>
+  
+  /**
+   * Constructs a new wrapper to adhere to the 
+   * {@link java.util.concurrent.ScheduledExecutorService} interface.
+   * 
+   * @param scheduler {@link PriorityScheduler} implementation to rely on
+   * @param taskPriority Priority for all tasks submitted to the parent scheduler
+   */
+  public PrioritySchedulerServiceWrapper(PriorityScheduler scheduler, TaskPriority taskPriority) {
+<span class="fc" id="L47">    super(DefaultPriorityWrapper.ensurePriority(scheduler, taskPriority));</span>
+    
+<span class="fc" id="L49">    this.pScheduler = scheduler;</span>
+<span class="pc bpc" id="L50" title="1 of 2 branches missed.">    this.taskPriority = taskPriority == null ? scheduler.getDefaultPriority() : taskPriority;</span>
+<span class="fc" id="L51">  }</span>
+
+  @Override
+  public void shutdown() {
+<span class="fc" id="L55">    pScheduler.shutdown();</span>
+<span class="fc" id="L56">  }</span>
+
+  /**
+   * This call will stop the processor as quick as possible.  Any tasks which are awaiting 
+   * execution will be canceled and returned as a result to this call.
+   * &lt;p&gt;
+   * Unlike {@link java.util.concurrent.ExecutorService} implementation there is no attempt to 
+   * stop any currently execution tasks.
+   * &lt;p&gt;
+   * This method does not wait for actively executing tasks toterminate.  Use 
+   * {@link #awaitTermination awaitTermination} to do that.
+   *
+   * @return list of tasks that never commenced execution
+   */
+  @Override
+  public List&lt;Runnable&gt; shutdownNow() {
+<span class="fc" id="L72">    return pScheduler.shutdownNow();</span>
+  }
+
+  @Override
+  public boolean isTerminated() {
+<span class="fc bfc" id="L77" title="All 2 branches covered.">    return scheduler.isShutdown() &amp;&amp; </span>
+<span class="pc bpc" id="L78" title="1 of 2 branches missed.">           pScheduler.getCurrentPoolSize() == 0;</span>
+  }
+
+  @Override
+  public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+<span class="fc" id="L83">    return pScheduler.awaitTermination(unit.toMillis(timeout));</span>
+  }
+
+  @Override
+  protected ListenableScheduledFuture&lt;?&gt; schedule(Runnable task, long delayInMillis) {
+<span class="fc" id="L88">    ListenableRunnableFuture&lt;Void&gt; taskFuture = new ListenableFutureTask&lt;&gt;(false, task, pScheduler);</span>
+<span class="fc" id="L89">    Delayed d = ThreadlyInternalAccessor.doScheduleAndGetDelayed(pScheduler, taskFuture, </span>
+                                                                 taskPriority, delayInMillis);
+    
+<span class="fc" id="L92">    return new ScheduledFutureDelegate&lt;&gt;(taskFuture, d);</span>
+  }
+
+  @Override
+  protected &lt;V&gt; ListenableScheduledFuture&lt;V&gt; schedule(Callable&lt;V&gt; callable, long delayInMillis) {
+<span class="fc" id="L97">    ListenableRunnableFuture&lt;V&gt; taskFuture = new ListenableFutureTask&lt;&gt;(false, callable, pScheduler);</span>
+<span class="fc" id="L98">    Delayed d = ThreadlyInternalAccessor.doScheduleAndGetDelayed(pScheduler, taskFuture, </span>
+                                                                 taskPriority, delayInMillis);
+    
+<span class="fc" id="L101">    return new ScheduledFutureDelegate&lt;&gt;(taskFuture, d);</span>
+  }
+
+  @Override
+  protected ListenableScheduledFuture&lt;?&gt; scheduleWithFixedDelay(Runnable task,
+                                                                long initialDelay, long delayInMs) {
+    // wrap the task to ensure the correct behavior on exceptions
+<span class="fc" id="L108">    task = new ThrowableHandlingRecurringRunnable(scheduler, task);</span>
+    
+<span class="fc" id="L110">    ListenableRunnableFuture&lt;Void&gt; lft = </span>
+        new CancelRemovingListenableFutureTask&lt;&gt;(scheduler, true, task, pScheduler);
+<span class="fc" id="L112">    Delayed d = ThreadlyInternalAccessor.doScheduleWithFixedDelayAndGetDelayed(pScheduler, </span>
+                                                                               lft, taskPriority, 
+                                                                               initialDelay, 
+                                                                               delayInMs);
+    
+<span class="fc" id="L117">    return new ScheduledFutureDelegate&lt;&gt;(lft, d);</span>
+  }
+
+  @Override
+  protected ListenableScheduledFuture&lt;?&gt; scheduleAtFixedRate(Runnable task,
+                                                             long initialDelay, long periodInMillis) {
+    // wrap the task to ensure the correct behavior on exceptions
+<span class="fc" id="L124">    task = new ThrowableHandlingRecurringRunnable(pScheduler, task);</span>
+    
+<span class="fc" id="L126">    ListenableRunnableFuture&lt;Void&gt; lft = </span>
+        new CancelRemovingListenableFutureTask&lt;&gt;(scheduler, true, task, pScheduler);
+<span class="fc" id="L128">    Delayed d = ThreadlyInternalAccessor.doScheduleAtFixedRateAndGetDelayed(pScheduler, </span>
+                                                                            lft, taskPriority, 
+                                                                            initialDelay, 
+                                                                            periodInMillis);
+    
+<span class="fc" id="L133">    return new ScheduledFutureDelegate&lt;&gt;(lft, d);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

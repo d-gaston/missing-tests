@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ArgumentList.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.analytic</a> &gt; <span class="el_source">ArgumentList.java</span></div><h1>ArgumentList.java</h1><pre class="source lang-java linenums">package tech.tablesaw.analytic;
+
+import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Stream;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.columns.Column;
+
+/** This class holds data on what aggregate and numbering functions to execute in the query. */
+final class ArgumentList {
+  // Throws if a column with the same name is registered
+  private final Map&lt;String, FunctionCall&lt;AggregateFunctions&gt;&gt; aggregateFunctions;
+  private final Map&lt;String, FunctionCall&lt;NumberingFunctions&gt;&gt; numberingFunctions;
+
+  // Used to determine the order in which to add new columns.
+  private final LinkedHashSet&lt;String&gt; newColumnNames;
+
+  public ArgumentList(
+      Map&lt;String, FunctionCall&lt;AggregateFunctions&gt;&gt; aggregateFunctions,
+      Map&lt;String, FunctionCall&lt;NumberingFunctions&gt;&gt; numberingFunctions,
+<span class="fc" id="L28">      LinkedHashSet&lt;String&gt; newColumnNames) {</span>
+<span class="fc" id="L29">    this.aggregateFunctions = aggregateFunctions;</span>
+<span class="fc" id="L30">    this.numberingFunctions = numberingFunctions;</span>
+<span class="fc" id="L31">    this.newColumnNames = newColumnNames;</span>
+<span class="fc" id="L32">  }</span>
+
+  static Builder builder() {
+<span class="fc" id="L35">    return new Builder();</span>
+  }
+
+  public Map&lt;String, FunctionCall&lt;AggregateFunctions&gt;&gt; getAggregateFunctions() {
+<span class="fc" id="L39">    return aggregateFunctions;</span>
+  }
+
+  public Map&lt;String, FunctionCall&lt;NumberingFunctions&gt;&gt; getNumberingFunctions() {
+<span class="fc" id="L43">    return numberingFunctions;</span>
+  }
+
+  public List&lt;String&gt; getNewColumnNames() {
+<span class="fc" id="L47">    return ImmutableList.copyOf(newColumnNames);</span>
+  }
+
+  public String toSqlString(String windowName) {
+<span class="fc" id="L51">    StringBuilder sb = new StringBuilder();</span>
+<span class="fc" id="L52">    int colCount = 0;</span>
+<span class="fc bfc" id="L53" title="All 2 branches covered.">    for (String newColName : newColumnNames) {</span>
+<span class="fc" id="L54">      String optionalNumberingCol =</span>
+<span class="fc" id="L55">          Optional.ofNullable(numberingFunctions.get(newColName))</span>
+<span class="fc" id="L56">              .map(f -&gt; f.toSqlString(windowName))</span>
+<span class="fc" id="L57">              .orElse(&quot;&quot;);</span>
+<span class="fc" id="L58">      String optionalAggregateCol =</span>
+<span class="fc" id="L59">          Optional.ofNullable(aggregateFunctions.get(newColName))</span>
+<span class="fc" id="L60">              .map(f -&gt; f.toSqlString(windowName))</span>
+<span class="fc" id="L61">              .orElse(&quot;&quot;);</span>
+<span class="fc" id="L62">      sb.append(optionalNumberingCol);</span>
+<span class="fc" id="L63">      sb.append(optionalAggregateCol);</span>
+<span class="fc" id="L64">      colCount++;</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">      if (colCount &lt; newColumnNames.size()) {</span>
+<span class="fc" id="L66">        sb.append(&quot;,&quot;);</span>
+<span class="fc" id="L67">        sb.append(System.lineSeparator());</span>
+      }
+<span class="fc" id="L69">    }</span>
+<span class="fc" id="L70">    return sb.toString();</span>
+  }
+
+  /** @return an ordered list of new columns this analytic query will generate. */
+  List&lt;Column&lt;?&gt;&gt; createEmptyDestinationColumns(int rowCount) {
+<span class="fc" id="L75">    List&lt;Column&lt;?&gt;&gt; newColumns = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    for (String toColumn : newColumnNames) {</span>
+<span class="fc" id="L77">      FunctionCall&lt;? extends FunctionMetaData&gt; functionCall =</span>
+<span class="fc" id="L78">          Stream.of(aggregateFunctions.get(toColumn), numberingFunctions.get(toColumn))</span>
+<span class="fc" id="L79">              .filter(java.util.Objects::nonNull)</span>
+<span class="fc" id="L80">              .findFirst()</span>
+<span class="fc" id="L81">              .get();</span>
+<span class="fc" id="L82">      ColumnType type = functionCall.function.returnType();</span>
+<span class="fc" id="L83">      Column&lt;?&gt; resultColumn = type.create(toColumn);</span>
+<span class="fc" id="L84">      newColumns.add(resultColumn);</span>
+
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      for (int i = 0; i &lt; rowCount; i++) {</span>
+<span class="fc" id="L87">        resultColumn.appendMissing();</span>
+      }
+<span class="fc" id="L89">    }</span>
+<span class="fc" id="L90">    return newColumns;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L95">    return toSqlString(&quot;?&quot;);</span>
+  }
+
+  static class FunctionCall&lt;T extends FunctionMetaData&gt; {
+    private final String sourceColumnName;
+    private final String destinationColumnName;
+    private final T function;
+
+    public String getSourceColumnName() {
+<span class="fc" id="L104">      return sourceColumnName;</span>
+    }
+
+    public String getDestinationColumnName() {
+<span class="fc" id="L108">      return destinationColumnName;</span>
+    }
+
+    public T getFunction() {
+<span class="fc" id="L112">      return function;</span>
+    }
+
+<span class="fc" id="L115">    public FunctionCall(String sourceColumnName, String destinationColumnName, T function) {</span>
+<span class="fc" id="L116">      this.sourceColumnName = sourceColumnName;</span>
+<span class="fc" id="L117">      this.destinationColumnName = destinationColumnName;</span>
+<span class="fc" id="L118">      this.function = function;</span>
+<span class="fc" id="L119">    }</span>
+
+    @Override
+    public String toString() {
+<span class="nc" id="L123">      return toSqlString(&quot;&quot;);</span>
+    }
+
+    public String toSqlString(String windowName) {
+<span class="fc" id="L127">      String over = &quot;&quot;;</span>
+<span class="pc bpc" id="L128" title="1 of 2 branches missed.">      if (!windowName.isEmpty()) {</span>
+<span class="fc" id="L129">        over = &quot; OVER &quot; + windowName;</span>
+      }
+<span class="fc" id="L131">      return function.toString()</span>
+          + '('
+          + sourceColumnName
+          + &quot;)&quot;
+          + over
+          + &quot; AS &quot;
+          + destinationColumnName;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L142" title="1 of 2 branches missed.">      if (this == o) return true;</span>
+<span class="pc bpc" id="L143" title="2 of 4 branches missed.">      if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L144">      FunctionCall&lt;?&gt; that = (FunctionCall&lt;?&gt;) o;</span>
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">      return Objects.equal(sourceColumnName, that.sourceColumnName)</span>
+<span class="pc bpc" id="L146" title="1 of 2 branches missed.">          &amp;&amp; Objects.equal(destinationColumnName, that.destinationColumnName)</span>
+<span class="pc bpc" id="L147" title="1 of 2 branches missed.">          &amp;&amp; Objects.equal(function, that.function);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L152">      return Objects.hashCode(sourceColumnName, destinationColumnName, function);</span>
+    }
+  }
+
+  static class Builder {
+
+    // Maps the destination column name to aggregate function.
+<span class="fc" id="L159">    private final Map&lt;String, FunctionCall&lt;AggregateFunctions&gt;&gt; aggregateFunctions =</span>
+        new HashMap&lt;&gt;();
+    // Maps the destination column name to aggregate function.
+<span class="fc" id="L162">    private final Map&lt;String, FunctionCall&lt;NumberingFunctions&gt;&gt; numberingFunctions =</span>
+        new HashMap&lt;&gt;();
+
+    // Throws if a column with the same name is registered twice.
+<span class="fc" id="L166">    private final LinkedHashSet&lt;String&gt; newColumnNames = new LinkedHashSet&lt;&gt;();</span>
+
+    // Temporarily store analytic function data until the user calls 'as' to give the new column a
+    // name
+    // and save all the metadata.
+    private String stagedFromColumn;
+    private AggregateFunctions stagedAggregateFunction;
+    private NumberingFunctions stagedNumberingFunction;
+
+<span class="fc" id="L175">    private Builder() {}</span>
+
+    Builder stageFunction(String fromColumn, AggregateFunctions function) {
+<span class="fc" id="L178">      checkNothingStaged();</span>
+<span class="fc" id="L179">      Preconditions.checkNotNull(fromColumn);</span>
+<span class="fc" id="L180">      Preconditions.checkNotNull(function);</span>
+<span class="fc" id="L181">      this.stagedFromColumn = fromColumn;</span>
+<span class="fc" id="L182">      this.stagedAggregateFunction = function;</span>
+<span class="fc" id="L183">      return this;</span>
+    }
+
+    Builder stageFunction(NumberingFunctions function) {
+<span class="fc" id="L187">      checkNothingStaged();</span>
+<span class="fc" id="L188">      Preconditions.checkNotNull(function);</span>
+      // Numbering functions do not have a from column. Use a placeholder instead.
+<span class="fc" id="L190">      this.stagedFromColumn = &quot;NUMBERING_FUNCTION_PLACEHOLDER&quot;;</span>
+<span class="fc" id="L191">      this.stagedNumberingFunction = function;</span>
+<span class="fc" id="L192">      return this;</span>
+    }
+
+    private void checkNothingStaged() {
+<span class="fc bfc" id="L196" title="All 2 branches covered.">      if (this.stagedFromColumn != null) {</span>
+<span class="fc" id="L197">        throw new IllegalArgumentException(</span>
+            &quot;Cannot stage a column while another is staged. Must call unstage first&quot;);
+      }
+<span class="fc" id="L200">    }</span>
+
+    private void checkForDuplicateAlias(String toColumn) {
+<span class="fc" id="L203">      Preconditions.checkArgument(</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">          !newColumnNames.contains(toColumn), &quot;Cannot add duplicate column name: &quot; + toColumn);</span>
+<span class="fc" id="L205">      newColumnNames.add(toColumn);</span>
+<span class="fc" id="L206">    }</span>
+
+    Builder unStageFunction(String toColumn) {
+<span class="fc" id="L209">      Preconditions.checkNotNull(stagedFromColumn);</span>
+<span class="fc" id="L210">      checkForDuplicateAlias(toColumn);</span>
+
+<span class="fc bfc" id="L212" title="All 2 branches covered.">      if (stagedNumberingFunction != null) {</span>
+<span class="fc" id="L213">        Preconditions.checkNotNull(stagedNumberingFunction);</span>
+<span class="fc" id="L214">        this.numberingFunctions.put(</span>
+            toColumn, new FunctionCall&lt;&gt;(&quot;&quot;, toColumn, this.stagedNumberingFunction));
+      } else {
+<span class="fc" id="L217">        Preconditions.checkNotNull(stagedAggregateFunction);</span>
+<span class="fc" id="L218">        this.aggregateFunctions.put(</span>
+            toColumn,
+            new FunctionCall&lt;&gt;(this.stagedFromColumn, toColumn, this.stagedAggregateFunction));
+      }
+<span class="fc" id="L222">      this.stagedNumberingFunction = null;</span>
+<span class="fc" id="L223">      this.stagedAggregateFunction = null;</span>
+<span class="fc" id="L224">      this.stagedFromColumn = null;</span>
+
+<span class="fc" id="L226">      return this;</span>
+    }
+
+    ArgumentList build() {
+<span class="fc bfc" id="L230" title="All 2 branches covered.">      if (this.stagedFromColumn != null) {</span>
+<span class="fc" id="L231">        throw new IllegalStateException(&quot;Cannot build when a column is staged&quot;);</span>
+      }
+<span class="fc" id="L233">      return new ArgumentList(aggregateFunctions, numberingFunctions, newColumnNames);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

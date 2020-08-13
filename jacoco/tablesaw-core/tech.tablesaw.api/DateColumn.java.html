@@ -1,0 +1,652 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DateColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">DateColumn.java</span></div><h1>DateColumn.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import it.unimi.dsi.fastutil.ints.IntIterator;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
+import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+import tech.tablesaw.columns.AbstractColumn;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.dates.DateColumnFormatter;
+import tech.tablesaw.columns.dates.DateColumnType;
+import tech.tablesaw.columns.dates.DateFillers;
+import tech.tablesaw.columns.dates.DateFilters;
+import tech.tablesaw.columns.dates.DateMapFunctions;
+import tech.tablesaw.columns.dates.PackedLocalDate;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.sorting.comparators.DescendingIntComparator;
+
+/** A column in a base table that contains float values */
+public class DateColumn extends AbstractColumn&lt;DateColumn, LocalDate&gt;
+    implements DateFilters,
+        DateFillers&lt;DateColumn&gt;,
+        DateMapFunctions,
+        CategoricalColumn&lt;LocalDate&gt; {
+
+<span class="fc" id="L55">  private final IntComparator reverseIntComparator = DescendingIntComparator.instance();</span>
+
+  private IntArrayList data;
+
+<span class="fc" id="L59">  private final IntComparator comparator =</span>
+      (r1, r2) -&gt; {
+<span class="fc" id="L61">        final int f1 = getIntInternal(r1);</span>
+<span class="fc" id="L62">        int f2 = getIntInternal(r2);</span>
+<span class="fc" id="L63">        return Integer.compare(f1, f2);</span>
+      };
+
+<span class="fc" id="L66">  private DateColumnFormatter printFormatter = new DateColumnFormatter();</span>
+
+  public static DateColumn create(final String name) {
+<span class="fc" id="L69">    return new DateColumn(name, new IntArrayList(DEFAULT_ARRAY_SIZE));</span>
+  }
+
+  public static DateColumn create(final String name, final int initialSize) {
+<span class="fc" id="L73">    DateColumn column = new DateColumn(name, new IntArrayList(initialSize));</span>
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    for (int i = 0; i &lt; initialSize; i++) {</span>
+<span class="fc" id="L75">      column.appendMissing();</span>
+    }
+<span class="fc" id="L77">    return column;</span>
+  }
+
+  public static DateColumn create(String name, List&lt;LocalDate&gt; data) {
+<span class="nc" id="L81">    DateColumn column = new DateColumn(name, new IntArrayList(data.size()));</span>
+<span class="nc bnc" id="L82" title="All 2 branches missed.">    for (LocalDate date : data) {</span>
+<span class="nc" id="L83">      column.append(date);</span>
+<span class="nc" id="L84">    }</span>
+<span class="nc" id="L85">    return column;</span>
+  }
+
+  public static DateColumn create(String name, LocalDate[] data) {
+<span class="fc" id="L89">    DateColumn column = new DateColumn(name, new IntArrayList(data.length));</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">    for (LocalDate date : data) {</span>
+<span class="fc" id="L91">      column.append(date);</span>
+    }
+<span class="fc" id="L93">    return column;</span>
+  }
+
+  public static DateColumn create(String name, Stream&lt;LocalDate&gt; stream) {
+<span class="nc" id="L97">    DateColumn column = create(name);</span>
+<span class="nc" id="L98">    stream.forEach(val -&gt; column.append(val));</span>
+<span class="nc" id="L99">    return column;</span>
+  }
+
+  private DateColumn(String name, IntArrayList data) {
+<span class="fc" id="L103">    super(DateColumnType.instance(), name);</span>
+<span class="fc" id="L104">    this.data = data;</span>
+<span class="fc" id="L105">  }</span>
+
+  @Override
+  public int size() {
+<span class="fc" id="L109">    return data.size();</span>
+  }
+
+  @Override
+  public DateColumn subset(final int[] rows) {
+<span class="fc" id="L114">    final DateColumn c = this.emptyCopy();</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">    for (final int row : rows) {</span>
+<span class="fc" id="L116">      c.appendInternal(getIntInternal(row));</span>
+    }
+<span class="fc" id="L118">    return c;</span>
+  }
+
+  public DateColumn appendInternal(int f) {
+<span class="fc" id="L122">    data.add(f);</span>
+<span class="fc" id="L123">    return this;</span>
+  }
+
+  /** @deprecated Use intIterator(), or getIntInternal() instead */
+  @Deprecated
+  public IntArrayList data() {
+<span class="nc" id="L129">    return data;</span>
+  }
+
+  public DateColumn set(int index, int value) {
+<span class="fc" id="L133">    data.set(index, value);</span>
+<span class="fc" id="L134">    return this;</span>
+  }
+
+  @Override
+  public DateColumn set(int index, LocalDate value) {
+<span class="fc" id="L139">    data.set(index, PackedLocalDate.pack(value));</span>
+<span class="fc" id="L140">    return this;</span>
+  }
+
+  public void setPrintFormatter(DateTimeFormatter dateTimeFormatter, String missingValueString) {
+<span class="fc" id="L144">    Preconditions.checkNotNull(dateTimeFormatter);</span>
+<span class="fc" id="L145">    Preconditions.checkNotNull(missingValueString);</span>
+<span class="fc" id="L146">    this.printFormatter = new DateColumnFormatter(dateTimeFormatter, missingValueString);</span>
+<span class="fc" id="L147">  }</span>
+
+  public void setPrintFormatter(DateTimeFormatter dateTimeFormatter) {
+<span class="fc" id="L150">    Preconditions.checkNotNull(dateTimeFormatter);</span>
+<span class="fc" id="L151">    this.printFormatter = new DateColumnFormatter(dateTimeFormatter);</span>
+<span class="fc" id="L152">  }</span>
+
+  @Override
+  public String getString(int row) {
+<span class="fc" id="L156">    return printFormatter.format(getPackedDate(row));</span>
+  }
+
+  @Override
+  public String getUnformattedString(int row) {
+<span class="nc" id="L161">    return PackedLocalDate.toDateString(getPackedDate(row));</span>
+  }
+
+  @Override
+  public DateColumn emptyCopy() {
+<span class="fc" id="L166">    DateColumn empty = create(name());</span>
+<span class="fc" id="L167">    empty.printFormatter = printFormatter;</span>
+<span class="fc" id="L168">    return empty;</span>
+  }
+
+  @Override
+  public DateColumn emptyCopy(int rowSize) {
+<span class="fc" id="L173">    DateColumn copy = create(name(), rowSize);</span>
+<span class="fc" id="L174">    copy.printFormatter = printFormatter;</span>
+<span class="fc" id="L175">    return copy;</span>
+  }
+
+  @Override
+  public DateColumn copy() {
+<span class="fc" id="L180">    DateColumn copy = emptyCopy(data.size());</span>
+<span class="fc" id="L181">    copy.data = data.clone();</span>
+<span class="fc" id="L182">    return copy;</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="nc" id="L187">    data.clear();</span>
+<span class="nc" id="L188">  }</span>
+
+  @Override
+  public DateColumn lead(int n) {
+<span class="nc" id="L192">    DateColumn column = lag(-n);</span>
+<span class="nc" id="L193">    column.setName(name() + &quot; lead(&quot; + n + &quot;)&quot;);</span>
+<span class="nc" id="L194">    return column;</span>
+  }
+
+  @Override
+  public DateColumn lag(int n) {
+<span class="nc bnc" id="L199" title="All 2 branches missed.">    int srcPos = n &gt;= 0 ? 0 : 0 - n;</span>
+<span class="nc" id="L200">    int[] dest = new int[size()];</span>
+<span class="nc bnc" id="L201" title="All 2 branches missed.">    int destPos = n &lt;= 0 ? 0 : n;</span>
+<span class="nc bnc" id="L202" title="All 2 branches missed.">    int length = n &gt;= 0 ? size() - n : size() + n;</span>
+
+<span class="nc bnc" id="L204" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L205">      dest[i] = DateColumnType.missingValueIndicator();</span>
+    }
+
+<span class="nc" id="L208">    System.arraycopy(data.toIntArray(), srcPos, dest, destPos, length);</span>
+
+<span class="nc" id="L210">    DateColumn copy = emptyCopy(size());</span>
+<span class="nc" id="L211">    copy.data = new IntArrayList(dest);</span>
+<span class="nc" id="L212">    copy.setName(name() + &quot; lag(&quot; + n + &quot;)&quot;);</span>
+<span class="nc" id="L213">    return copy;</span>
+  }
+
+  @Override
+  public void sortAscending() {
+<span class="nc" id="L218">    Arrays.parallelSort(data.elements());</span>
+<span class="nc" id="L219">  }</span>
+
+  @Override
+  public void sortDescending() {
+<span class="nc" id="L223">    IntArrays.parallelQuickSort(data.elements(), reverseIntComparator);</span>
+<span class="nc" id="L224">  }</span>
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L228">    IntSet ints = new IntOpenHashSet(size());</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L230">      ints.add(data.getInt(i));</span>
+    }
+<span class="fc" id="L232">    return ints.size();</span>
+  }
+
+  @Override
+  public DateColumn unique() {
+<span class="nc" id="L237">    IntSet ints = new IntOpenHashSet(data.size());</span>
+<span class="nc bnc" id="L238" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L239">      ints.add(data.getInt(i));</span>
+    }
+<span class="nc" id="L241">    DateColumn copy = emptyCopy(ints.size());</span>
+<span class="nc" id="L242">    copy.setName(name() + &quot; Unique values&quot;);</span>
+<span class="nc" id="L243">    copy.data = IntArrayList.wrap(ints.toIntArray());</span>
+<span class="nc" id="L244">    return copy;</span>
+  }
+
+  @Override
+  public DateColumn append(final Column&lt;LocalDate&gt; column) {
+<span class="pc bpc" id="L249" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L250">    DateColumn dateColumn = (DateColumn) column;</span>
+<span class="fc" id="L251">    final int size = dateColumn.size();</span>
+<span class="fc bfc" id="L252" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L253">      appendInternal(dateColumn.getPackedDate(i));</span>
+    }
+<span class="fc" id="L255">    return this;</span>
+  }
+
+  @Override
+  public DateColumn append(Column&lt;LocalDate&gt; column, int row) {
+<span class="pc bpc" id="L260" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L261">    return appendInternal(((DateColumn) column).getIntInternal(row));</span>
+  }
+
+  @Override
+  public DateColumn set(int row, Column&lt;LocalDate&gt; column, int sourceRow) {
+<span class="pc bpc" id="L266" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L267">    return set(row, ((DateColumn) column).getIntInternal(sourceRow));</span>
+  }
+
+  @Override
+  public LocalDate max() {
+<span class="pc bpc" id="L272" title="1 of 2 branches missed.">    if (isEmpty()) {</span>
+<span class="nc" id="L273">      return null;</span>
+    }
+
+<span class="fc" id="L276">    Integer max = null;</span>
+<span class="fc bfc" id="L277" title="All 2 branches covered.">    for (int aData : data) {</span>
+<span class="pc bpc" id="L278" title="1 of 2 branches missed.">      if (DateColumnType.missingValueIndicator() != aData) {</span>
+<span class="fc bfc" id="L279" title="All 2 branches covered.">        if (max == null) {</span>
+<span class="fc" id="L280">          max = aData;</span>
+        } else {
+<span class="fc bfc" id="L282" title="All 2 branches covered.">          max = (max &gt; aData) ? max : aData;</span>
+        }
+      }
+<span class="fc" id="L285">    }</span>
+
+<span class="pc bpc" id="L287" title="1 of 2 branches missed.">    if (max == null) {</span>
+<span class="nc" id="L288">      return null;</span>
+    }
+<span class="fc" id="L290">    return PackedLocalDate.asLocalDate(max);</span>
+  }
+
+  @Override
+  public LocalDate min() {
+<span class="pc bpc" id="L295" title="1 of 2 branches missed.">    if (isEmpty()) {</span>
+<span class="nc" id="L296">      return null;</span>
+    }
+
+<span class="fc" id="L299">    Integer min = null;</span>
+<span class="fc bfc" id="L300" title="All 2 branches covered.">    for (int aData : data) {</span>
+<span class="fc bfc" id="L301" title="All 2 branches covered.">      if (DateColumnType.missingValueIndicator() != aData) {</span>
+<span class="fc bfc" id="L302" title="All 2 branches covered.">        if (min == null) {</span>
+<span class="fc" id="L303">          min = aData;</span>
+        } else {
+<span class="fc bfc" id="L305" title="All 2 branches covered.">          min = (min &lt; aData) ? min : aData;</span>
+        }
+      }
+<span class="fc" id="L308">    }</span>
+<span class="pc bpc" id="L309" title="1 of 2 branches missed.">    if (min == null) {</span>
+<span class="nc" id="L310">      return null;</span>
+    }
+<span class="fc" id="L312">    return PackedLocalDate.asLocalDate(min);</span>
+  }
+
+  /**
+   * Conditionally update this column, replacing current values with newValue for all rows where the
+   * current value matches the selection criteria
+   *
+   * &lt;p&gt;Example: myColumn.set(myColumn.valueIsMissing(), LocalDate.now()); // no more missing values
+   */
+  public DateColumn set(Selection rowSelection, LocalDate newValue) {
+<span class="nc" id="L322">    int packed = PackedLocalDate.pack(newValue);</span>
+<span class="nc bnc" id="L323" title="All 2 branches missed.">    for (int row : rowSelection) {</span>
+<span class="nc" id="L324">      set(row, packed);</span>
+<span class="nc" id="L325">    }</span>
+<span class="nc" id="L326">    return this;</span>
+  }
+
+  @Override
+  public DateColumn appendMissing() {
+<span class="fc" id="L331">    appendInternal(DateColumnType.missingValueIndicator());</span>
+<span class="fc" id="L332">    return this;</span>
+  }
+
+  @Override
+  public LocalDate get(int index) {
+<span class="fc" id="L337">    return PackedLocalDate.asLocalDate(getPackedDate(index));</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="fc" id="L342">    return data.isEmpty();</span>
+  }
+
+  @Override
+  public IntComparator rowComparator() {
+<span class="fc" id="L347">    return comparator;</span>
+  }
+
+  @Override
+  public DateColumn append(LocalDate value) {
+<span class="fc" id="L352">    return this.appendInternal(PackedLocalDate.pack(value));</span>
+  }
+
+  @Override
+  public DateColumn appendObj(Object obj) {
+<span class="pc bpc" id="L357" title="1 of 2 branches missed.">    if (obj == null) {</span>
+<span class="nc" id="L358">      return appendMissing();</span>
+    }
+<span class="fc bfc" id="L360" title="All 2 branches covered.">    if (obj instanceof java.sql.Date) {</span>
+<span class="fc" id="L361">      return append(((java.sql.Date) obj).toLocalDate());</span>
+    }
+<span class="pc bpc" id="L363" title="1 of 2 branches missed.">    if (obj instanceof LocalDate) {</span>
+<span class="fc" id="L364">      return append((LocalDate) obj);</span>
+    }
+<span class="nc" id="L366">    throw new IllegalArgumentException(</span>
+<span class="nc" id="L367">        &quot;Cannot append &quot; + obj.getClass().getName() + &quot; to DateColumn&quot;);</span>
+  }
+
+  @Override
+  public DateColumn appendCell(String string) {
+<span class="fc" id="L372">    return appendInternal(PackedLocalDate.pack(DateColumnType.DEFAULT_PARSER.parse(string)));</span>
+  }
+
+  @Override
+  public DateColumn appendCell(String string, AbstractColumnParser&lt;?&gt; parser) {
+<span class="fc" id="L377">    return appendObj(parser.parse(string));</span>
+  }
+
+  @Override
+  public int getIntInternal(int index) {
+<span class="fc" id="L382">    return data.getInt(index);</span>
+  }
+
+  protected int getPackedDate(int index) {
+<span class="fc" id="L386">    return getIntInternal(index);</span>
+  }
+
+  /**
+   * Returns a table of dates and the number of observations of those dates
+   *
+   * @return the summary table
+   */
+  @Override
+  public Table summary() {
+
+<span class="fc" id="L397">    Table table = Table.create(&quot;Column: &quot; + name());</span>
+<span class="fc" id="L398">    StringColumn measure = StringColumn.create(&quot;Measure&quot;);</span>
+<span class="fc" id="L399">    StringColumn value = StringColumn.create(&quot;Value&quot;);</span>
+<span class="fc" id="L400">    table.addColumns(measure);</span>
+<span class="fc" id="L401">    table.addColumns(value);</span>
+
+<span class="fc" id="L403">    measure.append(&quot;Count&quot;);</span>
+<span class="fc" id="L404">    value.append(String.valueOf(size()));</span>
+
+<span class="fc" id="L406">    measure.append(&quot;Missing&quot;);</span>
+<span class="fc" id="L407">    value.append(String.valueOf(countMissing()));</span>
+
+<span class="fc" id="L409">    measure.append(&quot;Earliest&quot;);</span>
+<span class="fc" id="L410">    value.append(String.valueOf(min()));</span>
+
+<span class="fc" id="L412">    measure.append(&quot;Latest&quot;);</span>
+<span class="fc" id="L413">    value.append(String.valueOf(max()));</span>
+
+<span class="fc" id="L415">    return table;</span>
+  }
+
+  public static boolean valueIsMissing(int i) {
+<span class="fc" id="L419">    return DateColumnType.valueIsMissing(i);</span>
+  }
+
+  /** Returns the count of missing values in this column */
+  @Override
+  public int countMissing() {
+<span class="fc" id="L425">    int count = 0;</span>
+<span class="fc bfc" id="L426" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L427" title="All 2 branches covered.">      if (getPackedDate(i) == DateColumnType.missingValueIndicator()) {</span>
+<span class="fc" id="L428">        count++;</span>
+      }
+    }
+<span class="fc" id="L431">    return count;</span>
+  }
+
+  /**
+   * Returns the largest (&quot;top&quot;) n values in the column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the largest observations
+   */
+  public List&lt;LocalDate&gt; top(int n) {
+<span class="nc" id="L442">    List&lt;LocalDate&gt; top = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L443">    int[] values = data.toIntArray();</span>
+<span class="nc" id="L444">    IntArrays.parallelQuickSort(values, DescendingIntComparator.instance());</span>
+<span class="nc bnc" id="L445" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L446">      top.add(PackedLocalDate.asLocalDate(values[i]));</span>
+    }
+<span class="nc" id="L448">    return top;</span>
+  }
+
+  /**
+   * Returns the smallest (&quot;bottom&quot;) n values in the column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the smallest n observations
+   */
+  public List&lt;LocalDate&gt; bottom(int n) {
+<span class="nc" id="L459">    List&lt;LocalDate&gt; bottom = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L460">    int[] values = data.toIntArray();</span>
+<span class="nc" id="L461">    IntArrays.parallelQuickSort(values);</span>
+<span class="nc bnc" id="L462" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L463">      bottom.add(PackedLocalDate.asLocalDate(values[i]));</span>
+    }
+<span class="nc" id="L465">    return bottom;</span>
+  }
+
+  public IntIterator intIterator() {
+<span class="fc" id="L469">    return data.iterator();</span>
+  }
+
+  @Override
+  public DateColumn removeMissing() {
+<span class="nc" id="L474">    DateColumn noMissing = emptyCopy();</span>
+<span class="nc" id="L475">    IntIterator iterator = intIterator();</span>
+<span class="nc bnc" id="L476" title="All 2 branches missed.">    while (iterator.hasNext()) {</span>
+<span class="nc" id="L477">      int i = iterator.nextInt();</span>
+<span class="nc bnc" id="L478" title="All 2 branches missed.">      if (!valueIsMissing(i)) {</span>
+<span class="nc" id="L479">        noMissing.appendInternal(i);</span>
+      }
+<span class="nc" id="L481">    }</span>
+<span class="nc" id="L482">    return noMissing;</span>
+  }
+
+  public List&lt;LocalDate&gt; asList() {
+<span class="fc" id="L486">    List&lt;LocalDate&gt; dates = new ArrayList&lt;&gt;(size());</span>
+<span class="fc bfc" id="L487" title="All 2 branches covered.">    for (LocalDate localDate : this) {</span>
+<span class="fc" id="L488">      dates.add(localDate);</span>
+<span class="fc" id="L489">    }</span>
+<span class="fc" id="L490">    return dates;</span>
+  }
+
+  @Override
+  public DateColumn where(Selection selection) {
+<span class="fc" id="L495">    return subset(selection.toArray());</span>
+  }
+
+  public Set&lt;LocalDate&gt; asSet() {
+<span class="nc" id="L499">    Set&lt;LocalDate&gt; dates = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L500">    DateColumn unique = unique();</span>
+<span class="nc bnc" id="L501" title="All 2 branches missed.">    for (LocalDate d : unique) {</span>
+<span class="nc" id="L502">      dates.add(d);</span>
+<span class="nc" id="L503">    }</span>
+<span class="nc" id="L504">    return dates;</span>
+  }
+
+  public boolean contains(LocalDate localDate) {
+<span class="fc" id="L508">    int date = PackedLocalDate.pack(localDate);</span>
+<span class="fc" id="L509">    return data.contains(date);</span>
+  }
+
+  @Override
+  public Column&lt;LocalDate&gt; setMissing(int i) {
+<span class="nc" id="L514">    return set(i, DateColumnType.missingValueIndicator());</span>
+  }
+
+  public double[] asDoubleArray() {
+<span class="nc" id="L518">    double[] doubles = new double[size()];</span>
+<span class="nc bnc" id="L519" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L520">      doubles[i] = data.getInt(i);</span>
+    }
+<span class="nc" id="L522">    return doubles;</span>
+  }
+
+  public DoubleColumn asDoubleColumn() {
+<span class="nc" id="L526">    return DoubleColumn.create(name(), asDoubleArray());</span>
+  }
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="fc" id="L531">    return valueIsMissing(getIntInternal(rowNumber));</span>
+  }
+
+  public double getDouble(int i) {
+<span class="nc" id="L535">    return getIntInternal(i);</span>
+  }
+
+  @Override
+  public int byteSize() {
+<span class="fc" id="L540">    return type().byteSize();</span>
+  }
+
+  /**
+   * Returns the contents of the cell at rowNumber as a byte[]
+   *
+   * @param rowNumber the number of the row as int
+   */
+  @Override
+  public byte[] asBytes(int rowNumber) {
+<span class="fc" id="L550">    return ByteBuffer.allocate(byteSize()).putInt(getPackedDate(rowNumber)).array();</span>
+  }
+
+  /**
+   * Returns an iterator over elements of type {@code T}.
+   *
+   * @return an Iterator.
+   */
+  @Override
+  public Iterator&lt;LocalDate&gt; iterator() {
+
+<span class="fc" id="L561">    return new Iterator&lt;LocalDate&gt;() {</span>
+
+<span class="fc" id="L563">      final IntIterator intIterator = intIterator();</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L567">        return intIterator.hasNext();</span>
+      }
+
+      @Override
+      public LocalDate next() {
+<span class="fc" id="L572">        return PackedLocalDate.asLocalDate(intIterator.nextInt());</span>
+      }
+    };
+  }
+
+  // fillWith methods
+
+  private DateColumn fillWith(
+      int count, Iterator&lt;LocalDate&gt; iterator, Consumer&lt;LocalDate&gt; acceptor) {
+<span class="nc bnc" id="L581" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="nc bnc" id="L582" title="All 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L583">        break;</span>
+      }
+<span class="nc" id="L585">      acceptor.accept(iterator.next());</span>
+    }
+<span class="nc" id="L587">    return this;</span>
+  }
+
+  @Override
+  public DateColumn fillWith(Iterator&lt;LocalDate&gt; iterator) {
+<span class="nc" id="L592">    int[] r = new int[1];</span>
+<span class="nc" id="L593">    fillWith(size(), iterator, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L594">    return this;</span>
+  }
+
+  private DateColumn fillWith(
+      int count, Iterable&lt;LocalDate&gt; iterable, Consumer&lt;LocalDate&gt; acceptor) {
+<span class="fc" id="L599">    Iterator&lt;LocalDate&gt; iterator = iterable.iterator();</span>
+<span class="fc bfc" id="L600" title="All 2 branches covered.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="pc bpc" id="L601" title="1 of 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L602">        iterator = iterable.iterator();</span>
+<span class="nc bnc" id="L603" title="All 2 branches missed.">        if (!iterator.hasNext()) {</span>
+<span class="nc" id="L604">          break;</span>
+        }
+      }
+<span class="fc" id="L607">      acceptor.accept(iterator.next());</span>
+    }
+<span class="fc" id="L609">    return this;</span>
+  }
+
+  @Override
+  public DateColumn fillWith(Iterable&lt;LocalDate&gt; iterable) {
+<span class="fc" id="L614">    int[] r = new int[1];</span>
+<span class="fc" id="L615">    fillWith(size(), iterable, date -&gt; set(r[0]++, date));</span>
+<span class="fc" id="L616">    return this;</span>
+  }
+
+  private DateColumn fillWith(
+      int count, Supplier&lt;LocalDate&gt; supplier, Consumer&lt;LocalDate&gt; acceptor) {
+<span class="nc bnc" id="L621" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+      try {
+<span class="nc" id="L623">        acceptor.accept(supplier.get());</span>
+<span class="nc" id="L624">      } catch (Exception e) {</span>
+<span class="nc" id="L625">        break;</span>
+<span class="nc" id="L626">      }</span>
+    }
+<span class="nc" id="L628">    return this;</span>
+  }
+
+  @Override
+  public DateColumn fillWith(Supplier&lt;LocalDate&gt; supplier) {
+<span class="nc" id="L633">    int[] r = new int[1];</span>
+<span class="nc" id="L634">    fillWith(size(), supplier, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L635">    return this;</span>
+  }
+
+  @Override
+  public LocalDate[] asObjectArray() {
+<span class="fc" id="L640">    final LocalDate[] output = new LocalDate[data.size()];</span>
+<span class="fc bfc" id="L641" title="All 2 branches covered.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="fc" id="L642">      output[i] = get(i);</span>
+    }
+<span class="fc" id="L644">    return output;</span>
+  }
+
+  @Override
+  public int compare(LocalDate o1, LocalDate o2) {
+<span class="nc" id="L649">    return o1.compareTo(o2);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

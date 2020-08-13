@@ -1,0 +1,377 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Code128Barcode.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">barbecue$All_in_barbecue_test.exec</a> &gt; <a href="index.source.html" class="el_package">net.sourceforge.barbecue.linear.code128</a> &gt; <span class="el_source">Code128Barcode.java</span></div><h1>Code128Barcode.java</h1><pre class="source lang-java linenums">/***********************************************************************************************************************
+ * Copyright (c) 2003, International Barcode Consortium
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *
+ * Redistributions of source code must retain the above copyright notice, this list of
+ * conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright notice, this list of
+ * conditions and the following disclaimer in the documentation and/or other materials
+ * provided with the distribution.
+ * Neither the name of the International Barcode Consortium nor the names of any contributors may be used to endorse
+ * or promote products derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ ***********************************************************************************************************************/
+
+package net.sourceforge.barbecue.linear.code128;
+
+import net.sourceforge.barbecue.BarcodeException;
+import net.sourceforge.barbecue.BlankModule;
+import net.sourceforge.barbecue.CompositeModule;
+import net.sourceforge.barbecue.Module;
+import net.sourceforge.barbecue.linear.LinearBarcode;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * This is a concrete implementation of the Code 128 barcode. It fully supports all three
+ * available character sets (A, B and C), and also fully supports code shifts and set
+ * changes on-the-fly, providing an automatic optimisation mode.
+ *
+ * @author &lt;a href=&quot;mailto:opensource@ianbourke.com&quot;&gt;Ian Bourke&lt;/a&gt;
+ */
+public class Code128Barcode extends LinearBarcode {
+    /** Character set A flag */
+    public static final int A = 0;
+    /** Character set B flag */
+    public static final int B = 1;
+    /** Character set c flag */
+    public static final int C = 2;
+    /** Auto character set flag */
+    public static final int O = 3;
+    
+    /** Code shift character */
+    public static final String SHIFT = &quot;\306&quot;;
+    /** Code set change from current to A character */
+    public static final String CHANGE_TO_A = &quot;\311&quot;;
+    /** Code set change from current to B character */
+    public static final String CHANGE_TO_B = &quot;\310&quot;;
+    /** Code set change from current to c character */
+    public static final String CHANGE_TO_C = &quot;\307&quot;;
+    
+    /** FNC1 start character */
+    public static final String FNC_1 = &quot;\312&quot;;
+    
+<span class="fc" id="L67">    public static final Module START_A = new Module(new int[] {2, 1, 1, 4, 1, 2});</span>
+<span class="fc" id="L68">    public static final Module START_B = new Module(new int[] {2, 1, 1, 2, 1, 4});</span>
+<span class="fc" id="L69">    public static final Module START_C = new Module(new int[] {2, 1, 1, 2, 3, 2});</span>
+<span class="fc" id="L70">    protected static final Module STOP = new Module(new int[] {2, 3, 3, 1, 1, 1, 2});</span>
+<span class="fc" id="L71">    protected static final Module QUIET_SECTION = new BlankModule(10);</span>
+    
+<span class="fc" id="L73">    private static final Module[] START = {</span>
+        START_A,
+        START_B,
+        START_C
+    };
+    
+<span class="fc" id="L79">    protected static final int[] START_INDICES = {</span>
+        103, 104, 105
+    };
+    
+<span class="fc" id="L83">    protected static final int[] BUF_SIZES = {</span>
+        1, 1, 2
+    };
+    
+    protected int startIndex;
+    protected int mode;
+    private int startingMode;
+    private boolean shiftNext;
+    private boolean shifted;
+    private CharBuffer buf;
+    private Module checkDigit;
+    private boolean optimising;
+    private Accumulator sum;
+    private Accumulator index;
+    
+    /**
+     * Create a new Code 128 barcode using character set B.
+     * @param data The data to encode
+     * @throws BarcodeException If the data to be encoded is invalid
+     */
+    public Code128Barcode(String data) throws BarcodeException {
+<span class="fc" id="L104">        this(data, O);</span>
+<span class="fc" id="L105">    }</span>
+    
+    /**
+     * Creates a new Coded 128 barcode with the specified data and the specified
+     * character set.
+     * @param data The data to encode
+     * @param mode The character set to use for encoding
+     * @throws BarcodeException If the data to be encoded is invalid
+     */
+    public Code128Barcode(String data, int mode) throws BarcodeException {
+<span class="fc" id="L115">        super(data);</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">        if (mode == O) {</span>
+<span class="fc" id="L117">            optimising = true;</span>
+<span class="fc" id="L118">            this.mode = B;</span>
+        } else {
+<span class="fc" id="L120">            optimising = false;</span>
+<span class="fc" id="L121">            this.mode = mode;</span>
+        }
+<span class="fc" id="L123">        this.startingMode = this.mode;</span>
+<span class="fc" id="L124">        this.shiftNext = false;</span>
+<span class="fc" id="L125">        this.shifted = false;</span>
+<span class="fc" id="L126">        this.startIndex = START_INDICES[this.mode];</span>
+<span class="fc" id="L127">    }</span>
+    
+    /**
+     * Returns the current character set being used in this barcode.
+     * @return The flag indicating the current character set
+     */
+    public int getCharacterSet() {
+<span class="fc" id="L134">        return startingMode;</span>
+    }
+    
+    /**
+     * Returns the text label to be displayed underneath the barcode/
+     * @return The text label for the barcode
+     */
+    public String getLabel() {
+<span class="pc bpc" id="L142" title="1 of 2 branches missed.">        if(label != null) {</span>
+<span class="nc" id="L143">            return label;</span>
+        } else {
+<span class="fc" id="L145">            return data;</span>
+        }
+    }
+    
+    /**
+     * Returns the width of the encoded symbol portion of the barcode in pixels for
+     * the given resolution.
+     * @param resolution The resolution to calculate the width for
+     * @return The width of the encoded portion of the barcode
+     */
+    protected double getSymbolWidth(int resolution) {
+        //		L = (11C + 35)X (alphanumeric) L = (5.5C + 35)X (numeric only using Code C)
+        //		where
+        //		L = length of symbol (not counting quiet zone)
+        //		C = number of data characters, code characters and shift characters
+        //		(do not include start, stop or checksum. They are automatically added in.)
+        //		X = X-dimension
+<span class="fc" id="L162">        double barWidthMM = convertToMillimetres(barWidth, resolution);</span>
+<span class="fc" id="L163">        double multiplier = 11;</span>
+<span class="fc bfc" id="L164" title="All 2 branches covered.">        if (startingMode == C) {</span>
+<span class="fc" id="L165">            multiplier = 5.5;</span>
+        }
+<span class="fc" id="L167">        return (multiplier * data.length() + 35) * barWidthMM;</span>
+    }
+    
+    /**
+     * Calculates the minimum allowed barcode height for the barcode. The height must
+     * be at least .15 times the length of the symbol (excluding quiet zones) and .25
+     * inches (whichever is larger).
+     * @param resolution The output resolution (for calculating the width)
+     * @return The minimum height
+     */
+    protected int calculateMinimumBarHeight(int resolution) {
+        // The height of the bars must be at least .15 times the symbol's length or .25 inches,
+        // whichever is larger
+<span class="fc" id="L180">        double point25Inches = resolution * 0.25;</span>
+        // TODO: Need to get rid of this and do it in the output class
+<span class="fc" id="L182">        return (int) Math.max((0.15 * getSymbolWidth(resolution)), point25Inches);</span>
+    }
+    
+    /**
+     * Encodes the data of the barcode into bars.
+     * @return The encoded bar data
+     */
+    public Module[] encodeData() {
+        // We are calculating the check digit as we encode - this will ensure that it is
+        // calculated correctly, even with code changes to char set C
+<span class="fc" id="L192">        sum = new Accumulator(startIndex);</span>
+<span class="fc" id="L193">        List modules = new ArrayList();</span>
+<span class="fc" id="L194">        buf = new CharBuffer(BUF_SIZES[mode]);</span>
+<span class="fc" id="L195">        index = new Accumulator(1);</span>
+<span class="fc" id="L196">        padDataToEvenLength();</span>
+        
+<span class="fc bfc" id="L198" title="All 2 branches covered.">        for (int i = 0; i &lt; data.length(); i++) {</span>
+<span class="fc" id="L199">            char c = data.charAt(i);</span>
+<span class="pc bpc" id="L200" title="1 of 4 branches missed.">            if (optimising &amp;&amp; startingMode == B) {</span>
+<span class="pc bpc" id="L201" title="1 of 6 branches missed.">                if (i + 1 &lt; data.length() &amp;&amp; isControl(c) &amp;&amp; mode != A) {</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">                    if (mode == B) {</span>
+<span class="fc" id="L203">                        encode(modules, SHIFT);</span>
+                    } else {
+<span class="fc" id="L205">                        encode(modules, CHANGE_TO_A);</span>
+                    }
+<span class="fc bfc" id="L207" title="All 6 branches covered.">                } else if (i + 3 &lt; data.length() &amp;&amp; digitGroupIsNext(i, data) &amp;&amp; mode != C) {</span>
+<span class="fc" id="L208">                    encode(modules, CHANGE_TO_C);</span>
+<span class="pc bpc" id="L209" title="1 of 6 branches missed.">                } else if (i + 1 &lt;= data.length() &amp;&amp; digitGroupEndIsNext(i, data)</span>
+<span class="fc bfc" id="L210" title="All 2 branches covered.">                &amp;&amp; mode == C &amp;&amp; buf.size() != 1) {</span>
+<span class="fc" id="L211">                    encode(modules, CHANGE_TO_B);</span>
+                }
+            }
+            
+<span class="fc bfc" id="L215" title="All 2 branches covered.">            if (isShiftOrCode(c)) {</span>
+<span class="fc" id="L216">                encode(modules, String.valueOf(c));</span>
+<span class="fc" id="L217">                buf.clear();</span>
+            } else {
+<span class="fc" id="L219">                buf.addChar(c);</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">                if (buf.isFull()) {</span>
+<span class="fc" id="L221">                    encode(modules, buf.toString());</span>
+<span class="fc" id="L222">                    buf.clear();</span>
+                }
+            }
+        }
+        
+<span class="fc" id="L227">        checkDigit = ModuleFactory.getModuleForIndex(sum.getValue() % 103, mode);</span>
+<span class="fc" id="L228">        mode = startingMode;</span>
+<span class="fc" id="L229">        return (Module[]) modules.toArray(new Module[0]);</span>
+    }
+    
+    private boolean isShiftOrCode(char c) {
+<span class="fc" id="L233">        String s = String.valueOf(c);</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">        return (s.equals(SHIFT)</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">        || s.equals(CHANGE_TO_A)</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">        || s.equals(CHANGE_TO_B)</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">        || s.equals(CHANGE_TO_C)</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">        || s.equals(FNC_1));</span>
+    }
+    
+    /**
+     * Calculates the check sum digit for the barcode.
+     * @return The check sum digit
+     */
+    public Module calculateChecksum() {
+<span class="fc bfc" id="L246" title="All 2 branches covered.">        if (checkDigit == null) {</span>
+<span class="fc" id="L247">            encodeData();</span>
+        }
+<span class="fc" id="L249">        return checkDigit;</span>
+    }
+    
+    /**
+     * Returns the pre-amble for the barcode. This is a combination of a
+     * quiet section and the start character for the character set that the barcode
+     * was constructed with.
+     * @return The pre-amble
+     */
+    protected Module getPreAmble() {
+<span class="fc" id="L259">        CompositeModule module = new CompositeModule();</span>
+<span class="pc bpc" id="L260" title="1 of 2 branches missed.">        if(drawingQuietSection) {</span>
+<span class="fc" id="L261">            module.add(QUIET_SECTION);</span>
+        }
+<span class="fc" id="L263">        module.add(START[mode]);</span>
+<span class="fc" id="L264">        return module;</span>
+    }
+    
+    /**
+     * Returns the post amble for the barcode. This is the combination
+     * of the stop character anda quiet section.
+     * @return The post amble
+     */
+    protected Module getPostAmble() {
+<span class="fc" id="L273">        CompositeModule module = new CompositeModule();</span>
+<span class="fc" id="L274">        module.add(STOP);</span>
+<span class="pc bpc" id="L275" title="1 of 2 branches missed.">        if(drawingQuietSection) {</span>
+<span class="fc" id="L276">            module.add(QUIET_SECTION);</span>
+        }
+<span class="fc" id="L278">        return module;</span>
+    }
+    
+    private boolean isControl(char c) {
+<span class="fc" id="L282">        return Character.isISOControl(c);</span>
+    }
+    
+    private boolean digitGroupIsNext(int index, String chars) {
+<span class="fc" id="L286">        char c1 = chars.charAt(index);</span>
+<span class="fc" id="L287">        char c2 = chars.charAt(index + 1);</span>
+<span class="fc" id="L288">        char c3 = chars.charAt(index + 2);</span>
+<span class="fc" id="L289">        char c4 = chars.charAt(index + 3);</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">        return (Character.isDigit(c1)</span>
+<span class="fc bfc" id="L291" title="All 2 branches covered.">        &amp;&amp; Character.isDigit(c2)</span>
+<span class="fc bfc" id="L292" title="All 2 branches covered.">        &amp;&amp; Character.isDigit(c3)</span>
+<span class="fc bfc" id="L293" title="All 2 branches covered.">        &amp;&amp; Character.isDigit(c4));</span>
+    }
+    
+    private boolean digitGroupEndIsNext(int index, String chars) {
+<span class="fc bfc" id="L297" title="All 2 branches covered.">        if (index == chars.length() - 1) {</span>
+<span class="fc" id="L298">            return true;</span>
+        }
+<span class="fc" id="L300">        char c1 = chars.charAt(index);</span>
+<span class="fc" id="L301">        char c2 = chars.charAt(index + 1);</span>
+<span class="fc bfc" id="L302" title="All 4 branches covered.">        return ((Character.isDigit(c1) &amp;&amp; (!Character.isDigit(c2)))</span>
+<span class="fc bfc" id="L303" title="All 2 branches covered.">        || (!Character.isDigit(c1)));</span>
+    }
+    
+    /**
+     * Pads the data to be encoded to an even length by prepending &quot;0&quot; characters.
+     * This is only valid for pure character set C barcodes.
+     */
+    private void padDataToEvenLength() {
+        // Only for Code C
+<span class="fc bfc" id="L312" title="All 6 branches covered.">        if (startingMode == C &amp;&amp; data.length() % 2 != 0 &amp;&amp; !containsShiftOrChange(data)) {</span>
+<span class="fc" id="L313">            data = '0' + data;</span>
+        }
+<span class="fc" id="L315">    }</span>
+    
+    private boolean containsShiftOrChange(String data) {
+<span class="fc bfc" id="L318" title="All 2 branches covered.">        return ((data.indexOf(CHANGE_TO_A) &gt;= 0)</span>
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">        || (data.indexOf(CHANGE_TO_B) &gt;= 0)</span>
+<span class="pc bpc" id="L320" title="1 of 2 branches missed.">        || (data.indexOf(CHANGE_TO_C) &gt;= 0)</span>
+<span class="pc bpc" id="L321" title="1 of 2 branches missed.">        || (data.indexOf(SHIFT) &gt;= 0));</span>
+    }
+    
+    private void clearShift() {
+<span class="fc bfc" id="L325" title="All 2 branches covered.">        if (shifted) {</span>
+<span class="fc" id="L326">            shifted = false;</span>
+<span class="fc" id="L327">            shiftNext = false;</span>
+<span class="fc" id="L328">            mode = shiftMode();</span>
+        }
+<span class="fc" id="L330">    }</span>
+    
+    private void checkShift(Module module) {
+<span class="fc bfc" id="L333" title="All 2 branches covered.">        if (module instanceof ShiftModule) {</span>
+<span class="fc" id="L334">            mode = shiftMode();</span>
+<span class="fc" id="L335">            shiftNext = true;</span>
+<span class="fc bfc" id="L336" title="All 2 branches covered.">        } else if (shiftNext) {</span>
+<span class="fc" id="L337">            shifted = true;</span>
+        }
+<span class="fc" id="L339">    }</span>
+    
+    private int shiftMode() {
+<span class="fc bfc" id="L342" title="All 2 branches covered.">        if (mode == A) {</span>
+<span class="fc" id="L343">            return B;</span>
+        } else {
+<span class="fc" id="L345">            return A;</span>
+        }
+    }
+    
+    private void checkCodeChange(Module module) {
+<span class="fc bfc" id="L350" title="All 2 branches covered.">        if (module instanceof CodeChangeModule) {</span>
+<span class="fc" id="L351">            mode = ((CodeChangeModule) module).getCode();</span>
+<span class="fc" id="L352">            buf = new CharBuffer(BUF_SIZES[mode]);</span>
+        }
+<span class="fc" id="L354">    }</span>
+    
+    private void encode(List modules, String data) {
+<span class="fc" id="L357">        Module module = ModuleFactory.getModule(data, mode);</span>
+<span class="fc" id="L358">        updateCheckSum(data);</span>
+<span class="fc" id="L359">        checkShift(module);</span>
+<span class="fc" id="L360">        checkCodeChange(module);</span>
+<span class="fc" id="L361">        modules.add(module);</span>
+<span class="fc" id="L362">        clearShift();</span>
+<span class="fc" id="L363">    }</span>
+    
+    private void updateCheckSum(String data) {
+<span class="fc" id="L366">        int code = ModuleFactory.getIndex(data, mode);</span>
+<span class="fc" id="L367">        sum.add(code * index.getValue());</span>
+<span class="fc" id="L368">        index.increment();</span>
+<span class="fc" id="L369">    }</span>
+    
+    private double convertToMillimetres(double barWidth, int resolution) {
+        //25.4 mm in 1 inch
+<span class="fc" id="L373">        double pixelsPerMM = resolution / 25.4;</span>
+<span class="fc" id="L374">        return barWidth / pixelsPerMM;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

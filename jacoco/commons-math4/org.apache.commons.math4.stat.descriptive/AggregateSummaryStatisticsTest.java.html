@@ -1,0 +1,342 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AggregateSummaryStatisticsTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.stat.descriptive</a> &gt; <span class="el_source">AggregateSummaryStatisticsTest.java</span></div><h1>AggregateSummaryStatisticsTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.stat.descriptive;
+
+import java.util.ArrayList;
+import java.util.Collection;
+
+import org.apache.commons.math4.TestUtils;
+import org.apache.commons.statistics.distribution.DiscreteDistribution;
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.math4.distribution.AbstractRealDistribution;
+import org.apache.commons.statistics.distribution.UniformDiscreteDistribution;
+import org.apache.commons.statistics.distribution.UniformContinuousDistribution;
+import org.apache.commons.numbers.core.Precision;
+import org.apache.commons.rng.simple.RandomSource;
+import org.junit.Assert;
+import org.junit.Test;
+
+
+/**
+ * Test cases for {@link AggregateSummaryStatistics}
+ */
+<span class="fc" id="L38">public class AggregateSummaryStatisticsTest {</span>
+
+    /**
+     * Tests the standard aggregation behavior
+     */
+    @Test
+    public void testAggregation() {
+<span class="fc" id="L45">        AggregateSummaryStatistics aggregate = new AggregateSummaryStatistics();</span>
+<span class="fc" id="L46">        SummaryStatistics setOneStats = aggregate.createContributingStatistics();</span>
+<span class="fc" id="L47">        SummaryStatistics setTwoStats = aggregate.createContributingStatistics();</span>
+
+<span class="fc" id="L49">        Assert.assertNotNull(&quot;The set one contributing stats are null&quot;, setOneStats);</span>
+<span class="fc" id="L50">        Assert.assertNotNull(&quot;The set two contributing stats are null&quot;, setTwoStats);</span>
+<span class="fc" id="L51">        Assert.assertNotSame(&quot;Contributing stats objects are the same&quot;, setOneStats, setTwoStats);</span>
+
+<span class="fc" id="L53">        setOneStats.addValue(2);</span>
+<span class="fc" id="L54">        setOneStats.addValue(3);</span>
+<span class="fc" id="L55">        setOneStats.addValue(5);</span>
+<span class="fc" id="L56">        setOneStats.addValue(7);</span>
+<span class="fc" id="L57">        setOneStats.addValue(11);</span>
+<span class="fc" id="L58">        Assert.assertEquals(&quot;Wrong number of set one values&quot;, 5, setOneStats.getN());</span>
+<span class="fc" id="L59">        Assert.assertTrue(&quot;Wrong sum of set one values&quot;, Precision.equals(28.0, setOneStats.getSum(), 1));</span>
+
+<span class="fc" id="L61">        setTwoStats.addValue(2);</span>
+<span class="fc" id="L62">        setTwoStats.addValue(4);</span>
+<span class="fc" id="L63">        setTwoStats.addValue(8);</span>
+<span class="fc" id="L64">        Assert.assertEquals(&quot;Wrong number of set two values&quot;, 3, setTwoStats.getN());</span>
+<span class="fc" id="L65">        Assert.assertTrue(&quot;Wrong sum of set two values&quot;, Precision.equals(14.0, setTwoStats.getSum(), 1));</span>
+
+<span class="fc" id="L67">        Assert.assertEquals(&quot;Wrong number of aggregate values&quot;, 8, aggregate.getN());</span>
+<span class="fc" id="L68">        Assert.assertTrue(&quot;Wrong aggregate sum&quot;, Precision.equals(42.0, aggregate.getSum(), 1));</span>
+<span class="fc" id="L69">    }</span>
+
+    /**
+     * Verify that aggregating over a partition gives the same results
+     * as direct computation.
+     *
+     *  1) Randomly generate a dataset of 10-100 values
+     *     from [-100, 100]
+     *  2) Divide the dataset it into 2-5 partitions
+     *  3) Create an AggregateSummaryStatistic and ContributingStatistics
+     *     for each partition
+     *  4) Compare results from the AggregateSummaryStatistic with values
+     *     returned by a single SummaryStatistics instance that is provided
+     *     the full dataset
+     */
+    @Test
+    public void testAggregationConsistency() {
+
+        // Generate a random sample and random partition
+<span class="fc" id="L88">        double[] totalSample = generateSample();</span>
+<span class="fc" id="L89">        double[][] subSamples = generatePartition(totalSample);</span>
+<span class="fc" id="L90">        int nSamples = subSamples.length;</span>
+
+        // Create aggregator and total stats for comparison
+<span class="fc" id="L93">        AggregateSummaryStatistics aggregate = new AggregateSummaryStatistics();</span>
+<span class="fc" id="L94">        SummaryStatistics totalStats = new SummaryStatistics();</span>
+
+        // Create array of component stats
+<span class="fc" id="L97">        SummaryStatistics componentStats[] = new SummaryStatistics[nSamples];</span>
+
+<span class="fc bfc" id="L99" title="All 2 branches covered.">        for (int i = 0; i &lt; nSamples; i++) {</span>
+
+            // Make componentStats[i] a contributing statistic to aggregate
+<span class="fc" id="L102">            componentStats[i] = aggregate.createContributingStatistics();</span>
+
+            // Add values from subsample
+<span class="fc bfc" id="L105" title="All 2 branches covered.">            for (int j = 0; j &lt; subSamples[i].length; j++) {</span>
+<span class="fc" id="L106">                componentStats[i].addValue(subSamples[i][j]);</span>
+            }
+        }
+
+        // Compute totalStats directly
+<span class="fc bfc" id="L111" title="All 2 branches covered.">        for (int i = 0; i &lt; totalSample.length; i++) {</span>
+<span class="fc" id="L112">            totalStats.addValue(totalSample[i]);</span>
+        }
+
+        /*
+         * Compare statistics in totalStats with aggregate.
+         * Note that guaranteed success of this comparison depends on the
+         * fact that &lt;aggregate&gt; gets values in exactly the same order
+         * as &lt;totalStats&gt;.
+         *
+         */
+<span class="fc" id="L122">        Assert.assertEquals(totalStats.getSummary(), aggregate.getSummary());</span>
+
+<span class="fc" id="L124">    }</span>
+
+    /**
+     * Test aggregate function by randomly generating a dataset of 10-100 values
+     * from [-100, 100], dividing it into 2-5 partitions, computing stats for each
+     * partition and comparing the result of aggregate(...) applied to the collection
+     * of per-partition SummaryStatistics with a single SummaryStatistics computed
+     * over the full sample.
+     */
+    @Test
+    public void testAggregate() {
+
+        // Generate a random sample and random partition
+<span class="fc" id="L137">        double[] totalSample = generateSample();</span>
+<span class="fc" id="L138">        double[][] subSamples = generatePartition(totalSample);</span>
+<span class="fc" id="L139">        int nSamples = subSamples.length;</span>
+
+        // Compute combined stats directly
+<span class="fc" id="L142">        SummaryStatistics totalStats = new SummaryStatistics();</span>
+<span class="fc bfc" id="L143" title="All 2 branches covered.">        for (int i = 0; i &lt; totalSample.length; i++) {</span>
+<span class="fc" id="L144">            totalStats.addValue(totalSample[i]);</span>
+        }
+
+        // Now compute subsample stats individually and aggregate
+<span class="fc" id="L148">        SummaryStatistics[] subSampleStats = new SummaryStatistics[nSamples];</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">        for (int i = 0; i &lt; nSamples; i++) {</span>
+<span class="fc" id="L150">            subSampleStats[i] = new SummaryStatistics();</span>
+        }
+<span class="fc" id="L152">        Collection&lt;SummaryStatistics&gt; aggregate = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L153" title="All 2 branches covered.">        for (int i = 0; i &lt; nSamples; i++) {</span>
+<span class="fc bfc" id="L154" title="All 2 branches covered.">            for (int j = 0; j &lt; subSamples[i].length; j++) {</span>
+<span class="fc" id="L155">                subSampleStats[i].addValue(subSamples[i][j]);</span>
+            }
+<span class="fc" id="L157">            aggregate.add(subSampleStats[i]);</span>
+        }
+
+        // Compare values
+<span class="fc" id="L161">        StatisticalSummary aggregatedStats = AggregateSummaryStatistics.aggregate(aggregate);</span>
+<span class="fc" id="L162">        assertEquals(totalStats.getSummary(), aggregatedStats, 10E-12);</span>
+<span class="fc" id="L163">    }</span>
+
+    /**
+     * Similar to {@link #testAggregate()} but operating on
+     * {@link StatisticalSummary} instead.
+     */
+    @Test
+    public void testAggregateStatisticalSummary() {
+
+        // Generate a random sample and random partition
+<span class="fc" id="L173">        double[] totalSample = generateSample();</span>
+<span class="fc" id="L174">        double[][] subSamples = generatePartition(totalSample);</span>
+<span class="fc" id="L175">        int nSamples = subSamples.length;</span>
+
+        // Compute combined stats directly
+<span class="fc" id="L178">        SummaryStatistics totalStats = new SummaryStatistics();</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">        for (int i = 0; i &lt; totalSample.length; i++) {</span>
+<span class="fc" id="L180">            totalStats.addValue(totalSample[i]);</span>
+        }
+
+        // Now compute subsample stats individually and aggregate
+<span class="fc" id="L184">        SummaryStatistics[] subSampleStats = new SummaryStatistics[nSamples];</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">        for (int i = 0; i &lt; nSamples; i++) {</span>
+<span class="fc" id="L186">            subSampleStats[i] = new SummaryStatistics();</span>
+        }
+<span class="fc" id="L188">        Collection&lt;StatisticalSummary&gt; aggregate = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L189" title="All 2 branches covered.">        for (int i = 0; i &lt; nSamples; i++) {</span>
+<span class="fc bfc" id="L190" title="All 2 branches covered.">            for (int j = 0; j &lt; subSamples[i].length; j++) {</span>
+<span class="fc" id="L191">                subSampleStats[i].addValue(subSamples[i][j]);</span>
+            }
+<span class="fc" id="L193">            aggregate.add(subSampleStats[i].getSummary());</span>
+        }
+
+        // Compare values
+<span class="fc" id="L197">        StatisticalSummary aggregatedStats = AggregateSummaryStatistics.aggregate(aggregate);</span>
+<span class="fc" id="L198">        assertEquals(totalStats.getSummary(), aggregatedStats, 10E-12);</span>
+<span class="fc" id="L199">    }</span>
+
+
+    @Test
+    public void testAggregateDegenerate() {
+<span class="fc" id="L204">        double[] totalSample = {1, 2, 3, 4, 5};</span>
+<span class="fc" id="L205">        double[][] subSamples = {{1}, {2}, {3}, {4}, {5}};</span>
+
+        // Compute combined stats directly
+<span class="fc" id="L208">        SummaryStatistics totalStats = new SummaryStatistics();</span>
+<span class="fc bfc" id="L209" title="All 2 branches covered.">        for (int i = 0; i &lt; totalSample.length; i++) {</span>
+<span class="fc" id="L210">            totalStats.addValue(totalSample[i]);</span>
+        }
+
+        // Now compute subsample stats individually and aggregate
+<span class="fc" id="L214">        SummaryStatistics[] subSampleStats = new SummaryStatistics[5];</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">        for (int i = 0; i &lt; 5; i++) {</span>
+<span class="fc" id="L216">            subSampleStats[i] = new SummaryStatistics();</span>
+        }
+<span class="fc" id="L218">        Collection&lt;SummaryStatistics&gt; aggregate = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">        for (int i = 0; i &lt; 5; i++) {</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">            for (int j = 0; j &lt; subSamples[i].length; j++) {</span>
+<span class="fc" id="L221">                subSampleStats[i].addValue(subSamples[i][j]);</span>
+            }
+<span class="fc" id="L223">            aggregate.add(subSampleStats[i]);</span>
+        }
+
+        // Compare values
+<span class="fc" id="L227">        StatisticalSummaryValues aggregatedStats = AggregateSummaryStatistics.aggregate(aggregate);</span>
+<span class="fc" id="L228">        assertEquals(totalStats.getSummary(), aggregatedStats, 10E-12);</span>
+<span class="fc" id="L229">    }</span>
+
+    @Test
+    public void testAggregateSpecialValues() {
+<span class="fc" id="L233">        double[] totalSample = {Double.POSITIVE_INFINITY, 2, 3, Double.NaN, 5};</span>
+<span class="fc" id="L234">        double[][] subSamples = {{Double.POSITIVE_INFINITY, 2}, {3}, {Double.NaN}, {5}};</span>
+
+        // Compute combined stats directly
+<span class="fc" id="L237">        SummaryStatistics totalStats = new SummaryStatistics();</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">        for (int i = 0; i &lt; totalSample.length; i++) {</span>
+<span class="fc" id="L239">            totalStats.addValue(totalSample[i]);</span>
+        }
+
+        // Now compute subsample stats individually and aggregate
+<span class="fc" id="L243">        SummaryStatistics[] subSampleStats = new SummaryStatistics[5];</span>
+<span class="fc bfc" id="L244" title="All 2 branches covered.">        for (int i = 0; i &lt; 4; i++) {</span>
+<span class="fc" id="L245">            subSampleStats[i] = new SummaryStatistics();</span>
+        }
+<span class="fc" id="L247">        Collection&lt;SummaryStatistics&gt; aggregate = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L248" title="All 2 branches covered.">        for (int i = 0; i &lt; 4; i++) {</span>
+<span class="fc bfc" id="L249" title="All 2 branches covered.">            for (int j = 0; j &lt; subSamples[i].length; j++) {</span>
+<span class="fc" id="L250">                subSampleStats[i].addValue(subSamples[i][j]);</span>
+            }
+<span class="fc" id="L252">            aggregate.add(subSampleStats[i]);</span>
+        }
+
+        // Compare values
+<span class="fc" id="L256">        StatisticalSummaryValues aggregatedStats = AggregateSummaryStatistics.aggregate(aggregate);</span>
+<span class="fc" id="L257">        assertEquals(totalStats.getSummary(), aggregatedStats, 10E-12);</span>
+
+<span class="fc" id="L259">    }</span>
+
+    /**
+     * Verifies that a StatisticalSummary and a StatisticalSummaryValues are equal up
+     * to delta, with NaNs, infinities returned in the same spots. For max, min, n, values
+     * have to agree exactly, delta is used only for sum, mean, variance, std dev.
+     */
+    protected static void assertEquals(StatisticalSummary expected, StatisticalSummary observed, double delta) {
+<span class="fc" id="L267">        TestUtils.assertEquals(expected.getMax(), observed.getMax(), 0);</span>
+<span class="fc" id="L268">        TestUtils.assertEquals(expected.getMin(), observed.getMin(), 0);</span>
+<span class="fc" id="L269">        Assert.assertEquals(expected.getN(), observed.getN());</span>
+<span class="fc" id="L270">        TestUtils.assertEquals(expected.getSum(), observed.getSum(), delta);</span>
+<span class="fc" id="L271">        TestUtils.assertEquals(expected.getMean(), observed.getMean(), delta);</span>
+<span class="fc" id="L272">        TestUtils.assertEquals(expected.getStandardDeviation(), observed.getStandardDeviation(), delta);</span>
+<span class="fc" id="L273">        TestUtils.assertEquals(expected.getVariance(), observed.getVariance(), delta);</span>
+<span class="fc" id="L274">    }</span>
+
+
+    /**
+     * Generates a random sample of double values.
+     * Sample size is random, between 10 and 100 and values are
+     * uniformly distributed over [-100, 100].
+     *
+     * @return array of random double values
+     */
+    private double[] generateSample() {
+<span class="fc" id="L285">        final DiscreteDistribution.Sampler size =</span>
+<span class="fc" id="L286">            new UniformDiscreteDistribution(10, 100).createSampler(RandomSource.create(RandomSource.WELL_512_A,</span>
+<span class="fc" id="L287">                                                                                      327652));</span>
+<span class="fc" id="L288">        final ContinuousDistribution.Sampler randomData</span>
+<span class="fc" id="L289">            = new UniformContinuousDistribution(-100, 100).createSampler(RandomSource.create(RandomSource.WELL_512_A,</span>
+<span class="fc" id="L290">                                                                                       64925784252L));;</span>
+<span class="fc" id="L291">        final int sampleSize = size.sample();</span>
+<span class="fc" id="L292">        final double[] out = AbstractRealDistribution.sample(sampleSize, randomData);</span>
+<span class="fc" id="L293">        return out;</span>
+    }
+
+    /**
+     * Generates a partition of &lt;sample&gt; into up to 5 sequentially selected
+     * subsamples with randomly selected partition points.
+     *
+     * @param sample array to partition
+     * @return rectangular array with rows = subsamples
+     */
+    private double[][] generatePartition(double[] sample) {
+<span class="fc" id="L304">        final int length = sample.length;</span>
+<span class="fc" id="L305">        final double[][] out = new double[5][];</span>
+<span class="fc" id="L306">        int cur = 0;          // beginning of current partition segment</span>
+<span class="fc" id="L307">        int offset = 0;       // end of current partition segment</span>
+<span class="fc" id="L308">        int sampleCount = 0;  // number of segments defined</span>
+<span class="fc bfc" id="L309" title="All 2 branches covered.">        for (int i = 0; i &lt; 5; i++) {</span>
+<span class="pc bpc" id="L310" title="1 of 4 branches missed.">            if (cur == length || offset == length) {</span>
+<span class="nc" id="L311">                break;</span>
+            }
+            final int next;
+<span class="fc bfc" id="L314" title="All 4 branches covered.">            if (i == 4 || cur == length - 1) {</span>
+<span class="fc" id="L315">                next = length - 1;</span>
+            } else {
+<span class="fc" id="L317">                final DiscreteDistribution.Sampler sampler =</span>
+<span class="fc" id="L318">                    new UniformDiscreteDistribution(cur, length - 1).createSampler(RandomSource.create(RandomSource.WELL_512_A));</span>
+<span class="fc" id="L319">                next = sampler.sample();</span>
+            }
+<span class="fc" id="L321">            final int subLength = next - cur + 1;</span>
+<span class="fc" id="L322">            out[i] = new double[subLength];</span>
+<span class="fc" id="L323">            System.arraycopy(sample, offset, out[i], 0, subLength);</span>
+<span class="fc" id="L324">            cur = next + 1;</span>
+<span class="fc" id="L325">            sampleCount++;</span>
+<span class="fc" id="L326">            offset += subLength;</span>
+        }
+<span class="fc bfc" id="L328" title="All 2 branches covered.">        if (sampleCount &lt; 5) {</span>
+<span class="fc" id="L329">            double[][] out2 = new double[sampleCount][];</span>
+<span class="fc bfc" id="L330" title="All 2 branches covered.">            for (int j = 0; j &lt; sampleCount; j++) {</span>
+<span class="fc" id="L331">                final int curSize = out[j].length;</span>
+<span class="fc" id="L332">                out2[j] = new double[curSize];</span>
+<span class="fc" id="L333">                System.arraycopy(out[j], 0, out2[j], 0, curSize);</span>
+            }
+<span class="fc" id="L335">            return out2;</span>
+        } else {
+<span class="fc" id="L337">            return out;</span>
+        }
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

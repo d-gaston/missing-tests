@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>QRCodeReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode</a> &gt; <span class="el_source">QRCodeReader.java</span></div><h1>QRCodeReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.ChecksumException;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Reader;
+import com.google.zxing.Result;
+import com.google.zxing.ResultMetadataType;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.DecoderResult;
+import com.google.zxing.common.DetectorResult;
+import com.google.zxing.qrcode.decoder.Decoder;
+import com.google.zxing.qrcode.decoder.QRCodeDecoderMetaData;
+import com.google.zxing.qrcode.detector.Detector;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * This implementation can detect and decode QR Codes in an image.
+ *
+ * @author Sean Owen
+ */
+<span class="fc" id="L44">public class QRCodeReader implements Reader {</span>
+
+<span class="fc" id="L46">  private static final ResultPoint[] NO_POINTS = new ResultPoint[0];</span>
+
+<span class="fc" id="L48">  private final Decoder decoder = new Decoder();</span>
+
+  protected final Decoder getDecoder() {
+<span class="fc" id="L51">    return decoder;</span>
+  }
+
+  /**
+   * Locates and decodes a QR code in an image.
+   *
+   * @return a String representing the content encoded by the QR code
+   * @throws NotFoundException if a QR code cannot be found
+   * @throws FormatException if a QR code cannot be decoded
+   * @throws ChecksumException if error correction fails
+   */
+  @Override
+  public Result decode(BinaryBitmap image) throws NotFoundException, ChecksumException, FormatException {
+<span class="nc" id="L64">    return decode(image, null);</span>
+  }
+
+  @Override
+  public final Result decode(BinaryBitmap image, Map&lt;DecodeHintType,?&gt; hints)
+      throws NotFoundException, ChecksumException, FormatException {
+    DecoderResult decoderResult;
+    ResultPoint[] points;
+<span class="fc bfc" id="L72" title="All 4 branches covered.">    if (hints != null &amp;&amp; hints.containsKey(DecodeHintType.PURE_BARCODE)) {</span>
+<span class="fc" id="L73">      BitMatrix bits = extractPureBits(image.getBlackMatrix());</span>
+<span class="fc" id="L74">      decoderResult = decoder.decode(bits, hints);</span>
+<span class="fc" id="L75">      points = NO_POINTS;</span>
+<span class="fc" id="L76">    } else {</span>
+<span class="fc" id="L77">      DetectorResult detectorResult = new Detector(image.getBlackMatrix()).detect(hints);</span>
+<span class="fc" id="L78">      decoderResult = decoder.decode(detectorResult.getBits(), hints);</span>
+<span class="fc" id="L79">      points = detectorResult.getPoints();</span>
+    }
+
+    // If the code was mirrored: swap the bottom-left and the top-right points.
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">    if (decoderResult.getOther() instanceof QRCodeDecoderMetaData) {</span>
+<span class="nc" id="L84">      ((QRCodeDecoderMetaData) decoderResult.getOther()).applyMirroredCorrection(points);</span>
+    }
+
+<span class="fc" id="L87">    Result result = new Result(decoderResult.getText(), decoderResult.getRawBytes(), points, BarcodeFormat.QR_CODE);</span>
+<span class="fc" id="L88">    List&lt;byte[]&gt; byteSegments = decoderResult.getByteSegments();</span>
+<span class="fc bfc" id="L89" title="All 2 branches covered.">    if (byteSegments != null) {</span>
+<span class="fc" id="L90">      result.putMetadata(ResultMetadataType.BYTE_SEGMENTS, byteSegments);</span>
+    }
+<span class="fc" id="L92">    String ecLevel = decoderResult.getECLevel();</span>
+<span class="pc bpc" id="L93" title="1 of 2 branches missed.">    if (ecLevel != null) {</span>
+<span class="fc" id="L94">      result.putMetadata(ResultMetadataType.ERROR_CORRECTION_LEVEL, ecLevel);</span>
+    }
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">    if (decoderResult.hasStructuredAppend()) {</span>
+<span class="nc" id="L97">      result.putMetadata(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE,</span>
+<span class="nc" id="L98">                         decoderResult.getStructuredAppendSequenceNumber());</span>
+<span class="nc" id="L99">      result.putMetadata(ResultMetadataType.STRUCTURED_APPEND_PARITY,</span>
+<span class="nc" id="L100">                         decoderResult.getStructuredAppendParity());</span>
+    }
+<span class="fc" id="L102">    return result;</span>
+  }
+
+  @Override
+  public void reset() {
+    // do nothing
+<span class="nc" id="L108">  }</span>
+
+  /**
+   * This method detects a code in a &quot;pure&quot; image -- that is, pure monochrome image
+   * which contains only an unrotated, unskewed, image of a code, with some white border
+   * around it. This is a specialized method that works exceptionally fast in this special
+   * case.
+   */
+  private static BitMatrix extractPureBits(BitMatrix image) throws NotFoundException {
+
+<span class="fc" id="L118">    int[] leftTopBlack = image.getTopLeftOnBit();</span>
+<span class="fc" id="L119">    int[] rightBottomBlack = image.getBottomRightOnBit();</span>
+<span class="pc bpc" id="L120" title="2 of 4 branches missed.">    if (leftTopBlack == null || rightBottomBlack == null) {</span>
+<span class="nc" id="L121">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc" id="L124">    float moduleSize = moduleSize(leftTopBlack, image);</span>
+
+<span class="fc" id="L126">    int top = leftTopBlack[1];</span>
+<span class="fc" id="L127">    int bottom = rightBottomBlack[1];</span>
+<span class="fc" id="L128">    int left = leftTopBlack[0];</span>
+<span class="fc" id="L129">    int right = rightBottomBlack[0];</span>
+
+    // Sanity check!
+<span class="pc bpc" id="L132" title="1 of 4 branches missed.">    if (left &gt;= right || top &gt;= bottom) {</span>
+<span class="fc" id="L133">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    if (bottom - top != right - left) {</span>
+      // Special case, where bottom-right module wasn't black so we found something else in the last row
+      // Assume it's a square, so use height as the width
+<span class="fc" id="L139">      right = left + (bottom - top);</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">      if (right &gt;= image.getWidth()) {</span>
+        // Abort if that would not make sense -- off image
+<span class="fc" id="L142">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+    }
+
+<span class="fc" id="L146">    int matrixWidth = Math.round((right - left + 1) / moduleSize);</span>
+<span class="fc" id="L147">    int matrixHeight = Math.round((bottom - top + 1) / moduleSize);</span>
+<span class="pc bpc" id="L148" title="2 of 4 branches missed.">    if (matrixWidth &lt;= 0 || matrixHeight &lt;= 0) {</span>
+<span class="nc" id="L149">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="pc bpc" id="L151" title="1 of 2 branches missed.">    if (matrixHeight != matrixWidth) {</span>
+      // Only possibly decode square regions
+<span class="nc" id="L153">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+    // Push in the &quot;border&quot; by half the module width so that we start
+    // sampling in the middle of the module. Just in case the image is a
+    // little off, this will help recover.
+<span class="fc" id="L159">    int nudge = (int) (moduleSize / 2.0f);</span>
+<span class="fc" id="L160">    top += nudge;</span>
+<span class="fc" id="L161">    left += nudge;</span>
+
+    // But careful that this does not sample off the edge
+    // &quot;right&quot; is the farthest-right valid pixel location -- right+1 is not necessarily
+    // This is positive by how much the inner x loop below would be too large
+<span class="fc" id="L166">    int nudgedTooFarRight = left + (int) ((matrixWidth - 1) * moduleSize) - right;</span>
+<span class="fc bfc" id="L167" title="All 2 branches covered.">    if (nudgedTooFarRight &gt; 0) {</span>
+<span class="pc bpc" id="L168" title="1 of 2 branches missed.">      if (nudgedTooFarRight &gt; nudge) {</span>
+        // Neither way fits; abort
+<span class="nc" id="L170">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L172">      left -= nudgedTooFarRight;</span>
+    }
+    // See logic above
+<span class="fc" id="L175">    int nudgedTooFarDown = top + (int) ((matrixHeight - 1) * moduleSize) - bottom;</span>
+<span class="fc bfc" id="L176" title="All 2 branches covered.">    if (nudgedTooFarDown &gt; 0) {</span>
+<span class="pc bpc" id="L177" title="1 of 2 branches missed.">      if (nudgedTooFarDown &gt; nudge) {</span>
+        // Neither way fits; abort
+<span class="nc" id="L179">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L181">      top -= nudgedTooFarDown;</span>
+    }
+
+    // Now just read off the bits
+<span class="fc" id="L185">    BitMatrix bits = new BitMatrix(matrixWidth, matrixHeight);</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">    for (int y = 0; y &lt; matrixHeight; y++) {</span>
+<span class="fc" id="L187">      int iOffset = top + (int) (y * moduleSize);</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">      for (int x = 0; x &lt; matrixWidth; x++) {</span>
+<span class="fc bfc" id="L189" title="All 2 branches covered.">        if (image.get(left + (int) (x * moduleSize), iOffset)) {</span>
+<span class="fc" id="L190">          bits.set(x, y);</span>
+        }
+      }
+    }
+<span class="fc" id="L194">    return bits;</span>
+  }
+
+  private static float moduleSize(int[] leftTopBlack, BitMatrix image) throws NotFoundException {
+<span class="fc" id="L198">    int height = image.getHeight();</span>
+<span class="fc" id="L199">    int width = image.getWidth();</span>
+<span class="fc" id="L200">    int x = leftTopBlack[0];</span>
+<span class="fc" id="L201">    int y = leftTopBlack[1];</span>
+<span class="fc" id="L202">    boolean inBlack = true;</span>
+<span class="fc" id="L203">    int transitions = 0;</span>
+<span class="fc bfc" id="L204" title="All 4 branches covered.">    while (x &lt; width &amp;&amp; y &lt; height) {</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">      if (inBlack != image.get(x, y)) {</span>
+<span class="fc bfc" id="L206" title="All 2 branches covered.">        if (++transitions == 5) {</span>
+<span class="fc" id="L207">          break;</span>
+        }
+<span class="fc bfc" id="L209" title="All 2 branches covered.">        inBlack = !inBlack;</span>
+      }
+<span class="fc" id="L211">      x++;</span>
+<span class="fc" id="L212">      y++;</span>
+    }
+<span class="fc bfc" id="L214" title="All 4 branches covered.">    if (x == width || y == height) {</span>
+<span class="fc" id="L215">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L217">    return (x - leftTopBlack[0]) / 7.0f;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

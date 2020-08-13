@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>QRCodeMultiReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.multi.qrcode</a> &gt; <span class="el_source">QRCodeMultiReader.java</span></div><h1>QRCodeMultiReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2009 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.multi.qrcode;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.ReaderException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultMetadataType;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.DecoderResult;
+import com.google.zxing.common.DetectorResult;
+import com.google.zxing.multi.MultipleBarcodeReader;
+import com.google.zxing.multi.qrcode.detector.MultiDetector;
+import com.google.zxing.qrcode.QRCodeReader;
+import com.google.zxing.qrcode.decoder.QRCodeDecoderMetaData;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Collections;
+import java.util.Comparator;
+
+/**
+ * This implementation can detect and decode multiple QR Codes in an image.
+ *
+ * @author Sean Owen
+ * @author Hannes Erven
+ */
+<span class="fc" id="L48">public final class QRCodeMultiReader extends QRCodeReader implements MultipleBarcodeReader {</span>
+
+<span class="fc" id="L50">  private static final Result[] EMPTY_RESULT_ARRAY = new Result[0];</span>
+<span class="fc" id="L51">  private static final ResultPoint[] NO_POINTS = new ResultPoint[0];</span>
+
+  @Override
+  public Result[] decodeMultiple(BinaryBitmap image) throws NotFoundException {
+<span class="fc" id="L55">    return decodeMultiple(image, null);</span>
+  }
+
+  @Override
+  public Result[] decodeMultiple(BinaryBitmap image, Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException {
+<span class="fc" id="L60">    List&lt;Result&gt; results = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L61">    DetectorResult[] detectorResults = new MultiDetector(image.getBlackMatrix()).detectMulti(hints);</span>
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    for (DetectorResult detectorResult : detectorResults) {</span>
+      try {
+<span class="fc" id="L64">        DecoderResult decoderResult = getDecoder().decode(detectorResult.getBits(), hints);</span>
+<span class="fc" id="L65">        ResultPoint[] points = detectorResult.getPoints();</span>
+        // If the code was mirrored: swap the bottom-left and the top-right points.
+<span class="pc bpc" id="L67" title="1 of 2 branches missed.">        if (decoderResult.getOther() instanceof QRCodeDecoderMetaData) {</span>
+<span class="nc" id="L68">          ((QRCodeDecoderMetaData) decoderResult.getOther()).applyMirroredCorrection(points);</span>
+        }
+<span class="fc" id="L70">        Result result = new Result(decoderResult.getText(), decoderResult.getRawBytes(), points,</span>
+                                   BarcodeFormat.QR_CODE);
+<span class="fc" id="L72">        List&lt;byte[]&gt; byteSegments = decoderResult.getByteSegments();</span>
+<span class="pc bpc" id="L73" title="1 of 2 branches missed.">        if (byteSegments != null) {</span>
+<span class="fc" id="L74">          result.putMetadata(ResultMetadataType.BYTE_SEGMENTS, byteSegments);</span>
+        }
+<span class="fc" id="L76">        String ecLevel = decoderResult.getECLevel();</span>
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">        if (ecLevel != null) {</span>
+<span class="fc" id="L78">          result.putMetadata(ResultMetadataType.ERROR_CORRECTION_LEVEL, ecLevel);</span>
+        }
+<span class="pc bpc" id="L80" title="1 of 2 branches missed.">        if (decoderResult.hasStructuredAppend()) {</span>
+<span class="nc" id="L81">          result.putMetadata(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE,</span>
+<span class="nc" id="L82">                             decoderResult.getStructuredAppendSequenceNumber());</span>
+<span class="nc" id="L83">          result.putMetadata(ResultMetadataType.STRUCTURED_APPEND_PARITY,</span>
+<span class="nc" id="L84">                             decoderResult.getStructuredAppendParity());</span>
+        }
+<span class="fc" id="L86">        results.add(result);</span>
+<span class="nc" id="L87">      } catch (ReaderException re) {</span>
+        // ignore and continue 
+<span class="fc" id="L89">      }</span>
+    }
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">    if (results.isEmpty()) {</span>
+<span class="nc" id="L92">      return EMPTY_RESULT_ARRAY;</span>
+    } else {
+<span class="fc" id="L94">      results = processStructuredAppend(results);</span>
+<span class="fc" id="L95">      return results.toArray(EMPTY_RESULT_ARRAY);</span>
+    }
+  }
+
+  private static List&lt;Result&gt; processStructuredAppend(List&lt;Result&gt; results) {
+<span class="fc" id="L100">    boolean hasSA = false;</span>
+
+    // first, check, if there is at least on SA result in the list
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    for (Result result : results) {</span>
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">      if (result.getResultMetadata().containsKey(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE)) {</span>
+<span class="nc" id="L105">        hasSA = true;</span>
+<span class="nc" id="L106">        break;</span>
+      }
+<span class="fc" id="L108">    }</span>
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">    if (!hasSA) {</span>
+<span class="fc" id="L110">      return results;</span>
+    }
+
+    // it is, second, split the lists and built a new result list
+<span class="nc" id="L114">    List&lt;Result&gt; newResults = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L115">    List&lt;Result&gt; saResults = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L116" title="All 2 branches missed.">    for (Result result : results) {</span>
+<span class="nc" id="L117">      newResults.add(result);</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">      if (result.getResultMetadata().containsKey(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE)) {</span>
+<span class="nc" id="L119">        saResults.add(result);</span>
+      }
+<span class="nc" id="L121">    }</span>
+    // sort and concatenate the SA list items
+<span class="nc" id="L123">    Collections.sort(saResults, new SAComparator());</span>
+<span class="nc" id="L124">    StringBuilder concatedText = new StringBuilder();</span>
+<span class="nc" id="L125">    int rawBytesLen = 0;</span>
+<span class="nc" id="L126">    int byteSegmentLength = 0;</span>
+<span class="nc bnc" id="L127" title="All 2 branches missed.">    for (Result saResult : saResults) {</span>
+<span class="nc" id="L128">      concatedText.append(saResult.getText());</span>
+<span class="nc" id="L129">      rawBytesLen += saResult.getRawBytes().length;</span>
+<span class="nc bnc" id="L130" title="All 2 branches missed.">      if (saResult.getResultMetadata().containsKey(ResultMetadataType.BYTE_SEGMENTS)) {</span>
+        @SuppressWarnings(&quot;unchecked&quot;)
+<span class="nc" id="L132">        Iterable&lt;byte[]&gt; byteSegments =</span>
+<span class="nc" id="L133">            (Iterable&lt;byte[]&gt;) saResult.getResultMetadata().get(ResultMetadataType.BYTE_SEGMENTS);</span>
+<span class="nc bnc" id="L134" title="All 2 branches missed.">        for (byte[] segment : byteSegments) {</span>
+<span class="nc" id="L135">          byteSegmentLength += segment.length;</span>
+<span class="nc" id="L136">        }</span>
+      }
+<span class="nc" id="L138">    }</span>
+<span class="nc" id="L139">    byte[] newRawBytes = new byte[rawBytesLen];</span>
+<span class="nc" id="L140">    byte[] newByteSegment = new byte[byteSegmentLength];</span>
+<span class="nc" id="L141">    int newRawBytesIndex = 0;</span>
+<span class="nc" id="L142">    int byteSegmentIndex = 0;</span>
+<span class="nc bnc" id="L143" title="All 2 branches missed.">    for (Result saResult : saResults) {</span>
+<span class="nc" id="L144">      System.arraycopy(saResult.getRawBytes(), 0, newRawBytes, newRawBytesIndex, saResult.getRawBytes().length);</span>
+<span class="nc" id="L145">      newRawBytesIndex += saResult.getRawBytes().length;</span>
+<span class="nc bnc" id="L146" title="All 2 branches missed.">      if (saResult.getResultMetadata().containsKey(ResultMetadataType.BYTE_SEGMENTS)) {</span>
+        @SuppressWarnings(&quot;unchecked&quot;)
+<span class="nc" id="L148">        Iterable&lt;byte[]&gt; byteSegments =</span>
+<span class="nc" id="L149">            (Iterable&lt;byte[]&gt;) saResult.getResultMetadata().get(ResultMetadataType.BYTE_SEGMENTS);</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">        for (byte[] segment : byteSegments) {</span>
+<span class="nc" id="L151">          System.arraycopy(segment, 0, newByteSegment, byteSegmentIndex, segment.length);</span>
+<span class="nc" id="L152">          byteSegmentIndex += segment.length;</span>
+<span class="nc" id="L153">        }</span>
+      }
+<span class="nc" id="L155">    }</span>
+<span class="nc" id="L156">    Result newResult = new Result(concatedText.toString(), newRawBytes, NO_POINTS, BarcodeFormat.QR_CODE);</span>
+<span class="nc bnc" id="L157" title="All 2 branches missed.">    if (byteSegmentLength &gt; 0) {</span>
+<span class="nc" id="L158">      Collection&lt;byte[]&gt; byteSegmentList = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L159">      byteSegmentList.add(newByteSegment);</span>
+<span class="nc" id="L160">      newResult.putMetadata(ResultMetadataType.BYTE_SEGMENTS, byteSegmentList);</span>
+    }
+<span class="nc" id="L162">    newResults.add(newResult);</span>
+<span class="nc" id="L163">    return newResults;</span>
+  }
+
+  private static final class SAComparator implements Comparator&lt;Result&gt;, Serializable {
+    @Override
+    public int compare(Result a, Result b) {
+<span class="nc" id="L169">      int aNumber = (int) a.getResultMetadata().get(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE);</span>
+<span class="nc" id="L170">      int bNumber = (int) b.getResultMetadata().get(ResultMetadataType.STRUCTURED_APPEND_SEQUENCE);</span>
+<span class="nc" id="L171">      return Integer.compare(aNumber, bNumber);</span>
+    }
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

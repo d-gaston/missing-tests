@@ -1,0 +1,706 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CsvReaderTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.io.csv</a> &gt; <span class="el_source">CsvReaderTest.java</span></div><h1>CsvReaderTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.io.csv;
+
+import static java.util.Arrays.asList;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static tech.tablesaw.api.ColumnType.DOUBLE;
+import static tech.tablesaw.api.ColumnType.FLOAT;
+import static tech.tablesaw.api.ColumnType.INTEGER;
+import static tech.tablesaw.api.ColumnType.LOCAL_DATE;
+import static tech.tablesaw.api.ColumnType.LOCAL_DATE_TIME;
+import static tech.tablesaw.api.ColumnType.LOCAL_TIME;
+import static tech.tablesaw.api.ColumnType.SHORT;
+import static tech.tablesaw.api.ColumnType.SKIP;
+import static tech.tablesaw.api.ColumnType.STRING;
+
+import com.univocity.parsers.common.TextParsingException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.io.StringReader;
+import java.nio.file.Paths;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import org.junit.jupiter.api.Test;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.DateColumn;
+import tech.tablesaw.api.DateTimeColumn;
+import tech.tablesaw.api.LongColumn;
+import tech.tablesaw.api.ShortColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.io.AddCellToColumnException;
+
+/** Tests for CSV Reading */
+<span class="fc" id="L58">public class CsvReaderTest {</span>
+
+<span class="fc" id="L60">  private static final String LINE_END = System.lineSeparator();</span>
+
+<span class="fc" id="L62">  private final ColumnType[] bus_types = {SHORT, STRING, STRING, FLOAT, FLOAT};</span>
+<span class="fc" id="L63">  private final ColumnType[] bus_types_with_SKIP = {SHORT, STRING, SKIP, DOUBLE, DOUBLE};</span>
+
+  @Test
+  public void testMaxCharsPerColumnPass() throws IOException {
+<span class="fc" id="L67">    final Reader reader =</span>
+        new StringReader(&quot;Text&quot; + LINE_END + &quot;\&quot;short\&quot;&quot; + LINE_END + &quot;1234567890&quot; + LINE_END);
+
+<span class="fc" id="L70">    final int maxCharsPerColumn = 12;</span>
+
+    Table result =
+<span class="fc" id="L73">        Table.read().csv(CsvReadOptions.builder(reader).maxCharsPerColumn(maxCharsPerColumn));</span>
+<span class="fc" id="L74">    assertEquals(2, result.rowCount());</span>
+<span class="fc" id="L75">  }</span>
+
+  @Test
+  public void testMaxCharsPerColumnException() {
+<span class="fc" id="L79">    final Reader reader =</span>
+        new StringReader(&quot;Text&quot; + LINE_END + &quot;\&quot;short\&quot;&quot; + LINE_END + &quot;1234567890&quot; + LINE_END);
+
+<span class="fc" id="L82">    final int maxCharsPerColumn = 8;</span>
+
+<span class="fc" id="L84">    assertThrows(</span>
+        TextParsingException.class,
+        () -&gt; {
+<span class="nc" id="L87">          Table.read().csv(CsvReadOptions.builder(reader).maxCharsPerColumn(maxCharsPerColumn));</span>
+<span class="nc" id="L88">        });</span>
+<span class="fc" id="L89">  }</span>
+
+  @Test
+  public void testWithBusData() throws IOException {
+    // Read the CSV file
+    Table table =
+<span class="fc" id="L95">        Table.read()</span>
+<span class="fc" id="L96">            .csv(CsvReadOptions.builder(&quot;../data/bus_stop_test.csv&quot;).columnTypes(bus_types));</span>
+
+    // Look at the column names
+<span class="fc" id="L99">    assertEquals(</span>
+<span class="fc" id="L100">        &quot;[stop_id, stop_name, stop_desc, stop_lat, stop_lon]&quot;, table.columnNames().toString());</span>
+
+<span class="fc" id="L102">    table = table.sortDescendingOn(&quot;stop_id&quot;);</span>
+<span class="fc" id="L103">    table.removeColumns(&quot;stop_desc&quot;);</span>
+<span class="fc" id="L104">  }</span>
+
+  @Test
+  public void testWithColumnSKIP() throws IOException {
+    // Read the CSV file
+    Table table =
+<span class="fc" id="L110">        Table.read()</span>
+<span class="fc" id="L111">            .csv(</span>
+<span class="fc" id="L112">                CsvReadOptions.builder(&quot;../data/bus_stop_test.csv&quot;)</span>
+<span class="fc" id="L113">                    .columnTypes(bus_types_with_SKIP));</span>
+
+<span class="fc" id="L115">    assertEquals(4, table.columnCount());</span>
+    // Look at the column names
+<span class="fc" id="L117">    assertEquals(&quot;[stop_id, stop_name, stop_lat, stop_lon]&quot;, table.columnNames().toString());</span>
+<span class="fc" id="L118">  }</span>
+
+  @Test
+  public void testWithColumnSKIPWithoutHeader() throws IOException {
+    // Read the CSV file
+    Table table =
+<span class="fc" id="L124">        Table.read()</span>
+<span class="fc" id="L125">            .csv(</span>
+<span class="fc" id="L126">                CsvReadOptions.builder(&quot;../data/bus_stop_noheader_test.csv&quot;)</span>
+<span class="fc" id="L127">                    .header(false)</span>
+<span class="fc" id="L128">                    .columnTypes(bus_types_with_SKIP));</span>
+
+<span class="fc" id="L130">    assertEquals(4, table.columnCount());</span>
+    // Look at the column names
+<span class="fc" id="L132">    assertEquals(&quot;[C0, C1, C3, C4]&quot;, table.columnNames().toString());</span>
+<span class="fc" id="L133">  }</span>
+
+  @Test
+  public void testWithBushData() throws IOException {
+    // Read the CSV file
+<span class="fc" id="L138">    ColumnType[] types = {LOCAL_DATE, DOUBLE, STRING};</span>
+<span class="fc" id="L139">    Table table = Table.read().csv(CsvReadOptions.builder(&quot;../data/bush.csv&quot;).columnTypes(types));</span>
+
+<span class="fc" id="L141">    assertEquals(323, table.rowCount());</span>
+
+    // Look at the column names
+<span class="fc" id="L144">    assertEquals(&quot;[date, approval, who]&quot;, table.columnNames().toString());</span>
+<span class="fc" id="L145">  }</span>
+
+  @Test
+  public void testBushDataWithoutSamplingForTypeDetection() throws IOException {
+    // Read the CSV file
+<span class="fc" id="L150">    Table table = Table.read().csv(CsvReadOptions.builder(&quot;../data/bush.csv&quot;).sample(false));</span>
+
+<span class="fc" id="L152">    assertEquals(323, table.rowCount());</span>
+
+    // Look at the column names
+<span class="fc" id="L155">    assertEquals(&quot;[date, approval, who]&quot;, table.columnNames().toString());</span>
+<span class="fc" id="L156">  }</span>
+
+  @Test
+  public void testDataTypeDetection() throws IOException {
+<span class="fc" id="L160">    Reader reader = new FileReader(&quot;../data/bus_stop_test.csv&quot;);</span>
+<span class="fc" id="L161">    CsvReadOptions options =</span>
+<span class="fc" id="L162">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L163">            .header(true)</span>
+<span class="fc" id="L164">            .minimizeColumnSizes()</span>
+<span class="fc" id="L165">            .separator(',')</span>
+<span class="fc" id="L166">            .sample(false)</span>
+<span class="fc" id="L167">            .locale(Locale.getDefault())</span>
+<span class="fc" id="L168">            .build();</span>
+
+<span class="fc" id="L170">    ColumnType[] columnTypes = new CsvReader().detectColumnTypes(reader, options);</span>
+<span class="fc" id="L171">    assertArrayEquals(bus_types, columnTypes);</span>
+<span class="fc" id="L172">  }</span>
+
+  @Test
+  public void testMillis() {
+<span class="fc" id="L176">    long[] times = {1530486314124L, 1530488214124L};</span>
+<span class="fc" id="L177">    LongColumn d = LongColumn.create(&quot;times&quot;, times);</span>
+<span class="fc" id="L178">    DateTimeColumn column = d.asDateTimes(ZoneOffset.UTC);</span>
+<span class="fc" id="L179">    assertEquals(1530486314124L, column.get(0).toInstant(ZoneOffset.UTC).toEpochMilli());</span>
+<span class="fc" id="L180">  }</span>
+
+  @Test
+  public void testLocalDateDetectionEnglish() {
+
+<span class="fc" id="L185">    final Reader reader =</span>
+        new StringReader(
+            &quot;Date&quot;
+                + LINE_END
+                + &quot;\&quot;Nov 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;Oct 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;Sep 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;Aug 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;Jul 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;Jun 1, 2017\&quot;&quot;
+                + LINE_END);
+
+<span class="fc" id="L202">    final boolean header = true;</span>
+<span class="fc" id="L203">    final char delimiter = ',';</span>
+<span class="fc" id="L204">    final boolean useSampling = true;</span>
+
+<span class="fc" id="L206">    CsvReadOptions options =</span>
+<span class="fc" id="L207">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L208">            .header(header)</span>
+<span class="fc" id="L209">            .separator(delimiter)</span>
+<span class="fc" id="L210">            .sample(useSampling)</span>
+<span class="fc" id="L211">            .locale(Locale.ENGLISH)</span>
+<span class="fc" id="L212">            .build();</span>
+
+<span class="fc" id="L214">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+
+<span class="fc" id="L216">    assertEquals(Collections.singletonList(LOCAL_DATE), actual);</span>
+<span class="fc" id="L217">  }</span>
+
+  @Test
+  public void testDateTimeDetection() {
+
+<span class="fc" id="L222">    final Reader reader =</span>
+        new StringReader(
+            &quot;Date&quot;
+                + LINE_END
+                + &quot;09-Nov-2014 13:03:04&quot;
+                + LINE_END
+                + &quot;09-Oct-2014 13:03:56&quot;
+                + LINE_END);
+
+<span class="fc" id="L231">    final boolean header = true;</span>
+
+<span class="fc" id="L233">    CsvReadOptions options =</span>
+<span class="fc" id="L234">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L235">            .header(header)</span>
+<span class="fc" id="L236">            .dateTimeFormat(DateTimeFormatter.ofPattern(&quot;dd-MMM-yyyy HH:mm:ss&quot;))</span>
+<span class="fc" id="L237">            .build();</span>
+
+<span class="fc" id="L239">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+
+<span class="fc" id="L241">    assertEquals(Collections.singletonList(LOCAL_DATE_TIME), actual);</span>
+<span class="fc" id="L242">  }</span>
+
+  @Test
+  public void testDateTimeDetection2() {
+
+<span class="fc" id="L247">    final Reader reader =</span>
+        new StringReader(
+            &quot;Date&quot;
+                + LINE_END
+                + &quot;09-Nov-2014 13:03:04&quot;
+                + LINE_END
+                + &quot;09-Oct-2014 13:03:56&quot;
+                + LINE_END);
+
+<span class="fc" id="L256">    final boolean header = true;</span>
+
+<span class="fc" id="L258">    CsvReadOptions options =</span>
+<span class="fc" id="L259">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L260">            .header(header)</span>
+<span class="fc" id="L261">            .dateTimeFormat(DateTimeFormatter.ofPattern(&quot;dd-MMM-yyyy HH:mm:ss&quot;))</span>
+<span class="fc" id="L262">            .build();</span>
+
+<span class="fc" id="L264">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+
+<span class="fc" id="L266">    assertEquals(Collections.singletonList(LOCAL_DATE_TIME), actual);</span>
+<span class="fc" id="L267">  }</span>
+
+  @Test
+  public void testDateTimeDetection3() {
+
+<span class="fc" id="L272">    final Reader reader =</span>
+        new StringReader(
+            &quot;Date&quot;
+                + LINE_END
+                + &quot;09-NOV-2014 13:03:04&quot;
+                + LINE_END
+                + &quot;09-OCT-2014 13:03:56&quot;
+                + LINE_END);
+
+<span class="fc" id="L281">    final boolean header = true;</span>
+
+<span class="fc" id="L283">    CsvReadOptions options =</span>
+<span class="fc" id="L284">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L285">            .header(header)</span>
+<span class="fc" id="L286">            .dateTimeFormat(</span>
+                new DateTimeFormatterBuilder()
+<span class="fc" id="L288">                    .parseCaseInsensitive()</span>
+<span class="fc" id="L289">                    .appendPattern(&quot;dd-MMM-yyyy HH:mm:ss&quot;)</span>
+<span class="fc" id="L290">                    .toFormatter())</span>
+<span class="fc" id="L291">            .build();</span>
+
+<span class="fc" id="L293">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+
+<span class="fc" id="L295">    assertEquals(Collections.singletonList(LOCAL_DATE_TIME), actual);</span>
+<span class="fc" id="L296">  }</span>
+
+  @Test
+  public void testDateDetection1() {
+
+<span class="fc" id="L301">    final Reader reader =</span>
+        new StringReader(&quot;Time&quot; + LINE_END + &quot;13.03.04&quot; + LINE_END + &quot;13.03.04&quot; + LINE_END);
+
+<span class="fc" id="L304">    final boolean header = true;</span>
+
+<span class="fc" id="L306">    CsvReadOptions options =</span>
+<span class="fc" id="L307">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L308">            .header(header)</span>
+<span class="fc" id="L309">            .timeFormat(</span>
+                new DateTimeFormatterBuilder()
+<span class="fc" id="L311">                    .parseCaseInsensitive()</span>
+<span class="fc" id="L312">                    .appendPattern(&quot;HH.mm.ss&quot;)</span>
+<span class="fc" id="L313">                    .toFormatter())</span>
+<span class="fc" id="L314">            .build();</span>
+
+<span class="fc" id="L316">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+<span class="fc" id="L317">    assertEquals(Collections.singletonList(LOCAL_TIME), actual);</span>
+<span class="fc" id="L318">  }</span>
+
+  @Test
+  public void testTimeDetection1() {
+
+<span class="fc" id="L323">    final Reader reader =</span>
+        new StringReader(&quot;Date&quot; + LINE_END + &quot;09-NOV-2014&quot; + LINE_END + &quot;09-OCT-2014&quot; + LINE_END);
+
+<span class="fc" id="L326">    final boolean header = true;</span>
+
+<span class="fc" id="L328">    CsvReadOptions options =</span>
+<span class="fc" id="L329">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L330">            .header(header)</span>
+<span class="fc" id="L331">            .dateFormat(</span>
+                new DateTimeFormatterBuilder()
+<span class="fc" id="L333">                    .parseCaseInsensitive()</span>
+<span class="fc" id="L334">                    .appendPattern(&quot;dd-MMM-yyyy&quot;)</span>
+<span class="fc" id="L335">                    .toFormatter())</span>
+<span class="fc" id="L336">            .build();</span>
+
+<span class="fc" id="L338">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+<span class="fc" id="L339">    assertEquals(Collections.singletonList(LOCAL_DATE), actual);</span>
+<span class="fc" id="L340">  }</span>
+
+  @Test
+  public void testLocalDateDetectionFrench() {
+
+<span class="fc" id="L345">    final Reader reader =</span>
+        new StringReader(
+            &quot;Date&quot;
+                + LINE_END
+                + &quot;\&quot;nov. 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;oct. 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;sept. 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;août 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;juil. 1, 2017\&quot;&quot;
+                + LINE_END
+                + &quot;\&quot;juin 1, 2017\&quot;&quot;
+                + LINE_END);
+
+<span class="fc" id="L362">    final boolean header = true;</span>
+<span class="fc" id="L363">    final char delimiter = ',';</span>
+<span class="fc" id="L364">    final boolean useSampling = true;</span>
+
+<span class="fc" id="L366">    CsvReadOptions options =</span>
+<span class="fc" id="L367">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L368">            .header(header)</span>
+<span class="fc" id="L369">            .separator(delimiter)</span>
+<span class="fc" id="L370">            .sample(useSampling)</span>
+<span class="fc" id="L371">            .locale(Locale.FRENCH)</span>
+<span class="fc" id="L372">            .build();</span>
+
+<span class="fc" id="L374">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+
+<span class="fc" id="L376">    assertEquals(actual, Collections.singletonList(LOCAL_DATE));</span>
+<span class="fc" id="L377">  }</span>
+
+  @Test
+  public void testLocalDateTimeDetectionFrench() {
+
+<span class="fc" id="L382">    final Reader reader =</span>
+        new StringReader(
+            &quot;Date&quot;
+                + LINE_END
+                + &quot;09-nov.-2014 13:03&quot;
+                + LINE_END
+                + &quot;09-oct.-2014 13:03&quot;
+                + LINE_END
+                + &quot;09-sept.-2014 13:03&quot;
+                + LINE_END
+                + &quot;09-août-2014 13:03&quot;
+                + LINE_END
+                + &quot;09-juil.-2014 13:03&quot;
+                + LINE_END
+                + &quot;09-juin-2014 13:03&quot;
+                + LINE_END);
+
+<span class="fc" id="L399">    final boolean header = true;</span>
+<span class="fc" id="L400">    final char delimiter = ',';</span>
+<span class="fc" id="L401">    final boolean useSampling = true;</span>
+
+<span class="fc" id="L403">    CsvReadOptions options =</span>
+<span class="fc" id="L404">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L405">            .header(header)</span>
+<span class="fc" id="L406">            .separator(delimiter)</span>
+<span class="fc" id="L407">            .sample(useSampling)</span>
+<span class="fc" id="L408">            .locale(Locale.FRENCH)</span>
+<span class="fc" id="L409">            .build();</span>
+
+<span class="fc" id="L411">    final List&lt;ColumnType&gt; actual = asList(new CsvReader().detectColumnTypes(reader, options));</span>
+
+<span class="fc" id="L413">    assertEquals(actual, Collections.singletonList(LOCAL_DATE_TIME));</span>
+<span class="fc" id="L414">  }</span>
+
+  @Test
+  public void testWithMissingValue() throws IOException {
+
+<span class="fc" id="L419">    CsvReadOptions options =</span>
+<span class="fc" id="L420">        CsvReadOptions.builder(&quot;../data/missing_values.csv&quot;)</span>
+<span class="fc" id="L421">            .dateFormat(DateTimeFormatter.ofPattern(&quot;yyyy.MM.dd&quot;))</span>
+<span class="fc" id="L422">            .header(true)</span>
+<span class="fc" id="L423">            .missingValueIndicator(&quot;-&quot;)</span>
+<span class="fc" id="L424">            .build();</span>
+
+<span class="fc" id="L426">    Table t = Table.read().csv(options);</span>
+<span class="fc" id="L427">    assertEquals(1, t.stringColumn(0).countMissing());</span>
+<span class="fc" id="L428">    assertEquals(1, t.numberColumn(1).countMissing());</span>
+<span class="fc" id="L429">    assertEquals(1, t.numberColumn(2).countMissing());</span>
+<span class="fc" id="L430">  }</span>
+
+  @Test
+  public void testWindowsAndLinuxLineEndings() throws IOException {
+<span class="fc" id="L434">    Reader reader =</span>
+        new StringReader(
+            &quot;TestCol\n&quot;
+                + &quot;foobar1\n&quot;
+                + &quot;foobar2\n&quot;
+                + &quot;foobar3\n&quot;
+                + &quot;foobar4\r\n&quot;
+                + &quot;foobar5\r\n&quot;
+                + &quot;foobar6\r\n&quot;);
+
+<span class="fc" id="L444">    Table t = Table.read().csv(reader);</span>
+<span class="fc" id="L445">    assertEquals(1, t.columnCount());</span>
+<span class="fc" id="L446">    assertEquals(6, t.rowCount());</span>
+<span class="fc" id="L447">  }</span>
+
+  @Test
+  public void testCustomLineEndings() throws IOException {
+<span class="fc" id="L451">    CsvReadOptions options =</span>
+<span class="fc" id="L452">        CsvReadOptions.builder(&quot;../data/alt_line_endings.csv&quot;).lineEnding(&quot;~&quot;).header(true).build();</span>
+
+<span class="fc" id="L454">    Table t = Table.read().csv(options);</span>
+<span class="fc" id="L455">    assertEquals(2, t.columnCount());</span>
+<span class="fc" id="L456">    assertEquals(2, t.rowCount());</span>
+<span class="fc" id="L457">  }</span>
+
+  @Test
+  public void testDateWithFormatter1() throws IOException {
+
+<span class="fc" id="L462">    final boolean header = false;</span>
+<span class="fc" id="L463">    final char delimiter = ',';</span>
+<span class="fc" id="L464">    final boolean useSampling = true;</span>
+
+<span class="fc" id="L466">    CsvReadOptions options =</span>
+<span class="fc" id="L467">        CsvReadOptions.builder(&quot;../data/date_format_test.txt&quot;)</span>
+<span class="fc" id="L468">            .header(header)</span>
+<span class="fc" id="L469">            .separator(delimiter)</span>
+<span class="fc" id="L470">            .sample(useSampling)</span>
+<span class="fc" id="L471">            .dateFormat(DateTimeFormatter.ofPattern(&quot;yyyy.MM.dd&quot;))</span>
+<span class="fc" id="L472">            .build();</span>
+
+<span class="fc" id="L474">    final Table table = Table.read().csv(options);</span>
+<span class="fc" id="L475">    DateColumn date = table.dateColumn(0);</span>
+<span class="fc" id="L476">    assertFalse(date.isEmpty());</span>
+<span class="fc" id="L477">  }</span>
+
+  @Test
+  public void testDateWithFormatter2() throws IOException {
+
+<span class="fc" id="L482">    final boolean header = false;</span>
+<span class="fc" id="L483">    final char delimiter = ',';</span>
+<span class="fc" id="L484">    final boolean useSampling = true;</span>
+
+<span class="fc" id="L486">    CsvReadOptions options =</span>
+<span class="fc" id="L487">        CsvReadOptions.builder(&quot;../data/date_format_test.txt&quot;)</span>
+<span class="fc" id="L488">            .header(header)</span>
+<span class="fc" id="L489">            .separator(delimiter)</span>
+<span class="fc" id="L490">            .sample(useSampling)</span>
+<span class="fc" id="L491">            .dateFormat(DateTimeFormatter.ofPattern(&quot;yyyy.MM.dd&quot;))</span>
+<span class="fc" id="L492">            .build();</span>
+
+<span class="fc" id="L494">    final Table table = Table.read().csv(options);</span>
+<span class="fc" id="L495">    DateColumn date = table.dateColumn(0);</span>
+<span class="fc" id="L496">    assertFalse(date.isEmpty());</span>
+<span class="fc" id="L497">  }</span>
+
+  @Test
+  public void testPrintStructure() throws IOException {
+<span class="fc" id="L501">    String output =</span>
+        &quot;ColumnType[] columnTypes = {&quot;
+            + LINE_END
+            + &quot;LOCAL_DATE, // 0     date        &quot;
+            + LINE_END
+            + &quot;INTEGER,    // 1     approval    &quot;
+            + LINE_END
+            + &quot;STRING,     // 2     who         &quot;
+            + LINE_END
+            + &quot;}&quot;
+            + LINE_END;
+<span class="fc" id="L512">    assertEquals(</span>
+        output,
+        new CsvReader()
+<span class="fc" id="L515">            .printColumnTypes(</span>
+<span class="fc" id="L516">                CsvReadOptions.builder(&quot;../data/bush.csv&quot;)</span>
+<span class="fc" id="L517">                    .header(true)</span>
+<span class="fc" id="L518">                    .separator(',')</span>
+<span class="fc" id="L519">                    .locale(Locale.getDefault())</span>
+<span class="fc" id="L520">                    .sample(true)</span>
+<span class="fc" id="L521">                    .build()));</span>
+<span class="fc" id="L522">  }</span>
+
+  @Test
+  public void testDataTypeDetection2() throws IOException {
+<span class="fc" id="L526">    Reader reader = new FileReader(&quot;../data/bush.csv&quot;);</span>
+<span class="fc" id="L527">    CsvReadOptions options =</span>
+<span class="fc" id="L528">        CsvReadOptions.builder(reader)</span>
+<span class="fc" id="L529">            .header(true)</span>
+<span class="fc" id="L530">            .separator(',')</span>
+<span class="fc" id="L531">            .sample(false)</span>
+<span class="fc" id="L532">            .locale(Locale.getDefault())</span>
+<span class="fc" id="L533">            .build();</span>
+
+<span class="fc" id="L535">    ColumnType[] columnTypes = new CsvReader().detectColumnTypes(reader, options);</span>
+<span class="fc" id="L536">    assertEquals(LOCAL_DATE, columnTypes[0]);</span>
+<span class="fc" id="L537">    assertEquals(INTEGER, columnTypes[1]);</span>
+<span class="fc" id="L538">    assertEquals(STRING, columnTypes[2]);</span>
+<span class="fc" id="L539">  }</span>
+
+  @Test
+  public void testLoadFromUrlWithColumnTypes() throws IOException {
+<span class="fc" id="L543">    ColumnType[] types = {LOCAL_DATE, DOUBLE, STRING};</span>
+    Table table;
+<span class="fc" id="L545">    try (InputStream input = new File(&quot;../data/bush.csv&quot;).toURI().toURL().openStream()) {</span>
+      table =
+<span class="fc" id="L547">          Table.read()</span>
+<span class="fc" id="L548">              .csv(</span>
+<span class="fc" id="L549">                  CsvReadOptions.builder(input)</span>
+<span class="fc" id="L550">                      .tableName(&quot;Bush approval ratings&quot;)</span>
+<span class="fc" id="L551">                      .columnTypes(types));</span>
+    }
+<span class="fc" id="L553">    assertNotNull(table);</span>
+<span class="fc" id="L554">    assertEquals(3, table.columnCount());</span>
+<span class="fc" id="L555">  }</span>
+
+  /** Read from a url while performing column type inference */
+  @Test
+  public void testLoadFromUrl() throws IOException {
+    Table table;
+<span class="fc" id="L561">    try (InputStream input = new File(&quot;../data/bush.csv&quot;).toURI().toURL().openStream()) {</span>
+<span class="fc" id="L562">      table = Table.read().csv(CsvReadOptions.builder(input).tableName(&quot;Bush approval ratings&quot;));</span>
+    }
+<span class="fc" id="L564">    assertNotNull(table);</span>
+<span class="fc" id="L565">    assertEquals(3, table.columnCount());</span>
+<span class="fc" id="L566">  }</span>
+
+  /** Read from a file input stream while performing column type inference */
+  @Test
+  public void testLoadFromFileStream() throws IOException {
+<span class="fc" id="L571">    String location = &quot;../data/bush.csv&quot;;</span>
+    Table table;
+<span class="fc" id="L573">    File file = Paths.get(location).toFile();</span>
+<span class="fc" id="L574">    try (InputStream input = new FileInputStream(file)) {</span>
+<span class="fc" id="L575">      table = Table.read().csv(CsvReadOptions.builder(input).tableName(&quot;Bush approval ratings&quot;));</span>
+    }
+<span class="fc" id="L577">    assertNotNull(table);</span>
+<span class="fc" id="L578">    assertEquals(3, table.columnCount());</span>
+<span class="fc" id="L579">  }</span>
+
+  /** Read from a file input stream while performing column type inference */
+  @Test
+  public void testLoadFromFileStreamReader() throws IOException {
+<span class="fc" id="L584">    String location = &quot;../data/bush.csv&quot;;</span>
+    Table table;
+<span class="fc" id="L586">    File file = Paths.get(location).toFile();</span>
+<span class="fc" id="L587">    try (Reader reader = new FileReader(file)) {</span>
+<span class="fc" id="L588">      table = Table.read().csv(CsvReadOptions.builder(reader).tableName(&quot;Bush approval ratings&quot;));</span>
+    }
+<span class="fc" id="L590">    assertNotNull(table);</span>
+<span class="fc" id="L591">    assertEquals(3, table.columnCount());</span>
+<span class="fc" id="L592">  }</span>
+
+  @Test
+  public void testEmptyRow() throws IOException {
+<span class="fc" id="L596">    Table table = Table.read().csv(&quot;../data/empty_row.csv&quot;);</span>
+    // Note: tried capturing std err output and asserting on it, but it failed when running as mvn
+    // target
+<span class="fc" id="L599">    assertEquals(5, table.rowCount());</span>
+<span class="fc" id="L600">  }</span>
+
+  @Test
+  public void testShortRow() {
+<span class="fc" id="L604">    assertThrows(</span>
+        AddCellToColumnException.class,
+        () -&gt; {
+<span class="nc" id="L607">          Table.read().csv(&quot;../data/short_row.csv&quot;);</span>
+<span class="nc" id="L608">        });</span>
+<span class="fc" id="L609">  }</span>
+
+  @Test
+  public void testLongRow() {
+<span class="fc" id="L613">    assertThrows(</span>
+        RuntimeException.class,
+        () -&gt; {
+<span class="nc" id="L616">          Table.read().csv(&quot;../data/long_row.csv&quot;);</span>
+<span class="nc" id="L617">        });</span>
+<span class="fc" id="L618">  }</span>
+
+  @Test
+  public void testBoundary1() throws IOException {
+<span class="fc" id="L622">    Table table = Table.read().csv(&quot;../data/boundaryTest1.csv&quot;);</span>
+<span class="fc" id="L623">    assertEquals(2, table.rowCount());</span>
+<span class="fc" id="L624">  }</span>
+
+  @Test
+  public void testBoundary2() throws IOException {
+<span class="fc" id="L628">    Table table = Table.read().csv(&quot;../data/boundaryTest2.csv&quot;);</span>
+<span class="fc" id="L629">    assertEquals(2, table.rowCount());</span>
+<span class="fc" id="L630">  }</span>
+
+  @Test
+  public void testReadFailure() throws IOException {
+    // TODO (lwhite): These tests don't fail. What was their intent?
+    Table table1 =
+<span class="fc" id="L636">        Table.read()</span>
+<span class="fc" id="L637">            .csv(CsvReadOptions.builder(&quot;../data/read_failure_test.csv&quot;).minimizeColumnSizes());</span>
+<span class="fc" id="L638">    table1.structure(); // just make sure the import completed</span>
+<span class="fc" id="L639">    ShortColumn test = table1.shortColumn(&quot;Test&quot;);</span>
+    // TODO(lwhite): Better tests
+<span class="fc" id="L641">    assertNotNull(test.summary());</span>
+<span class="fc" id="L642">  }</span>
+
+  @Test
+  public void testReadFailure2() throws IOException {
+    Table table1 =
+<span class="fc" id="L647">        Table.read()</span>
+<span class="fc" id="L648">            .csv(CsvReadOptions.builder(&quot;../data/read_failure_test2.csv&quot;).minimizeColumnSizes());</span>
+<span class="fc" id="L649">    table1.structure(); // just make sure the import completed</span>
+<span class="fc" id="L650">    ShortColumn test = table1.shortColumn(&quot;Test&quot;);</span>
+
+    // TODO(lwhite): Better tests
+<span class="fc" id="L653">    assertNotNull(test.summary());</span>
+<span class="fc" id="L654">  }</span>
+
+  @Test
+  public void testEmptyFileHeaderEnabled() throws IOException {
+<span class="fc" id="L658">    Table table1 = Table.read().csv(CsvReadOptions.builder(&quot;../data/empty_file.csv&quot;).header(false));</span>
+<span class="fc" id="L659">    assertEquals(&quot;0 rows X 0 cols&quot;, table1.shape());</span>
+<span class="fc" id="L660">  }</span>
+
+  @Test
+  public void testEmptyFileHeaderDisabled() throws IOException {
+<span class="fc" id="L664">    Table table1 = Table.read().csv(CsvReadOptions.builder(&quot;../data/empty_file.csv&quot;).header(false));</span>
+<span class="fc" id="L665">    assertEquals(&quot;0 rows X 0 cols&quot;, table1.shape());</span>
+<span class="fc" id="L666">  }</span>
+
+  public void testReadMaxColumnsExceeded() {
+<span class="nc" id="L669">    assertThrows(</span>
+        TextParsingException.class,
+        () -&gt; {
+<span class="nc" id="L672">          Table.read().csv(CsvReadOptions.builder(&quot;../data/10001_columns.csv&quot;).header(false));</span>
+<span class="nc" id="L673">        });</span>
+<span class="nc" id="L674">  }</span>
+
+  @Test
+  public void testReadWithMaxColumnsSetting() throws IOException {
+    Table table1 =
+<span class="fc" id="L679">        Table.read()</span>
+<span class="fc" id="L680">            .csv(</span>
+<span class="fc" id="L681">                CsvReadOptions.builder(&quot;../data/10001_columns.csv&quot;)</span>
+<span class="fc" id="L682">                    .maxNumberOfColumns(10001)</span>
+<span class="fc" id="L683">                    .header(false));</span>
+<span class="fc" id="L684">    assertEquals(&quot;1 rows X 10001 cols&quot;, table1.shape());</span>
+<span class="fc" id="L685">  }</span>
+
+  @Test
+  public void testSkipLinesWithComments() throws IOException {
+    Table table1 =
+<span class="fc" id="L690">        Table.read()</span>
+<span class="fc" id="L691">            .csv(</span>
+<span class="fc" id="L692">                CsvReadOptions.builder(&quot;../data/with_comments.csv&quot;)</span>
+<span class="fc" id="L693">                    .maxNumberOfColumns(3)</span>
+<span class="fc" id="L694">                    .commentPrefix('#')</span>
+<span class="fc" id="L695">                    .header(true));</span>
+<span class="fc" id="L696">    assertEquals(&quot;3 rows X 3 cols&quot;, table1.shape());</span>
+<span class="fc" id="L697">  }</span>
+
+  @Test
+  public void carriageReturnLineEnding() throws IOException {
+    Table table =
+<span class="fc" id="L702">        Table.read().csv(CsvReadOptions.builder(&quot;../data/sacramento_real_estate_transactions.csv&quot;));</span>
+<span class="fc" id="L703">    assertEquals(985, table.rowCount());</span>
+<span class="fc" id="L704">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

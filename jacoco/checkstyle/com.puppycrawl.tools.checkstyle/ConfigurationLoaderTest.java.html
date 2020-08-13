@@ -1,0 +1,629 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ConfigurationLoaderTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle</a> &gt; <span class="el_source">ConfigurationLoaderTest.java</span></div><h1>ConfigurationLoaderTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.io.File;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
+
+import org.junit.Test;
+import org.powermock.reflect.Whitebox;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+
+import com.puppycrawl.tools.checkstyle.api.CheckstyleException;
+import com.puppycrawl.tools.checkstyle.api.Configuration;
+
+/**
+ * Unit test for ConfigurationLoader.
+ */
+<span class="fc" id="L48">public class ConfigurationLoaderTest extends AbstractPathTestSupport {</span>
+
+    @Override
+    protected String getPackageLocation() {
+<span class="fc" id="L52">        return &quot;com/puppycrawl/tools/checkstyle/configurationloader&quot;;</span>
+    }
+
+    private Configuration loadConfiguration(String name) throws Exception {
+<span class="fc" id="L56">        return loadConfiguration(name, new Properties());</span>
+    }
+
+    private Configuration loadConfiguration(
+        String name, Properties props) throws Exception {
+<span class="fc" id="L61">        final String fName = getPath(name);</span>
+
+<span class="fc" id="L63">        return ConfigurationLoader.loadConfiguration(fName, new PropertiesExpander(props));</span>
+    }
+
+    /**
+     * Non meaningful javadoc just to contain &quot;noinspection&quot; tag.
+     * Till https://youtrack.jetbrains.com/issue/IDEA-187209
+     * @return method class
+     * @throws Exception if smth wrong
+     * @noinspection JavaReflectionMemberAccess
+     */
+    private static Method getReplacePropertiesMethod() throws Exception {
+<span class="fc" id="L74">        final Class&lt;?&gt;[] params = new Class&lt;?&gt;[3];</span>
+<span class="fc" id="L75">        params[0] = String.class;</span>
+<span class="fc" id="L76">        params[1] = PropertyResolver.class;</span>
+<span class="fc" id="L77">        params[2] = String.class;</span>
+<span class="fc" id="L78">        final Class&lt;ConfigurationLoader&gt; configurationLoaderClass = ConfigurationLoader.class;</span>
+<span class="fc" id="L79">        final Method replacePropertiesMethod =</span>
+<span class="fc" id="L80">            configurationLoaderClass.getDeclaredMethod(&quot;replaceProperties&quot;, params);</span>
+<span class="fc" id="L81">        replacePropertiesMethod.setAccessible(true);</span>
+<span class="fc" id="L82">        return replacePropertiesMethod;</span>
+    }
+
+    @Test
+    public void testResourceLoadConfiguration() throws Exception {
+<span class="fc" id="L87">        final Properties props = new Properties();</span>
+<span class="fc" id="L88">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+        // load config that's only found in the classpath
+<span class="fc" id="L91">        final DefaultConfiguration config =</span>
+<span class="fc" id="L92">            (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L93">                getPath(&quot;InputConfigurationLoaderChecks.xml&quot;), new PropertiesExpander(props));</span>
+
+        //verify the root, and property substitution
+<span class="fc" id="L96">        final Properties attributes = new Properties();</span>
+<span class="fc" id="L97">        attributes.setProperty(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L98">        attributes.setProperty(&quot;basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L99">        verifyConfigNode(config, &quot;Checker&quot;, 3, attributes);</span>
+<span class="fc" id="L100">    }</span>
+
+    @Test
+    public void testResourceLoadConfigurationWithMultiThreadConfiguration() throws Exception {
+<span class="fc" id="L104">        final Properties props = new Properties();</span>
+<span class="fc" id="L105">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L107">        final PropertiesExpander propertiesExpander = new PropertiesExpander(props);</span>
+<span class="fc" id="L108">        final String configPath = getPath(&quot;InputConfigurationLoaderChecks.xml&quot;);</span>
+<span class="fc" id="L109">        final ThreadModeSettings multiThreadModeSettings =</span>
+            new ThreadModeSettings(4, 2);
+
+        try {
+<span class="nc" id="L113">            ConfigurationLoader.loadConfiguration(</span>
+                configPath, propertiesExpander, multiThreadModeSettings);
+<span class="nc" id="L115">            fail(&quot;An exception is expected&quot;);</span>
+        }
+<span class="fc" id="L117">        catch (IllegalArgumentException ex) {</span>
+<span class="fc" id="L118">            assertEquals(&quot;Invalid exception message&quot;,</span>
+                &quot;Multi thread mode for Checker module is not implemented&quot;,
+<span class="fc" id="L120">                ex.getMessage());</span>
+<span class="nc" id="L121">        }</span>
+<span class="fc" id="L122">    }</span>
+
+    @Test
+    public void testResourceLoadConfigurationWithSingleThreadConfiguration() throws Exception {
+<span class="fc" id="L126">        final Properties props = new Properties();</span>
+<span class="fc" id="L127">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L129">        final PropertiesExpander propertiesExpander = new PropertiesExpander(props);</span>
+<span class="fc" id="L130">        final String configPath = getPath(&quot;InputConfigurationLoaderChecks.xml&quot;);</span>
+<span class="fc" id="L131">        final ThreadModeSettings singleThreadModeSettings =</span>
+            ThreadModeSettings.SINGLE_THREAD_MODE_INSTANCE;
+
+<span class="fc" id="L134">        final DefaultConfiguration config =</span>
+<span class="fc" id="L135">            (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+                configPath, propertiesExpander, singleThreadModeSettings);
+
+<span class="fc" id="L138">        final Properties attributes = new Properties();</span>
+<span class="fc" id="L139">        attributes.setProperty(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L140">        attributes.setProperty(&quot;basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L141">        verifyConfigNode(config, &quot;Checker&quot;, 3, attributes);</span>
+<span class="fc" id="L142">    }</span>
+
+    @Test
+    public void testEmptyConfiguration() throws Exception {
+<span class="fc" id="L146">        final DefaultConfiguration config =</span>
+<span class="fc" id="L147">            (DefaultConfiguration) loadConfiguration(&quot;InputConfigurationLoaderEmpty.xml&quot;);</span>
+<span class="fc" id="L148">        verifyConfigNode(config, &quot;Checker&quot;, 0, new Properties());</span>
+<span class="fc" id="L149">    }</span>
+
+    @Test
+    public void testEmptyModuleResolver() throws Exception {
+<span class="fc" id="L153">        final DefaultConfiguration config =</span>
+<span class="fc" id="L154">            (DefaultConfiguration) loadConfiguration(</span>
+                &quot;InputConfigurationLoaderEmpty.xml&quot;, new Properties());
+<span class="fc" id="L156">        verifyConfigNode(config, &quot;Checker&quot;, 0, new Properties());</span>
+<span class="fc" id="L157">    }</span>
+
+    @Test
+    public void testMissingPropertyName() throws Exception {
+        try {
+<span class="nc" id="L162">            loadConfiguration(&quot;InputConfigurationLoaderMissingPropertyName.xml&quot;);</span>
+<span class="nc" id="L163">            fail(&quot;missing property name&quot;);</span>
+        }
+<span class="fc" id="L165">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L166">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L167">                    ex.getMessage().contains(&quot;\&quot;name\&quot;&quot;));</span>
+<span class="fc" id="L168">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L169">                    ex.getMessage().contains(&quot;\&quot;property\&quot;&quot;));</span>
+<span class="fc" id="L170">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L171">                    ex.getMessage().endsWith(&quot;:8:41&quot;));</span>
+<span class="nc" id="L172">        }</span>
+<span class="fc" id="L173">    }</span>
+
+    @Test
+    public void testMissingPropertyNameInMethodWithBooleanParameter() throws Exception {
+        try {
+<span class="fc" id="L178">            final String fName = getPath(&quot;InputConfigurationLoaderMissingPropertyName.xml&quot;);</span>
+<span class="nc" id="L179">            ConfigurationLoader.loadConfiguration(fName, new PropertiesExpander(new Properties()),</span>
+                    false);
+
+<span class="nc" id="L182">            fail(&quot;missing property name&quot;);</span>
+        }
+<span class="fc" id="L184">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L185">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L186">                    ex.getMessage().contains(&quot;\&quot;name\&quot;&quot;));</span>
+<span class="fc" id="L187">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L188">                    ex.getMessage().contains(&quot;\&quot;property\&quot;&quot;));</span>
+<span class="fc" id="L189">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L190">                    ex.getMessage().endsWith(&quot;:8:41&quot;));</span>
+<span class="nc" id="L191">        }</span>
+<span class="fc" id="L192">    }</span>
+
+    @Test
+    public void testMissingPropertyValue() throws Exception {
+        try {
+<span class="nc" id="L197">            loadConfiguration(&quot;InputConfigurationLoaderMissingPropertyValue.xml&quot;);</span>
+<span class="nc" id="L198">            fail(&quot;missing property value&quot;);</span>
+        }
+<span class="fc" id="L200">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L201">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L202">                    ex.getMessage().contains(&quot;\&quot;value\&quot;&quot;));</span>
+<span class="fc" id="L203">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L204">                    ex.getMessage().contains(&quot;\&quot;property\&quot;&quot;));</span>
+<span class="fc" id="L205">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L206">                    ex.getMessage().endsWith(&quot;:8:43&quot;));</span>
+<span class="nc" id="L207">        }</span>
+<span class="fc" id="L208">    }</span>
+
+    @Test
+    public void testMissingConfigName() throws Exception {
+        try {
+<span class="nc" id="L213">            loadConfiguration(&quot;InputConfigurationLoaderMissingConfigName.xml&quot;);</span>
+<span class="nc" id="L214">            fail(&quot;missing module name&quot;);</span>
+        }
+<span class="fc" id="L216">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L217">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L218">                    ex.getMessage().contains(&quot;\&quot;name\&quot;&quot;));</span>
+<span class="fc" id="L219">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L220">                    ex.getMessage().contains(&quot;\&quot;module\&quot;&quot;));</span>
+<span class="fc" id="L221">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L222">                    ex.getMessage().endsWith(&quot;:7:23&quot;));</span>
+<span class="nc" id="L223">        }</span>
+<span class="fc" id="L224">    }</span>
+
+    @Test
+    public void testMissingConfigParent() throws Exception {
+        try {
+<span class="nc" id="L229">            loadConfiguration(&quot;InputConfigurationLoaderMissingConfigParent.xml&quot;);</span>
+<span class="nc" id="L230">            fail(&quot;missing module parent&quot;);</span>
+        }
+<span class="fc" id="L232">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L233">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L234">                    ex.getMessage().contains(&quot;\&quot;property\&quot;&quot;));</span>
+<span class="fc" id="L235">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L236">                    ex.getMessage().contains(&quot;\&quot;module\&quot;&quot;));</span>
+<span class="fc" id="L237">            assertTrue(&quot;Invalid exception message: &quot; + ex.getMessage(),</span>
+<span class="fc" id="L238">                    ex.getMessage().endsWith(&quot;:8:38&quot;));</span>
+<span class="nc" id="L239">        }</span>
+<span class="fc" id="L240">    }</span>
+
+    @Test
+    public void testCheckstyleChecks() throws Exception {
+<span class="fc" id="L244">        final Properties props = new Properties();</span>
+<span class="fc" id="L245">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L247">        final DefaultConfiguration config =</span>
+<span class="fc" id="L248">            (DefaultConfiguration) loadConfiguration(</span>
+                &quot;InputConfigurationLoaderChecks.xml&quot;, props);
+
+        //verify the root, and property substitution
+<span class="fc" id="L252">        final Properties atts = new Properties();</span>
+<span class="fc" id="L253">        atts.setProperty(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L254">        atts.setProperty(&quot;basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L255">        verifyConfigNode(config, &quot;Checker&quot;, 3, atts);</span>
+
+        //verify children
+<span class="fc" id="L258">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L259">        atts.clear();</span>
+<span class="fc" id="L260">        verifyConfigNode(</span>
+            (DefaultConfiguration) children[1], &quot;JavadocPackage&quot;, 0, atts);
+<span class="fc" id="L262">        verifyConfigNode(</span>
+            (DefaultConfiguration) children[2], &quot;Translation&quot;, 0, atts);
+<span class="fc" id="L264">        atts.setProperty(&quot;testName&quot;, &quot;testValue&quot;);</span>
+<span class="fc" id="L265">        verifyConfigNode(</span>
+            (DefaultConfiguration) children[0],
+            &quot;TreeWalker&quot;,
+            8,
+            atts);
+
+        //verify TreeWalker's first, last, NoWhitespaceAfterCheck
+<span class="fc" id="L272">        final Configuration[] grandchildren = children[0].getChildren();</span>
+<span class="fc" id="L273">        atts.clear();</span>
+<span class="fc" id="L274">        verifyConfigNode(</span>
+            (DefaultConfiguration) grandchildren[0],
+            &quot;AvoidStarImport&quot;,
+            0,
+            atts);
+<span class="fc" id="L279">        atts.setProperty(&quot;format&quot;, &quot;System.out.println&quot;);</span>
+<span class="fc" id="L280">        verifyConfigNode(</span>
+            (DefaultConfiguration) grandchildren[grandchildren.length - 1],
+            &quot;GenericIllegalRegexp&quot;,
+            0,
+            atts);
+<span class="fc" id="L285">        atts.clear();</span>
+<span class="fc" id="L286">        atts.setProperty(&quot;tokens&quot;, &quot;DOT&quot;);</span>
+<span class="fc" id="L287">        atts.setProperty(&quot;allowLineBreaks&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L288">        verifyConfigNode(</span>
+            (DefaultConfiguration) grandchildren[6],
+            &quot;NoWhitespaceAfter&quot;,
+            0,
+            atts);
+<span class="fc" id="L293">    }</span>
+
+    @Test
+    public void testCustomMessages() throws Exception {
+<span class="fc" id="L297">        final Properties props = new Properties();</span>
+<span class="fc" id="L298">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L300">        final DefaultConfiguration config =</span>
+<span class="fc" id="L301">            (DefaultConfiguration) loadConfiguration(</span>
+                &quot;InputConfigurationLoaderCustomMessages.xml&quot;, props);
+
+<span class="fc" id="L304">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L305">        final Configuration[] grandchildren = children[0].getChildren();</span>
+
+<span class="fc" id="L307">        final String expectedKey = &quot;name.invalidPattern&quot;;</span>
+<span class="fc" id="L308">        assertTrue(&quot;Messages should contain key: &quot; + expectedKey,</span>
+<span class="fc" id="L309">            grandchildren[0].getMessages()</span>
+<span class="fc" id="L310">            .containsKey(expectedKey));</span>
+<span class="fc" id="L311">    }</span>
+
+    private static void verifyConfigNode(
+        DefaultConfiguration config, String name, int childrenLength,
+        Properties atts) throws Exception {
+<span class="fc" id="L316">        assertEquals(&quot;name.&quot;, name, config.getName());</span>
+<span class="fc" id="L317">        assertEquals(</span>
+            &quot;children.length.&quot;,
+            childrenLength,
+<span class="fc" id="L320">            config.getChildren().length);</span>
+
+<span class="fc" id="L322">        final String[] attNames = config.getAttributeNames();</span>
+<span class="fc" id="L323">        assertEquals(&quot;attributes.length&quot;, atts.size(), attNames.length);</span>
+
+<span class="fc bfc" id="L325" title="All 2 branches covered.">        for (String attName : attNames) {</span>
+<span class="fc" id="L326">            assertEquals(</span>
+                &quot;attribute[&quot; + attName + &quot;]&quot;,
+<span class="fc" id="L328">                atts.getProperty(attName),</span>
+<span class="fc" id="L329">                config.getAttribute(attName));</span>
+        }
+<span class="fc" id="L331">    }</span>
+
+    @Test
+    public void testReplacePropertiesNoReplace() throws Exception {
+<span class="fc" id="L335">        final String[] testValues = {null, &quot;&quot;, &quot;a&quot;, &quot;$a&quot;, &quot;{a&quot;,</span>
+                                     &quot;{a}&quot;, &quot;a}&quot;, &quot;$a}&quot;, &quot;$&quot;, &quot;a$b&quot;, };
+<span class="fc" id="L337">        final Properties props = initProperties();</span>
+<span class="fc bfc" id="L338" title="All 2 branches covered.">        for (String testValue : testValues) {</span>
+<span class="fc" id="L339">            final String value = (String) getReplacePropertiesMethod().invoke(</span>
+                null, testValue, new PropertiesExpander(props), null);
+<span class="fc" id="L341">            assertEquals(&quot;\&quot;&quot; + testValue + &quot;\&quot;&quot;, value, testValue);</span>
+        }
+<span class="fc" id="L343">    }</span>
+
+    @Test
+    public void testReplacePropertiesSyntaxError() throws Exception {
+<span class="fc" id="L347">        final Properties props = initProperties();</span>
+        try {
+<span class="nc" id="L349">            final String value = (String) getReplacePropertiesMethod().invoke(</span>
+                null, &quot;${a&quot;, new PropertiesExpander(props), null);
+<span class="nc" id="L351">            fail(&quot;expected to fail, instead got: &quot; + value);</span>
+        }
+<span class="fc" id="L353">        catch (InvocationTargetException ex) {</span>
+<span class="fc" id="L354">            assertEquals(&quot;Invalid exception cause message&quot;,</span>
+<span class="fc" id="L355">                &quot;Syntax error in property: ${a&quot;, ex.getCause().getMessage());</span>
+<span class="nc" id="L356">        }</span>
+<span class="fc" id="L357">    }</span>
+
+    @Test
+    public void testReplacePropertiesMissingProperty() throws Exception {
+<span class="fc" id="L361">        final Properties props = initProperties();</span>
+        try {
+<span class="nc" id="L363">            final String value = (String) getReplacePropertiesMethod().invoke(</span>
+                null, &quot;${c}&quot;, new PropertiesExpander(props), null);
+<span class="nc" id="L365">            fail(&quot;expected to fail, instead got: &quot; + value);</span>
+        }
+<span class="fc" id="L367">        catch (InvocationTargetException ex) {</span>
+<span class="fc" id="L368">            assertEquals(&quot;Invalid exception cause message&quot;,</span>
+<span class="fc" id="L369">                &quot;Property ${c} has not been set&quot;, ex.getCause().getMessage());</span>
+<span class="nc" id="L370">        }</span>
+<span class="fc" id="L371">    }</span>
+
+    @Test
+    public void testReplacePropertiesReplace() throws Exception {
+<span class="fc" id="L375">        final String[][] testValues = {</span>
+            {&quot;${a}&quot;, &quot;A&quot;},
+            {&quot;x${a}&quot;, &quot;xA&quot;},
+            {&quot;${a}x&quot;, &quot;Ax&quot;},
+            {&quot;${a}${b}&quot;, &quot;AB&quot;},
+            {&quot;x${a}${b}&quot;, &quot;xAB&quot;},
+            {&quot;${a}x${b}&quot;, &quot;AxB&quot;},
+            {&quot;${a}${b}x&quot;, &quot;ABx&quot;},
+            {&quot;x${a}y${b}&quot;, &quot;xAyB&quot;},
+            {&quot;${a}x${b}y&quot;, &quot;AxBy&quot;},
+            {&quot;x${a}${b}y&quot;, &quot;xABy&quot;},
+            {&quot;x${a}y${b}z&quot;, &quot;xAyBz&quot;},
+            {&quot;$$&quot;, &quot;$&quot;},
+        };
+<span class="fc" id="L389">        final Properties props = initProperties();</span>
+<span class="fc bfc" id="L390" title="All 2 branches covered.">        for (String[] testValue : testValues) {</span>
+<span class="fc" id="L391">            final String value = (String) getReplacePropertiesMethod().invoke(</span>
+                null, testValue[0], new PropertiesExpander(props), null);
+<span class="fc" id="L393">            assertEquals(&quot;\&quot;&quot; + testValue[0] + &quot;\&quot;&quot;,</span>
+                testValue[1], value);
+        }
+<span class="fc" id="L396">    }</span>
+
+    private static Properties initProperties() {
+<span class="fc" id="L399">        final Properties props = new Properties();</span>
+<span class="fc" id="L400">        props.setProperty(&quot;a&quot;, &quot;A&quot;);</span>
+<span class="fc" id="L401">        props.setProperty(&quot;b&quot;, &quot;B&quot;);</span>
+<span class="fc" id="L402">        return props;</span>
+    }
+
+    @Test
+    public void testExternalEntity() throws Exception {
+<span class="fc" id="L407">        final Properties props = new Properties();</span>
+<span class="fc" id="L408">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L410">        System.setProperty(</span>
+                XmlLoader.LoadExternalDtdFeatureProvider.ENABLE_EXTERNAL_DTD_LOAD, &quot;true&quot;);
+
+<span class="fc" id="L413">        final DefaultConfiguration config =</span>
+<span class="fc" id="L414">            (DefaultConfiguration) loadConfiguration(</span>
+                &quot;InputConfigurationLoaderExternalEntity.xml&quot;, props);
+
+<span class="fc" id="L417">        final Properties atts = new Properties();</span>
+<span class="fc" id="L418">        atts.setProperty(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L419">        atts.setProperty(&quot;basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L420">        verifyConfigNode(config, &quot;Checker&quot;, 2, atts);</span>
+<span class="fc" id="L421">    }</span>
+
+    @Test
+    public void testExternalEntitySubdirectory() throws Exception {
+<span class="fc" id="L425">        final Properties props = new Properties();</span>
+<span class="fc" id="L426">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L428">        System.setProperty(</span>
+                XmlLoader.LoadExternalDtdFeatureProvider.ENABLE_EXTERNAL_DTD_LOAD, &quot;true&quot;);
+
+<span class="fc" id="L431">        final DefaultConfiguration config =</span>
+<span class="fc" id="L432">            (DefaultConfiguration) loadConfiguration(</span>
+                &quot;subdir/InputConfigurationLoaderExternalEntitySubDir.xml&quot;, props);
+
+<span class="fc" id="L435">        final Properties attributes = new Properties();</span>
+<span class="fc" id="L436">        attributes.setProperty(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L437">        attributes.setProperty(&quot;basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L438">        verifyConfigNode(config, &quot;Checker&quot;, 2, attributes);</span>
+<span class="fc" id="L439">    }</span>
+
+    @Test
+    public void testExternalEntityFromUri() throws Exception {
+<span class="fc" id="L443">        final Properties props = new Properties();</span>
+<span class="fc" id="L444">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+
+<span class="fc" id="L446">        System.setProperty(</span>
+                XmlLoader.LoadExternalDtdFeatureProvider.ENABLE_EXTERNAL_DTD_LOAD, &quot;true&quot;);
+
+<span class="fc" id="L449">        final File file = new File(</span>
+<span class="fc" id="L450">                getPath(&quot;subdir/InputConfigurationLoaderExternalEntitySubDir.xml&quot;));</span>
+<span class="fc" id="L451">        final DefaultConfiguration config =</span>
+<span class="fc" id="L452">            (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L453">                    file.toURI().toString(), new PropertiesExpander(props));</span>
+
+<span class="fc" id="L455">        final Properties atts = new Properties();</span>
+<span class="fc" id="L456">        atts.setProperty(&quot;tabWidth&quot;, &quot;4&quot;);</span>
+<span class="fc" id="L457">        atts.setProperty(&quot;basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L458">        verifyConfigNode(config, &quot;Checker&quot;, 2, atts);</span>
+<span class="fc" id="L459">    }</span>
+
+    @Test
+    public void testIncorrectTag() throws Exception {
+<span class="fc" id="L463">        final Class&lt;?&gt; aClassParent = ConfigurationLoader.class;</span>
+<span class="fc" id="L464">        final Constructor&lt;?&gt; ctorParent = aClassParent.getDeclaredConstructor(</span>
+                PropertyResolver.class, boolean.class, ThreadModeSettings.class);
+<span class="fc" id="L466">        ctorParent.setAccessible(true);</span>
+<span class="fc" id="L467">        final Object objParent = ctorParent.newInstance(null, true, null);</span>
+
+<span class="fc" id="L469">        final Class&lt;?&gt; aClass = Class.forName(&quot;com.puppycrawl.tools.checkstyle.&quot;</span>
+                + &quot;ConfigurationLoader$InternalLoader&quot;);
+<span class="fc" id="L471">        final Constructor&lt;?&gt; constructor = aClass.getDeclaredConstructor(objParent.getClass());</span>
+<span class="fc" id="L472">        constructor.setAccessible(true);</span>
+
+<span class="fc" id="L474">        final Object obj = constructor.newInstance(objParent);</span>
+
+        try {
+<span class="nc" id="L477">            Whitebox.invokeMethod(obj, &quot;startElement&quot;, &quot;&quot;, &quot;&quot;, &quot;hello&quot;, null);</span>
+
+<span class="nc" id="L479">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L481">        catch (IllegalStateException ex) {</span>
+<span class="fc" id="L482">            assertEquals(&quot;Invalid exception cause message&quot;,</span>
+<span class="fc" id="L483">                &quot;Unknown name:&quot; + &quot;hello&quot; + &quot;.&quot;, ex.getMessage());</span>
+<span class="nc" id="L484">        }</span>
+<span class="fc" id="L485">    }</span>
+
+    @Test
+    public void testNonExistentPropertyName() throws Exception {
+        try {
+<span class="nc" id="L490">            loadConfiguration(&quot;InputConfigurationLoaderNonexistentProperty.xml&quot;);</span>
+<span class="nc" id="L491">            fail(&quot;exception in expected&quot;);</span>
+        }
+<span class="fc" id="L493">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L494">            assertEquals(&quot;Invalid exception message&quot;,</span>
+<span class="fc" id="L495">                &quot;unable to parse configuration stream&quot;, ex.getMessage());</span>
+<span class="fc" id="L496">            assertSame(&quot;Expected cause of type SAXException&quot;,</span>
+<span class="fc" id="L497">                SAXException.class, ex.getCause().getClass());</span>
+<span class="fc" id="L498">            assertSame(&quot;Expected cause of type CheckstyleException&quot;,</span>
+<span class="fc" id="L499">                CheckstyleException.class, ex.getCause().getCause().getClass());</span>
+<span class="fc" id="L500">            assertEquals(&quot;Invalid exception cause message&quot;,</span>
+                &quot;Property ${nonexistent} has not been set&quot;,
+<span class="fc" id="L502">                ex.getCause().getCause().getMessage());</span>
+<span class="nc" id="L503">        }</span>
+<span class="fc" id="L504">    }</span>
+
+    @Test
+    public void testConfigWithIgnore() throws Exception {
+<span class="fc" id="L508">        final DefaultConfiguration config =</span>
+<span class="fc" id="L509">                (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L510">                        getPath(&quot;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;),</span>
+                        new PropertiesExpander(new Properties()), true);
+
+<span class="fc" id="L513">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L514">        assertEquals(&quot;Invalid children count&quot;, 0, children[0].getChildren().length);</span>
+<span class="fc" id="L515">    }</span>
+
+    @Test
+    public void testConfigWithIgnoreUsingInputSource() throws Exception {
+<span class="fc" id="L519">        final DefaultConfiguration config =</span>
+<span class="fc" id="L520">                (DefaultConfiguration) ConfigurationLoader.loadConfiguration(new InputSource(</span>
+<span class="fc" id="L521">                        new File(getPath(&quot;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;))</span>
+<span class="fc" id="L522">                            .toURI().toString()),</span>
+                        new PropertiesExpander(new Properties()), true);
+
+<span class="fc" id="L525">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L526">        assertEquals(&quot;Invalid children count&quot;, 0, children[0].getChildren().length);</span>
+<span class="fc" id="L527">    }</span>
+
+    @Test
+    public void testConfigCheckerWithIgnore() throws Exception {
+<span class="fc" id="L531">        final DefaultConfiguration config =</span>
+<span class="fc" id="L532">                (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L533">                        getPath(&quot;InputConfigurationLoaderCheckerIgnoreSeverity.xml&quot;),</span>
+                        new PropertiesExpander(new Properties()), true);
+
+<span class="fc" id="L536">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L537">        assertEquals(&quot;Invalid children count&quot;, 0, children.length);</span>
+<span class="fc" id="L538">    }</span>
+
+    @Test
+    public void testLoadConfigurationWrongUrl() {
+        try {
+<span class="fc" id="L543">            final DefaultConfiguration config =</span>
+<span class="nc" id="L544">                    (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+                            &quot;;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;,
+                            new PropertiesExpander(new Properties()), true);
+
+<span class="nc" id="L548">            final Configuration[] children = config.getChildren();</span>
+<span class="nc" id="L549">            assertEquals(&quot;Invalid children count&quot;, 0, children[0].getChildren().length);</span>
+<span class="nc" id="L550">            fail(&quot;Exception is expected&quot;);</span>
+        }
+<span class="fc" id="L552">        catch (CheckstyleException ex) {</span>
+<span class="fc" id="L553">            assertEquals(&quot;Invalid exception message&quot;,</span>
+                    &quot;Unable to find: ;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;,
+<span class="fc" id="L555">                    ex.getMessage());</span>
+<span class="nc" id="L556">        }</span>
+<span class="fc" id="L557">    }</span>
+
+    @Test
+    public void testLoadConfigurationDeprecated() throws Exception {
+<span class="fc" id="L561">        final DefaultConfiguration config =</span>
+<span class="fc" id="L562">                (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L563">                        Files.newInputStream(Paths.get(</span>
+<span class="fc" id="L564">                            getPath(&quot;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;))),</span>
+                        new PropertiesExpander(new Properties()), true);
+
+<span class="fc" id="L567">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L568">        assertEquals(&quot;Invalid children count&quot;,</span>
+<span class="fc" id="L569">            0, children[0].getChildren().length);</span>
+<span class="fc" id="L570">    }</span>
+
+    @Test
+    public void testReplacePropertiesDefault() throws Exception {
+<span class="fc" id="L574">        final Properties props = new Properties();</span>
+<span class="fc" id="L575">        final String defaultValue = &quot;defaultValue&quot;;</span>
+
+<span class="fc" id="L577">        final String value = (String) getReplacePropertiesMethod().invoke(</span>
+            null, &quot;${checkstyle.basedir}&quot;, new PropertiesExpander(props), defaultValue);
+
+<span class="fc" id="L580">        assertEquals(&quot;Invalid property value&quot;, defaultValue, value);</span>
+<span class="fc" id="L581">    }</span>
+
+    @Test
+    public void testLoadConfigurationFromClassPath() throws Exception {
+<span class="fc" id="L585">        final DefaultConfiguration config =</span>
+<span class="fc" id="L586">                (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L587">                        getPath(&quot;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;),</span>
+                        new PropertiesExpander(new Properties()), true);
+
+<span class="fc" id="L590">        final Configuration[] children = config.getChildren();</span>
+<span class="fc" id="L591">        assertEquals(&quot;Invalid children count&quot;,</span>
+<span class="fc" id="L592">            0, children[0].getChildren().length);</span>
+<span class="fc" id="L593">    }</span>
+
+    @Test
+    public void testParsePropertyString() throws Exception {
+<span class="fc" id="L597">        final List&lt;String&gt; propertyRefs = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L598">        final List&lt;String&gt; fragments = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L600">        Whitebox.invokeMethod(ConfigurationLoader.class,</span>
+                &quot;parsePropertyString&quot;, &quot;$&quot;,
+               fragments, propertyRefs);
+<span class="fc" id="L603">        assertEquals(&quot;Fragments list has unexpected amount of items&quot;,</span>
+<span class="fc" id="L604">                1, fragments.size());</span>
+<span class="fc" id="L605">    }</span>
+
+    @Test
+    public void testConstructors() throws Exception {
+<span class="fc" id="L609">        final Properties props = new Properties();</span>
+<span class="fc" id="L610">        props.setProperty(&quot;checkstyle.basedir&quot;, &quot;basedir&quot;);</span>
+<span class="fc" id="L611">        final String fName = getPath(&quot;InputConfigurationLoaderChecks.xml&quot;);</span>
+
+<span class="fc" id="L613">        final Configuration configuration = ConfigurationLoader.loadConfiguration(fName,</span>
+                new PropertiesExpander(props), ConfigurationLoader.IgnoredModulesOptions.OMIT);
+<span class="fc" id="L615">        assertEquals(&quot;Name is not expected&quot;, &quot;Checker&quot;, configuration.getName());</span>
+
+<span class="fc" id="L617">        final DefaultConfiguration configuration1 =</span>
+<span class="fc" id="L618">                (DefaultConfiguration) ConfigurationLoader.loadConfiguration(</span>
+<span class="fc" id="L619">                        new InputSource(Files.newInputStream(Paths.get(</span>
+<span class="fc" id="L620">                            getPath(&quot;InputConfigurationLoaderModuleIgnoreSeverity.xml&quot;)))),</span>
+                        new PropertiesExpander(new Properties()),
+                        ConfigurationLoader.IgnoredModulesOptions.EXECUTE);
+
+<span class="fc" id="L624">        final Configuration[] children = configuration1.getChildren();</span>
+<span class="fc" id="L625">        assertEquals(&quot;Unexpected children size&quot;, 1, children[0].getChildren().length);</span>
+<span class="fc" id="L626">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UnfairExecutorTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">UnfairExecutorTest.java</span></div><h1>UnfairExecutorTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
+
+import org.junit.Test;
+import org.threadly.BlockingTestRunnable;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.SubmitterExecutorInterfaceTest.SubmitterExecutorFactory;
+import org.threadly.concurrent.UnfairExecutor.TaskStripeGenerator;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.util.Clock;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L19">public class UnfairExecutorTest extends ThreadlyTester {</span>
+  @Test
+  @SuppressWarnings(&quot;unused&quot;)
+  public void constructorFail() {
+    try {
+<span class="nc" id="L24">      new UnfairExecutor(-1);</span>
+<span class="nc" id="L25">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L26">    } catch (IllegalArgumentException execpted) {</span>
+      // expected
+<span class="nc" id="L28">    }</span>
+    try {
+<span class="nc" id="L30">      new UnfairExecutor(13, (TaskStripeGenerator)null);</span>
+<span class="nc" id="L31">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L32">    } catch (IllegalArgumentException execpted) {</span>
+      // expected
+<span class="nc" id="L34">    }</span>
+<span class="fc" id="L35">  }</span>
+  
+  @Test
+  public void constructorTest() {
+<span class="fc" id="L39">    assertTrue(new UnfairExecutor(13, true).schedulers[0].thread.isDaemon());</span>
+<span class="fc" id="L40">    assertFalse(new UnfairExecutor(13, false).schedulers[0].thread.isDaemon());</span>
+<span class="fc" id="L41">  }</span>
+  
+  @Test
+  public void isShutdownTest() {
+<span class="fc" id="L45">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+<span class="fc" id="L46">    assertFalse(ue.isShutdown());</span>
+
+<span class="fc" id="L48">    SubmitterExecutorInterfaceTest.executeTestRunnables(ue, 0);</span>
+<span class="fc" id="L49">    ue.shutdown();</span>
+<span class="fc" id="L50">    assertTrue(ue.isShutdown());</span>
+    
+<span class="fc" id="L52">    ue = new UnfairExecutor(1);</span>
+<span class="fc" id="L53">    ue.shutdownNow();</span>
+<span class="fc" id="L54">    assertTrue(ue.isShutdown());</span>
+<span class="fc" id="L55">  }</span>
+  
+  @Test
+  public void shutdownTest() {
+<span class="fc" id="L59">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+    /* adding a run time to have greater chances that runnable 
+     * will be waiting to execute after shutdown call.
+     */
+<span class="fc" id="L63">    TestRunnable lastRunnable = </span>
+<span class="fc" id="L64">        SubmitterExecutorInterfaceTest.executeTestRunnables(ue, 5).get(TEST_QTY - 1);</span>
+    
+<span class="fc" id="L66">    ue.shutdown();</span>
+    
+    // runnable should finish
+<span class="fc" id="L69">    lastRunnable.blockTillFinished();</span>
+<span class="fc" id="L70">  }</span>
+  
+  @Test
+  public void shutdownNowTest() {
+<span class="fc" id="L74">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+    
+    // execute one runnable which will not complete
+<span class="fc" id="L77">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L78">    ue.execute(btr);</span>
+
+    try {
+<span class="fc" id="L81">      List&lt;TestRunnable&gt; expectedRunnables = </span>
+<span class="fc" id="L82">          SubmitterExecutorInterfaceTest.executeTestRunnables(ue, 0);</span>
+      
+<span class="fc" id="L84">      btr.blockTillStarted();</span>
+      
+<span class="fc" id="L86">      List&lt;Runnable&gt; canceledRunnables = ue.shutdownNow();</span>
+      // unblock now so that others can run (if the unit test fails)
+<span class="fc" id="L88">      btr.unblock();</span>
+      
+<span class="fc" id="L90">      assertNotNull(canceledRunnables);</span>
+<span class="fc" id="L91">      assertTrue(canceledRunnables.containsAll(expectedRunnables));</span>
+<span class="fc" id="L92">      assertTrue(expectedRunnables.containsAll(canceledRunnables));</span>
+      
+<span class="fc" id="L94">      Iterator&lt;TestRunnable&gt; it = expectedRunnables.iterator();</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L96">        assertEquals(0, it.next().getRunCount());</span>
+      }
+    } finally {
+<span class="fc" id="L99">      btr.unblock();</span>
+    }
+<span class="fc" id="L101">  }</span>
+  
+  @Test
+  public void awaitTerminationTest() throws InterruptedException {
+<span class="fc" id="L105">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+    /* adding a run time to have greater chances that runnable 
+     * will be waiting to execute after shutdown call.
+     */
+<span class="fc" id="L109">    TestRunnable lastRunnable = </span>
+<span class="fc" id="L110">        SubmitterExecutorInterfaceTest.executeTestRunnables(ue, 5).get(TEST_QTY - 1);</span>
+    
+<span class="fc" id="L112">    ue.shutdown();</span>
+<span class="fc" id="L113">    ue.awaitTermination();</span>
+    
+    // runnable should already be done
+<span class="fc" id="L116">    assertTrue(lastRunnable.ranOnce());</span>
+<span class="fc" id="L117">  }</span>
+  
+  @Test
+  public void awaitTerminationWithTimeoutTest() throws InterruptedException {
+<span class="fc" id="L121">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+    /* adding a run time to have greater chances that runnable 
+     * will be waiting to execute after shutdown call.
+     */
+<span class="fc" id="L125">    TestRunnable lastRunnable = </span>
+<span class="fc" id="L126">        SubmitterExecutorInterfaceTest.executeTestRunnables(ue, 5).get(TEST_QTY - 1);</span>
+
+<span class="fc" id="L128">    ue.shutdown();</span>
+<span class="fc" id="L129">    assertTrue(ue.awaitTermination(1000 * 10));</span>
+    
+    // runnable should already be done
+<span class="fc" id="L132">    assertTrue(lastRunnable.ranOnce());</span>
+<span class="fc" id="L133">  }</span>
+  
+  @Test
+  public void awaitTerminationWithTimeoutExpireTest() throws InterruptedException {
+<span class="fc" id="L137">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+<span class="fc" id="L138">    SubmitterExecutorInterfaceTest.executeTestRunnables(ue, 1000 * 10);</span>
+    
+<span class="fc" id="L140">    long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L141">    ue.shutdown();</span>
+<span class="fc" id="L142">    assertFalse(ue.awaitTermination(DELAY_TIME));</span>
+
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">    assertTrue(Clock.accurateForwardProgressingMillis() - start &gt;= (DELAY_TIME - ALLOWED_VARIANCE));</span>
+<span class="fc" id="L145">  }</span>
+  
+  @Test (expected = RejectedExecutionException.class)
+  public void shutdownExecutionFail() {
+<span class="fc" id="L149">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+<span class="fc" id="L150">    ue.shutdown();</span>
+    
+<span class="nc" id="L152">    ue.execute(DoNothingRunnable.instance());</span>
+<span class="nc" id="L153">  }</span>
+  
+  @Test (expected = RejectedExecutionException.class)
+  public void shutdownNowExecutionFail() {
+<span class="fc" id="L157">    UnfairExecutor ue = new UnfairExecutor(1);</span>
+<span class="fc" id="L158">    ue.shutdownNow();</span>
+    
+<span class="nc" id="L160">    ue.execute(DoNothingRunnable.instance());</span>
+<span class="nc" id="L161">  }</span>
+
+  protected static class UnfairExecutorFactory implements SubmitterExecutorFactory {
+    private final TaskStripeGenerator stripeGenerator;
+<span class="fc" id="L165">    private List&lt;UnfairExecutor&gt; executors = new ArrayList&lt;&gt;(1);</span>
+    
+<span class="fc" id="L167">    public UnfairExecutorFactory(TaskStripeGenerator stripeGenerator) {</span>
+<span class="fc" id="L168">      this.stripeGenerator = stripeGenerator;</span>
+<span class="fc" id="L169">    }</span>
+    
+    @Override
+    public UnfairExecutor makeSubmitterExecutor(int poolSize, boolean prestartIfAvailable) {
+<span class="fc" id="L173">      UnfairExecutor result = new UnfairExecutor(poolSize, stripeGenerator);</span>
+<span class="fc" id="L174">      executors.add(result);</span>
+      
+<span class="fc" id="L176">      return result;</span>
+    }
+
+    @Override
+    public void shutdown() {
+<span class="fc bfc" id="L181" title="All 2 branches covered.">      for (UnfairExecutor ue : executors) {</span>
+<span class="fc" id="L182">        ue.shutdownNow();</span>
+<span class="fc" id="L183">      }</span>
+<span class="fc" id="L184">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

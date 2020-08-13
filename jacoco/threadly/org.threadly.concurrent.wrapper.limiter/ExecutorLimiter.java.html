@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ExecutorLimiter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">ExecutorLimiter.java</span></div><h1>ExecutorLimiter.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import java.util.Queue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.SameThreadSubmitterExecutor;
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * This class is designed to limit how much parallel execution happens on a provided 
+ * {@link Executor}.  This allows the user to have one thread pool for all their code, and if they 
+ * want certain sections to have less levels of parallelism (possibly because those those sections 
+ * would completely consume the global pool), they can wrap the executor in this class.
+ * &lt;p&gt;
+ * Thus providing you better control on the absolute thread count and how much parallelism can 
+ * occur in different sections of the program.
+ * &lt;p&gt;
+ * This is an alternative from having to create multiple thread pools.  By using this you also 
+ * are able to accomplish more efficiently thread use than multiple thread pools would.
+ * &lt;p&gt;
+ * If limiting to a single thread, please see {@link SingleThreadSchedulerSubPool} as a possible 
+ * alternative.
+ * 
+ * @since 4.6.0 (since 1.0.0 at org.threadly.concurrent.limiter)
+ */
+public class ExecutorLimiter implements SubmitterExecutor {
+  protected static final boolean DEFAULT_LIMIT_FUTURE_LISTENER_EXECUTION = true;
+  
+  protected final Executor executor;
+  protected final Queue&lt;RunnableRunnableContainer&gt; waitingTasks;
+  protected final boolean limitFutureListenersExecution;
+  private final AtomicInteger currentlyRunning;
+  private volatile int maxConcurrency;
+  
+  /**
+   * Construct a new execution limiter that implements the {@link Executor} interface.
+   * 
+   * @param executor {@link Executor} to submit task executions to.
+   * @param maxConcurrency maximum quantity of tasks to run in parallel
+   */
+  public ExecutorLimiter(Executor executor, int maxConcurrency) {
+<span class="fc" id="L50">    this(executor, maxConcurrency, DEFAULT_LIMIT_FUTURE_LISTENER_EXECUTION);</span>
+<span class="fc" id="L51">  }</span>
+  
+  /**
+   * Construct a new execution limiter that implements the {@link Executor} interface.
+   * &lt;p&gt;
+   * This constructor allows you to specify if listeners / 
+   * {@link org.threadly.concurrent.future.FutureCallback}'s / functions in 
+   * {@link ListenableFuture#map(java.util.function.Function)} or 
+   * {@link ListenableFuture#flatMap(java.util.function.Function)} should be counted towards the 
+   * concurrency limit.  Specifying {@code false} will release the limit as soon as the original 
+   * task completes.  Specifying {@code true} will continue to enforce the limit until all listeners 
+   * (without an executor) complete.
+   * 
+   * @param executor {@link Executor} to submit task executions to.
+   * @param maxConcurrency maximum quantity of tasks to run in parallel
+   * @param limitFutureListenersExecution {@code true} to include listener / mapped functions towards execution limit
+   */
+  public ExecutorLimiter(Executor executor, int maxConcurrency, 
+<span class="fc" id="L69">                         boolean limitFutureListenersExecution) {</span>
+<span class="fc" id="L70">    ArgumentVerifier.assertNotNull(executor, &quot;executor&quot;);</span>
+<span class="fc" id="L71">    ArgumentVerifier.assertGreaterThanZero(maxConcurrency, &quot;maxConcurrency&quot;);</span>
+
+<span class="fc" id="L73">    this.executor = executor;</span>
+<span class="fc" id="L74">    this.waitingTasks = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="fc" id="L75">    this.limitFutureListenersExecution = limitFutureListenersExecution;</span>
+<span class="fc" id="L76">    this.currentlyRunning = new AtomicInteger(0);</span>
+<span class="fc" id="L77">    this.maxConcurrency = maxConcurrency;</span>
+<span class="fc" id="L78">  }</span>
+  
+  @Override
+  public void execute(Runnable task) {
+<span class="fc" id="L82">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L84">    executeOrQueue(task, null);</span>
+<span class="fc" id="L85">  }</span>
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result) {
+<span class="fc" id="L89">    return submit(RunnableCallableAdapter.adapt(task, result));</span>
+  }
+  
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task) {
+<span class="fc" id="L94">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L96">    ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, this);</span>
+    
+<span class="fc" id="L98">    executeOrQueue(lft, lft);</span>
+    
+<span class="fc" id="L100">    return lft;</span>
+  }
+  
+  /**
+   * Call to check what the maximum concurrency this limiter will allow.
+   * 
+   * @return maximum concurrent tasks to be run
+   */
+  public int getMaxConcurrency() {
+<span class="fc" id="L109">    return maxConcurrency;</span>
+  }
+  
+  /**
+   * Updates the concurrency limit for this wrapper.  If reducing the the limit, there will be no 
+   * attempt or impact on tasks already limiting.  Instead new tasks just wont be submitted to the 
+   * parent pool until existing tasks complete and go below the new limit.
+   * 
+   * @since 5.4
+   * @param maxConcurrency maximum quantity of tasks to run in parallel
+   */
+  public void setMaxConcurrency(int maxConcurrency) {
+<span class="fc" id="L121">    ArgumentVerifier.assertGreaterThanZero(maxConcurrency, &quot;maxConcurrency&quot;);</span>
+    
+<span class="fc bfc" id="L123" title="All 2 branches covered.">    boolean increasing = this.maxConcurrency &lt; maxConcurrency; </span>
+<span class="fc" id="L124">    this.maxConcurrency = maxConcurrency;</span>
+<span class="fc bfc" id="L125" title="All 2 branches covered.">    if (increasing) {</span>
+<span class="fc" id="L126">      consumeAvailable();</span>
+    }
+<span class="fc" id="L128">  }</span>
+  
+  /**
+   * Returns how many tasks are currently being &quot;limited&quot; and thus are in queue to run from this 
+   * limiter.
+   * 
+   * @return Quantity of tasks queued in this limiter
+   */
+  public int getUnsubmittedTaskCount() {
+<span class="fc" id="L137">    return waitingTasks.size();</span>
+  }
+  
+  /**
+   * Thread safe verification that the pool has space remaining to accept additional tasks.
+   * &lt;p&gt;
+   * If this returns {@code true} {@code currentlyRunning} has been incremented and it expects the 
+   * task to run will invoke {@link #handleTaskFinished()} when completed.
+   * 
+   * @return {@code true} if the task can be submitted to the pool
+   */
+  protected boolean canSubmitTaskToPool() {
+    while (true) {  // loop till we have a result
+<span class="fc" id="L150">      int currentValue = currentlyRunning.get();</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">      if (currentValue &lt; maxConcurrency) {</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">        if (currentlyRunning.compareAndSet(currentValue, currentValue + 1)) {</span>
+<span class="fc" id="L153">          return true;</span>
+        } // else retry in while loop
+      } else {
+<span class="fc" id="L156">        return false;</span>
+      }
+<span class="fc" id="L158">    }</span>
+  }
+  
+  /**
+   * Submit any tasks that we can to the parent executor (dependent on our pools limit).
+   */
+  protected void consumeAvailable() {
+<span class="fc bfc" id="L165" title="All 4 branches covered.">    if (currentlyRunning.get() &gt;= maxConcurrency || waitingTasks.isEmpty()) {</span>
+      // shortcut before we lock
+<span class="fc" id="L167">      return;</span>
+    }
+    /* must synchronize in queue consumer to avoid multiple threads from consuming tasks in 
+     * parallel and possibly emptying after .isEmpty() check but before .poll()
+     */
+<span class="fc" id="L172">    synchronized (this) {</span>
+<span class="fc bfc" id="L173" title="All 4 branches covered.">      while (! waitingTasks.isEmpty() &amp;&amp; canSubmitTaskToPool()) {</span>
+        // by entering loop we can now execute task
+<span class="fc" id="L175">        executor.execute(waitingTasks.poll());</span>
+      }
+<span class="fc" id="L177">    }</span>
+<span class="fc" id="L178">  }</span>
+  
+  /**
+   * Check that not only are we able to submit tasks to the pool, but there are no tasks currently 
+   * waiting to already be submitted.  If only {@link #canSubmitTaskToPool()} is checked, tasks 
+   * may be able to cut in line with tasks that are already queued in the waiting queue.
+   * 
+   * @return true if the task can be submitted to the pool 
+   */
+  protected boolean canRunTask() {
+<span class="fc bfc" id="L188" title="All 4 branches covered.">    return waitingTasks.isEmpty() &amp;&amp; canSubmitTaskToPool();</span>
+  }
+  
+  /**
+   * Called to indicate that hold for the task execution should be released. 
+   */
+  private void releaseExecutionLimit() {
+<span class="fc" id="L195">    currentlyRunning.decrementAndGet();</span>
+    
+<span class="fc" id="L197">    consumeAvailable(); // allow any waiting tasks to run</span>
+<span class="fc" id="L198">  }</span>
+
+  /**
+   * This is called once a task is ready to be executed (or if unable to execute immediately, 
+   * queued).  In addition to the task itself, this function takes in any future which represents 
+   * task execution (if available, otherwise {@code null}).  Passing in as a separate argument 
+   * allows us to avoid a {@code instanceof} check, but does require it to be specified for 
+   * pre-future listener completion support.
+   * 
+   * @param task Task to be executed
+   * @param future Future to represent task completion or {@code null} if not available
+   */
+  protected void executeOrQueue(Runnable task, ListenableFuture&lt;?&gt; future) {
+<span class="fc bfc" id="L211" title="All 4 branches covered.">    if (limitFutureListenersExecution || future == null) {</span>
+<span class="fc" id="L212">      executeOrQueueWrapper(new LimiterRunnableWrapper(task));</span>
+    } else {
+      // we will release the limit restriction as soon as the future completes.
+      // listeners should be invoked in order, so we just need to be the first listener here
+      // We add a `SameThreadSubmitterExecutor` so that we get executed first as if it was async
+<span class="fc" id="L217">      future.addListener(this::releaseExecutionLimit, SameThreadSubmitterExecutor.instance());</span>
+
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">      if (canRunTask()) {</span>
+<span class="fc" id="L220">        executor.execute(task);</span>
+      } else {
+<span class="nc" id="L222">        addToQueue(new TransparentRunnableContainer(task));</span>
+      }
+    }
+<span class="fc" id="L225">  }</span>
+  
+  /**
+   * Executes the wrapper if there is room in the limiter, otherwise it will queue the wrapper to 
+   * be executed once the limiter has room.
+   * 
+   * @param lrw Wrapper that is ready to execute once there is available slots in the limiter
+   */
+  protected void executeOrQueueWrapper(LimiterRunnableWrapper lrw) {
+<span class="fc bfc" id="L234" title="All 2 branches covered.">    if (canRunTask()) {</span>
+<span class="fc" id="L235">      executor.execute(lrw);</span>
+    } else {
+<span class="fc" id="L237">      addToQueue(lrw);</span>
+    }
+<span class="fc" id="L239">  }</span>
+  
+  /**
+   * Adds the wrapper to the queue.  After adding to the queue it will be verified that there is 
+   * not available slots in the limiter to consume (it or others) from the queue.
+   * &lt;p&gt;
+   * It is expected that you already attempted to run the task (by calling {@link #canRunTask()} 
+   * before deferring to this.
+   * 
+   * @param lrw {@link LimiterRunnableWrapper} to add to the queue
+   */
+  protected void addToQueue(RunnableRunnableContainer lrw) {
+<span class="fc" id="L251">    waitingTasks.add(lrw);</span>
+<span class="fc" id="L252">    consumeAvailable(); // call to consume in case task finished after first check</span>
+<span class="fc" id="L253">  }</span>
+
+  // TODO - make higher level and reuse for this common interface combination?  Or avoid javadocs pollution?
+  /**
+   * Simple combination of {@link RunnableContainer} and {@link Runnable}.  This allows us to 
+   * specify two possible run implementations while have a collection of {@link RunnableContainer}'s 
+   * so that we can do task removal easily.
+   * 
+   * @since 5.7
+   */
+  protected interface RunnableRunnableContainer extends RunnableContainer, Runnable {
+    // intentionally left blank
+  }
+  
+  /**
+   * Generic wrapper for runnables which are used within the limiters.  This wrapper ensures that 
+   * {@link #handleTaskFinished()} will be called after the task completes.
+   * 
+   * @since 1.0.0
+   */
+  protected class LimiterRunnableWrapper implements RunnableRunnableContainer {
+    protected final Runnable runnable;
+    
+<span class="fc" id="L276">    public LimiterRunnableWrapper(Runnable runnable) {</span>
+<span class="fc" id="L277">      this.runnable = runnable;</span>
+<span class="fc" id="L278">    }</span>
+    
+    /**
+     * Called immediately after contained task finishes.  That way any additional cleanup needed 
+     * can be run.
+     */
+    protected void doAfterRunTasks() {
+      // nothing in the default implementation
+<span class="fc" id="L286">    }</span>
+    
+    @Override
+    public void run() {
+      try {
+<span class="fc" id="L291">        runnable.run();</span>
+      } finally {
+        try {
+<span class="fc" id="L294">          doAfterRunTasks();</span>
+        } finally {
+<span class="fc" id="L296">          releaseExecutionLimit();</span>
+        }
+      }
+<span class="fc" id="L299">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L303">      return runnable;</span>
+    }
+  }
+  
+  /**
+   * An implementation of {@link RunnableRunnableContainer} where the {@link Runnable#run()} 
+   * implementation delegates purely to the contained runnable.
+   * 
+   * @since 5.7
+   */
+  protected static class TransparentRunnableContainer implements RunnableRunnableContainer {
+    protected final Runnable task;
+    
+<span class="nc" id="L316">    protected TransparentRunnableContainer(Runnable task) {</span>
+<span class="nc" id="L317">      this.task = task;</span>
+<span class="nc" id="L318">    }</span>
+    
+    @Override
+    public void run() {
+<span class="nc" id="L322">      task.run();</span>
+<span class="nc" id="L323">    }</span>
+    
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="nc" id="L327">      return task;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

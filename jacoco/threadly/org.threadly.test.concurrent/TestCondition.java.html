@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TestCondition.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.test.concurrent</a> &gt; <span class="el_source">TestCondition.java</span></div><h1>TestCondition.java</h1><pre class="source lang-java linenums">package org.threadly.test.concurrent;
+
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.IntBinaryOperator;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+
+/**
+ * {@link TestCondition} in unit test, designed to check a condition for something that is 
+ * happening in a different thread.  Allowing a test to efficiently block till the testable 
+ * action has finished.
+ * &lt;p&gt;
+ * This tool is used often within threadly's own unit tests.  Please use those as examples using 
+ * this class.
+ * 
+ * @since 1.0.0
+ */
+public class TestCondition {
+  protected static final int DEFAULT_POLL_INTERVAL = 10;
+  protected static final int DEFAULT_TIMEOUT = 10_000;
+  
+  private static void delay(long maxMillis) {
+<span class="fc bfc" id="L26" title="All 2 branches covered.">    if (maxMillis &gt; 10) {</span>
+<span class="fc" id="L27">      LockSupport.parkNanos(Clock.NANOS_IN_MILLISECOND * maxMillis);</span>
+    } else {
+<span class="fc" id="L29">      Thread.yield();</span>
+    }
+<span class="fc" id="L31">  }</span>
+  
+  private final IntBinaryOperator blockCondition;
+  
+  /**
+   * This constructor is expected to have {@link #get()} overridden, otherwise an exception will be 
+   * thrown when this condition is checked/used.
+   */
+  public TestCondition() {
+<span class="fc" id="L40">    this(null);</span>
+<span class="fc" id="L41">  }</span>
+
+  /**
+   * Construct a new {@link TestCondition} with a provided supplier for when the state changes.  
+   * Alternatively this can be constructed with {@link #TestCondition()} and then the condition can 
+   * be reported by overriding {@link #get()}.
+   * 
+   * @since 5.0
+   * @param condition Condition to check for
+   */
+<span class="fc" id="L51">  public TestCondition(Supplier&lt;Boolean&gt; condition) {</span>
+<span class="fc" id="L52">    blockCondition = (timeoutInMillis, pollIntervalInMillis) -&gt; {</span>
+<span class="fc" id="L53">      long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L54">      long now = startTime;</span>
+      boolean lastResult;
+<span class="fc bfc" id="L56" title="All 4 branches covered.">      while (! (lastResult = condition == null ? get() : condition.get()) &amp;&amp; </span>
+<span class="pc bpc" id="L57" title="1 of 2 branches missed.">             ! Thread.currentThread().isInterrupted() &amp;&amp; </span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">             (now = Clock.accurateForwardProgressingMillis()) - startTime &lt; timeoutInMillis) {</span>
+<span class="fc" id="L59">        delay(pollIntervalInMillis);</span>
+      }
+      
+<span class="fc bfc" id="L62" title="All 2 branches covered.">      if (lastResult) {</span>
+<span class="fc" id="L63">        return 0; // ignored result</span>
+      } else {
+<span class="fc" id="L65">        throw new ConditionTimeoutException(&quot;Still 'false' after &quot; + </span>
+                                              (now - startTime) + &quot;ms, interrupted: &quot; + 
+<span class="fc" id="L67">                                              Thread.currentThread().isInterrupted());</span>
+      }
+    };
+<span class="fc" id="L70">  }</span>
+  
+  /**
+   * Construct a new {@link TestCondition} where one function will supply a result and a second 
+   * function will test that result to see if the condition is met.
+   * 
+   * @param &lt;T&gt; the type of object returned from the supplier and tested by the predicate
+   * @param supplier The function to provide a result to test
+   * @param predicate The predicate a result is provided to for checking the test condition
+   */
+<span class="fc" id="L80">  public &lt;T&gt; TestCondition(Supplier&lt;? extends T&gt; supplier, Predicate&lt;? super T&gt; predicate) {</span>
+<span class="fc" id="L81">    ArgumentVerifier.assertNotNull(supplier, &quot;supplier&quot;);</span>
+<span class="fc" id="L82">    ArgumentVerifier.assertNotNull(predicate, &quot;predicate&quot;);</span>
+    
+<span class="fc" id="L84">    blockCondition = (timeoutInMillis, pollIntervalInMillis) -&gt; {</span>
+<span class="fc" id="L85">      long startTime = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L86">      long now = startTime;</span>
+      boolean pass;
+      T lastResult;
+<span class="fc bfc" id="L89" title="All 2 branches covered.">      while (! (pass = predicate.test(lastResult = supplier.get())) &amp;&amp; </span>
+<span class="pc bpc" id="L90" title="1 of 2 branches missed.">             ! Thread.currentThread().isInterrupted() &amp;&amp; </span>
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">             (now = Clock.accurateForwardProgressingMillis()) - startTime &lt; timeoutInMillis) {</span>
+<span class="fc" id="L92">        delay(pollIntervalInMillis);</span>
+      }
+      
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">      if (pass) {</span>
+<span class="fc" id="L96">        return 0; // ignored result</span>
+      } else {
+<span class="nc" id="L98">        throw new ConditionTimeoutException(&quot;Still '&quot; + lastResult + &quot;' after &quot; + </span>
+                                              (now - startTime) + &quot;ms, interrupted: &quot; + 
+<span class="nc" id="L100">                                              Thread.currentThread().isInterrupted());</span>
+      }
+    };
+<span class="fc" id="L103">  }</span>
+  
+  /**
+   * Getter for the conditions current state.  If constructed with {@link #TestCondition()} this 
+   * must be overridden.  Otherwise this will return the result from the provided supplier at 
+   * construction.
+   * 
+   * @return Test condition state, {@code true} if ready
+   */
+  public boolean get() {
+<span class="fc" id="L113">    throw new RuntimeException(&quot;Must override get() or provide condition supplier&quot;);</span>
+  }
+
+  /**
+   * Blocks till condition is true, useful for asynchronism operations, waiting for them to 
+   * complete in other threads during unit tests.  
+   * &lt;p&gt;
+   * This uses a default timeout of 10 seconds, and a poll interval of 10ms
+   */
+  public void blockTillTrue() {
+<span class="fc" id="L123">    blockTillTrue(DEFAULT_TIMEOUT, DEFAULT_POLL_INTERVAL);</span>
+<span class="fc" id="L124">  }</span>
+
+  /**
+   * Blocks till condition is true, useful for asynchronism operations, waiting for them to 
+   * complete in other threads during unit tests.
+   * &lt;p&gt;
+   * This uses the default poll interval of 10ms
+   * 
+   * @param timeoutInMillis time to wait for value to become true
+   */
+  public void blockTillTrue(int timeoutInMillis) {
+<span class="fc" id="L135">    blockTillTrue(timeoutInMillis, DEFAULT_POLL_INTERVAL);</span>
+<span class="fc" id="L136">  }</span>
+  
+  /**
+   * Blocks till condition is true, useful for asynchronism operations, waiting for them to 
+   * complete in other threads during unit tests.
+   * 
+   * @param timeoutInMillis time to wait for value to become true
+   * @param pollIntervalInMillis time to sleep between checks
+   */
+  public void blockTillTrue(int timeoutInMillis, int pollIntervalInMillis) {
+<span class="fc" id="L146">    blockCondition.applyAsInt(timeoutInMillis, pollIntervalInMillis);</span>
+<span class="fc" id="L147">  }</span>
+  
+  /**
+   * Thrown if condition is still false after a given timeout.
+   * &lt;p&gt;
+   * The reason this exception is public is to allow test implementors to catch this exception 
+   * specifically and handle it if necessary.
+   */
+  public static class ConditionTimeoutException extends RuntimeException {
+    private static final long serialVersionUID = 7445447193772617274L;
+    
+    /**
+     * Constructor for new TimeoutException.
+     */
+    public ConditionTimeoutException() {
+<span class="nc" id="L162">      super();</span>
+<span class="nc" id="L163">    }</span>
+    
+    /**
+     * Constructor for new TimeoutException.
+     * 
+     * @param msg Exception message
+     */
+    public ConditionTimeoutException(String msg) {
+<span class="fc" id="L171">      super(msg);</span>
+<span class="fc" id="L172">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

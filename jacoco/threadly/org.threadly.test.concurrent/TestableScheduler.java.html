@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TestableScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.test.concurrent</a> &gt; <span class="el_source">TestableScheduler.java</span></div><h1>TestableScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.test.concurrent;
+
+import java.util.List;
+
+import org.threadly.concurrent.AbstractPriorityScheduler;
+import org.threadly.concurrent.NoThreadScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionHandler;
+
+/**
+ * This differs from {@link org.threadly.concurrent.NoThreadScheduler} in that time is ONLY 
+ * advanced via the tick calls.  That means that if you schedule a task, it will be scheduled off 
+ * of either the creation time, or the last tick time, what ever the most recent point is.  This 
+ * allows you to progress time forward faster than it could in real time, having tasks execute 
+ * faster, etc, etc.
+ * &lt;p&gt;
+ * The tasks in this scheduler are only progressed forward with calls to {@link #tick()}.  Since 
+ * it is running on the calling thread, calls to {@code Object.wait()} and {@code Thread.sleep()} 
+ * from sub tasks will block (possibly forever).  The call to {@link #tick()} will not unblock 
+ * till there is no more work for the scheduler to currently handle.
+ * 
+ * @since 2.0.0
+ */
+public class TestableScheduler extends AbstractPriorityScheduler {
+  private final InternalScheduler scheduler;
+  private long nowInMillis;
+  
+  /**
+   * Constructs a new {@link TestableScheduler} scheduler.
+   */
+  public TestableScheduler() {
+<span class="fc" id="L33">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS);</span>
+<span class="fc" id="L34">  }</span>
+  
+  /**
+   * Constructs a new {@link TestableScheduler} scheduler.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  public TestableScheduler(TaskPriority defaultPriority, long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L43">    super(defaultPriority);</span>
+    
+<span class="fc" id="L45">    scheduler = new InternalScheduler(defaultPriority, maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L46">    nowInMillis = Clock.lastKnownTimeMillis();</span>
+<span class="fc" id="L47">  }</span>
+
+  @Override
+  public boolean isShutdown() {
+<span class="fc" id="L51">    return scheduler.isShutdown();</span>
+  }
+
+  @Override
+  public int getActiveTaskCount() {
+<span class="nc" id="L56">    return scheduler.getActiveTaskCount();</span>
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay,
+                                     TaskPriority priority) {
+<span class="fc" id="L62">    scheduler.scheduleWithFixedDelay(task, initialDelay, recurringDelay, priority);</span>
+<span class="fc" id="L63">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period,
+                                  TaskPriority priority) {
+<span class="fc" id="L68">    scheduler.scheduleAtFixedRate(task, initialDelay, period, priority);</span>
+<span class="fc" id="L69">  }</span>
+
+  @Override
+  protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L73">    return scheduler.doSchedule(task, delayInMillis, priority);</span>
+  }
+
+  @Override
+  protected QueueManager getQueueManager() {
+<span class="fc" id="L78">    return scheduler.getQueueManager();</span>
+  }
+  
+  /**
+   * Returns the last provided time to the tick call.  If tick has not been called yet, then this 
+   * will represent the time at construction.
+   * 
+   * @return last time the scheduler used for reference on execution
+   */
+  public long getLastTickTime() {
+<span class="fc" id="L88">    return nowInMillis;</span>
+  }
+  
+  /**
+   * This is to provide a convince when advancing the scheduler forward an explicit amount of time.  
+   * Where tick accepts an absolute time, this accepts an amount of time to advance forward.  That 
+   * way the user does not have to track the current time.
+   * 
+   * @param timeInMillis amount in milliseconds to advance the scheduler forward
+   * @return quantity of tasks run during this tick call
+   */
+  public int advance(long timeInMillis) {
+<span class="fc" id="L100">    return advance(timeInMillis, null);</span>
+  }
+  
+  /**
+   * This is to provide a convince when advancing the scheduler forward an explicit amount of time.  
+   * Where tick accepts an absolute time, this accepts an amount of time to advance forward.  That 
+   * way the user does not have to track the current time.  
+   * &lt;p&gt;
+   * This call allows you to specify an {@link ExceptionHandler}.  If provided, if any tasks throw 
+   * an exception, this will be called to inform them of the exception.  This allows you to ensure 
+   * that you get a returned task count (meaning if provided, no exceptions except a possible 
+   * {@link InterruptedException} can be thrown).  If {@code null} is provided for the exception 
+   * handler, than any tasks which throw a {@link RuntimeException}, will throw out of this 
+   * invocation.
+   * 
+   * @since 3.2.0
+   * @param timeInMillis amount in milliseconds to advance the scheduler forward
+   * @param exceptionHandler Exception handler implementation to call if any tasks throw an 
+   *                           exception, or null to have exceptions thrown out of this call
+   * @return quantity of tasks run during this tick call
+   */
+  public int advance(long timeInMillis, ExceptionHandler exceptionHandler) {
+<span class="fc" id="L122">    return tick(nowInMillis + timeInMillis, exceptionHandler);</span>
+  }
+  
+  /**
+   * Progresses tasks for the current time.  This will block as it runs as many scheduled or 
+   * waiting tasks as possible.  This call will NOT block if no task are currently ready to run.
+   * &lt;p&gt;
+   * If any tasks throw a {@link RuntimeException}, they will be bubbled up to this tick call.  
+   * Any tasks past that task will not run till the next call to tick.  So it is important that 
+   * the implementor handle those exceptions.  
+   * 
+   * @return quantity of tasks run during this tick call
+   */
+  public int tick() {
+<span class="fc" id="L136">    return tick(null);</span>
+  }
+  
+  /**
+   * Progresses tasks for the current time.  This will block as it runs as many scheduled or 
+   * waiting tasks as possible.  This call will NOT block if no task are currently ready to run.  
+   * &lt;p&gt;
+   * This call allows you to specify an {@link ExceptionHandler}.  If provided, if any tasks throw 
+   * an exception, this will be called to inform them of the exception.  This allows you to ensure 
+   * that you get a returned task count (meaning if provided, no exceptions except a possible 
+   * {@link InterruptedException} can be thrown).  If {@code null} is provided for the exception 
+   * handler, than any tasks which throw a {@link RuntimeException}, will throw out of this 
+   * invocation.
+   * 
+   * @since 3.2.0
+   * @param exceptionHandler Exception handler implementation to call if any tasks throw an 
+   *                           exception, or null to have exceptions thrown out of this call
+   * @return quantity of tasks run during this tick call
+   */
+  public int tick(ExceptionHandler exceptionHandler) {
+<span class="fc" id="L156">    long currentRealTime = Clock.accurateTimeMillis();</span>
+<span class="fc bfc" id="L157" title="All 2 branches covered.">    if (nowInMillis &gt; currentRealTime) {</span>
+<span class="fc" id="L158">      return tick(nowInMillis, exceptionHandler);</span>
+    } else {
+<span class="fc" id="L160">      return tick(currentRealTime, exceptionHandler);</span>
+    }
+  }
+  
+  /**
+   * This progresses tasks based off the time provided.  This is primarily used in testing by 
+   * providing a possible time in the future (to execute future tasks).  This call will NOT block 
+   * if no task are currently ready to run.  
+   * &lt;p&gt;
+   * If any tasks throw a {@link RuntimeException}, they will be bubbled up to this tick call.  
+   * Any tasks past that task will not run till the next call to tick.  So it is important that 
+   * the implementor handle those exceptions.
+   * &lt;p&gt;
+   * This call accepts the absolute time in milliseconds.  If you want to advance the scheduler a 
+   * specific amount of time forward, look at the &quot;advance&quot; call.
+   * 
+   * @param currentTime Absolute time to provide for looking at task run time
+   * @return quantity of tasks run in this tick call
+   */
+  public int tick(long currentTime) {
+<span class="fc" id="L180">    return tick(currentTime, null);</span>
+  }
+  
+  /**
+   * This progresses tasks based off the time provided.  This is primarily used in testing by 
+   * providing a possible time in the future (to execute future tasks).  This call will NOT block 
+   * if no task are currently ready to run.  
+   * &lt;p&gt;
+   * This call allows you to specify an {@link ExceptionHandler}.  If provided, if any tasks throw 
+   * an exception, this will be called to inform them of the exception.  This allows you to ensure 
+   * that you get a returned task count (meaning if provided, no exceptions except a possible 
+   * {@link InterruptedException} can be thrown).  If {@code null} is provided for the exception 
+   * handler, than any tasks which throw a {@link RuntimeException}, will throw out of this 
+   * invocation.
+   * &lt;p&gt;
+   * This call accepts the absolute time in milliseconds.  If you want to advance the scheduler a 
+   * specific amount of time forward, look at the &quot;advance&quot; call.
+   * 
+   * @since 3.2.0
+   * @param currentTime Absolute time to provide for looking at task run time
+   * @param exceptionHandler Exception handler implementation to call if any tasks throw an 
+   *                           exception, or null to have exceptions thrown out of this call
+   * @return quantity of tasks run in this tick call
+   */
+  public int tick(long currentTime, ExceptionHandler exceptionHandler) {
+<span class="fc bfc" id="L205" title="All 2 branches covered.">    if (nowInMillis &gt; currentTime) {</span>
+<span class="fc" id="L206">      throw new IllegalArgumentException(&quot;Time can not go backwards&quot;);</span>
+    }
+<span class="fc" id="L208">    nowInMillis = currentTime;</span>
+    
+<span class="fc" id="L210">    return scheduler.tick(exceptionHandler);</span>
+  }
+  
+  /**
+   * Checks if there are tasks ready to be run on the scheduler.  If 
+   * {@link #tick(ExceptionHandler)} is not currently being called, this call indicates if the 
+   * next {@link #tick(ExceptionHandler)} will have at least one task to run.  If 
+   * {@link #tick(ExceptionHandler)} is currently being invoked, this call will do a best attempt 
+   * to indicate if there is at least one more task to run (not including the task which may 
+   * currently be running).  It's a best attempt as it will try not to block the thread invoking 
+   * {@link #tick(ExceptionHandler)} to prevent it from accepting additional work.
+   *  
+   * @return {@code true} if there are task waiting to run
+   */
+  public boolean hasTaskReadyToRun() {
+<span class="fc" id="L225">    return scheduler.hasTaskReadyToRun();</span>
+  }
+  
+  /**
+   * Checks how long till the next task will be ready to execute.  If there are no tasks in this 
+   * scheduler currently then {@link Long#MAX_VALUE} will be returned.  If there is a task ready 
+   * to execute this will return a value less than or equal to zero.  If the task is past its 
+   * desired point of execution the result will be a negative amount of milliseconds past that 
+   * point in time.  
+   * &lt;p&gt;
+   * Generally this is called from the same thread that would invoke 
+   * {@link #tick(ExceptionHandler)} (but does not have to be).  Since this does not block or lock 
+   * if being invoked in parallel with {@link #tick(ExceptionHandler)}, the results may be no 
+   * longer accurate by the time this invocation has returned.
+   * &lt;p&gt;
+   * This can be useful if you want to know how long you can block on something, ASSUMING you can 
+   * detect that something has been added to the scheduler, and interrupt that blocking in order 
+   * to handle tasks.
+   * 
+   * @return Milliseconds till the next task is ready to run
+   */
+  public long getDelayTillNextTask() {
+<span class="fc" id="L247">    return scheduler.getDelayTillNextTask();</span>
+  }
+  
+  /**
+   * Removes any tasks waiting to be run.  Will not interrupt any tasks currently running if 
+   * {@link #tick(ExceptionHandler)} is being called.  But will avoid additional tasks from being 
+   * run on the current {@link #tick(ExceptionHandler)} call.  
+   * &lt;p&gt;
+   * If tasks are added concurrently during this invocation they may or may not be removed.
+   * 
+   * @return List of runnables which were waiting in the task queue to be executed (and were now removed)
+   */
+  public List&lt;Runnable&gt; clearTasks() {
+<span class="fc" id="L260">    return scheduler.clearTasks();</span>
+  }
+  
+  /**
+   * Small internal wrapper class so that we can control what from the &quot;NoThreadScheduler&quot; api's 
+   * we want to expose from this implementation.
+   * 
+   * @since 2.4.0
+   */
+  private class InternalScheduler extends NoThreadScheduler {
+<span class="fc" id="L270">    public InternalScheduler(TaskPriority defaultPriority, long maxWaitForLowPriorityInMs) {</span>
+<span class="fc" id="L271">      super(defaultPriority, maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L272">    }</span>
+
+    @Override
+    protected long nowInMillis(boolean accurate) {
+<span class="fc" id="L276">      return nowInMillis;</span>
+    }
+    
+    @Override
+    protected QueueManager getQueueManager() {
+<span class="fc" id="L281">      return super.getQueueManager();</span>
+    }
+    
+    @Override
+    protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L286">      return super.doSchedule(task, delayInMillis, priority);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractRealDistribution.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.distribution</a> &gt; <span class="el_source">AbstractRealDistribution.java</span></div><h1>AbstractRealDistribution.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.distribution;
+
+import java.io.Serializable;
+
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.math4.analysis.UnivariateFunction;
+import org.apache.commons.math4.analysis.solvers.UnivariateSolverUtils;
+import org.apache.commons.math4.exception.NumberIsTooLargeException;
+import org.apache.commons.math4.exception.OutOfRangeException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.rng.UniformRandomProvider;
+import org.apache.commons.rng.sampling.distribution.InverseTransformContinuousSampler;
+import org.apache.commons.rng.sampling.distribution.ContinuousInverseCumulativeProbabilityFunction;
+import org.apache.commons.rng.sampling.distribution.ContinuousSampler;
+import org.apache.commons.math4.util.FastMath;
+
+/**
+ * Base class for probability distributions on the reals.
+ * Default implementations are provided for some of the methods
+ * that do not vary from distribution to distribution.
+ *
+ * &lt;p&gt;
+ * This base class provides a default factory method for creating
+ * a {@link org.apache.commons.statistics.distribution.ContinuousDistribution.Sampler
+ * sampler instance} that uses the
+ * &lt;a href=&quot;http://en.wikipedia.org/wiki/Inverse_transform_sampling&quot;&gt;
+ * inversion method&lt;/a&gt; for generating random samples that follow the
+ * distribution.
+ * &lt;/p&gt;
+ *
+ * @since 3.0
+ */
+<span class="fc" id="L49">public abstract class AbstractRealDistribution</span>
+    implements RealDistribution,
+               Serializable {
+    /** Default absolute accuracy for inverse cumulative computation. */
+    public static final double SOLVER_DEFAULT_ABSOLUTE_ACCURACY = 1e-6;
+    /** Serializable version identifier */
+    private static final long serialVersionUID = 20160311L;
+
+    /**
+     * For a random variable {@code X} whose values are distributed according
+     * to this distribution, this method returns {@code P(x0 &lt; X &lt;= x1)}.
+     *
+     * @param x0 Lower bound (excluded).
+     * @param x1 Upper bound (included).
+     * @return the probability that a random variable with this distribution
+     * takes a value between {@code x0} and {@code x1}, excluding the lower
+     * and including the upper endpoint.
+     * @throws NumberIsTooLargeException if {@code x0 &gt; x1}.
+     *
+     * The default implementation uses the identity
+     * {@code P(x0 &lt; X &lt;= x1) = P(X &lt;= x1) - P(X &lt;= x0)}
+     *
+     * @since 3.1
+     */
+    @Override
+    public double probability(double x0,
+                              double x1) {
+<span class="fc bfc" id="L76" title="All 2 branches covered.">        if (x0 &gt; x1) {</span>
+<span class="fc" id="L77">            throw new NumberIsTooLargeException(LocalizedFormats.LOWER_ENDPOINT_ABOVE_UPPER_ENDPOINT,</span>
+<span class="fc" id="L78">                                                x0, x1, true);</span>
+        }
+<span class="fc" id="L80">        return cumulativeProbability(x1) - cumulativeProbability(x0);</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The default implementation returns
+     * &lt;ul&gt;
+     * &lt;li&gt;{@link #getSupportLowerBound()} for {@code p = 0},&lt;/li&gt;
+     * &lt;li&gt;{@link #getSupportUpperBound()} for {@code p = 1}.&lt;/li&gt;
+     * &lt;/ul&gt;
+     */
+    @Override
+    public double inverseCumulativeProbability(final double p) throws OutOfRangeException {
+        /*
+         * IMPLEMENTATION NOTES
+         * --------------------
+         * Where applicable, use is made of the one-sided Chebyshev inequality
+         * to bracket the root. This inequality states that
+         * P(X - mu &gt;= k * sig) &lt;= 1 / (1 + k^2),
+         * mu: mean, sig: standard deviation. Equivalently
+         * 1 - P(X &lt; mu + k * sig) &lt;= 1 / (1 + k^2),
+         * F(mu + k * sig) &gt;= k^2 / (1 + k^2).
+         *
+         * For k = sqrt(p / (1 - p)), we find
+         * F(mu + k * sig) &gt;= p,
+         * and (mu + k * sig) is an upper-bound for the root.
+         *
+         * Then, introducing Y = -X, mean(Y) = -mu, sd(Y) = sig, and
+         * P(Y &gt;= -mu + k * sig) &lt;= 1 / (1 + k^2),
+         * P(-X &gt;= -mu + k * sig) &lt;= 1 / (1 + k^2),
+         * P(X &lt;= mu - k * sig) &lt;= 1 / (1 + k^2),
+         * F(mu - k * sig) &lt;= 1 / (1 + k^2).
+         *
+         * For k = sqrt((1 - p) / p), we find
+         * F(mu - k * sig) &lt;= p,
+         * and (mu - k * sig) is a lower-bound for the root.
+         *
+         * In cases where the Chebyshev inequality does not apply, geometric
+         * progressions 1, 2, 4, ... and -1, -2, -4, ... are used to bracket
+         * the root.
+         */
+<span class="pc bpc" id="L122" title="2 of 4 branches missed.">        if (p &lt; 0.0 || p &gt; 1.0) {</span>
+<span class="nc" id="L123">            throw new OutOfRangeException(p, 0, 1);</span>
+        }
+
+<span class="fc" id="L126">        double lowerBound = getSupportLowerBound();</span>
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">        if (p == 0.0) {</span>
+<span class="nc" id="L128">            return lowerBound;</span>
+        }
+
+<span class="fc" id="L131">        double upperBound = getSupportUpperBound();</span>
+<span class="pc bpc" id="L132" title="1 of 2 branches missed.">        if (p == 1.0) {</span>
+<span class="nc" id="L133">            return upperBound;</span>
+        }
+
+<span class="fc" id="L136">        final double mu = getMean();</span>
+<span class="fc" id="L137">        final double sig = FastMath.sqrt(getVariance());</span>
+        final boolean chebyshevApplies;
+<span class="pc bpc" id="L139" title="2 of 4 branches missed.">        chebyshevApplies = !(Double.isInfinite(mu) || Double.isNaN(mu) ||</span>
+<span class="pc bpc" id="L140" title="2 of 4 branches missed.">                             Double.isInfinite(sig) || Double.isNaN(sig));</span>
+
+<span class="pc bpc" id="L142" title="1 of 2 branches missed.">        if (lowerBound == Double.NEGATIVE_INFINITY) {</span>
+<span class="nc bnc" id="L143" title="All 2 branches missed.">            if (chebyshevApplies) {</span>
+<span class="nc" id="L144">                lowerBound = mu - sig * FastMath.sqrt((1. - p) / p);</span>
+            } else {
+<span class="nc" id="L146">                lowerBound = -1.0;</span>
+<span class="nc bnc" id="L147" title="All 2 branches missed.">                while (cumulativeProbability(lowerBound) &gt;= p) {</span>
+<span class="nc" id="L148">                    lowerBound *= 2.0;</span>
+                }
+            }
+        }
+
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">        if (upperBound == Double.POSITIVE_INFINITY) {</span>
+<span class="nc bnc" id="L154" title="All 2 branches missed.">            if (chebyshevApplies) {</span>
+<span class="nc" id="L155">                upperBound = mu + sig * FastMath.sqrt(p / (1. - p));</span>
+            } else {
+<span class="nc" id="L157">                upperBound = 1.0;</span>
+<span class="nc bnc" id="L158" title="All 2 branches missed.">                while (cumulativeProbability(upperBound) &lt; p) {</span>
+<span class="nc" id="L159">                    upperBound *= 2.0;</span>
+                }
+            }
+        }
+
+<span class="fc" id="L164">        final UnivariateFunction toSolve = new UnivariateFunction() {</span>
+            /** {@inheritDoc} */
+            @Override
+            public double value(final double x) {
+<span class="fc" id="L168">                return cumulativeProbability(x) - p;</span>
+            }
+        };
+
+<span class="fc" id="L172">        double x = UnivariateSolverUtils.solve(toSolve,</span>
+                                                   lowerBound,
+                                                   upperBound,
+<span class="fc" id="L175">                                                   getSolverAbsoluteAccuracy());</span>
+
+<span class="pc bpc" id="L177" title="1 of 2 branches missed.">        if (!isSupportConnected()) {</span>
+            /* Test for plateau. */
+<span class="fc" id="L179">            final double dx = getSolverAbsoluteAccuracy();</span>
+<span class="pc bpc" id="L180" title="1 of 2 branches missed.">            if (x - dx &gt;= getSupportLowerBound()) {</span>
+<span class="fc" id="L181">                double px = cumulativeProbability(x);</span>
+<span class="pc bpc" id="L182" title="1 of 2 branches missed.">                if (cumulativeProbability(x - dx) == px) {</span>
+<span class="fc" id="L183">                    upperBound = x;</span>
+<span class="fc bfc" id="L184" title="All 2 branches covered.">                    while (upperBound - lowerBound &gt; dx) {</span>
+<span class="fc" id="L185">                        final double midPoint = 0.5 * (lowerBound + upperBound);</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">                        if (cumulativeProbability(midPoint) &lt; px) {</span>
+<span class="fc" id="L187">                            lowerBound = midPoint;</span>
+                        } else {
+<span class="fc" id="L189">                            upperBound = midPoint;</span>
+                        }
+<span class="fc" id="L191">                    }</span>
+<span class="fc" id="L192">                    return upperBound;</span>
+                }
+            }
+        }
+<span class="nc" id="L196">        return x;</span>
+    }
+
+    /**
+     * Returns the solver absolute accuracy for inverse cumulative computation.
+     * You can override this method in order to use a Brent solver with an
+     * absolute accuracy different from the default.
+     *
+     * @return the maximum absolute error in inverse cumulative probability estimates
+     */
+    protected double getSolverAbsoluteAccuracy() {
+<span class="fc" id="L207">        return SOLVER_DEFAULT_ABSOLUTE_ACCURACY;</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @return zero.
+     * @since 3.1
+     */
+    @Override
+    public double probability(double x) {
+<span class="nc" id="L218">        return 0d;</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     * &lt;p&gt;
+     * The default implementation simply computes the logarithm of {@code density(x)}.
+     */
+    @Override
+    public double logDensity(double x) {
+<span class="fc" id="L228">        return FastMath.log(density(x));</span>
+    }
+
+    /**
+     * Utility function for allocating an array and filling it with {@code n}
+     * samples generated by the given {@code sampler}.
+     *
+     * @param n Number of samples.
+     * @param sampler Sampler.
+     * @return an array of size {@code n}.
+     */
+    public static double[] sample(int n,
+                                  ContinuousDistribution.Sampler sampler) {
+<span class="fc" id="L241">        final double[] samples = new double[n];</span>
+<span class="fc bfc" id="L242" title="All 2 branches covered.">        for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L243">            samples[i] = sampler.sample();</span>
+        }
+<span class="fc" id="L245">        return samples;</span>
+    }
+
+    /**{@inheritDoc} */
+    @Override
+    public ContinuousDistribution.Sampler createSampler(final UniformRandomProvider rng) {
+<span class="fc" id="L251">        return new ContinuousDistribution.Sampler() {</span>
+            /**
+             * Inversion method distribution sampler.
+             */
+<span class="fc" id="L255">            private final ContinuousSampler sampler =</span>
+<span class="fc" id="L256">                new InverseTransformContinuousSampler(rng, createICPF());</span>
+
+            /** {@inheritDoc} */
+            @Override
+            public double sample() {
+<span class="fc" id="L261">                return sampler.sample();</span>
+            }
+        };
+    }
+
+    /**
+     * @return an instance for use by {@link #createSampler(UniformRandomProvider)}
+     */
+    private ContinuousInverseCumulativeProbabilityFunction createICPF() {
+<span class="fc" id="L270">        return new ContinuousInverseCumulativeProbabilityFunction() {</span>
+            /** {@inheritDoc} */
+            @Override
+            public double inverseCumulativeProbability(double p) {
+<span class="fc" id="L274">                return AbstractRealDistribution.this.inverseCumulativeProbability(p);</span>
+            }
+        };
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

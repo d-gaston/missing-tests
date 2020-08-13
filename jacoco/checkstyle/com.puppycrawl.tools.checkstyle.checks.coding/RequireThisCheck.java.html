@@ -1,0 +1,1580 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RequireThisCheck.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.checks.coding</a> &gt; <span class="el_source">RequireThisCheck.java</span></div><h1>RequireThisCheck.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.checks.coding;
+
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import com.puppycrawl.tools.checkstyle.FileStatefulCheck;
+import com.puppycrawl.tools.checkstyle.api.AbstractCheck;
+import com.puppycrawl.tools.checkstyle.api.DetailAST;
+import com.puppycrawl.tools.checkstyle.api.TokenTypes;
+import com.puppycrawl.tools.checkstyle.utils.CheckUtil;
+import com.puppycrawl.tools.checkstyle.utils.ScopeUtil;
+import com.puppycrawl.tools.checkstyle.utils.TokenUtil;
+
+/**
+ * &lt;p&gt;
+ * Checks that references to instance variables and methods of the present
+ * object are explicitly of the form &quot;this.varName&quot; or &quot;this.methodName(args)&quot;
+ * and that those references don't rely on the default behavior when &quot;this.&quot; is absent.
+ * &lt;/p&gt;
+ * &lt;p&gt;Warning: the Check is very controversial if 'validateOnlyOverlapping' option is set to 'false'
+ * and not that actual nowadays.&lt;/p&gt;
+ * &lt;p&gt;Rationale:&lt;/p&gt;
+ * &lt;ol&gt;
+ *   &lt;li&gt;
+ *     The same notation/habit for C++ and Java (C++ have global methods, so having
+ *     &amp;quot;this.&amp;quot; do make sense in it to distinguish call of method of class
+ *     instead of global).
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     Non-IDE development (ease of refactoring, some clearness to distinguish
+ *     static and non-static methods).
+ *   &lt;/li&gt;
+ * &lt;/ol&gt;
+ * &lt;p&gt;Limitations: Nothing is currently done about static variables
+ * or catch-blocks.  Static methods invoked on a class name seem to be OK;
+ * both the class name and the method name have a DOT parent.
+ * Non-static methods invoked on either this or a variable name seem to be
+ * OK, likewise.
+ * &lt;/p&gt;
+ * &lt;ul&gt;
+ * &lt;li&gt;
+ * Property {@code checkFields} - Control whether to check references to fields.
+ * Default value is {@code true}.
+ * &lt;/li&gt;
+ * &lt;li&gt;
+ * Property {@code checkMethods} - Control whether to check references to methods.
+ * Default value is {@code true}.
+ * &lt;/li&gt;
+ * &lt;li&gt;
+ * Property {@code validateOnlyOverlapping} - Control whether to check only
+ * overlapping by variables or arguments.
+ * Default value is {@code true}.
+ * &lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;
+ * To configure the default check:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * &amp;lt;module name=&amp;quot;RequireThis&amp;quot;/&amp;gt;
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * To configure to check the {@code this} qualifier for fields only:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * &amp;lt;module name=&amp;quot;RequireThis&amp;quot;&amp;gt;
+ *   &amp;lt;property name=&amp;quot;checkMethods&amp;quot; value=&amp;quot;false&amp;quot;/&amp;gt;
+ * &amp;lt;/module&amp;gt;
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * Examples of how the check works if validateOnlyOverlapping option is set to true:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * public static class A {
+ *   private int field1;
+ *   private int field2;
+ *
+ *   public A(int field1) {
+ *     // Overlapping by constructor argument.
+ *     field1 = field1; // violation: Reference to instance variable &quot;field1&quot; needs &quot;this&quot;.
+ *     field2 = 0;
+ *   }
+ *
+ *   void foo3() {
+ *     String field1 = &quot;values&quot;;
+ *     // Overlapping by local variable.
+ *     field1 = field1; // violation:  Reference to instance variable &quot;field1&quot; needs &quot;this&quot;.
+ *   }
+ * }
+ *
+ * public static class B {
+ *   private int field;
+ *
+ *   public A(int f) {
+ *     field = f;
+ *   }
+ *
+ *   String addSuffixToField(String field) {
+ *     // Overlapping by method argument. Equal to &quot;return field = field + &quot;suffix&quot;;&quot;
+ *     return field += &quot;suffix&quot;; // violation: Reference to instance variable &quot;field&quot; needs &quot;this&quot;.
+ *   }
+ * }
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * Please, be aware of the following logic, which is implemented in the check:
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * 1) If you arrange 'this' in your code on your own, the check will not raise violation for
+ * variables which use 'this' to reference a class field, for example:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * public class C {
+ *   private int scale;
+ *   private int x;
+ *   public void foo(int scale) {
+ *     scale = this.scale; // no violation
+ *     if (scale &amp;gt; 0) {
+ *       scale = -scale; // no violation
+ *     }
+ *     x *= scale;
+ *   }
+ * }
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * 2) If method parameter is returned from the method, the check will not raise violation for
+ * returned variable/parameter, for example:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * public class D {
+ *   private String prefix;
+ *   public String modifyPrefix(String prefix) {
+ *     prefix = &quot;^&quot; + prefix + &quot;$&quot; // no violation (modification of parameter)
+ *     return prefix; // modified method parameter is returned from the method
+ *   }
+ * }
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * Examples of how the check works if validateOnlyOverlapping option is set to false:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * public static class A {
+ *   private int field1;
+ *   private int field2;
+ *
+ *   public A(int field1) {
+ *     field1 = field1; // violation: Reference to instance variable &quot;field1&quot; needs &quot;this&quot;.
+ *     field2 = 0; // violation: Reference to instance variable &quot;field2&quot; needs &quot;this&quot;.
+ *     String field2;
+ *     field2 = &quot;0&quot;; // No violation. Local var allowed
+ *   }
+ *
+ *   void foo3() {
+ *     String field1 = &quot;values&quot;;
+ *     field1 = field1; // violation:  Reference to instance variable &quot;field1&quot; needs &quot;this&quot;.
+ *   }
+ * }
+ *
+ * public static class B {
+ *   private int field;
+ *
+ *   public A(int f) {
+ *     field = f; // violation:  Reference to instance variable &quot;field&quot; needs &quot;this&quot;.
+ *   }
+ *
+ *   String addSuffixToField(String field) {
+ *     return field += &quot;suffix&quot;; // violation: Reference to instance variable &quot;field&quot; needs &quot;this&quot;.
+ *   }
+ * }
+ *
+ * // If the variable is locally defined, there won't be a violation provided the variable
+ * // doesn't overlap.
+ * class C {
+ *   private String s1 = &quot;foo1&quot;;
+ *   String s2 = &quot;foo2&quot;;
+ *
+ *   C() {
+ *     s1 = &quot;bar1&quot;; // Violation. Reference to instance variable 's1' needs &quot;this.&quot;.
+ *     String s2;
+ *     s2 = &quot;bar2&quot;; // No violation. Local var allowed.
+ *     s2 += s2; // Violation. Overlapping. Reference to instance variable 's2' needs &quot;this.&quot;.
+ *   }
+ * }
+ * &lt;/pre&gt;
+ *
+ * @since 3.4
+ */
+// -@cs[ClassDataAbstractionCoupling] This check requires to work with and identify many frames.
+@FileStatefulCheck
+<span class="fc" id="L216">public class RequireThisCheck extends AbstractCheck {</span>
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_METHOD = &quot;require.this.method&quot;;
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_VARIABLE = &quot;require.this.variable&quot;;
+
+    /** Set of all declaration tokens. */
+<span class="fc" id="L230">    private static final Set&lt;Integer&gt; DECLARATION_TOKENS = Collections.unmodifiableSet(</span>
+<span class="fc" id="L231">        Arrays.stream(new Integer[] {</span>
+<span class="fc" id="L232">            TokenTypes.VARIABLE_DEF,</span>
+<span class="fc" id="L233">            TokenTypes.CTOR_DEF,</span>
+<span class="fc" id="L234">            TokenTypes.METHOD_DEF,</span>
+<span class="fc" id="L235">            TokenTypes.CLASS_DEF,</span>
+<span class="fc" id="L236">            TokenTypes.ENUM_DEF,</span>
+<span class="fc" id="L237">            TokenTypes.ANNOTATION_DEF,</span>
+<span class="fc" id="L238">            TokenTypes.INTERFACE_DEF,</span>
+<span class="fc" id="L239">            TokenTypes.PARAMETER_DEF,</span>
+<span class="fc" id="L240">            TokenTypes.TYPE_ARGUMENT,</span>
+<span class="fc" id="L241">        }).collect(Collectors.toSet()));</span>
+    /** Set of all assign tokens. */
+<span class="fc" id="L243">    private static final Set&lt;Integer&gt; ASSIGN_TOKENS = Collections.unmodifiableSet(</span>
+<span class="fc" id="L244">        Arrays.stream(new Integer[] {</span>
+<span class="fc" id="L245">            TokenTypes.ASSIGN,</span>
+<span class="fc" id="L246">            TokenTypes.PLUS_ASSIGN,</span>
+<span class="fc" id="L247">            TokenTypes.STAR_ASSIGN,</span>
+<span class="fc" id="L248">            TokenTypes.DIV_ASSIGN,</span>
+<span class="fc" id="L249">            TokenTypes.MOD_ASSIGN,</span>
+<span class="fc" id="L250">            TokenTypes.SR_ASSIGN,</span>
+<span class="fc" id="L251">            TokenTypes.BSR_ASSIGN,</span>
+<span class="fc" id="L252">            TokenTypes.SL_ASSIGN,</span>
+<span class="fc" id="L253">            TokenTypes.BAND_ASSIGN,</span>
+<span class="fc" id="L254">            TokenTypes.BXOR_ASSIGN,</span>
+<span class="fc" id="L255">        }).collect(Collectors.toSet()));</span>
+    /** Set of all compound assign tokens. */
+<span class="fc" id="L257">    private static final Set&lt;Integer&gt; COMPOUND_ASSIGN_TOKENS = Collections.unmodifiableSet(</span>
+<span class="fc" id="L258">        Arrays.stream(new Integer[] {</span>
+<span class="fc" id="L259">            TokenTypes.PLUS_ASSIGN,</span>
+<span class="fc" id="L260">            TokenTypes.STAR_ASSIGN,</span>
+<span class="fc" id="L261">            TokenTypes.DIV_ASSIGN,</span>
+<span class="fc" id="L262">            TokenTypes.MOD_ASSIGN,</span>
+<span class="fc" id="L263">            TokenTypes.SR_ASSIGN,</span>
+<span class="fc" id="L264">            TokenTypes.BSR_ASSIGN,</span>
+<span class="fc" id="L265">            TokenTypes.SL_ASSIGN,</span>
+<span class="fc" id="L266">            TokenTypes.BAND_ASSIGN,</span>
+<span class="fc" id="L267">            TokenTypes.BXOR_ASSIGN,</span>
+<span class="fc" id="L268">        }).collect(Collectors.toSet()));</span>
+
+    /** Frame for the currently processed AST. */
+<span class="fc" id="L271">    private final Deque&lt;AbstractFrame&gt; current = new ArrayDeque&lt;&gt;();</span>
+
+    /** Tree of all the parsed frames. */
+    private Map&lt;DetailAST, AbstractFrame&gt; frames;
+
+    /** Control whether to check references to fields. */
+<span class="fc" id="L277">    private boolean checkFields = true;</span>
+    /** Control whether to check references to methods. */
+<span class="fc" id="L279">    private boolean checkMethods = true;</span>
+    /** Control whether to check only overlapping by variables or arguments. */
+<span class="fc" id="L281">    private boolean validateOnlyOverlapping = true;</span>
+
+    /**
+     * Setter to control whether to check references to fields.
+     * @param checkFields should we check fields usage or not.
+     */
+    public void setCheckFields(boolean checkFields) {
+<span class="fc" id="L288">        this.checkFields = checkFields;</span>
+<span class="fc" id="L289">    }</span>
+
+    /**
+     * Setter to control whether to check references to methods.
+     * @param checkMethods should we check methods usage or not.
+     */
+    public void setCheckMethods(boolean checkMethods) {
+<span class="fc" id="L296">        this.checkMethods = checkMethods;</span>
+<span class="fc" id="L297">    }</span>
+
+    /**
+     * Setter to control whether to check only overlapping by variables or arguments.
+     * @param validateOnlyOverlapping should we check only overlapping by variables or arguments.
+     */
+    public void setValidateOnlyOverlapping(boolean validateOnlyOverlapping) {
+<span class="fc" id="L304">        this.validateOnlyOverlapping = validateOnlyOverlapping;</span>
+<span class="fc" id="L305">    }</span>
+
+    @Override
+    public int[] getDefaultTokens() {
+<span class="fc" id="L309">        return getRequiredTokens();</span>
+    }
+
+    @Override
+    public int[] getRequiredTokens() {
+<span class="fc" id="L314">        return new int[] {</span>
+            TokenTypes.CLASS_DEF,
+            TokenTypes.INTERFACE_DEF,
+            TokenTypes.ENUM_DEF,
+            TokenTypes.ANNOTATION_DEF,
+            TokenTypes.CTOR_DEF,
+            TokenTypes.METHOD_DEF,
+            TokenTypes.LITERAL_FOR,
+            TokenTypes.SLIST,
+            TokenTypes.IDENT,
+        };
+    }
+
+    @Override
+    public int[] getAcceptableTokens() {
+<span class="fc" id="L329">        return getRequiredTokens();</span>
+    }
+
+    @Override
+    public void beginTree(DetailAST rootAST) {
+<span class="fc" id="L334">        frames = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L335">        current.clear();</span>
+
+<span class="fc" id="L337">        final Deque&lt;AbstractFrame&gt; frameStack = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L338">        DetailAST curNode = rootAST;</span>
+<span class="fc bfc" id="L339" title="All 2 branches covered.">        while (curNode != null) {</span>
+<span class="fc" id="L340">            collectDeclarations(frameStack, curNode);</span>
+<span class="fc" id="L341">            DetailAST toVisit = curNode.getFirstChild();</span>
+<span class="fc bfc" id="L342" title="All 4 branches covered.">            while (curNode != null &amp;&amp; toVisit == null) {</span>
+<span class="fc" id="L343">                endCollectingDeclarations(frameStack, curNode);</span>
+<span class="fc" id="L344">                toVisit = curNode.getNextSibling();</span>
+<span class="fc bfc" id="L345" title="All 2 branches covered.">                if (toVisit == null) {</span>
+<span class="fc" id="L346">                    curNode = curNode.getParent();</span>
+                }
+            }
+<span class="fc" id="L349">            curNode = toVisit;</span>
+<span class="fc" id="L350">        }</span>
+<span class="fc" id="L351">    }</span>
+
+    @Override
+    public void visitToken(DetailAST ast) {
+<span class="fc bfc" id="L355" title="All 3 branches covered.">        switch (ast.getType()) {</span>
+            case TokenTypes.IDENT :
+<span class="fc" id="L357">                processIdent(ast);</span>
+<span class="fc" id="L358">                break;</span>
+            case TokenTypes.CLASS_DEF :
+            case TokenTypes.INTERFACE_DEF :
+            case TokenTypes.ENUM_DEF :
+            case TokenTypes.ANNOTATION_DEF :
+            case TokenTypes.SLIST :
+            case TokenTypes.METHOD_DEF :
+            case TokenTypes.CTOR_DEF :
+            case TokenTypes.LITERAL_FOR :
+<span class="fc" id="L367">                current.push(frames.get(ast));</span>
+<span class="fc" id="L368">                break;</span>
+            default :
+                // do nothing
+        }
+<span class="fc" id="L372">    }</span>
+
+    @Override
+    public void leaveToken(DetailAST ast) {
+<span class="fc bfc" id="L376" title="All 2 branches covered.">        switch (ast.getType()) {</span>
+            case TokenTypes.CLASS_DEF :
+            case TokenTypes.INTERFACE_DEF :
+            case TokenTypes.ENUM_DEF :
+            case TokenTypes.ANNOTATION_DEF :
+            case TokenTypes.SLIST :
+            case TokenTypes.METHOD_DEF :
+            case TokenTypes.CTOR_DEF :
+            case TokenTypes.LITERAL_FOR:
+<span class="fc" id="L385">                current.pop();</span>
+<span class="fc" id="L386">                break;</span>
+            default :
+                // do nothing
+        }
+<span class="fc" id="L390">    }</span>
+
+    /**
+     * Checks if a given IDENT is method call or field name which
+     * requires explicit {@code this} qualifier.
+     * @param ast IDENT to check.
+     */
+    private void processIdent(DetailAST ast) {
+<span class="fc" id="L398">        int parentType = ast.getParent().getType();</span>
+<span class="fc bfc" id="L399" title="All 2 branches covered.">        if (parentType == TokenTypes.EXPR</span>
+<span class="fc bfc" id="L400" title="All 2 branches covered.">                &amp;&amp; ast.getParent().getParent().getParent().getType()</span>
+                    == TokenTypes.ANNOTATION_FIELD_DEF) {
+<span class="fc" id="L402">            parentType = TokenTypes.ANNOTATION_FIELD_DEF;</span>
+        }
+<span class="fc bfc" id="L404" title="All 3 branches covered.">        switch (parentType) {</span>
+            case TokenTypes.ANNOTATION_MEMBER_VALUE_PAIR:
+            case TokenTypes.ANNOTATION:
+            case TokenTypes.ANNOTATION_FIELD_DEF:
+                // no need to check annotations content
+<span class="fc" id="L409">                break;</span>
+            case TokenTypes.METHOD_CALL:
+<span class="fc bfc" id="L411" title="All 2 branches covered.">                if (checkMethods) {</span>
+<span class="fc" id="L412">                    final AbstractFrame frame = getMethodWithoutThis(ast);</span>
+<span class="fc bfc" id="L413" title="All 2 branches covered.">                    if (frame != null) {</span>
+<span class="fc" id="L414">                        logViolation(MSG_METHOD, ast, frame);</span>
+                    }
+<span class="fc" id="L416">                }</span>
+                break;
+            default:
+<span class="fc bfc" id="L419" title="All 2 branches covered.">                if (checkFields) {</span>
+<span class="fc" id="L420">                    final AbstractFrame frame = getFieldWithoutThis(ast, parentType);</span>
+<span class="fc bfc" id="L421" title="All 2 branches covered.">                    if (frame != null) {</span>
+<span class="fc" id="L422">                        logViolation(MSG_VARIABLE, ast, frame);</span>
+                    }
+                }
+                break;
+        }
+<span class="fc" id="L427">    }</span>
+
+    /**
+     * Helper method to log a LocalizedMessage.
+     * @param ast a node to get line id column numbers associated with the message.
+     * @param msgKey key to locale message format.
+     * @param frame the class frame where the violation is found.
+     */
+    private void logViolation(String msgKey, DetailAST ast, AbstractFrame frame) {
+<span class="fc bfc" id="L436" title="All 2 branches covered.">        if (frame.getFrameName().equals(getNearestClassFrameName())) {</span>
+<span class="fc" id="L437">            log(ast, msgKey, ast.getText(), &quot;&quot;);</span>
+        }
+<span class="fc bfc" id="L439" title="All 2 branches covered.">        else if (!(frame instanceof AnonymousClassFrame)) {</span>
+<span class="fc" id="L440">            log(ast, msgKey, ast.getText(), frame.getFrameName() + '.');</span>
+        }
+<span class="fc" id="L442">    }</span>
+
+    /**
+     * Returns the frame where the field is declared, if the given field is used without
+     * 'this', and null otherwise.
+     * @param ast field definition ast token.
+     * @param parentType type of the parent.
+     * @return the frame where the field is declared, if the given field is used without
+     *         'this' and null otherwise.
+     */
+    private AbstractFrame getFieldWithoutThis(DetailAST ast, int parentType) {
+<span class="fc bfc" id="L453" title="All 2 branches covered.">        final boolean importOrPackage = ScopeUtil.getSurroundingScope(ast) == null;</span>
+<span class="fc bfc" id="L454" title="All 4 branches covered.">        final boolean typeName = parentType == TokenTypes.TYPE</span>
+                || parentType == TokenTypes.LITERAL_NEW;
+<span class="fc" id="L456">        AbstractFrame frame = null;</span>
+
+<span class="fc bfc" id="L458" title="All 4 branches covered.">        if (!importOrPackage</span>
+                &amp;&amp; !typeName
+<span class="fc bfc" id="L460" title="All 2 branches covered.">                &amp;&amp; !isDeclarationToken(parentType)</span>
+<span class="fc bfc" id="L461" title="All 2 branches covered.">                &amp;&amp; !isLambdaParameter(ast)) {</span>
+<span class="fc" id="L462">            final AbstractFrame fieldFrame = findClassFrame(ast, false);</span>
+
+<span class="fc bfc" id="L464" title="All 4 branches covered.">            if (fieldFrame != null &amp;&amp; ((ClassFrame) fieldFrame).hasInstanceMember(ast)) {</span>
+<span class="fc" id="L465">                frame = getClassFrameWhereViolationIsFound(ast);</span>
+            }
+        }
+<span class="fc" id="L468">        return frame;</span>
+    }
+
+    /**
+     * Parses the next AST for declarations.
+     * @param frameStack stack containing the FrameTree being built.
+     * @param ast AST to parse.
+     */
+    // -@cs[JavaNCSS] This method is a big switch and is too hard to remove.
+    private static void collectDeclarations(Deque&lt;AbstractFrame&gt; frameStack, DetailAST ast) {
+<span class="fc" id="L478">        final AbstractFrame frame = frameStack.peek();</span>
+<span class="fc bfc" id="L479" title="All 11 branches covered.">        switch (ast.getType()) {</span>
+            case TokenTypes.VARIABLE_DEF :
+<span class="fc" id="L481">                collectVariableDeclarations(ast, frame);</span>
+<span class="fc" id="L482">                break;</span>
+            case TokenTypes.PARAMETER_DEF :
+<span class="fc bfc" id="L484" title="All 2 branches covered.">                if (!CheckUtil.isReceiverParameter(ast)</span>
+<span class="fc bfc" id="L485" title="All 2 branches covered.">                        &amp;&amp; !isLambdaParameter(ast)</span>
+<span class="fc bfc" id="L486" title="All 2 branches covered.">                        &amp;&amp; ast.getParent().getType() != TokenTypes.LITERAL_CATCH) {</span>
+<span class="fc" id="L487">                    final DetailAST parameterIdent = ast.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc" id="L488">                    frame.addIdent(parameterIdent);</span>
+<span class="fc" id="L489">                }</span>
+                break;
+            case TokenTypes.CLASS_DEF :
+            case TokenTypes.INTERFACE_DEF :
+            case TokenTypes.ENUM_DEF :
+            case TokenTypes.ANNOTATION_DEF :
+<span class="fc" id="L495">                final DetailAST classFrameNameIdent = ast.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc" id="L496">                frameStack.addFirst(new ClassFrame(frame, classFrameNameIdent));</span>
+<span class="fc" id="L497">                break;</span>
+            case TokenTypes.SLIST :
+<span class="fc" id="L499">                frameStack.addFirst(new BlockFrame(frame, ast));</span>
+<span class="fc" id="L500">                break;</span>
+            case TokenTypes.METHOD_DEF :
+<span class="fc" id="L502">                final DetailAST methodFrameNameIdent = ast.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc" id="L503">                final DetailAST mods = ast.findFirstToken(TokenTypes.MODIFIERS);</span>
+<span class="fc bfc" id="L504" title="All 2 branches covered.">                if (mods.findFirstToken(TokenTypes.LITERAL_STATIC) == null) {</span>
+<span class="fc" id="L505">                    ((ClassFrame) frame).addInstanceMethod(methodFrameNameIdent);</span>
+                }
+                else {
+<span class="fc" id="L508">                    ((ClassFrame) frame).addStaticMethod(methodFrameNameIdent);</span>
+                }
+<span class="fc" id="L510">                frameStack.addFirst(new MethodFrame(frame, methodFrameNameIdent));</span>
+<span class="fc" id="L511">                break;</span>
+            case TokenTypes.CTOR_DEF :
+<span class="fc" id="L513">                final DetailAST ctorFrameNameIdent = ast.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc" id="L514">                frameStack.addFirst(new ConstructorFrame(frame, ctorFrameNameIdent));</span>
+<span class="fc" id="L515">                break;</span>
+            case TokenTypes.ENUM_CONSTANT_DEF :
+<span class="fc" id="L517">                final DetailAST ident = ast.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc" id="L518">                ((ClassFrame) frame).addStaticMember(ident);</span>
+<span class="fc" id="L519">                break;</span>
+            case TokenTypes.LITERAL_CATCH:
+<span class="fc" id="L521">                final AbstractFrame catchFrame = new CatchFrame(frame, ast);</span>
+<span class="fc" id="L522">                catchFrame.addIdent(ast.findFirstToken(TokenTypes.PARAMETER_DEF).findFirstToken(</span>
+                        TokenTypes.IDENT));
+<span class="fc" id="L524">                frameStack.addFirst(catchFrame);</span>
+<span class="fc" id="L525">                break;</span>
+            case TokenTypes.LITERAL_FOR:
+<span class="fc" id="L527">                final AbstractFrame forFrame = new ForFrame(frame, ast);</span>
+<span class="fc" id="L528">                frameStack.addFirst(forFrame);</span>
+<span class="fc" id="L529">                break;</span>
+            case TokenTypes.LITERAL_NEW:
+<span class="fc bfc" id="L531" title="All 2 branches covered.">                if (isAnonymousClassDef(ast)) {</span>
+<span class="fc" id="L532">                    frameStack.addFirst(new AnonymousClassFrame(frame,</span>
+<span class="fc" id="L533">                            ast.getFirstChild().toString()));</span>
+                }
+                break;
+            default:
+                // do nothing
+        }
+<span class="fc" id="L539">    }</span>
+
+    /**
+     * Collects variable declarations.
+     * @param ast variable token.
+     * @param frame current frame.
+     */
+    private static void collectVariableDeclarations(DetailAST ast, AbstractFrame frame) {
+<span class="fc" id="L547">        final DetailAST ident = ast.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc bfc" id="L548" title="All 2 branches covered.">        if (frame.getType() == FrameType.CLASS_FRAME) {</span>
+<span class="fc" id="L549">            final DetailAST mods =</span>
+<span class="fc" id="L550">                    ast.findFirstToken(TokenTypes.MODIFIERS);</span>
+<span class="fc bfc" id="L551" title="All 2 branches covered.">            if (ScopeUtil.isInInterfaceBlock(ast)</span>
+<span class="fc bfc" id="L552" title="All 2 branches covered.">                    || mods.findFirstToken(TokenTypes.LITERAL_STATIC) != null) {</span>
+<span class="fc" id="L553">                ((ClassFrame) frame).addStaticMember(ident);</span>
+            }
+            else {
+<span class="fc" id="L556">                ((ClassFrame) frame).addInstanceMember(ident);</span>
+            }
+<span class="fc" id="L558">        }</span>
+        else {
+<span class="fc" id="L560">            frame.addIdent(ident);</span>
+        }
+<span class="fc" id="L562">    }</span>
+
+    /**
+     * Ends parsing of the AST for declarations.
+     * @param frameStack Stack containing the FrameTree being built.
+     * @param ast AST that was parsed.
+     */
+    private void endCollectingDeclarations(Queue&lt;AbstractFrame&gt; frameStack, DetailAST ast) {
+<span class="fc bfc" id="L570" title="All 3 branches covered.">        switch (ast.getType()) {</span>
+            case TokenTypes.CLASS_DEF :
+            case TokenTypes.INTERFACE_DEF :
+            case TokenTypes.ENUM_DEF :
+            case TokenTypes.ANNOTATION_DEF :
+            case TokenTypes.SLIST :
+            case TokenTypes.METHOD_DEF :
+            case TokenTypes.CTOR_DEF :
+            case TokenTypes.LITERAL_CATCH :
+            case TokenTypes.LITERAL_FOR :
+<span class="fc" id="L580">                frames.put(ast, frameStack.poll());</span>
+<span class="fc" id="L581">                break;</span>
+            case TokenTypes.LITERAL_NEW :
+<span class="fc bfc" id="L583" title="All 2 branches covered.">                if (isAnonymousClassDef(ast)) {</span>
+<span class="fc" id="L584">                    frames.put(ast, frameStack.poll());</span>
+                }
+                break;
+            default :
+                // do nothing
+        }
+<span class="fc" id="L590">    }</span>
+
+    /**
+     * Whether the AST is a definition of an anonymous class.
+     * @param ast the AST to process.
+     * @return true if the AST is a definition of an anonymous class.
+     */
+    private static boolean isAnonymousClassDef(DetailAST ast) {
+<span class="fc" id="L598">        final DetailAST lastChild = ast.getLastChild();</span>
+<span class="fc bfc" id="L599" title="All 2 branches covered.">        return lastChild != null</span>
+<span class="fc bfc" id="L600" title="All 2 branches covered.">            &amp;&amp; lastChild.getType() == TokenTypes.OBJBLOCK;</span>
+    }
+
+    /**
+     * Returns the class frame where violation is found (where the field is used without 'this')
+     * or null otherwise.
+     * @param ast IDENT ast to check.
+     * @return the class frame where violation is found or null otherwise.
+     */
+    // -@cs[CyclomaticComplexity] Method already invokes too many methods that fully explain
+    // a logic, additional abstraction will not make logic/algorithm more readable.
+    private AbstractFrame getClassFrameWhereViolationIsFound(DetailAST ast) {
+<span class="fc" id="L612">        AbstractFrame frameWhereViolationIsFound = null;</span>
+<span class="fc" id="L613">        final AbstractFrame variableDeclarationFrame = findFrame(ast, false);</span>
+<span class="fc" id="L614">        final FrameType variableDeclarationFrameType = variableDeclarationFrame.getType();</span>
+<span class="fc" id="L615">        final DetailAST prevSibling = ast.getPreviousSibling();</span>
+<span class="fc bfc" id="L616" title="All 6 branches covered.">        if (variableDeclarationFrameType == FrameType.CLASS_FRAME</span>
+                &amp;&amp; !validateOnlyOverlapping
+                &amp;&amp; prevSibling == null
+<span class="fc bfc" id="L619" title="All 2 branches covered.">                &amp;&amp; canBeReferencedFromStaticContext(ast)) {</span>
+<span class="fc" id="L620">            frameWhereViolationIsFound = variableDeclarationFrame;</span>
+        }
+<span class="fc bfc" id="L622" title="All 2 branches covered.">        else if (variableDeclarationFrameType == FrameType.METHOD_FRAME) {</span>
+<span class="fc bfc" id="L623" title="All 2 branches covered.">            if (isOverlappingByArgument(ast)) {</span>
+<span class="fc bfc" id="L624" title="All 2 branches covered.">                if (!isUserDefinedArrangementOfThis(variableDeclarationFrame, ast)</span>
+<span class="fc bfc" id="L625" title="All 2 branches covered.">                        &amp;&amp; !isReturnedVariable(variableDeclarationFrame, ast)</span>
+<span class="fc bfc" id="L626" title="All 2 branches covered.">                        &amp;&amp; canBeReferencedFromStaticContext(ast)</span>
+<span class="fc bfc" id="L627" title="All 2 branches covered.">                        &amp;&amp; canAssignValueToClassField(ast)) {</span>
+<span class="fc" id="L628">                    frameWhereViolationIsFound = findFrame(ast, true);</span>
+                }
+            }
+<span class="fc bfc" id="L631" title="All 4 branches covered.">            else if (!validateOnlyOverlapping</span>
+                     &amp;&amp; prevSibling == null
+<span class="fc bfc" id="L633" title="All 2 branches covered.">                     &amp;&amp; isAssignToken(ast.getParent().getType())</span>
+<span class="fc bfc" id="L634" title="All 2 branches covered.">                     &amp;&amp; !isUserDefinedArrangementOfThis(variableDeclarationFrame, ast)</span>
+<span class="fc bfc" id="L635" title="All 2 branches covered.">                     &amp;&amp; canBeReferencedFromStaticContext(ast)</span>
+<span class="fc bfc" id="L636" title="All 2 branches covered.">                     &amp;&amp; canAssignValueToClassField(ast)) {</span>
+<span class="fc" id="L637">                frameWhereViolationIsFound = findFrame(ast, true);</span>
+            }
+        }
+<span class="fc bfc" id="L640" title="All 2 branches covered.">        else if (variableDeclarationFrameType == FrameType.CTOR_FRAME</span>
+<span class="fc bfc" id="L641" title="All 2 branches covered.">                 &amp;&amp; isOverlappingByArgument(ast)</span>
+<span class="fc bfc" id="L642" title="All 2 branches covered.">                 &amp;&amp; !isUserDefinedArrangementOfThis(variableDeclarationFrame, ast)) {</span>
+<span class="fc" id="L643">            frameWhereViolationIsFound = findFrame(ast, true);</span>
+        }
+<span class="fc bfc" id="L645" title="All 2 branches covered.">        else if (variableDeclarationFrameType == FrameType.BLOCK_FRAME</span>
+<span class="fc bfc" id="L646" title="All 2 branches covered.">                    &amp;&amp; isOverlappingByLocalVariable(ast)</span>
+<span class="fc bfc" id="L647" title="All 2 branches covered.">                    &amp;&amp; canAssignValueToClassField(ast)</span>
+<span class="fc bfc" id="L648" title="All 2 branches covered.">                    &amp;&amp; !isUserDefinedArrangementOfThis(variableDeclarationFrame, ast)</span>
+<span class="fc bfc" id="L649" title="All 2 branches covered.">                    &amp;&amp; !isReturnedVariable(variableDeclarationFrame, ast)</span>
+<span class="fc bfc" id="L650" title="All 2 branches covered.">                    &amp;&amp; canBeReferencedFromStaticContext(ast)) {</span>
+<span class="fc" id="L651">            frameWhereViolationIsFound = findFrame(ast, true);</span>
+        }
+<span class="fc" id="L653">        return frameWhereViolationIsFound;</span>
+    }
+
+    /**
+     * Checks whether user arranges 'this' for variable in method, constructor, or block on his own.
+     * @param currentFrame current frame.
+     * @param ident ident token.
+     * @return true if user arranges 'this' for variable in method, constructor,
+     *         or block on his own.
+     */
+    private static boolean isUserDefinedArrangementOfThis(AbstractFrame currentFrame,
+                                                          DetailAST ident) {
+<span class="fc" id="L665">        final DetailAST blockFrameNameIdent = currentFrame.getFrameNameIdent();</span>
+<span class="fc" id="L666">        final DetailAST definitionToken = blockFrameNameIdent.getParent();</span>
+<span class="fc" id="L667">        final DetailAST blockStartToken = definitionToken.findFirstToken(TokenTypes.SLIST);</span>
+<span class="fc" id="L668">        final DetailAST blockEndToken = getBlockEndToken(blockFrameNameIdent, blockStartToken);</span>
+
+<span class="fc" id="L670">        boolean userDefinedArrangementOfThis = false;</span>
+
+<span class="fc" id="L672">        final Set&lt;DetailAST&gt; variableUsagesInsideBlock =</span>
+<span class="fc" id="L673">            getAllTokensWhichAreEqualToCurrent(definitionToken, ident,</span>
+<span class="fc" id="L674">                blockEndToken.getLineNo());</span>
+
+<span class="fc bfc" id="L676" title="All 2 branches covered.">        for (DetailAST variableUsage : variableUsagesInsideBlock) {</span>
+<span class="fc" id="L677">            final DetailAST prevSibling = variableUsage.getPreviousSibling();</span>
+<span class="fc bfc" id="L678" title="All 2 branches covered.">            if (prevSibling != null</span>
+<span class="fc bfc" id="L679" title="All 2 branches covered.">                    &amp;&amp; prevSibling.getType() == TokenTypes.LITERAL_THIS) {</span>
+<span class="fc" id="L680">                userDefinedArrangementOfThis = true;</span>
+<span class="fc" id="L681">                break;</span>
+            }
+<span class="fc" id="L683">        }</span>
+<span class="fc" id="L684">        return userDefinedArrangementOfThis;</span>
+    }
+
+    /**
+     * Returns the token which ends the code block.
+     * @param blockNameIdent block name identifier.
+     * @param blockStartToken token which starts the block.
+     * @return the token which ends the code block.
+     */
+    private static DetailAST getBlockEndToken(DetailAST blockNameIdent, DetailAST blockStartToken) {
+<span class="fc" id="L694">        DetailAST blockEndToken = null;</span>
+<span class="fc" id="L695">        final DetailAST blockNameIdentParent = blockNameIdent.getParent();</span>
+<span class="fc bfc" id="L696" title="All 2 branches covered.">        if (blockNameIdentParent.getType() == TokenTypes.CASE_GROUP) {</span>
+<span class="fc" id="L697">            blockEndToken = blockNameIdentParent.getNextSibling();</span>
+        }
+        else {
+<span class="fc" id="L700">            final Set&lt;DetailAST&gt; rcurlyTokens = getAllTokensOfType(blockNameIdent,</span>
+                    TokenTypes.RCURLY);
+<span class="fc bfc" id="L702" title="All 2 branches covered.">            for (DetailAST currentRcurly : rcurlyTokens) {</span>
+<span class="fc" id="L703">                final DetailAST parent = currentRcurly.getParent();</span>
+<span class="fc bfc" id="L704" title="All 2 branches covered.">                if (blockStartToken.getLineNo() == parent.getLineNo()) {</span>
+<span class="fc" id="L705">                    blockEndToken = currentRcurly;</span>
+                }
+<span class="fc" id="L707">            }</span>
+        }
+<span class="fc" id="L709">        return blockEndToken;</span>
+    }
+
+    /**
+     * Checks whether the current variable is returned from the method.
+     * @param currentFrame current frame.
+     * @param ident variable ident token.
+     * @return true if the current variable is returned from the method.
+     */
+    private static boolean isReturnedVariable(AbstractFrame currentFrame, DetailAST ident) {
+<span class="fc" id="L719">        final DetailAST blockFrameNameIdent = currentFrame.getFrameNameIdent();</span>
+<span class="fc" id="L720">        final DetailAST definitionToken = blockFrameNameIdent.getParent();</span>
+<span class="fc" id="L721">        final DetailAST blockStartToken = definitionToken.findFirstToken(TokenTypes.SLIST);</span>
+<span class="fc" id="L722">        final DetailAST blockEndToken = getBlockEndToken(blockFrameNameIdent, blockStartToken);</span>
+
+<span class="fc" id="L724">        final Set&lt;DetailAST&gt; returnsInsideBlock = getAllTokensOfType(definitionToken,</span>
+<span class="fc" id="L725">            TokenTypes.LITERAL_RETURN, blockEndToken.getLineNo());</span>
+
+<span class="fc" id="L727">        boolean returnedVariable = false;</span>
+<span class="fc bfc" id="L728" title="All 2 branches covered.">        for (DetailAST returnToken : returnsInsideBlock) {</span>
+<span class="fc" id="L729">            returnedVariable = isAstInside(returnToken, ident);</span>
+<span class="fc bfc" id="L730" title="All 2 branches covered.">            if (returnedVariable) {</span>
+<span class="fc" id="L731">                break;</span>
+            }
+<span class="fc" id="L733">        }</span>
+<span class="fc" id="L734">        return returnedVariable;</span>
+    }
+
+    /**
+     * Checks if the given {@code ast} is equal to the {@code tree} or a child of it.
+     * @param tree The tree to search.
+     * @param ast The AST to look for.
+     * @return {@code true} if the {@code ast} was found.
+     */
+    private static boolean isAstInside(DetailAST tree, DetailAST ast) {
+<span class="fc" id="L744">        boolean result = false;</span>
+
+<span class="fc bfc" id="L746" title="All 2 branches covered.">        if (isAstSimilar(tree, ast)) {</span>
+<span class="fc" id="L747">            result = true;</span>
+        }
+        else {
+<span class="fc" id="L750">            for (DetailAST child = tree.getFirstChild(); child != null</span>
+<span class="fc bfc" id="L751" title="All 4 branches covered.">                    &amp;&amp; !result; child = child.getNextSibling()) {</span>
+<span class="fc" id="L752">                result = isAstInside(child, ast);</span>
+            }
+        }
+
+<span class="fc" id="L756">        return result;</span>
+    }
+
+    /**
+     * Checks whether a field can be referenced from a static context.
+     * @param ident ident token.
+     * @return true if field can be referenced from a static context.
+     */
+    private boolean canBeReferencedFromStaticContext(DetailAST ident) {
+<span class="fc" id="L765">        AbstractFrame variableDeclarationFrame = findFrame(ident, false);</span>
+<span class="fc" id="L766">        boolean staticInitializationBlock = false;</span>
+<span class="fc bfc" id="L767" title="All 2 branches covered.">        while (variableDeclarationFrame.getType() == FrameType.BLOCK_FRAME</span>
+<span class="fc bfc" id="L768" title="All 2 branches covered.">                || variableDeclarationFrame.getType() == FrameType.FOR_FRAME) {</span>
+<span class="fc" id="L769">            final DetailAST blockFrameNameIdent = variableDeclarationFrame.getFrameNameIdent();</span>
+<span class="fc" id="L770">            final DetailAST definitionToken = blockFrameNameIdent.getParent();</span>
+<span class="fc bfc" id="L771" title="All 2 branches covered.">            if (definitionToken.getType() == TokenTypes.STATIC_INIT) {</span>
+<span class="fc" id="L772">                staticInitializationBlock = true;</span>
+<span class="fc" id="L773">                break;</span>
+            }
+<span class="fc" id="L775">            variableDeclarationFrame = variableDeclarationFrame.getParent();</span>
+<span class="fc" id="L776">        }</span>
+
+<span class="fc" id="L778">        boolean staticContext = false;</span>
+<span class="fc bfc" id="L779" title="All 2 branches covered.">        if (staticInitializationBlock) {</span>
+<span class="fc" id="L780">            staticContext = true;</span>
+        }
+        else {
+<span class="fc bfc" id="L783" title="All 2 branches covered.">            if (variableDeclarationFrame.getType() == FrameType.CLASS_FRAME) {</span>
+<span class="fc" id="L784">                final DetailAST codeBlockDefinition = getCodeBlockDefinitionToken(ident);</span>
+<span class="fc bfc" id="L785" title="All 2 branches covered.">                if (codeBlockDefinition != null) {</span>
+<span class="fc" id="L786">                    final DetailAST modifiers = codeBlockDefinition.getFirstChild();</span>
+<span class="fc bfc" id="L787" title="All 2 branches covered.">                    staticContext = codeBlockDefinition.getType() == TokenTypes.STATIC_INIT</span>
+<span class="fc bfc" id="L788" title="All 2 branches covered.">                        || modifiers.findFirstToken(TokenTypes.LITERAL_STATIC) != null;</span>
+                }
+<span class="fc" id="L790">            }</span>
+            else {
+<span class="fc" id="L792">                final DetailAST frameNameIdent = variableDeclarationFrame.getFrameNameIdent();</span>
+<span class="fc" id="L793">                final DetailAST definitionToken = frameNameIdent.getParent();</span>
+<span class="fc" id="L794">                staticContext = definitionToken.findFirstToken(TokenTypes.MODIFIERS)</span>
+<span class="fc bfc" id="L795" title="All 2 branches covered.">                        .findFirstToken(TokenTypes.LITERAL_STATIC) != null;</span>
+            }
+        }
+<span class="fc bfc" id="L798" title="All 2 branches covered.">        return !staticContext;</span>
+    }
+
+    /**
+     * Returns code block definition token for current identifier.
+     * @param ident ident token.
+     * @return code block definition token for current identifier or null if code block
+     *         definition was not found.
+     */
+    private static DetailAST getCodeBlockDefinitionToken(DetailAST ident) {
+<span class="fc" id="L808">        DetailAST parent = ident.getParent();</span>
+<span class="fc bfc" id="L809" title="All 2 branches covered.">        while (parent != null</span>
+<span class="fc bfc" id="L810" title="All 2 branches covered.">               &amp;&amp; parent.getType() != TokenTypes.METHOD_DEF</span>
+<span class="fc bfc" id="L811" title="All 2 branches covered.">               &amp;&amp; parent.getType() != TokenTypes.CTOR_DEF</span>
+<span class="fc bfc" id="L812" title="All 2 branches covered.">               &amp;&amp; parent.getType() != TokenTypes.STATIC_INIT) {</span>
+<span class="fc" id="L813">            parent = parent.getParent();</span>
+        }
+<span class="fc" id="L815">        return parent;</span>
+    }
+
+    /**
+     * Checks whether a value can be assigned to a field.
+     * A value can be assigned to a final field only in constructor block. If there is a method
+     * block, value assignment can be performed only to non final field.
+     * @param ast an identifier token.
+     * @return true if a value can be assigned to a field.
+     */
+    private boolean canAssignValueToClassField(DetailAST ast) {
+<span class="fc" id="L826">        final AbstractFrame fieldUsageFrame = findFrame(ast, false);</span>
+<span class="fc" id="L827">        final boolean fieldUsageInConstructor = isInsideConstructorFrame(fieldUsageFrame);</span>
+
+<span class="fc" id="L829">        final AbstractFrame declarationFrame = findFrame(ast, true);</span>
+<span class="fc" id="L830">        final boolean finalField = ((ClassFrame) declarationFrame).hasFinalField(ast);</span>
+
+<span class="fc bfc" id="L832" title="All 4 branches covered.">        return fieldUsageInConstructor || !finalField;</span>
+    }
+
+    /**
+     * Checks whether a field usage frame is inside constructor frame.
+     * @param frame frame, where field is used.
+     * @return true if the field usage frame is inside constructor frame.
+     */
+    private static boolean isInsideConstructorFrame(AbstractFrame frame) {
+<span class="fc" id="L841">        boolean assignmentInConstructor = false;</span>
+<span class="fc" id="L842">        AbstractFrame fieldUsageFrame = frame;</span>
+<span class="fc bfc" id="L843" title="All 2 branches covered.">        if (fieldUsageFrame.getType() == FrameType.BLOCK_FRAME) {</span>
+<span class="fc bfc" id="L844" title="All 2 branches covered.">            while (fieldUsageFrame.getType() == FrameType.BLOCK_FRAME) {</span>
+<span class="fc" id="L845">                fieldUsageFrame = fieldUsageFrame.getParent();</span>
+            }
+<span class="fc bfc" id="L847" title="All 2 branches covered.">            if (fieldUsageFrame.getType() == FrameType.CTOR_FRAME) {</span>
+<span class="fc" id="L848">                assignmentInConstructor = true;</span>
+            }
+        }
+<span class="fc" id="L851">        return assignmentInConstructor;</span>
+    }
+
+    /**
+     * Checks whether an overlapping by method or constructor argument takes place.
+     * @param ast an identifier.
+     * @return true if an overlapping by method or constructor argument takes place.
+     */
+    private boolean isOverlappingByArgument(DetailAST ast) {
+<span class="fc" id="L860">        boolean overlapping = false;</span>
+<span class="fc" id="L861">        final DetailAST parent = ast.getParent();</span>
+<span class="fc" id="L862">        final DetailAST sibling = ast.getNextSibling();</span>
+<span class="fc bfc" id="L863" title="All 4 branches covered.">        if (sibling != null &amp;&amp; isAssignToken(parent.getType())) {</span>
+<span class="fc bfc" id="L864" title="All 2 branches covered.">            if (isCompoundAssignToken(parent.getType())) {</span>
+<span class="fc" id="L865">                overlapping = true;</span>
+            }
+            else {
+<span class="fc" id="L868">                final ClassFrame classFrame = (ClassFrame) findFrame(ast, true);</span>
+<span class="fc" id="L869">                final Set&lt;DetailAST&gt; exprIdents = getAllTokensOfType(sibling, TokenTypes.IDENT);</span>
+<span class="fc" id="L870">                overlapping = classFrame.containsFieldOrVariableDef(exprIdents, ast);</span>
+            }
+        }
+<span class="fc" id="L873">        return overlapping;</span>
+    }
+
+    /**
+     * Checks whether an overlapping by local variable takes place.
+     * @param ast an identifier.
+     * @return true if an overlapping by local variable takes place.
+     */
+    private boolean isOverlappingByLocalVariable(DetailAST ast) {
+<span class="fc" id="L882">        boolean overlapping = false;</span>
+<span class="fc" id="L883">        final DetailAST parent = ast.getParent();</span>
+<span class="fc" id="L884">        final DetailAST sibling = ast.getNextSibling();</span>
+<span class="fc bfc" id="L885" title="All 4 branches covered.">        if (sibling != null &amp;&amp; isAssignToken(parent.getType())) {</span>
+<span class="fc" id="L886">            final ClassFrame classFrame = (ClassFrame) findFrame(ast, true);</span>
+<span class="fc" id="L887">            final Set&lt;DetailAST&gt; exprIdents = getAllTokensOfType(sibling, TokenTypes.IDENT);</span>
+<span class="fc" id="L888">            overlapping = classFrame.containsFieldOrVariableDef(exprIdents, ast);</span>
+        }
+<span class="fc" id="L890">        return overlapping;</span>
+    }
+
+    /**
+     * Collects all tokens of specific type starting with the current ast node.
+     * @param ast ast node.
+     * @param tokenType token type.
+     * @return a set of all tokens of specific type starting with the current ast node.
+     */
+    private static Set&lt;DetailAST&gt; getAllTokensOfType(DetailAST ast, int tokenType) {
+<span class="fc" id="L900">        DetailAST vertex = ast;</span>
+<span class="fc" id="L901">        final Set&lt;DetailAST&gt; result = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L902">        final Deque&lt;DetailAST&gt; stack = new ArrayDeque&lt;&gt;();</span>
+<span class="fc bfc" id="L903" title="All 4 branches covered.">        while (vertex != null || !stack.isEmpty()) {</span>
+<span class="fc bfc" id="L904" title="All 2 branches covered.">            if (!stack.isEmpty()) {</span>
+<span class="fc" id="L905">                vertex = stack.pop();</span>
+            }
+<span class="fc bfc" id="L907" title="All 2 branches covered.">            while (vertex != null) {</span>
+<span class="fc bfc" id="L908" title="All 2 branches covered.">                if (vertex.getType() == tokenType) {</span>
+<span class="fc" id="L909">                    result.add(vertex);</span>
+                }
+<span class="fc bfc" id="L911" title="All 2 branches covered.">                if (vertex.getNextSibling() != null) {</span>
+<span class="fc" id="L912">                    stack.push(vertex.getNextSibling());</span>
+                }
+<span class="fc" id="L914">                vertex = vertex.getFirstChild();</span>
+            }
+        }
+<span class="fc" id="L917">        return result;</span>
+    }
+
+    /**
+     * Collects all tokens of specific type starting with the current ast node and which line
+     * number is lower or equal to the end line number.
+     * @param ast ast node.
+     * @param tokenType token type.
+     * @param endLineNumber end line number.
+     * @return a set of all tokens of specific type starting with the current ast node and which
+     *         line number is lower or equal to the end line number.
+     */
+    private static Set&lt;DetailAST&gt; getAllTokensOfType(DetailAST ast, int tokenType,
+                                                     int endLineNumber) {
+<span class="fc" id="L931">        DetailAST vertex = ast;</span>
+<span class="fc" id="L932">        final Set&lt;DetailAST&gt; result = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L933">        final Deque&lt;DetailAST&gt; stack = new ArrayDeque&lt;&gt;();</span>
+<span class="fc bfc" id="L934" title="All 4 branches covered.">        while (vertex != null || !stack.isEmpty()) {</span>
+<span class="fc bfc" id="L935" title="All 2 branches covered.">            if (!stack.isEmpty()) {</span>
+<span class="fc" id="L936">                vertex = stack.pop();</span>
+            }
+<span class="fc bfc" id="L938" title="All 2 branches covered.">            while (vertex != null) {</span>
+<span class="fc bfc" id="L939" title="All 2 branches covered.">                if (tokenType == vertex.getType()</span>
+<span class="fc bfc" id="L940" title="All 2 branches covered.">                    &amp;&amp; vertex.getLineNo() &lt;= endLineNumber) {</span>
+<span class="fc" id="L941">                    result.add(vertex);</span>
+                }
+<span class="fc bfc" id="L943" title="All 2 branches covered.">                if (vertex.getNextSibling() != null) {</span>
+<span class="fc" id="L944">                    stack.push(vertex.getNextSibling());</span>
+                }
+<span class="fc" id="L946">                vertex = vertex.getFirstChild();</span>
+            }
+        }
+<span class="fc" id="L949">        return result;</span>
+    }
+
+    /**
+     * Collects all tokens which are equal to current token starting with the current ast node and
+     * which line number is lower or equal to the end line number.
+     * @param ast ast node.
+     * @param token token.
+     * @param endLineNumber end line number.
+     * @return a set of tokens which are equal to current token starting with the current ast node
+     *         and which line number is lower or equal to the end line number.
+     */
+    private static Set&lt;DetailAST&gt; getAllTokensWhichAreEqualToCurrent(DetailAST ast, DetailAST token,
+                                                                     int endLineNumber) {
+<span class="fc" id="L963">        DetailAST vertex = ast;</span>
+<span class="fc" id="L964">        final Set&lt;DetailAST&gt; result = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L965">        final Deque&lt;DetailAST&gt; stack = new ArrayDeque&lt;&gt;();</span>
+<span class="fc bfc" id="L966" title="All 4 branches covered.">        while (vertex != null || !stack.isEmpty()) {</span>
+<span class="fc bfc" id="L967" title="All 2 branches covered.">            if (!stack.isEmpty()) {</span>
+<span class="fc" id="L968">                vertex = stack.pop();</span>
+            }
+<span class="fc bfc" id="L970" title="All 2 branches covered.">            while (vertex != null) {</span>
+<span class="fc bfc" id="L971" title="All 2 branches covered.">                if (isAstSimilar(token, vertex)</span>
+<span class="fc bfc" id="L972" title="All 2 branches covered.">                        &amp;&amp; vertex.getLineNo() &lt;= endLineNumber) {</span>
+<span class="fc" id="L973">                    result.add(vertex);</span>
+                }
+<span class="fc bfc" id="L975" title="All 2 branches covered.">                if (vertex.getNextSibling() != null) {</span>
+<span class="fc" id="L976">                    stack.push(vertex.getNextSibling());</span>
+                }
+<span class="fc" id="L978">                vertex = vertex.getFirstChild();</span>
+            }
+        }
+<span class="fc" id="L981">        return result;</span>
+    }
+
+    /**
+     * Returns the frame where the method is declared, if the given method is used without
+     * 'this' and null otherwise.
+     * @param ast the IDENT ast of the name to check.
+     * @return the frame where the method is declared, if the given method is used without
+     *         'this' and null otherwise.
+     */
+    private AbstractFrame getMethodWithoutThis(DetailAST ast) {
+<span class="fc" id="L992">        AbstractFrame result = null;</span>
+<span class="fc bfc" id="L993" title="All 2 branches covered.">        if (!validateOnlyOverlapping) {</span>
+<span class="fc" id="L994">            final AbstractFrame frame = findFrame(ast, true);</span>
+<span class="fc bfc" id="L995" title="All 2 branches covered.">            if (frame != null</span>
+<span class="fc bfc" id="L996" title="All 2 branches covered.">                    &amp;&amp; ((ClassFrame) frame).hasInstanceMethod(ast)</span>
+<span class="fc bfc" id="L997" title="All 2 branches covered.">                    &amp;&amp; !((ClassFrame) frame).hasStaticMethod(ast)) {</span>
+<span class="fc" id="L998">                result = frame;</span>
+            }
+        }
+<span class="fc" id="L1001">        return result;</span>
+    }
+
+    /**
+     * Find the class frame containing declaration.
+     * @param name IDENT ast of the declaration to find.
+     * @param lookForMethod whether we are looking for a method name.
+     * @return AbstractFrame containing declaration or null.
+     */
+    private AbstractFrame findClassFrame(DetailAST name, boolean lookForMethod) {
+<span class="fc" id="L1011">        AbstractFrame frame = current.peek();</span>
+
+        while (true) {
+<span class="fc" id="L1014">            frame = findFrame(frame, name, lookForMethod);</span>
+
+<span class="fc bfc" id="L1016" title="All 4 branches covered.">            if (frame == null || frame instanceof ClassFrame) {</span>
+<span class="fc" id="L1017">                break;</span>
+            }
+
+<span class="fc" id="L1020">            frame = frame.getParent();</span>
+        }
+
+<span class="fc" id="L1023">        return frame;</span>
+    }
+
+    /**
+     * Find frame containing declaration.
+     * @param name IDENT ast of the declaration to find.
+     * @param lookForMethod whether we are looking for a method name.
+     * @return AbstractFrame containing declaration or null.
+     */
+    private AbstractFrame findFrame(DetailAST name, boolean lookForMethod) {
+<span class="fc" id="L1033">        return findFrame(current.peek(), name, lookForMethod);</span>
+    }
+
+    /**
+     * Find frame containing declaration.
+     * @param frame The parent frame to searching in.
+     * @param name IDENT ast of the declaration to find.
+     * @param lookForMethod whether we are looking for a method name.
+     * @return AbstractFrame containing declaration or null.
+     */
+    private static AbstractFrame findFrame(AbstractFrame frame, DetailAST name,
+            boolean lookForMethod) {
+<span class="fc" id="L1045">        return frame.getIfContains(name, lookForMethod);</span>
+    }
+
+    /**
+     * Check that token is related to Definition tokens.
+     * @param parentType token Type.
+     * @return true if token is related to Definition Tokens.
+     */
+    private static boolean isDeclarationToken(int parentType) {
+<span class="fc" id="L1054">        return DECLARATION_TOKENS.contains(parentType);</span>
+    }
+
+    /**
+     * Check that token is related to assign tokens.
+     * @param tokenType token type.
+     * @return true if token is related to assign tokens.
+     */
+    private static boolean isAssignToken(int tokenType) {
+<span class="fc" id="L1063">        return ASSIGN_TOKENS.contains(tokenType);</span>
+    }
+
+    /**
+     * Check that token is related to compound assign tokens.
+     * @param tokenType token type.
+     * @return true if token is related to compound assign tokens.
+     */
+    private static boolean isCompoundAssignToken(int tokenType) {
+<span class="fc" id="L1072">        return COMPOUND_ASSIGN_TOKENS.contains(tokenType);</span>
+    }
+
+    /**
+     * Gets the name of the nearest parent ClassFrame.
+     * @return the name of the nearest parent ClassFrame.
+     */
+    private String getNearestClassFrameName() {
+<span class="fc" id="L1080">        AbstractFrame frame = current.peek();</span>
+<span class="fc bfc" id="L1081" title="All 2 branches covered.">        while (frame.getType() != FrameType.CLASS_FRAME) {</span>
+<span class="fc" id="L1082">            frame = frame.getParent();</span>
+        }
+<span class="fc" id="L1084">        return frame.getFrameName();</span>
+    }
+
+    /**
+     * Checks if the token is a Lambda parameter.
+     * @param ast the {@code DetailAST} value of the token to be checked
+     * @return true if the token is a Lambda parameter
+     */
+    private static boolean isLambdaParameter(DetailAST ast) {
+        DetailAST parent;
+<span class="fc bfc" id="L1094" title="All 2 branches covered.">        for (parent = ast.getParent(); parent != null; parent = parent.getParent()) {</span>
+<span class="fc bfc" id="L1095" title="All 2 branches covered.">            if (parent.getType() == TokenTypes.LAMBDA) {</span>
+<span class="fc" id="L1096">                break;</span>
+            }
+        }
+        final boolean isLambdaParameter;
+<span class="fc bfc" id="L1100" title="All 2 branches covered.">        if (parent == null) {</span>
+<span class="fc" id="L1101">            isLambdaParameter = false;</span>
+        }
+<span class="fc bfc" id="L1103" title="All 2 branches covered.">        else if (ast.getType() == TokenTypes.PARAMETER_DEF) {</span>
+<span class="fc" id="L1104">            isLambdaParameter = true;</span>
+        }
+        else {
+<span class="fc" id="L1107">            final DetailAST lambdaParameters = parent.findFirstToken(TokenTypes.PARAMETERS);</span>
+<span class="fc bfc" id="L1108" title="All 2 branches covered.">            if (lambdaParameters == null) {</span>
+<span class="fc" id="L1109">                isLambdaParameter = parent.getFirstChild().getText().equals(ast.getText());</span>
+            }
+            else {
+<span class="fc" id="L1112">                isLambdaParameter = TokenUtil.findFirstTokenByPredicate(lambdaParameters,</span>
+                    paramDef -&gt; {
+<span class="fc" id="L1114">                        final DetailAST param = paramDef.findFirstToken(TokenTypes.IDENT);</span>
+<span class="fc bfc" id="L1115" title="All 4 branches covered.">                        return param != null &amp;&amp; param.getText().equals(ast.getText());</span>
+<span class="fc" id="L1116">                    }).isPresent();</span>
+            }
+        }
+<span class="fc" id="L1119">        return isLambdaParameter;</span>
+    }
+
+    /**
+     * Checks if 2 AST are similar by their type and text.
+     * @param left The first AST to check.
+     * @param right The second AST to check.
+     * @return {@code true} if they are similar.
+     */
+    private static boolean isAstSimilar(DetailAST left, DetailAST right) {
+<span class="fc bfc" id="L1129" title="All 4 branches covered.">        return left.getType() == right.getType() &amp;&amp; left.getText().equals(right.getText());</span>
+    }
+
+    /** An AbstractFrame type. */
+<span class="fc" id="L1133">    private enum FrameType {</span>
+
+        /** Class frame type. */
+<span class="fc" id="L1136">        CLASS_FRAME,</span>
+        /** Constructor frame type. */
+<span class="fc" id="L1138">        CTOR_FRAME,</span>
+        /** Method frame type. */
+<span class="fc" id="L1140">        METHOD_FRAME,</span>
+        /** Block frame type. */
+<span class="fc" id="L1142">        BLOCK_FRAME,</span>
+        /** Catch frame type. */
+<span class="fc" id="L1144">        CATCH_FRAME,</span>
+        /** Lambda frame type. */
+<span class="fc" id="L1146">        FOR_FRAME,</span>
+
+    }
+
+    /**
+     * A declaration frame.
+     */
+    private abstract static class AbstractFrame {
+
+        /** Set of name of variables declared in this frame. */
+        private final Set&lt;DetailAST&gt; varIdents;
+
+        /** Parent frame. */
+        private final AbstractFrame parent;
+
+        /** Name identifier token. */
+        private final DetailAST frameNameIdent;
+
+        /**
+         * Constructor -- invocable only via super() from subclasses.
+         * @param parent parent frame.
+         * @param ident frame name ident.
+         */
+<span class="fc" id="L1169">        protected AbstractFrame(AbstractFrame parent, DetailAST ident) {</span>
+<span class="fc" id="L1170">            this.parent = parent;</span>
+<span class="fc" id="L1171">            frameNameIdent = ident;</span>
+<span class="fc" id="L1172">            varIdents = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L1173">        }</span>
+
+        /**
+         * Get the type of the frame.
+         * @return a FrameType.
+         */
+        protected abstract FrameType getType();
+
+        /**
+         * Add a name to the frame.
+         * @param identToAdd the name we're adding.
+         */
+        private void addIdent(DetailAST identToAdd) {
+<span class="fc" id="L1186">            varIdents.add(identToAdd);</span>
+<span class="fc" id="L1187">        }</span>
+
+        protected AbstractFrame getParent() {
+<span class="fc" id="L1190">            return parent;</span>
+        }
+
+        protected String getFrameName() {
+<span class="fc" id="L1194">            return frameNameIdent.getText();</span>
+        }
+
+        public DetailAST getFrameNameIdent() {
+<span class="fc" id="L1198">            return frameNameIdent;</span>
+        }
+
+        /**
+         * Check whether the frame contains a field or a variable with the given name.
+         * @param nameToFind the IDENT ast of the name we're looking for.
+         * @return whether it was found.
+         */
+        protected boolean containsFieldOrVariable(DetailAST nameToFind) {
+<span class="fc" id="L1207">            return containsFieldOrVariableDef(varIdents, nameToFind);</span>
+        }
+
+        /**
+         * Check whether the frame contains a given name.
+         * @param nameToFind IDENT ast of the name we're looking for.
+         * @param lookForMethod whether we are looking for a method name.
+         * @return whether it was found.
+         */
+        protected AbstractFrame getIfContains(DetailAST nameToFind, boolean lookForMethod) {
+            final AbstractFrame frame;
+
+<span class="fc bfc" id="L1219" title="All 2 branches covered.">            if (!lookForMethod</span>
+<span class="fc bfc" id="L1220" title="All 2 branches covered.">                &amp;&amp; containsFieldOrVariable(nameToFind)) {</span>
+<span class="fc" id="L1221">                frame = this;</span>
+            }
+            else {
+<span class="fc" id="L1224">                frame = parent.getIfContains(nameToFind, lookForMethod);</span>
+            }
+<span class="fc" id="L1226">            return frame;</span>
+        }
+
+        /**
+         * Whether the set contains a declaration with the text of the specified
+         * IDENT ast and it is declared in a proper position.
+         * @param set the set of declarations.
+         * @param ident the specified IDENT ast.
+         * @return true if the set contains a declaration with the text of the specified
+         *         IDENT ast and it is declared in a proper position.
+         */
+        protected boolean containsFieldOrVariableDef(Set&lt;DetailAST&gt; set, DetailAST ident) {
+<span class="fc" id="L1238">            boolean result = false;</span>
+<span class="fc bfc" id="L1239" title="All 2 branches covered.">            for (DetailAST ast: set) {</span>
+<span class="fc bfc" id="L1240" title="All 2 branches covered.">                if (isProperDefinition(ident, ast)) {</span>
+<span class="fc" id="L1241">                    result = true;</span>
+<span class="fc" id="L1242">                    break;</span>
+                }
+<span class="fc" id="L1244">            }</span>
+<span class="fc" id="L1245">            return result;</span>
+        }
+
+        /**
+         * Whether the definition is correspondent to the IDENT.
+         * @param ident the IDENT ast to check.
+         * @param ast the IDENT ast of the definition to check.
+         * @return true if ast is correspondent to ident.
+         */
+        protected boolean isProperDefinition(DetailAST ident, DetailAST ast) {
+<span class="fc" id="L1255">            final String nameToFind = ident.getText();</span>
+<span class="fc bfc" id="L1256" title="All 2 branches covered.">            return nameToFind.equals(ast.getText())</span>
+<span class="fc bfc" id="L1257" title="All 2 branches covered.">                &amp;&amp; CheckUtil.isBeforeInSource(ast, ident);</span>
+        }
+    }
+
+    /**
+     * A frame initiated at method definition; holds a method definition token.
+     */
+    private static class MethodFrame extends AbstractFrame {
+
+        /**
+         * Creates method frame.
+         * @param parent parent frame.
+         * @param ident method name identifier token.
+         */
+        protected MethodFrame(AbstractFrame parent, DetailAST ident) {
+<span class="fc" id="L1272">            super(parent, ident);</span>
+<span class="fc" id="L1273">        }</span>
+
+        @Override
+        protected FrameType getType() {
+<span class="fc" id="L1277">            return FrameType.METHOD_FRAME;</span>
+        }
+
+    }
+
+    /**
+     * A frame initiated at constructor definition.
+     */
+    private static class ConstructorFrame extends AbstractFrame {
+
+        /**
+         * Creates a constructor frame.
+         * @param parent parent frame.
+         * @param ident frame name ident.
+         */
+        protected ConstructorFrame(AbstractFrame parent, DetailAST ident) {
+<span class="fc" id="L1293">            super(parent, ident);</span>
+<span class="fc" id="L1294">        }</span>
+
+        @Override
+        protected FrameType getType() {
+<span class="fc" id="L1298">            return FrameType.CTOR_FRAME;</span>
+        }
+
+    }
+
+    /**
+     * A frame initiated at class, enum or interface definition; holds instance variable names.
+     */
+    private static class ClassFrame extends AbstractFrame {
+
+        /** Set of idents of instance members declared in this frame. */
+        private final Set&lt;DetailAST&gt; instanceMembers;
+        /** Set of idents of instance methods declared in this frame. */
+        private final Set&lt;DetailAST&gt; instanceMethods;
+        /** Set of idents of variables declared in this frame. */
+        private final Set&lt;DetailAST&gt; staticMembers;
+        /** Set of idents of static methods declared in this frame. */
+        private final Set&lt;DetailAST&gt; staticMethods;
+
+        /**
+         * Creates new instance of ClassFrame.
+         * @param parent parent frame.
+         * @param ident frame name ident.
+         */
+        /* package */ ClassFrame(AbstractFrame parent, DetailAST ident) {
+<span class="fc" id="L1323">            super(parent, ident);</span>
+<span class="fc" id="L1324">            instanceMembers = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L1325">            instanceMethods = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L1326">            staticMembers = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L1327">            staticMethods = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L1328">        }</span>
+
+        @Override
+        protected FrameType getType() {
+<span class="fc" id="L1332">            return FrameType.CLASS_FRAME;</span>
+        }
+
+        /**
+         * Adds static member's ident.
+         * @param ident an ident of static member of the class.
+         */
+        public void addStaticMember(final DetailAST ident) {
+<span class="fc" id="L1340">            staticMembers.add(ident);</span>
+<span class="fc" id="L1341">        }</span>
+
+        /**
+         * Adds static method's name.
+         * @param ident an ident of static method of the class.
+         */
+        public void addStaticMethod(final DetailAST ident) {
+<span class="fc" id="L1348">            staticMethods.add(ident);</span>
+<span class="fc" id="L1349">        }</span>
+
+        /**
+         * Adds instance member's ident.
+         * @param ident an ident of instance member of the class.
+         */
+        public void addInstanceMember(final DetailAST ident) {
+<span class="fc" id="L1356">            instanceMembers.add(ident);</span>
+<span class="fc" id="L1357">        }</span>
+
+        /**
+         * Adds instance method's name.
+         * @param ident an ident of instance method of the class.
+         */
+        public void addInstanceMethod(final DetailAST ident) {
+<span class="fc" id="L1364">            instanceMethods.add(ident);</span>
+<span class="fc" id="L1365">        }</span>
+
+        /**
+         * Checks if a given name is a known instance member of the class.
+         * @param ident the IDENT ast of the name to check.
+         * @return true is the given name is a name of a known
+         *         instance member of the class.
+         */
+        public boolean hasInstanceMember(final DetailAST ident) {
+<span class="fc" id="L1374">            return containsFieldOrVariableDef(instanceMembers, ident);</span>
+        }
+
+        /**
+         * Checks if a given name is a known instance method of the class.
+         * @param ident the IDENT ast of the method call to check.
+         * @return true if the given ast is correspondent to a known
+         *         instance method of the class.
+         */
+        public boolean hasInstanceMethod(final DetailAST ident) {
+<span class="fc" id="L1384">            return containsMethodDef(instanceMethods, ident);</span>
+        }
+
+        /**
+         * Checks if a given name is a known static method of the class.
+         * @param ident the IDENT ast of the method call to check.
+         * @return true is the given ast is correspondent to a known
+         *         instance method of the class.
+         */
+        public boolean hasStaticMethod(final DetailAST ident) {
+<span class="fc" id="L1394">            return containsMethodDef(staticMethods, ident);</span>
+        }
+
+        /**
+         * Checks whether given instance member has final modifier.
+         * @param instanceMember an instance member of a class.
+         * @return true if given instance member has final modifier.
+         */
+        public boolean hasFinalField(final DetailAST instanceMember) {
+<span class="fc" id="L1403">            boolean result = false;</span>
+<span class="fc bfc" id="L1404" title="All 2 branches covered.">            for (DetailAST member : instanceMembers) {</span>
+<span class="fc" id="L1405">                final DetailAST mods = member.getParent().findFirstToken(TokenTypes.MODIFIERS);</span>
+<span class="fc bfc" id="L1406" title="All 2 branches covered.">                final boolean finalMod = mods.findFirstToken(TokenTypes.FINAL) != null;</span>
+<span class="fc bfc" id="L1407" title="All 4 branches covered.">                if (finalMod &amp;&amp; isAstSimilar(member, instanceMember)) {</span>
+<span class="fc" id="L1408">                    result = true;</span>
+<span class="fc" id="L1409">                    break;</span>
+                }
+<span class="fc" id="L1411">            }</span>
+<span class="fc" id="L1412">            return result;</span>
+        }
+
+        @Override
+        protected boolean containsFieldOrVariable(DetailAST nameToFind) {
+<span class="fc bfc" id="L1417" title="All 2 branches covered.">            return containsFieldOrVariableDef(instanceMembers, nameToFind)</span>
+<span class="fc bfc" id="L1418" title="All 2 branches covered.">                    || containsFieldOrVariableDef(staticMembers, nameToFind);</span>
+        }
+
+        @Override
+        protected boolean isProperDefinition(DetailAST ident, DetailAST ast) {
+<span class="fc" id="L1423">            final String nameToFind = ident.getText();</span>
+<span class="fc" id="L1424">            return nameToFind.equals(ast.getText());</span>
+        }
+
+        @Override
+        protected AbstractFrame getIfContains(DetailAST nameToFind, boolean lookForMethod) {
+<span class="fc" id="L1429">            AbstractFrame frame = null;</span>
+
+<span class="fc bfc" id="L1431" title="All 4 branches covered.">            if (lookForMethod &amp;&amp; containsMethod(nameToFind)</span>
+<span class="fc bfc" id="L1432" title="All 2 branches covered.">                || containsFieldOrVariable(nameToFind)) {</span>
+<span class="fc" id="L1433">                frame = this;</span>
+            }
+<span class="fc bfc" id="L1435" title="All 2 branches covered.">            else if (getParent() != null) {</span>
+<span class="fc" id="L1436">                frame = getParent().getIfContains(nameToFind, lookForMethod);</span>
+            }
+<span class="fc" id="L1438">            return frame;</span>
+        }
+
+        /**
+         * Check whether the frame contains a given method.
+         * @param methodToFind the AST of the method to find.
+         * @return true, if a method with the same name and number of parameters is found.
+         */
+        private boolean containsMethod(DetailAST methodToFind) {
+<span class="fc bfc" id="L1447" title="All 2 branches covered.">            return containsMethodDef(instanceMethods, methodToFind)</span>
+<span class="fc bfc" id="L1448" title="All 2 branches covered.">                || containsMethodDef(staticMethods, methodToFind);</span>
+        }
+
+        /**
+         * Whether the set contains a method definition with the
+         *     same name and number of parameters.
+         * @param set the set of definitions.
+         * @param ident the specified method call IDENT ast.
+         * @return true if the set contains a definition with the
+         *     same name and number of parameters.
+         */
+        private static boolean containsMethodDef(Set&lt;DetailAST&gt; set, DetailAST ident) {
+<span class="fc" id="L1460">            boolean result = false;</span>
+<span class="fc bfc" id="L1461" title="All 2 branches covered.">            for (DetailAST ast: set) {</span>
+<span class="fc bfc" id="L1462" title="All 2 branches covered.">                if (isSimilarSignature(ident, ast)) {</span>
+<span class="fc" id="L1463">                    result = true;</span>
+<span class="fc" id="L1464">                    break;</span>
+                }
+<span class="fc" id="L1466">            }</span>
+<span class="fc" id="L1467">            return result;</span>
+        }
+
+        /**
+         * Whether the method definition has the same name and number of parameters.
+         * @param ident the specified method call IDENT ast.
+         * @param ast the ast of a method definition to compare with.
+         * @return true if a method definition has the same name and number of parameters
+         *     as the method call.
+         */
+        private static boolean isSimilarSignature(DetailAST ident, DetailAST ast) {
+<span class="fc" id="L1478">            boolean result = false;</span>
+<span class="fc" id="L1479">            final DetailAST elistToken = ident.getParent().findFirstToken(TokenTypes.ELIST);</span>
+<span class="fc bfc" id="L1480" title="All 4 branches covered.">            if (elistToken != null &amp;&amp; ident.getText().equals(ast.getText())) {</span>
+<span class="fc" id="L1481">                final int paramsNumber =</span>
+<span class="fc" id="L1482">                    ast.getParent().findFirstToken(TokenTypes.PARAMETERS).getChildCount();</span>
+<span class="fc" id="L1483">                final int argsNumber = elistToken.getChildCount();</span>
+<span class="fc bfc" id="L1484" title="All 2 branches covered.">                result = paramsNumber == argsNumber;</span>
+            }
+<span class="fc" id="L1486">            return result;</span>
+        }
+
+    }
+
+    /**
+     * An anonymous class frame; holds instance variable names.
+     */
+    private static class AnonymousClassFrame extends ClassFrame {
+
+        /** The name of the frame. */
+        private final String frameName;
+
+        /**
+         * Creates anonymous class frame.
+         * @param parent parent frame.
+         * @param frameName name of the frame.
+         */
+        protected AnonymousClassFrame(AbstractFrame parent, String frameName) {
+<span class="fc" id="L1505">            super(parent, null);</span>
+<span class="fc" id="L1506">            this.frameName = frameName;</span>
+<span class="fc" id="L1507">        }</span>
+
+        @Override
+        protected String getFrameName() {
+<span class="fc" id="L1511">            return frameName;</span>
+        }
+
+    }
+
+    /**
+     * A frame initiated on entering a statement list; holds local variable names.
+     */
+    private static class BlockFrame extends AbstractFrame {
+
+        /**
+         * Creates block frame.
+         * @param parent parent frame.
+         * @param ident ident frame name ident.
+         */
+        protected BlockFrame(AbstractFrame parent, DetailAST ident) {
+<span class="fc" id="L1527">            super(parent, ident);</span>
+<span class="fc" id="L1528">        }</span>
+
+        @Override
+        protected FrameType getType() {
+<span class="fc" id="L1532">            return FrameType.BLOCK_FRAME;</span>
+        }
+
+    }
+
+    /**
+     * A frame initiated on entering a catch block; holds local catch variable names.
+     */
+    private static class CatchFrame extends AbstractFrame {
+
+        /**
+         * Creates catch frame.
+         * @param parent parent frame.
+         * @param ident ident frame name ident.
+         */
+        protected CatchFrame(AbstractFrame parent, DetailAST ident) {
+<span class="fc" id="L1548">            super(parent, ident);</span>
+<span class="fc" id="L1549">        }</span>
+
+        @Override
+        public FrameType getType() {
+<span class="fc" id="L1553">            return FrameType.CATCH_FRAME;</span>
+        }
+
+    }
+
+    /**
+     * A frame initiated on entering a for block; holds local for variable names.
+     */
+    private static class ForFrame extends AbstractFrame {
+
+        /**
+         * Creates for frame.
+         * @param parent parent frame.
+         * @param ident ident frame name ident.
+         */
+        protected ForFrame(AbstractFrame parent, DetailAST ident) {
+<span class="fc" id="L1569">            super(parent, ident);</span>
+<span class="fc" id="L1570">        }</span>
+
+        @Override
+        public FrameType getType() {
+<span class="fc" id="L1574">            return FrameType.FOR_FRAME;</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

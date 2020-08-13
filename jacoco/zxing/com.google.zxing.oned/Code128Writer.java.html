@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Code128Writer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">Code128Writer.java</span></div><h1>Code128Writer.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2010 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.WriterException;
+import com.google.zxing.common.BitMatrix;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
+
+/**
+ * This object renders a CODE128 code as a {@link BitMatrix}.
+ *
+ * @author erik.barbara@gmail.com (Erik Barbara)
+ */
+<span class="fc" id="L33">public final class Code128Writer extends OneDimensionalCodeWriter {</span>
+
+  private static final int CODE_START_A = 103;
+  private static final int CODE_START_B = 104;
+  private static final int CODE_START_C = 105;
+  private static final int CODE_CODE_A = 101;
+  private static final int CODE_CODE_B = 100;
+  private static final int CODE_CODE_C = 99;
+  private static final int CODE_STOP = 106;
+
+  // Dummy characters used to specify control characters in input
+  private static final char ESCAPE_FNC_1 = '\u00f1';
+  private static final char ESCAPE_FNC_2 = '\u00f2';
+  private static final char ESCAPE_FNC_3 = '\u00f3';
+  private static final char ESCAPE_FNC_4 = '\u00f4';
+
+  private static final int CODE_FNC_1 = 102;   // Code A, Code B, Code C
+  private static final int CODE_FNC_2 = 97;    // Code A, Code B
+  private static final int CODE_FNC_3 = 96;    // Code A, Code B
+  private static final int CODE_FNC_4_A = 101; // Code A
+  private static final int CODE_FNC_4_B = 100; // Code B
+
+  // Results of minimal lookahead for code C
+<span class="fc" id="L56">  private enum CType {</span>
+<span class="fc" id="L57">    UNCODABLE,</span>
+<span class="fc" id="L58">    ONE_DIGIT,</span>
+<span class="fc" id="L59">    TWO_DIGITS,</span>
+<span class="fc" id="L60">    FNC_1</span>
+  }
+
+  @Override
+  public BitMatrix encode(String contents,
+                          BarcodeFormat format,
+                          int width,
+                          int height,
+                          Map&lt;EncodeHintType,?&gt; hints) throws WriterException {
+<span class="pc bpc" id="L69" title="1 of 2 branches missed.">    if (format != BarcodeFormat.CODE_128) {</span>
+<span class="nc" id="L70">      throw new IllegalArgumentException(&quot;Can only encode CODE_128, but got &quot; + format);</span>
+    }
+<span class="fc" id="L72">    return super.encode(contents, format, width, height, hints);</span>
+  }
+
+  @Override
+  public boolean[] encode(String contents) {
+<span class="fc" id="L77">    int length = contents.length();</span>
+    // Check length
+<span class="pc bpc" id="L79" title="2 of 4 branches missed.">    if (length &lt; 1 || length &gt; 80) {</span>
+<span class="nc" id="L80">      throw new IllegalArgumentException(</span>
+          &quot;Contents length should be between 1 and 80 characters, but got &quot; + length);
+    }
+    // Check content
+<span class="fc bfc" id="L84" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L85">      char c = contents.charAt(i);</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      switch (c) {</span>
+        case ESCAPE_FNC_1:
+        case ESCAPE_FNC_2:
+        case ESCAPE_FNC_3:
+        case ESCAPE_FNC_4:
+<span class="fc" id="L91">          break;</span>
+        default:
+<span class="pc bpc" id="L93" title="1 of 2 branches missed.">          if (c &gt; 127) {</span>
+            // support for FNC4 isn't implemented, no full Latin-1 character set available at the moment
+<span class="nc" id="L95">            throw new IllegalArgumentException(&quot;Bad character in input: &quot; + c);</span>
+          }
+      }
+    }
+
+<span class="fc" id="L100">    Collection&lt;int[]&gt; patterns = new ArrayList&lt;&gt;(); // temporary storage for patterns</span>
+<span class="fc" id="L101">    int checkSum = 0;</span>
+<span class="fc" id="L102">    int checkWeight = 1;</span>
+<span class="fc" id="L103">    int codeSet = 0; // selected code (CODE_CODE_B or CODE_CODE_C)</span>
+<span class="fc" id="L104">    int position = 0; // position in contents</span>
+
+<span class="fc bfc" id="L106" title="All 2 branches covered.">    while (position &lt; length) {</span>
+      //Select code to use
+<span class="fc" id="L108">      int newCodeSet = chooseCode(contents, position, codeSet);</span>
+
+      //Get the pattern index
+      int patternIndex;
+<span class="fc bfc" id="L112" title="All 2 branches covered.">      if (newCodeSet == codeSet) {</span>
+        // Encode the current character
+        // First handle escapes
+<span class="fc bfc" id="L115" title="All 5 branches covered.">        switch (contents.charAt(position)) {</span>
+          case ESCAPE_FNC_1:
+<span class="fc" id="L117">            patternIndex = CODE_FNC_1;</span>
+<span class="fc" id="L118">            break;</span>
+          case ESCAPE_FNC_2:
+<span class="fc" id="L120">            patternIndex = CODE_FNC_2;</span>
+<span class="fc" id="L121">            break;</span>
+          case ESCAPE_FNC_3:
+<span class="fc" id="L123">            patternIndex = CODE_FNC_3;</span>
+<span class="fc" id="L124">            break;</span>
+          case ESCAPE_FNC_4:
+<span class="fc bfc" id="L126" title="All 2 branches covered.">            if (codeSet == CODE_CODE_A) {</span>
+<span class="fc" id="L127">              patternIndex = CODE_FNC_4_A;</span>
+            } else {
+<span class="fc" id="L129">              patternIndex = CODE_FNC_4_B;</span>
+            }
+<span class="fc" id="L131">            break;</span>
+          default:
+            // Then handle normal characters otherwise
+<span class="fc bfc" id="L134" title="All 3 branches covered.">            switch (codeSet) {</span>
+              case CODE_CODE_A:
+<span class="fc" id="L136">                patternIndex = contents.charAt(position) - ' ';</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">                if (patternIndex &lt; 0) {</span>
+                  // everything below a space character comes behind the underscore in the code patterns table
+<span class="fc" id="L139">                  patternIndex += '`';</span>
+                }
+                break;
+              case CODE_CODE_B:
+<span class="fc" id="L143">                patternIndex = contents.charAt(position) - ' ';</span>
+<span class="fc" id="L144">                break;</span>
+              default:
+                // CODE_CODE_C
+<span class="fc" id="L147">                patternIndex = Integer.parseInt(contents.substring(position, position + 2));</span>
+<span class="fc" id="L148">                position++; // Also incremented below</span>
+                break;
+            }
+        }
+<span class="fc" id="L152">        position++;</span>
+      } else {
+        // Should we change the current code?
+        // Do we have a code set?
+<span class="fc bfc" id="L156" title="All 2 branches covered.">        if (codeSet == 0) {</span>
+          // No, we don't have a code set
+<span class="fc bfc" id="L158" title="All 3 branches covered.">          switch (newCodeSet) {</span>
+            case CODE_CODE_A:
+<span class="fc" id="L160">              patternIndex = CODE_START_A;</span>
+<span class="fc" id="L161">              break;</span>
+            case CODE_CODE_B:
+<span class="fc" id="L163">              patternIndex = CODE_START_B;</span>
+<span class="fc" id="L164">              break;</span>
+            default:
+<span class="fc" id="L166">              patternIndex = CODE_START_C;</span>
+<span class="fc" id="L167">              break;</span>
+          }
+        } else {
+          // Yes, we have a code set
+<span class="fc" id="L171">          patternIndex = newCodeSet;</span>
+        }
+<span class="fc" id="L173">        codeSet = newCodeSet;</span>
+      }
+
+      // Get the pattern
+<span class="fc" id="L177">      patterns.add(Code128Reader.CODE_PATTERNS[patternIndex]);</span>
+
+      // Compute checksum
+<span class="fc" id="L180">      checkSum += patternIndex * checkWeight;</span>
+<span class="fc bfc" id="L181" title="All 2 branches covered.">      if (position != 0) {</span>
+<span class="fc" id="L182">        checkWeight++;</span>
+      }
+<span class="fc" id="L184">    }</span>
+
+    // Compute and append checksum
+<span class="fc" id="L187">    checkSum %= 103;</span>
+<span class="fc" id="L188">    patterns.add(Code128Reader.CODE_PATTERNS[checkSum]);</span>
+
+    // Append stop code
+<span class="fc" id="L191">    patterns.add(Code128Reader.CODE_PATTERNS[CODE_STOP]);</span>
+
+    // Compute code width
+<span class="fc" id="L194">    int codeWidth = 0;</span>
+<span class="fc bfc" id="L195" title="All 2 branches covered.">    for (int[] pattern : patterns) {</span>
+<span class="fc bfc" id="L196" title="All 2 branches covered.">      for (int width : pattern) {</span>
+<span class="fc" id="L197">        codeWidth += width;</span>
+      }
+<span class="fc" id="L199">    }</span>
+
+    // Compute result
+<span class="fc" id="L202">    boolean[] result = new boolean[codeWidth];</span>
+<span class="fc" id="L203">    int pos = 0;</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">    for (int[] pattern : patterns) {</span>
+<span class="fc" id="L205">      pos += appendPattern(result, pos, pattern, true);</span>
+<span class="fc" id="L206">    }</span>
+
+<span class="fc" id="L208">    return result;</span>
+  }
+
+  private static CType findCType(CharSequence value, int start) {
+<span class="fc" id="L212">    int last = value.length();</span>
+<span class="fc bfc" id="L213" title="All 2 branches covered.">    if (start &gt;= last) {</span>
+<span class="fc" id="L214">      return CType.UNCODABLE;</span>
+    }
+<span class="fc" id="L216">    char c = value.charAt(start);</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">    if (c == ESCAPE_FNC_1) {</span>
+<span class="fc" id="L218">      return CType.FNC_1;</span>
+    }
+<span class="fc bfc" id="L220" title="All 4 branches covered.">    if (c &lt; '0' || c &gt; '9') {</span>
+<span class="fc" id="L221">      return CType.UNCODABLE;</span>
+    }
+<span class="fc bfc" id="L223" title="All 2 branches covered.">    if (start + 1 &gt;= last) {</span>
+<span class="fc" id="L224">      return CType.ONE_DIGIT;</span>
+    }
+<span class="fc" id="L226">    c = value.charAt(start + 1);</span>
+<span class="fc bfc" id="L227" title="All 4 branches covered.">    if (c &lt; '0' || c &gt; '9') {</span>
+<span class="fc" id="L228">      return CType.ONE_DIGIT;</span>
+    }
+<span class="fc" id="L230">    return CType.TWO_DIGITS;</span>
+  }
+
+  private static int chooseCode(CharSequence value, int start, int oldCode) {
+<span class="fc" id="L234">    CType lookahead = findCType(value, start);</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    if (lookahead == CType.ONE_DIGIT) {</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">       if (oldCode == CODE_CODE_A) {</span>
+<span class="fc" id="L237">         return CODE_CODE_A;</span>
+       }
+<span class="fc" id="L239">       return CODE_CODE_B;</span>
+    }
+<span class="fc bfc" id="L241" title="All 2 branches covered.">    if (lookahead == CType.UNCODABLE) {</span>
+<span class="pc bpc" id="L242" title="1 of 2 branches missed.">      if (start &lt; value.length()) {</span>
+<span class="fc" id="L243">        char c = value.charAt(start);</span>
+<span class="pc bpc" id="L244" title="1 of 10 branches missed.">        if (c &lt; ' ' || (oldCode == CODE_CODE_A &amp;&amp; (c &lt; '`' || (c &gt;= ESCAPE_FNC_1 &amp;&amp; c &lt;= ESCAPE_FNC_4)))) {</span>
+          // can continue in code A, encodes ASCII 0 to 95 or FNC1 to FNC4
+<span class="fc" id="L246">          return CODE_CODE_A;</span>
+        }
+      }
+<span class="fc" id="L249">      return CODE_CODE_B; // no choice</span>
+    }
+<span class="pc bpc" id="L251" title="1 of 4 branches missed.">    if (oldCode == CODE_CODE_A &amp;&amp; lookahead == CType.FNC_1) {</span>
+<span class="fc" id="L252">      return CODE_CODE_A;</span>
+    }
+<span class="fc bfc" id="L254" title="All 2 branches covered.">    if (oldCode == CODE_CODE_C) { // can continue in code C</span>
+<span class="fc" id="L255">      return CODE_CODE_C;</span>
+    }
+<span class="fc bfc" id="L257" title="All 2 branches covered.">    if (oldCode == CODE_CODE_B) {</span>
+<span class="fc bfc" id="L258" title="All 2 branches covered.">      if (lookahead == CType.FNC_1) {</span>
+<span class="fc" id="L259">        return CODE_CODE_B; // can continue in code B</span>
+      }
+      // Seen two consecutive digits, see what follows
+<span class="fc" id="L262">      lookahead = findCType(value, start + 2);</span>
+<span class="fc bfc" id="L263" title="All 4 branches covered.">      if (lookahead == CType.UNCODABLE || lookahead == CType.ONE_DIGIT) {</span>
+<span class="fc" id="L264">        return CODE_CODE_B; // not worth switching now</span>
+      }
+<span class="pc bpc" id="L266" title="1 of 2 branches missed.">      if (lookahead == CType.FNC_1) { // two digits, then FNC_1...</span>
+<span class="nc" id="L267">        lookahead = findCType(value, start + 3);</span>
+<span class="nc bnc" id="L268" title="All 2 branches missed.">        if (lookahead == CType.TWO_DIGITS) { // then two more digits, switch</span>
+<span class="nc" id="L269">          return CODE_CODE_C;</span>
+        } else {
+<span class="nc" id="L271">          return CODE_CODE_B; // otherwise not worth switching</span>
+        }
+      }
+      // At this point, there are at least 4 consecutive digits.
+      // Look ahead to choose whether to switch now or on the next round.
+<span class="fc" id="L276">      int index = start + 4;</span>
+<span class="fc bfc" id="L277" title="All 2 branches covered.">      while ((lookahead = findCType(value, index)) == CType.TWO_DIGITS) {</span>
+<span class="fc" id="L278">        index += 2;</span>
+      }
+<span class="pc bpc" id="L280" title="1 of 2 branches missed.">      if (lookahead == CType.ONE_DIGIT) { // odd number of digits, switch later</span>
+<span class="nc" id="L281">        return CODE_CODE_B;</span>
+      }
+<span class="fc" id="L283">      return CODE_CODE_C; // even number of digits, switch now</span>
+    }
+    // Here oldCode == 0, which means we are choosing the initial code
+<span class="pc bpc" id="L286" title="1 of 2 branches missed.">    if (lookahead == CType.FNC_1) { // ignore FNC_1</span>
+<span class="fc" id="L287">      lookahead = findCType(value, start + 1);</span>
+    }
+<span class="pc bpc" id="L289" title="1 of 2 branches missed.">    if (lookahead == CType.TWO_DIGITS) { // at least two digits, start in code C</span>
+<span class="fc" id="L290">      return CODE_CODE_C;</span>
+    }
+<span class="nc" id="L292">    return CODE_CODE_B;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

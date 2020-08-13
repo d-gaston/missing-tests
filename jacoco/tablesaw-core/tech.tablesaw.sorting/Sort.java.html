@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Sort.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.sorting</a> &gt; <span class="el_source">Sort.java</span></div><h1>Sort.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.sorting;
+
+import static java.util.stream.Collectors.toSet;
+
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import tech.tablesaw.api.Table;
+
+/**
+ * Provides fine-grained control over sorting.
+ *
+ * &lt;p&gt;Use:
+ *
+ * &lt;p&gt;table.sortOn(first(&quot;Year&quot;, DESCEND).next(&quot;State&quot;, ASCEND));
+ *
+ * &lt;p&gt;This sorts table on the column named year in descending order, such that the most recent years
+ * appear first, then on State, in ascending order so &quot;AL&quot; will appear before &quot;CA&quot;. You can add
+ * additional instructions for multi-column sorts by chaining additional calls to next() with the
+ * appropriate column names and Order.
+ */
+public class Sort implements Iterable&lt;Map.Entry&lt;String, Sort.Order&gt;&gt; {
+
+<span class="fc" id="L42">  private final LinkedHashMap&lt;String, Order&gt; sortOrder = new LinkedHashMap&lt;&gt;();</span>
+
+<span class="fc" id="L44">  public Sort(String columnName, Order order) {</span>
+<span class="fc" id="L45">    next(columnName, order);</span>
+<span class="fc" id="L46">  }</span>
+
+  public static Sort on(String columnName, Order order) {
+<span class="fc" id="L49">    return new Sort(columnName, order);</span>
+  }
+
+  public Sort next(String columnName, Order order) {
+<span class="fc" id="L53">    sortOrder.put(columnName, order);</span>
+<span class="fc" id="L54">    return this;</span>
+  }
+
+  public boolean isEmpty() {
+<span class="fc" id="L58">    return sortOrder.isEmpty();</span>
+  }
+
+  public int size() {
+<span class="fc" id="L62">    return sortOrder.size();</span>
+  }
+
+  /**
+   * Create a Sort object from the given table and sort column names. Does not sort the table.
+   *
+   * @param table to sort. Used only to pull the table's schema. Does not modify the table.
+   * @param columnNames The columns to sort on. Can prefix column name with + for ascending, - for
+   *     descending. Default to ascending if no prefix is added.
+   * @return a {@link #Sort} Object.
+   */
+  public static Sort create(Table table, String... columnNames) {
+<span class="pc bpc" id="L74" title="1 of 2 branches missed.">    Preconditions.checkArgument(columnNames.length &gt; 0, &quot;At least one sort column must provided.&quot;);</span>
+
+<span class="fc" id="L76">    Sort key = null;</span>
+<span class="fc" id="L77">    Set&lt;String&gt; names = table.columnNames().stream().map(String::toUpperCase).collect(toSet());</span>
+
+<span class="fc bfc" id="L79" title="All 2 branches covered.">    for (String columnName : columnNames) {</span>
+<span class="fc" id="L80">      Sort.Order order = Sort.Order.ASCEND;</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">      if (!names.contains(columnName.toUpperCase())) {</span>
+        // the column name has been annotated with a prefix.
+        // get the prefix which could be - or +
+<span class="fc" id="L84">        String prefix = columnName.substring(0, 1);</span>
+<span class="fc" id="L85">        Optional&lt;Order&gt; orderOptional = getOrder(prefix);</span>
+
+        // Invalid prefix, column name exists on table.
+<span class="fc bfc" id="L88" title="All 4 branches covered.">        if (!orderOptional.isPresent() &amp;&amp; names.contains(columnName.substring(1).toUpperCase())) {</span>
+<span class="fc" id="L89">          throw new IllegalStateException(&quot;Column prefix: &quot; + prefix + &quot; is unknown.&quot;);</span>
+        }
+
+        // Valid prefix, column name does not exist on table.
+<span class="fc bfc" id="L93" title="All 4 branches covered.">        if (orderOptional.isPresent() &amp;&amp; !names.contains(columnName.substring(1).toUpperCase())) {</span>
+<span class="fc" id="L94">          throw new IllegalStateException(</span>
+<span class="fc" id="L95">              String.format(</span>
+<span class="fc" id="L96">                  &quot;Column %s does not exist in table %s&quot;, columnName.substring(1), table.name()));</span>
+        }
+
+        // Invalid prefix, column name does not exist on table.
+<span class="fc bfc" id="L100" title="All 2 branches covered.">        if (!orderOptional.isPresent()) {</span>
+<span class="fc" id="L101">          throw new IllegalStateException(&quot;Unrecognized Column: '&quot; + columnName + &quot;'&quot;);</span>
+        }
+
+        // Valid Prefix, column name exists on table.
+        // remove - prefix so provided name matches actual column name
+<span class="fc" id="L106">        columnName = columnName.substring(1);</span>
+<span class="fc" id="L107">        order = orderOptional.get();</span>
+      }
+
+<span class="fc bfc" id="L110" title="All 2 branches covered.">      if (key == null) { // key will be null the first time through</span>
+<span class="fc" id="L111">        key = new Sort(columnName, order);</span>
+      } else {
+<span class="fc" id="L113">        key.next(columnName, order);</span>
+      }
+    }
+<span class="fc" id="L116">    return key;</span>
+  }
+
+  private static Optional&lt;Order&gt; getOrder(String prefix) {
+<span class="pc bpc" id="L120" title="2 of 10 branches missed.">    switch (prefix) {</span>
+      case &quot;+&quot;:
+<span class="fc" id="L122">        return Optional.of(Order.ASCEND);</span>
+      case &quot;-&quot;:
+<span class="fc" id="L124">        return Optional.of(Order.DESCEND);</span>
+      default:
+<span class="fc" id="L126">        return Optional.empty();</span>
+    }
+  }
+
+  /**
+   * Returns an iterator over elements of type {@code T}.
+   *
+   * @return an Iterator.
+   */
+  @Override
+  public Iterator&lt;Map.Entry&lt;String, Order&gt;&gt; iterator() {
+<span class="fc" id="L137">    return sortOrder.entrySet().iterator();</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L142">    return MoreObjects.toStringHelper(this).add(&quot;order&quot;, sortOrder).toString();</span>
+  }
+
+<span class="fc" id="L145">  public enum Order {</span>
+<span class="fc" id="L146">    ASCEND,</span>
+<span class="fc" id="L147">    DESCEND</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

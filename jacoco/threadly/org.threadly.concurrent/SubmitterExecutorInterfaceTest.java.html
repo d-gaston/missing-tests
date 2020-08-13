@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SubmitterExecutorInterfaceTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">SubmitterExecutorInterfaceTest.java</span></div><h1>SubmitterExecutorInterfaceTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
+
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.util.SuppressedStackRuntimeException;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L23">public abstract class SubmitterExecutorInterfaceTest extends ThreadlyTester {</span>
+  protected abstract SubmitterExecutorFactory getSubmitterExecutorFactory();
+  
+  @BeforeClass
+  public static void setupClass() {
+<span class="fc" id="L28">    setIgnoreExceptionHandler();</span>
+<span class="fc" id="L29">  }</span>
+  
+  protected static List&lt;TestRunnable&gt; executeTestRunnables(Executor executor, int runnableSleepTime) {
+<span class="fc" id="L32">    List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L33" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L34">        TestRunnable tr = new TestRunnable(runnableSleepTime);</span>
+<span class="fc" id="L35">        executor.execute(tr);</span>
+<span class="fc" id="L36">        runnables.add(tr);</span>
+      }
+      
+<span class="fc" id="L39">      return runnables;</span>
+  }
+  
+  @Test
+  public void executeTest() {
+<span class="fc" id="L44">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L46">      SubmitterExecutor executor = factory.makeSubmitterExecutor(2, false);</span>
+      
+<span class="fc" id="L48">      List&lt;TestRunnable&gt; runnables = executeTestRunnables(executor, 0);</span>
+      
+      // verify execution
+<span class="fc" id="L51">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L52" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L53">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L54">        tr.blockTillFinished();</span>
+        
+<span class="fc" id="L56">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L57">      }</span>
+      
+      // run one more time now that all workers are already running
+<span class="fc" id="L60">      it = runnables.iterator();</span>
+<span class="fc bfc" id="L61" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L62">        executor.execute(it.next());</span>
+      }
+      
+      // verify second execution
+<span class="fc" id="L66">      it = runnables.iterator();</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L68">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L69">        tr.blockTillFinished(1000, 2);</span>
+        
+<span class="fc" id="L71">        assertEquals(2, tr.getRunCount());</span>
+<span class="fc" id="L72">      }</span>
+    } finally {
+<span class="fc" id="L74">      factory.shutdown();</span>
+    }
+<span class="fc" id="L76">  }</span>
+  
+  @Test
+  public void executeInOrderTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L80">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L82">      SubmitterExecutor executor = factory.makeSubmitterExecutor(1, false);</span>
+<span class="fc" id="L83">      final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L84">      TestRunnable lastRun = null;</span>
+<span class="fc" id="L85">      int testQty = 0;</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      while (testQty &lt; TEST_QTY) {</span>
+<span class="fc" id="L87">        testQty++;</span>
+<span class="fc" id="L88">        final TestRunnable fLastRun = lastRun;</span>
+<span class="fc" id="L89">        lastRun = new TestRunnable() {</span>
+          @Override
+          public void handleRunStart() {
+<span class="fc bfc" id="L92" title="All 2 branches covered.">            if (fLastRun != null) {</span>
+<span class="fc" id="L93">              av.assertTrue(fLastRun.ranOnce());</span>
+            }
+<span class="fc" id="L95">            av.signalComplete();</span>
+<span class="fc" id="L96">          }</span>
+        };
+        
+<span class="fc" id="L99">        executor.execute(lastRun);</span>
+<span class="fc" id="L100">      }</span>
+      
+<span class="fc" id="L102">      av.waitForTest(10 * 1000, testQty);</span>
+    } finally {
+<span class="fc" id="L104">      factory.shutdown();</span>
+    }
+<span class="fc" id="L106">  }</span>
+  
+  @Test
+  public void executeWithFailureRunnableTest() {
+<span class="fc" id="L110">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L112">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L114">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">        if (i % 2 == 0) {</span>
+          // add a failure runnable
+<span class="fc" id="L118">          executor.execute(new TestRuntimeFailureRunnable());</span>
+        }
+<span class="fc" id="L120">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L121">        executor.execute(tr);</span>
+<span class="fc" id="L122">        runnables.add(tr);</span>
+      }
+      
+      // verify execution
+<span class="fc" id="L126">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L127" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L128">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L129">        tr.blockTillFinished();</span>
+        
+<span class="fc" id="L131">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L132">      }</span>
+    } finally {
+<span class="fc" id="L134">      factory.shutdown();</span>
+    }
+<span class="fc" id="L136">  }</span>
+  
+  @Test (expected = IllegalArgumentException.class)
+  public void executeFail() {
+<span class="fc" id="L140">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L142">      SubmitterExecutor executor = factory.makeSubmitterExecutor(1, false);</span>
+      
+<span class="nc" id="L144">      executor.execute(null);</span>
+<span class="nc" id="L145">      fail(&quot;Execption should have thrown&quot;);</span>
+    } finally {
+<span class="fc" id="L147">      factory.shutdown();</span>
+    }
+<span class="nc" id="L149">  }</span>
+  
+  @Test
+  public void submitRunnableTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L153">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L155">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L157">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc" id="L158">      List&lt;Future&lt;?&gt;&gt; futures = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L159" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L160">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L161">        Future&lt;?&gt; future = executor.submit(tr);</span>
+<span class="fc" id="L162">        assertNotNull(future);</span>
+<span class="fc" id="L163">        runnables.add(tr);</span>
+<span class="fc" id="L164">        futures.add(future);</span>
+      }
+      
+      // verify execution
+<span class="fc" id="L168">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L169" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L170">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L171">        tr.blockTillFinished();</span>
+        
+<span class="fc" id="L173">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L174">      }</span>
+      
+      // run one more time now that all workers are already running
+<span class="fc" id="L177">      it = runnables.iterator();</span>
+<span class="fc bfc" id="L178" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L179">        executor.submit(it.next());</span>
+      }
+      
+      // verify second execution
+<span class="fc" id="L183">      it = runnables.iterator();</span>
+<span class="fc bfc" id="L184" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L185">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L186">        tr.blockTillFinished(1000, 2);</span>
+        
+<span class="fc" id="L188">        assertEquals(2, tr.getRunCount());</span>
+<span class="fc" id="L189">      }</span>
+      
+<span class="fc" id="L191">      Iterator&lt;Future&lt;?&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">      while (futureIt.hasNext()) {</span>
+<span class="fc" id="L193">        Future&lt;?&gt; future = futureIt.next();</span>
+<span class="fc" id="L194">        assertTrue(future.isDone());</span>
+<span class="fc" id="L195">        assertNull(future.get());</span>
+<span class="fc" id="L196">      }</span>
+    } finally {
+<span class="fc" id="L198">      factory.shutdown();</span>
+    }
+<span class="fc" id="L200">  }</span>
+  
+  @Test
+  public void submitRunnableExceptionTest() throws InterruptedException {
+<span class="fc" id="L204">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L206">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L208">      RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L209">      TestRuntimeFailureRunnable tr = new TestRuntimeFailureRunnable(failure);</span>
+<span class="fc" id="L210">      ListenableFuture&lt;?&gt; future = executor.submit(tr);</span>
+      // no exception should propagate
+      
+      try {
+<span class="nc" id="L214">        future.get();</span>
+<span class="nc" id="L215">        fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L216">      } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L217" title="1 of 2 branches missed.">        assertTrue(e.getCause() == failure);</span>
+<span class="nc" id="L218">      }</span>
+    } finally {
+<span class="fc" id="L220">      factory.shutdown();</span>
+    }
+<span class="fc" id="L222">  }</span>
+  
+  @Test
+  public void submitRunnableWithResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L226">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L228">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L230">      List&lt;TestRunnable&gt; runnables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc" id="L231">      List&lt;Future&lt;TestRunnable&gt;&gt; futures = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L232" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L233">        TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L234">        Future&lt;TestRunnable&gt; future = executor.submit(tr, tr);</span>
+<span class="fc" id="L235">        assertNotNull(future);</span>
+<span class="fc" id="L236">        runnables.add(tr);</span>
+<span class="fc" id="L237">        futures.add(future);</span>
+      }
+      
+      // verify execution
+<span class="fc" id="L241">      Iterator&lt;TestRunnable&gt; it = runnables.iterator();</span>
+<span class="fc bfc" id="L242" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L243">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L244">        tr.blockTillFinished();</span>
+        
+<span class="fc" id="L246">        assertEquals(1, tr.getRunCount());</span>
+<span class="fc" id="L247">      }</span>
+      
+      // run one more time now that all workers are already running
+<span class="fc" id="L250">      it = runnables.iterator();</span>
+<span class="fc bfc" id="L251" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L252">        executor.submit(it.next());</span>
+      }
+      
+      // verify second execution
+<span class="fc" id="L256">      it = runnables.iterator();</span>
+<span class="fc bfc" id="L257" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L258">        TestRunnable tr = it.next();</span>
+<span class="fc" id="L259">        tr.blockTillFinished(1000, 2);</span>
+        
+<span class="fc" id="L261">        assertEquals(2, tr.getRunCount());</span>
+<span class="fc" id="L262">      }</span>
+      
+<span class="fc" id="L264">      it = runnables.iterator();</span>
+<span class="fc" id="L265">      Iterator&lt;Future&lt;TestRunnable&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L266" title="All 2 branches covered.">      while (futureIt.hasNext()) {</span>
+<span class="fc" id="L267">        Future&lt;?&gt; future = futureIt.next();</span>
+<span class="fc" id="L268">        assertTrue(future.isDone());</span>
+<span class="pc bpc" id="L269" title="1 of 2 branches missed.">        assertTrue(future.get() == it.next());</span>
+<span class="fc" id="L270">      }</span>
+    } finally {
+<span class="fc" id="L272">      factory.shutdown();</span>
+    }
+<span class="fc" id="L274">  }</span>
+  
+  @Test
+  public void submitRunnableWithResultExceptionTest() throws InterruptedException {
+<span class="fc" id="L278">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L280">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L282">      RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L283">      TestRuntimeFailureRunnable tr = new TestRuntimeFailureRunnable(failure);</span>
+<span class="fc" id="L284">      ListenableFuture&lt;?&gt; future = executor.submit(tr, new Object());</span>
+      // no exception should propagate
+      
+<span class="fc" id="L287">      tr.blockTillFinished();</span>
+<span class="fc" id="L288">      assertTrue(future.isDone());</span>
+      try {
+<span class="nc" id="L290">        future.get();</span>
+<span class="nc" id="L291">        fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L292">      } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L293" title="1 of 2 branches missed.">        assertTrue(e.getCause() == failure);</span>
+<span class="nc" id="L294">      }</span>
+    } finally {
+<span class="fc" id="L296">      factory.shutdown();</span>
+    }
+<span class="fc" id="L298">  }</span>
+  
+  @Test
+  public void submitCallableTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L302">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L304">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L306">      List&lt;TestCallable&gt; callables = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc" id="L307">      List&lt;Future&lt;Object&gt;&gt; futures = new ArrayList&lt;&gt;(TEST_QTY);</span>
+<span class="fc bfc" id="L308" title="All 2 branches covered.">      for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L309">        TestCallable tc = new TestCallable();</span>
+<span class="fc" id="L310">        Future&lt;Object&gt; future = executor.submit(tc);</span>
+<span class="fc" id="L311">        assertNotNull(future);</span>
+<span class="fc" id="L312">        callables.add(tc);</span>
+<span class="fc" id="L313">        futures.add(future);</span>
+      }
+      
+      // verify execution
+<span class="fc" id="L317">      Iterator&lt;TestCallable&gt; it = callables.iterator();</span>
+<span class="fc bfc" id="L318" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L319">        TestCallable tc = it.next();</span>
+<span class="fc" id="L320">        tc.blockTillTrue();</span>
+        
+<span class="fc" id="L322">        assertTrue(tc.isDone());</span>
+<span class="fc" id="L323">      }</span>
+      
+<span class="fc" id="L325">      it = callables.iterator();</span>
+<span class="fc" id="L326">      Iterator&lt;Future&lt;Object&gt;&gt; futureIt = futures.iterator();</span>
+<span class="fc bfc" id="L327" title="All 2 branches covered.">      while (futureIt.hasNext()) {</span>
+<span class="fc" id="L328">        Future&lt;Object&gt; future = futureIt.next();</span>
+<span class="fc" id="L329">        TestCallable tc = it.next();</span>
+  
+<span class="pc bpc" id="L331" title="1 of 2 branches missed.">        assertTrue(tc.getReturnedResult() == future.get());</span>
+<span class="fc" id="L332">        assertTrue(future.isDone());</span>
+<span class="fc" id="L333">      }</span>
+    } finally {
+<span class="fc" id="L335">      factory.shutdown();</span>
+    }
+<span class="fc" id="L337">  }</span>
+  
+  @Test
+  public void submitCallableExceptionTest() throws InterruptedException {
+<span class="fc" id="L341">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L343">      SubmitterExecutor executor = factory.makeSubmitterExecutor(TEST_QTY, false);</span>
+      
+<span class="fc" id="L345">      final RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L346">      ListenableFuture&lt;?&gt; future = executor.submit(new Callable&lt;Void&gt;() {</span>
+        @Override
+        public Void call() throws Exception {
+<span class="fc" id="L349">          throw failure;</span>
+        }
+      });
+      // no exception should propagate
+      
+      try {
+<span class="nc" id="L355">        future.get();</span>
+<span class="nc" id="L356">        fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L357">      } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L358" title="1 of 2 branches missed.">        assertTrue(e.getCause() == failure);</span>
+<span class="nc" id="L359">      }</span>
+    } finally {
+<span class="fc" id="L361">      factory.shutdown();</span>
+    }
+<span class="fc" id="L363">  }</span>
+  
+  @Test (expected = IllegalArgumentException.class)
+  public void submitRunnableFail() {
+<span class="fc" id="L367">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L369">      SubmitterExecutor executor = factory.makeSubmitterExecutor(1, false);</span>
+      
+<span class="nc" id="L371">      executor.submit((Runnable)null);</span>
+<span class="nc" id="L372">      fail(&quot;Execption should have thrown&quot;);</span>
+    } finally {
+<span class="fc" id="L374">      factory.shutdown();</span>
+    }
+<span class="nc" id="L376">  }</span>
+
+  @Test (expected = IllegalArgumentException.class)
+  public void submitRunnableWithResultFail() {
+<span class="fc" id="L380">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L382">      SubmitterExecutor executor = factory.makeSubmitterExecutor(1, false);</span>
+      
+<span class="nc" id="L384">      executor.submit((Runnable)null, new Object());</span>
+<span class="nc" id="L385">      fail(&quot;Execption should have thrown&quot;);</span>
+    } finally {
+<span class="fc" id="L387">      factory.shutdown();</span>
+    }
+<span class="nc" id="L389">  }</span>
+  
+  @Test (expected = IllegalArgumentException.class)
+  public void submitCallableFail() {
+<span class="fc" id="L393">    SubmitterExecutorFactory factory = getSubmitterExecutorFactory();</span>
+    try {
+<span class="fc" id="L395">      SubmitterExecutor executor = factory.makeSubmitterExecutor(1, false);</span>
+      
+<span class="nc" id="L397">      executor.submit((Callable&lt;Void&gt;)null);</span>
+<span class="nc" id="L398">      fail(&quot;Execption should have thrown&quot;);</span>
+    } finally {
+<span class="fc" id="L400">      factory.shutdown();</span>
+    }
+<span class="nc" id="L402">  }</span>
+  
+  public interface SubmitterExecutorFactory {
+    public SubmitterExecutor makeSubmitterExecutor(int poolSize, boolean prestartIfAvailable);
+
+    public void shutdown();
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

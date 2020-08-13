@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Code39Reader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">Code39Reader.java</span></div><h1>Code39Reader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.ChecksumException;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitArray;
+
+import java.util.Arrays;
+import java.util.Map;
+
+/**
+ * &lt;p&gt;Decodes Code 39 barcodes. Supports &quot;Full ASCII Code 39&quot; if USE_CODE_39_EXTENDED_MODE is set.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ * @see Code93Reader
+ */
+public final class Code39Reader extends OneDReader {
+
+  static final String ALPHABET_STRING = &quot;0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%&quot;;
+
+  /**
+   * These represent the encodings of characters, as patterns of wide and narrow bars.
+   * The 9 least-significant bits of each int correspond to the pattern of wide and narrow,
+   * with 1s representing &quot;wide&quot; and 0s representing narrow.
+   */
+<span class="fc" id="L46">  static final int[] CHARACTER_ENCODINGS = {</span>
+      0x034, 0x121, 0x061, 0x160, 0x031, 0x130, 0x070, 0x025, 0x124, 0x064, // 0-9
+      0x109, 0x049, 0x148, 0x019, 0x118, 0x058, 0x00D, 0x10C, 0x04C, 0x01C, // A-J
+      0x103, 0x043, 0x142, 0x013, 0x112, 0x052, 0x007, 0x106, 0x046, 0x016, // K-T
+      0x181, 0x0C1, 0x1C0, 0x091, 0x190, 0x0D0, 0x085, 0x184, 0x0C4, 0x0A8, // U-$
+      0x0A2, 0x08A, 0x02A // /-%
+  };
+
+  static final int ASTERISK_ENCODING = 0x094;
+
+  private final boolean usingCheckDigit;
+  private final boolean extendedMode;
+  private final StringBuilder decodeRowResult;
+  private final int[] counters;
+
+  /**
+   * Creates a reader that assumes all encoded data is data, and does not treat the final
+   * character as a check digit. It will not decoded &quot;extended Code 39&quot; sequences.
+   */
+  public Code39Reader() {
+<span class="fc" id="L66">    this(false);</span>
+<span class="fc" id="L67">  }</span>
+
+  /**
+   * Creates a reader that can be configured to check the last character as a check digit.
+   * It will not decoded &quot;extended Code 39&quot; sequences.
+   *
+   * @param usingCheckDigit if true, treat the last data character as a check digit, not
+   * data, and verify that the checksum passes.
+   */
+  public Code39Reader(boolean usingCheckDigit) {
+<span class="fc" id="L77">    this(usingCheckDigit, false);</span>
+<span class="fc" id="L78">  }</span>
+
+  /**
+   * Creates a reader that can be configured to check the last character as a check digit,
+   * or optionally attempt to decode &quot;extended Code 39&quot; sequences that are used to encode
+   * the full ASCII character set.
+   *
+   * @param usingCheckDigit if true, treat the last data character as a check digit, not
+   * data, and verify that the checksum passes.
+   * @param extendedMode if true, will attempt to decode extended Code 39 sequences in the
+   * text.
+   */
+<span class="fc" id="L90">  public Code39Reader(boolean usingCheckDigit, boolean extendedMode) {</span>
+<span class="fc" id="L91">    this.usingCheckDigit = usingCheckDigit;</span>
+<span class="fc" id="L92">    this.extendedMode = extendedMode;</span>
+<span class="fc" id="L93">    decodeRowResult = new StringBuilder(20);</span>
+<span class="fc" id="L94">    counters = new int[9];</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public Result decodeRow(int rowNumber, BitArray row, Map&lt;DecodeHintType,?&gt; hints)
+      throws NotFoundException, ChecksumException, FormatException {
+
+<span class="fc" id="L101">    int[] theCounters = counters;</span>
+<span class="fc" id="L102">    Arrays.fill(theCounters, 0);</span>
+<span class="fc" id="L103">    StringBuilder result = decodeRowResult;</span>
+<span class="fc" id="L104">    result.setLength(0);</span>
+
+<span class="fc" id="L106">    int[] start = findAsteriskPattern(row, theCounters);</span>
+    // Read off white space
+<span class="fc" id="L108">    int nextStart = row.getNextSet(start[1]);</span>
+<span class="fc" id="L109">    int end = row.getSize();</span>
+
+    char decodedChar;
+    int lastStart;
+    do {
+<span class="fc" id="L114">      recordPattern(row, nextStart, theCounters);</span>
+<span class="fc" id="L115">      int pattern = toNarrowWidePattern(theCounters);</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">      if (pattern &lt; 0) {</span>
+<span class="fc" id="L117">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L119">      decodedChar = patternToChar(pattern);</span>
+<span class="fc" id="L120">      result.append(decodedChar);</span>
+<span class="fc" id="L121">      lastStart = nextStart;</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      for (int counter : theCounters) {</span>
+<span class="fc" id="L123">        nextStart += counter;</span>
+      }
+      // Read off white space
+<span class="fc" id="L126">      nextStart = row.getNextSet(nextStart);</span>
+<span class="fc bfc" id="L127" title="All 2 branches covered.">    } while (decodedChar != '*');</span>
+<span class="fc" id="L128">    result.setLength(result.length() - 1); // remove asterisk</span>
+
+    // Look for whitespace after pattern:
+<span class="fc" id="L131">    int lastPatternSize = 0;</span>
+<span class="fc bfc" id="L132" title="All 2 branches covered.">    for (int counter : theCounters) {</span>
+<span class="fc" id="L133">      lastPatternSize += counter;</span>
+    }
+<span class="fc" id="L135">    int whiteSpaceAfterEnd = nextStart - lastStart - lastPatternSize;</span>
+    // If 50% of last pattern size, following last pattern, is not whitespace, fail
+    // (but if it's whitespace to the very end of the image, that's OK)
+<span class="fc bfc" id="L138" title="All 4 branches covered.">    if (nextStart != end &amp;&amp; (whiteSpaceAfterEnd * 2) &lt; lastPatternSize) {</span>
+<span class="fc" id="L139">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="pc bpc" id="L142" title="1 of 2 branches missed.">    if (usingCheckDigit) {</span>
+<span class="nc" id="L143">      int max = result.length() - 1;</span>
+<span class="nc" id="L144">      int total = 0;</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">      for (int i = 0; i &lt; max; i++) {</span>
+<span class="nc" id="L146">        total += ALPHABET_STRING.indexOf(decodeRowResult.charAt(i));</span>
+      }
+<span class="nc bnc" id="L148" title="All 2 branches missed.">      if (result.charAt(max) != ALPHABET_STRING.charAt(total % 43)) {</span>
+<span class="nc" id="L149">        throw ChecksumException.getChecksumInstance();</span>
+      }
+<span class="nc" id="L151">      result.setLength(max);</span>
+    }
+
+<span class="fc bfc" id="L154" title="All 2 branches covered.">    if (result.length() == 0) {</span>
+      // false positive
+<span class="fc" id="L156">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+    String resultString;
+<span class="fc bfc" id="L160" title="All 2 branches covered.">    if (extendedMode) {</span>
+<span class="fc" id="L161">      resultString = decodeExtended(result);</span>
+    } else {
+<span class="fc" id="L163">      resultString = result.toString();</span>
+    }
+
+<span class="fc" id="L166">    float left = (start[1] + start[0]) / 2.0f;</span>
+<span class="fc" id="L167">    float right = lastStart + lastPatternSize / 2.0f;</span>
+<span class="fc" id="L168">    return new Result(</span>
+        resultString,
+        null,
+        new ResultPoint[]{
+            new ResultPoint(left, rowNumber),
+            new ResultPoint(right, rowNumber)},
+        BarcodeFormat.CODE_39);
+
+  }
+
+  private static int[] findAsteriskPattern(BitArray row, int[] counters) throws NotFoundException {
+<span class="fc" id="L179">    int width = row.getSize();</span>
+<span class="fc" id="L180">    int rowOffset = row.getNextSet(0);</span>
+
+<span class="fc" id="L182">    int counterPosition = 0;</span>
+<span class="fc" id="L183">    int patternStart = rowOffset;</span>
+<span class="fc" id="L184">    boolean isWhite = false;</span>
+<span class="fc" id="L185">    int patternLength = counters.length;</span>
+
+<span class="fc bfc" id="L187" title="All 2 branches covered.">    for (int i = rowOffset; i &lt; width; i++) {</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">      if (row.get(i) != isWhite) {</span>
+<span class="fc" id="L189">        counters[counterPosition]++;</span>
+      } else {
+<span class="fc bfc" id="L191" title="All 2 branches covered.">        if (counterPosition == patternLength - 1) {</span>
+          // Look for whitespace before start pattern, &gt;= 50% of width of start pattern
+<span class="fc bfc" id="L193" title="All 2 branches covered.">          if (toNarrowWidePattern(counters) == ASTERISK_ENCODING &amp;&amp;</span>
+<span class="fc bfc" id="L194" title="All 2 branches covered.">              row.isRange(Math.max(0, patternStart - ((i - patternStart) / 2)), patternStart, false)) {</span>
+<span class="fc" id="L195">            return new int[]{patternStart, i};</span>
+          }
+<span class="fc" id="L197">          patternStart += counters[0] + counters[1];</span>
+<span class="fc" id="L198">          System.arraycopy(counters, 2, counters, 0, counterPosition - 1);</span>
+<span class="fc" id="L199">          counters[counterPosition - 1] = 0;</span>
+<span class="fc" id="L200">          counters[counterPosition] = 0;</span>
+<span class="fc" id="L201">          counterPosition--;</span>
+        } else {
+<span class="fc" id="L203">          counterPosition++;</span>
+        }
+<span class="fc" id="L205">        counters[counterPosition] = 1;</span>
+<span class="fc bfc" id="L206" title="All 2 branches covered.">        isWhite = !isWhite;</span>
+      }
+    }
+<span class="fc" id="L209">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  // For efficiency, returns -1 on failure. Not throwing here saved as many as 700 exceptions
+  // per image when using some of our blackbox images.
+  private static int toNarrowWidePattern(int[] counters) {
+<span class="fc" id="L215">    int numCounters = counters.length;</span>
+<span class="fc" id="L216">    int maxNarrowCounter = 0;</span>
+    int wideCounters;
+    do {
+<span class="fc" id="L219">      int minCounter = Integer.MAX_VALUE;</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">      for (int counter : counters) {</span>
+<span class="fc bfc" id="L221" title="All 4 branches covered.">        if (counter &lt; minCounter &amp;&amp; counter &gt; maxNarrowCounter) {</span>
+<span class="fc" id="L222">          minCounter = counter;</span>
+        }
+      }
+<span class="fc" id="L225">      maxNarrowCounter = minCounter;</span>
+<span class="fc" id="L226">      wideCounters = 0;</span>
+<span class="fc" id="L227">      int totalWideCountersWidth = 0;</span>
+<span class="fc" id="L228">      int pattern = 0;</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">      for (int i = 0; i &lt; numCounters; i++) {</span>
+<span class="fc" id="L230">        int counter = counters[i];</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">        if (counter &gt; maxNarrowCounter) {</span>
+<span class="fc" id="L232">          pattern |= 1 &lt;&lt; (numCounters - 1 - i);</span>
+<span class="fc" id="L233">          wideCounters++;</span>
+<span class="fc" id="L234">          totalWideCountersWidth += counter;</span>
+        }
+      }
+<span class="fc bfc" id="L237" title="All 2 branches covered.">      if (wideCounters == 3) {</span>
+        // Found 3 wide counters, but are they close enough in width?
+        // We can perform a cheap, conservative check to see if any individual
+        // counter is more than 1.5 times the average:
+<span class="fc bfc" id="L241" title="All 4 branches covered.">        for (int i = 0; i &lt; numCounters &amp;&amp; wideCounters &gt; 0; i++) {</span>
+<span class="fc" id="L242">          int counter = counters[i];</span>
+<span class="fc bfc" id="L243" title="All 2 branches covered.">          if (counter &gt; maxNarrowCounter) {</span>
+<span class="fc" id="L244">            wideCounters--;</span>
+            // totalWideCountersWidth = 3 * average, so this checks if counter &gt;= 3/2 * average
+<span class="fc bfc" id="L246" title="All 2 branches covered.">            if ((counter * 2) &gt;= totalWideCountersWidth) {</span>
+<span class="fc" id="L247">              return -1;</span>
+            }
+          }
+        }
+<span class="fc" id="L251">        return pattern;</span>
+      }
+<span class="fc bfc" id="L253" title="All 2 branches covered.">    } while (wideCounters &gt; 3);</span>
+<span class="fc" id="L254">    return -1;</span>
+  }
+
+  private static char patternToChar(int pattern) throws NotFoundException {
+<span class="fc bfc" id="L258" title="All 2 branches covered.">    for (int i = 0; i &lt; CHARACTER_ENCODINGS.length; i++) {</span>
+<span class="fc bfc" id="L259" title="All 2 branches covered.">      if (CHARACTER_ENCODINGS[i] == pattern) {</span>
+<span class="fc" id="L260">        return ALPHABET_STRING.charAt(i);</span>
+      }
+    }
+<span class="fc bfc" id="L263" title="All 2 branches covered.">    if (pattern == ASTERISK_ENCODING) {</span>
+<span class="fc" id="L264">      return '*';</span>
+    }
+<span class="fc" id="L266">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  private static String decodeExtended(CharSequence encoded) throws FormatException {
+<span class="fc" id="L270">    int length = encoded.length();</span>
+<span class="fc" id="L271">    StringBuilder decoded = new StringBuilder(length);</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L273">      char c = encoded.charAt(i);</span>
+<span class="fc bfc" id="L274" title="All 8 branches covered.">      if (c == '+' || c == '$' || c == '%' || c == '/') {</span>
+<span class="fc" id="L275">        char next = encoded.charAt(i + 1);</span>
+<span class="fc" id="L276">        char decodedChar = '\0';</span>
+<span class="pc bpc" id="L277" title="1 of 5 branches missed.">        switch (c) {</span>
+          case '+':
+            // +A to +Z map to a to z
+<span class="pc bpc" id="L280" title="2 of 4 branches missed.">            if (next &gt;= 'A' &amp;&amp; next &lt;= 'Z') {</span>
+<span class="fc" id="L281">              decodedChar = (char) (next + 32);</span>
+            } else {
+<span class="nc" id="L283">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          case '$':
+            // $A to $Z map to control codes SH to SB
+<span class="pc bpc" id="L288" title="2 of 4 branches missed.">            if (next &gt;= 'A' &amp;&amp; next &lt;= 'Z') {</span>
+<span class="fc" id="L289">              decodedChar = (char) (next - 64);</span>
+            } else {
+<span class="nc" id="L291">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          case '%':
+            // %A to %E map to control codes ESC to US
+<span class="pc bpc" id="L296" title="1 of 4 branches missed.">            if (next &gt;= 'A' &amp;&amp; next &lt;= 'E') {</span>
+<span class="fc" id="L297">              decodedChar = (char) (next - 38);</span>
+<span class="pc bpc" id="L298" title="1 of 4 branches missed.">            } else if (next &gt;= 'F' &amp;&amp; next &lt;= 'J') {</span>
+<span class="fc" id="L299">              decodedChar = (char) (next - 11);</span>
+<span class="pc bpc" id="L300" title="1 of 4 branches missed.">            } else if (next &gt;= 'K' &amp;&amp; next &lt;= 'O') {</span>
+<span class="fc" id="L301">              decodedChar = (char) (next + 16);</span>
+<span class="pc bpc" id="L302" title="1 of 4 branches missed.">            } else if (next &gt;= 'P' &amp;&amp; next &lt;= 'T') {</span>
+<span class="fc" id="L303">              decodedChar = (char) (next + 43);</span>
+<span class="fc bfc" id="L304" title="All 2 branches covered.">            } else if (next == 'U') {</span>
+<span class="fc" id="L305">              decodedChar = (char) 0;</span>
+<span class="fc bfc" id="L306" title="All 2 branches covered.">            } else if (next == 'V') {</span>
+<span class="fc" id="L307">              decodedChar = '@';</span>
+<span class="pc bpc" id="L308" title="1 of 2 branches missed.">            } else if (next == 'W') {</span>
+<span class="fc" id="L309">              decodedChar = '`';</span>
+<span class="nc bnc" id="L310" title="All 6 branches missed.">            } else if (next == 'X' || next == 'Y' || next == 'Z') {</span>
+<span class="nc" id="L311">              decodedChar = (char) 127;</span>
+            } else {
+<span class="nc" id="L313">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          case '/':
+            // /A to /O map to ! to , and /Z maps to :
+<span class="pc bpc" id="L318" title="1 of 4 branches missed.">            if (next &gt;= 'A' &amp;&amp; next &lt;= 'O') {</span>
+<span class="fc" id="L319">              decodedChar = (char) (next - 32);</span>
+<span class="pc bpc" id="L320" title="1 of 2 branches missed.">            } else if (next == 'Z') {</span>
+<span class="fc" id="L321">              decodedChar = ':';</span>
+            } else {
+<span class="nc" id="L323">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+        }
+<span class="fc" id="L327">        decoded.append(decodedChar);</span>
+        // bump up i again since we read two characters
+<span class="fc" id="L329">        i++;</span>
+<span class="fc" id="L330">      } else {</span>
+<span class="fc" id="L331">        decoded.append(c);</span>
+      }
+    }
+<span class="fc" id="L334">    return decoded.toString();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

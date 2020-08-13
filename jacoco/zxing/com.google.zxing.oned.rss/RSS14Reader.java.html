@@ -1,0 +1,469 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RSS14Reader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned.rss</a> &gt; <span class="el_source">RSS14Reader.java</span></div><h1>RSS14Reader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2009 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned.rss;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.ResultPointCallback;
+import com.google.zxing.common.BitArray;
+import com.google.zxing.common.detector.MathUtils;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Decodes RSS-14, including truncated and stacked variants. See ISO/IEC 24724:2006.
+ */
+public final class RSS14Reader extends AbstractRSSReader {
+
+<span class="fc" id="L38">  private static final int[] OUTSIDE_EVEN_TOTAL_SUBSET = {1,10,34,70,126};</span>
+<span class="fc" id="L39">  private static final int[] INSIDE_ODD_TOTAL_SUBSET = {4,20,48,81};</span>
+<span class="fc" id="L40">  private static final int[] OUTSIDE_GSUM = {0,161,961,2015,2715};</span>
+<span class="fc" id="L41">  private static final int[] INSIDE_GSUM = {0,336,1036,1516};</span>
+<span class="fc" id="L42">  private static final int[] OUTSIDE_ODD_WIDEST = {8,6,4,3,1};</span>
+<span class="fc" id="L43">  private static final int[] INSIDE_ODD_WIDEST = {2,4,6,8};</span>
+
+<span class="fc" id="L45">  private static final int[][] FINDER_PATTERNS = {</span>
+      {3,8,2,1},
+      {3,5,5,1},
+      {3,3,7,1},
+      {3,1,9,1},
+      {2,7,4,1},
+      {2,5,6,1},
+      {2,3,8,1},
+      {1,5,7,1},
+      {1,3,9,1},
+  };
+
+  private final List&lt;Pair&gt; possibleLeftPairs;
+  private final List&lt;Pair&gt; possibleRightPairs;
+
+<span class="fc" id="L60">  public RSS14Reader() {</span>
+<span class="fc" id="L61">    possibleLeftPairs = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L62">    possibleRightPairs = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L63">  }</span>
+
+  @Override
+  public Result decodeRow(int rowNumber,
+                          BitArray row,
+                          Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException {
+<span class="fc" id="L69">    Pair leftPair = decodePair(row, false, rowNumber, hints);</span>
+<span class="fc" id="L70">    addOrTally(possibleLeftPairs, leftPair);</span>
+<span class="fc" id="L71">    row.reverse();</span>
+<span class="fc" id="L72">    Pair rightPair = decodePair(row, true, rowNumber, hints);</span>
+<span class="fc" id="L73">    addOrTally(possibleRightPairs, rightPair);</span>
+<span class="fc" id="L74">    row.reverse();</span>
+<span class="fc bfc" id="L75" title="All 2 branches covered.">    for (Pair left : possibleLeftPairs) {</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">      if (left.getCount() &gt; 1) {</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">        for (Pair right : possibleRightPairs) {</span>
+<span class="fc bfc" id="L78" title="All 4 branches covered.">          if (right.getCount() &gt; 1 &amp;&amp; checkChecksum(left, right)) {</span>
+<span class="fc" id="L79">            return constructResult(left, right);</span>
+          }
+<span class="fc" id="L81">        }</span>
+      }
+<span class="fc" id="L83">    }</span>
+<span class="fc" id="L84">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  private static void addOrTally(Collection&lt;Pair&gt; possiblePairs, Pair pair) {
+<span class="fc bfc" id="L88" title="All 2 branches covered.">    if (pair == null) {</span>
+<span class="fc" id="L89">      return;</span>
+    }
+<span class="fc" id="L91">    boolean found = false;</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    for (Pair other : possiblePairs) {</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">      if (other.getValue() == pair.getValue()) {</span>
+<span class="fc" id="L94">        other.incrementCount();</span>
+<span class="fc" id="L95">        found = true;</span>
+<span class="fc" id="L96">        break;</span>
+      }
+<span class="fc" id="L98">    }</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    if (!found) {</span>
+<span class="fc" id="L100">      possiblePairs.add(pair);</span>
+    }
+<span class="fc" id="L102">  }</span>
+
+  @Override
+  public void reset() {
+<span class="nc" id="L106">    possibleLeftPairs.clear();</span>
+<span class="nc" id="L107">    possibleRightPairs.clear();</span>
+<span class="nc" id="L108">  }</span>
+
+  private static Result constructResult(Pair leftPair, Pair rightPair) {
+<span class="fc" id="L111">    long symbolValue = 4537077L * leftPair.getValue() + rightPair.getValue();</span>
+<span class="fc" id="L112">    String text = String.valueOf(symbolValue);</span>
+
+<span class="fc" id="L114">    StringBuilder buffer = new StringBuilder(14);</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">    for (int i = 13 - text.length(); i &gt; 0; i--) {</span>
+<span class="fc" id="L116">      buffer.append('0');</span>
+    }
+<span class="fc" id="L118">    buffer.append(text);</span>
+
+<span class="fc" id="L120">    int checkDigit = 0;</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    for (int i = 0; i &lt; 13; i++) {</span>
+<span class="fc" id="L122">      int digit = buffer.charAt(i) - '0';</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">      checkDigit += (i &amp; 0x01) == 0 ? 3 * digit : digit;</span>
+    }
+<span class="fc" id="L125">    checkDigit = 10 - (checkDigit % 10);</span>
+<span class="pc bpc" id="L126" title="1 of 2 branches missed.">    if (checkDigit == 10) {</span>
+<span class="nc" id="L127">      checkDigit = 0;</span>
+    }
+<span class="fc" id="L129">    buffer.append(checkDigit);</span>
+
+<span class="fc" id="L131">    ResultPoint[] leftPoints = leftPair.getFinderPattern().getResultPoints();</span>
+<span class="fc" id="L132">    ResultPoint[] rightPoints = rightPair.getFinderPattern().getResultPoints();</span>
+<span class="fc" id="L133">    return new Result(</span>
+<span class="fc" id="L134">        buffer.toString(),</span>
+        null,
+        new ResultPoint[] { leftPoints[0], leftPoints[1], rightPoints[0], rightPoints[1], },
+        BarcodeFormat.RSS_14);
+  }
+
+  private static boolean checkChecksum(Pair leftPair, Pair rightPair) {
+    //int leftFPValue = leftPair.getFinderPattern().getValue();
+    //int rightFPValue = rightPair.getFinderPattern().getValue();
+    //if ((leftFPValue == 0 &amp;&amp; rightFPValue == 8) ||
+    //    (leftFPValue == 8 &amp;&amp; rightFPValue == 0)) {
+    //}
+<span class="fc" id="L146">    int checkValue = (leftPair.getChecksumPortion() + 16 * rightPair.getChecksumPortion()) % 79;</span>
+<span class="fc" id="L147">    int targetCheckValue =</span>
+<span class="fc" id="L148">        9 * leftPair.getFinderPattern().getValue() + rightPair.getFinderPattern().getValue();</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">    if (targetCheckValue &gt; 72) {</span>
+<span class="fc" id="L150">      targetCheckValue--;</span>
+    }
+<span class="pc bpc" id="L152" title="1 of 2 branches missed.">    if (targetCheckValue &gt; 8) {</span>
+<span class="fc" id="L153">      targetCheckValue--;</span>
+    }
+<span class="fc bfc" id="L155" title="All 2 branches covered.">    return checkValue == targetCheckValue;</span>
+  }
+
+  private Pair decodePair(BitArray row, boolean right, int rowNumber, Map&lt;DecodeHintType,?&gt; hints) {
+    try {
+<span class="fc" id="L160">      int[] startEnd = findFinderPattern(row, right);</span>
+<span class="fc" id="L161">      FinderPattern pattern = parseFoundFinderPattern(row, rowNumber, right, startEnd);</span>
+
+<span class="fc bfc" id="L163" title="All 2 branches covered.">      ResultPointCallback resultPointCallback = hints == null ? null :</span>
+<span class="fc" id="L164">        (ResultPointCallback) hints.get(DecodeHintType.NEED_RESULT_POINT_CALLBACK);</span>
+
+<span class="pc bpc" id="L166" title="1 of 2 branches missed.">      if (resultPointCallback != null) {</span>
+<span class="nc" id="L167">        float center = (startEnd[0] + startEnd[1]) / 2.0f;</span>
+<span class="nc bnc" id="L168" title="All 2 branches missed.">        if (right) {</span>
+          // row is actually reversed
+<span class="nc" id="L170">          center = row.getSize() - 1 - center;</span>
+        }
+<span class="nc" id="L172">        resultPointCallback.foundPossibleResultPoint(new ResultPoint(center, rowNumber));</span>
+      }
+
+<span class="fc" id="L175">      DataCharacter outside = decodeDataCharacter(row, pattern, true);</span>
+<span class="fc" id="L176">      DataCharacter inside = decodeDataCharacter(row, pattern, false);</span>
+<span class="fc" id="L177">      return new Pair(1597 * outside.getValue() + inside.getValue(),</span>
+<span class="fc" id="L178">                      outside.getChecksumPortion() + 4 * inside.getChecksumPortion(),</span>
+                      pattern);
+<span class="fc" id="L180">    } catch (NotFoundException ignored) {</span>
+<span class="fc" id="L181">      return null;</span>
+    }
+  }
+
+  private DataCharacter decodeDataCharacter(BitArray row, FinderPattern pattern, boolean outsideChar)
+      throws NotFoundException {
+
+<span class="fc" id="L188">    int[] counters = getDataCharacterCounters();</span>
+<span class="fc bfc" id="L189" title="All 2 branches covered.">    for (int x = 0; x &lt; counters.length; x++) {</span>
+<span class="fc" id="L190">      counters[x] = 0;</span>
+    }
+
+<span class="fc bfc" id="L193" title="All 2 branches covered.">    if (outsideChar) {</span>
+<span class="fc" id="L194">      recordPatternInReverse(row, pattern.getStartEnd()[0], counters);</span>
+    } else {
+<span class="fc" id="L196">      recordPattern(row, pattern.getStartEnd()[1] + 1, counters);</span>
+      // reverse it
+<span class="fc bfc" id="L198" title="All 2 branches covered.">      for (int i = 0, j = counters.length - 1; i &lt; j; i++, j--) {</span>
+<span class="fc" id="L199">        int temp = counters[i];</span>
+<span class="fc" id="L200">        counters[i] = counters[j];</span>
+<span class="fc" id="L201">        counters[j] = temp;</span>
+      }
+    }
+
+<span class="fc bfc" id="L205" title="All 2 branches covered.">    int numModules = outsideChar ? 16 : 15;</span>
+<span class="fc" id="L206">    float elementWidth = MathUtils.sum(counters) / (float) numModules;</span>
+
+<span class="fc" id="L208">    int[] oddCounts = this.getOddCounts();</span>
+<span class="fc" id="L209">    int[] evenCounts = this.getEvenCounts();</span>
+<span class="fc" id="L210">    float[] oddRoundingErrors = this.getOddRoundingErrors();</span>
+<span class="fc" id="L211">    float[] evenRoundingErrors = this.getEvenRoundingErrors();</span>
+
+<span class="fc bfc" id="L213" title="All 2 branches covered.">    for (int i = 0; i &lt; counters.length; i++) {</span>
+<span class="fc" id="L214">      float value = counters[i] / elementWidth;</span>
+<span class="fc" id="L215">      int count = (int) (value + 0.5f); // Round</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">      if (count &lt; 1) {</span>
+<span class="fc" id="L217">        count = 1;</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">      } else if (count &gt; 8) {</span>
+<span class="fc" id="L219">        count = 8;</span>
+      }
+<span class="fc" id="L221">      int offset = i / 2;</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">      if ((i &amp; 0x01) == 0) {</span>
+<span class="fc" id="L223">        oddCounts[offset] = count;</span>
+<span class="fc" id="L224">        oddRoundingErrors[offset] = value - count;</span>
+      } else {
+<span class="fc" id="L226">        evenCounts[offset] = count;</span>
+<span class="fc" id="L227">        evenRoundingErrors[offset] = value - count;</span>
+      }
+    }
+
+<span class="fc" id="L231">    adjustOddEvenCounts(outsideChar, numModules);</span>
+
+<span class="fc" id="L233">    int oddSum = 0;</span>
+<span class="fc" id="L234">    int oddChecksumPortion = 0;</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    for (int i = oddCounts.length - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L236">      oddChecksumPortion *= 9;</span>
+<span class="fc" id="L237">      oddChecksumPortion += oddCounts[i];</span>
+<span class="fc" id="L238">      oddSum += oddCounts[i];</span>
+    }
+<span class="fc" id="L240">    int evenChecksumPortion = 0;</span>
+<span class="fc" id="L241">    int evenSum = 0;</span>
+<span class="fc bfc" id="L242" title="All 2 branches covered.">    for (int i = evenCounts.length - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L243">      evenChecksumPortion *= 9;</span>
+<span class="fc" id="L244">      evenChecksumPortion += evenCounts[i];</span>
+<span class="fc" id="L245">      evenSum += evenCounts[i];</span>
+    }
+<span class="fc" id="L247">    int checksumPortion = oddChecksumPortion + 3 * evenChecksumPortion;</span>
+
+<span class="fc bfc" id="L249" title="All 2 branches covered.">    if (outsideChar) {</span>
+<span class="pc bpc" id="L250" title="3 of 6 branches missed.">      if ((oddSum &amp; 0x01) != 0 || oddSum &gt; 12 || oddSum &lt; 4) {</span>
+<span class="nc" id="L251">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L253">      int group = (12 - oddSum) / 2;</span>
+<span class="fc" id="L254">      int oddWidest = OUTSIDE_ODD_WIDEST[group];</span>
+<span class="fc" id="L255">      int evenWidest = 9 - oddWidest;</span>
+<span class="fc" id="L256">      int vOdd = RSSUtils.getRSSvalue(oddCounts, oddWidest, false);</span>
+<span class="fc" id="L257">      int vEven = RSSUtils.getRSSvalue(evenCounts, evenWidest, true);</span>
+<span class="fc" id="L258">      int tEven = OUTSIDE_EVEN_TOTAL_SUBSET[group];</span>
+<span class="fc" id="L259">      int gSum = OUTSIDE_GSUM[group];</span>
+<span class="fc" id="L260">      return new DataCharacter(vOdd * tEven + vEven + gSum, checksumPortion);</span>
+    } else {
+<span class="pc bpc" id="L262" title="3 of 6 branches missed.">      if ((evenSum &amp; 0x01) != 0 || evenSum &gt; 10 || evenSum &lt; 4) {</span>
+<span class="nc" id="L263">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L265">      int group = (10 - evenSum) / 2;</span>
+<span class="fc" id="L266">      int oddWidest = INSIDE_ODD_WIDEST[group];</span>
+<span class="fc" id="L267">      int evenWidest = 9 - oddWidest;</span>
+<span class="fc" id="L268">      int vOdd = RSSUtils.getRSSvalue(oddCounts, oddWidest, true);</span>
+<span class="fc" id="L269">      int vEven = RSSUtils.getRSSvalue(evenCounts, evenWidest, false);</span>
+<span class="fc" id="L270">      int tOdd = INSIDE_ODD_TOTAL_SUBSET[group];</span>
+<span class="fc" id="L271">      int gSum = INSIDE_GSUM[group];</span>
+<span class="fc" id="L272">      return new DataCharacter(vEven * tOdd + vOdd + gSum, checksumPortion);</span>
+    }
+
+  }
+
+  private int[] findFinderPattern(BitArray row, boolean rightFinderPattern)
+      throws NotFoundException {
+
+<span class="fc" id="L280">    int[] counters = getDecodeFinderCounters();</span>
+<span class="fc" id="L281">    counters[0] = 0;</span>
+<span class="fc" id="L282">    counters[1] = 0;</span>
+<span class="fc" id="L283">    counters[2] = 0;</span>
+<span class="fc" id="L284">    counters[3] = 0;</span>
+
+<span class="fc" id="L286">    int width = row.getSize();</span>
+<span class="fc" id="L287">    boolean isWhite = false;</span>
+<span class="fc" id="L288">    int rowOffset = 0;</span>
+<span class="fc bfc" id="L289" title="All 2 branches covered.">    while (rowOffset &lt; width) {</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">      isWhite = !row.get(rowOffset);</span>
+<span class="fc bfc" id="L291" title="All 2 branches covered.">      if (rightFinderPattern == isWhite) {</span>
+        // Will encounter white first when searching for right finder pattern
+<span class="fc" id="L293">        break;</span>
+      }
+<span class="fc" id="L295">      rowOffset++;</span>
+    }
+
+<span class="fc" id="L298">    int counterPosition = 0;</span>
+<span class="fc" id="L299">    int patternStart = rowOffset;</span>
+<span class="fc bfc" id="L300" title="All 2 branches covered.">    for (int x = rowOffset; x &lt; width; x++) {</span>
+<span class="fc bfc" id="L301" title="All 2 branches covered.">      if (row.get(x) != isWhite) {</span>
+<span class="fc" id="L302">        counters[counterPosition]++;</span>
+      } else {
+<span class="fc bfc" id="L304" title="All 2 branches covered.">        if (counterPosition == 3) {</span>
+<span class="fc bfc" id="L305" title="All 2 branches covered.">          if (isFinderPattern(counters)) {</span>
+<span class="fc" id="L306">            return new int[]{patternStart, x};</span>
+          }
+<span class="fc" id="L308">          patternStart += counters[0] + counters[1];</span>
+<span class="fc" id="L309">          counters[0] = counters[2];</span>
+<span class="fc" id="L310">          counters[1] = counters[3];</span>
+<span class="fc" id="L311">          counters[2] = 0;</span>
+<span class="fc" id="L312">          counters[3] = 0;</span>
+<span class="fc" id="L313">          counterPosition--;</span>
+        } else {
+<span class="fc" id="L315">          counterPosition++;</span>
+        }
+<span class="fc" id="L317">        counters[counterPosition] = 1;</span>
+<span class="fc bfc" id="L318" title="All 2 branches covered.">        isWhite = !isWhite;</span>
+      }
+    }
+<span class="fc" id="L321">    throw NotFoundException.getNotFoundInstance();</span>
+
+  }
+
+  private FinderPattern parseFoundFinderPattern(BitArray row, int rowNumber, boolean right, int[] startEnd)
+      throws NotFoundException {
+    // Actually we found elements 2-5
+<span class="fc" id="L328">    boolean firstIsBlack = row.get(startEnd[0]);</span>
+<span class="fc" id="L329">    int firstElementStart = startEnd[0] - 1;</span>
+    // Locate element 1
+<span class="fc bfc" id="L331" title="All 4 branches covered.">    while (firstElementStart &gt;= 0 &amp;&amp; firstIsBlack != row.get(firstElementStart)) {</span>
+<span class="fc" id="L332">      firstElementStart--;</span>
+    }
+<span class="fc" id="L334">    firstElementStart++;</span>
+<span class="fc" id="L335">    int firstCounter = startEnd[0] - firstElementStart;</span>
+    // Make 'counters' hold 1-4
+<span class="fc" id="L337">    int[] counters = getDecodeFinderCounters();</span>
+<span class="fc" id="L338">    System.arraycopy(counters, 0, counters, 1, counters.length - 1);</span>
+<span class="fc" id="L339">    counters[0] = firstCounter;</span>
+<span class="fc" id="L340">    int value = parseFinderValue(counters, FINDER_PATTERNS);</span>
+<span class="fc" id="L341">    int start = firstElementStart;</span>
+<span class="fc" id="L342">    int end = startEnd[1];</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">    if (right) {</span>
+      // row is actually reversed
+<span class="fc" id="L345">      start = row.getSize() - 1 - start;</span>
+<span class="fc" id="L346">      end = row.getSize() - 1 - end;</span>
+    }
+<span class="fc" id="L348">    return new FinderPattern(value, new int[] {firstElementStart, startEnd[1]}, start, end, rowNumber);</span>
+  }
+
+  private void adjustOddEvenCounts(boolean outsideChar, int numModules) throws NotFoundException {
+
+<span class="fc" id="L353">    int oddSum = MathUtils.sum(getOddCounts());</span>
+<span class="fc" id="L354">    int evenSum = MathUtils.sum(getEvenCounts());</span>
+
+<span class="fc" id="L356">    boolean incrementOdd = false;</span>
+<span class="fc" id="L357">    boolean decrementOdd = false;</span>
+<span class="fc" id="L358">    boolean incrementEven = false;</span>
+<span class="fc" id="L359">    boolean decrementEven = false;</span>
+
+<span class="fc bfc" id="L361" title="All 2 branches covered.">    if (outsideChar) {</span>
+<span class="fc bfc" id="L362" title="All 2 branches covered.">      if (oddSum &gt; 12) {</span>
+<span class="fc" id="L363">        decrementOdd = true;</span>
+<span class="pc bpc" id="L364" title="1 of 2 branches missed.">      } else if (oddSum &lt; 4) {</span>
+<span class="nc" id="L365">        incrementOdd = true;</span>
+      }
+<span class="fc bfc" id="L367" title="All 2 branches covered.">      if (evenSum &gt; 12) {</span>
+<span class="fc" id="L368">        decrementEven = true;</span>
+<span class="pc bpc" id="L369" title="1 of 2 branches missed.">      } else if (evenSum &lt; 4) {</span>
+<span class="nc" id="L370">        incrementEven = true;</span>
+      }
+    } else {
+<span class="fc bfc" id="L373" title="All 2 branches covered.">      if (oddSum &gt; 11) {</span>
+<span class="fc" id="L374">        decrementOdd = true;</span>
+<span class="fc bfc" id="L375" title="All 2 branches covered.">      } else if (oddSum &lt; 5) {</span>
+<span class="fc" id="L376">        incrementOdd = true;</span>
+      }
+<span class="fc bfc" id="L378" title="All 2 branches covered.">      if (evenSum &gt; 10) {</span>
+<span class="fc" id="L379">        decrementEven = true;</span>
+<span class="pc bpc" id="L380" title="1 of 2 branches missed.">      } else if (evenSum &lt; 4) {</span>
+<span class="nc" id="L381">        incrementEven = true;</span>
+      }
+    }
+
+<span class="fc" id="L385">    int mismatch = oddSum + evenSum - numModules;</span>
+<span class="fc bfc" id="L386" title="All 4 branches covered.">    boolean oddParityBad = (oddSum &amp; 0x01) == (outsideChar ? 1 : 0);</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">    boolean evenParityBad = (evenSum &amp; 0x01) == 1;</span>
+    /*if (mismatch == 2) {
+      if (!(oddParityBad &amp;&amp; evenParityBad)) {
+        throw ReaderException.getInstance();
+      }
+      decrementOdd = true;
+      decrementEven = true;
+    } else if (mismatch == -2) {
+      if (!(oddParityBad &amp;&amp; evenParityBad)) {
+        throw ReaderException.getInstance();
+      }
+      incrementOdd = true;
+      incrementEven = true;
+<span class="fc bfc" id="L400" title="All 2 branches covered.">    } else */ if (mismatch == 1) {</span>
+<span class="fc bfc" id="L401" title="All 2 branches covered.">      if (oddParityBad) {</span>
+<span class="pc bpc" id="L402" title="1 of 2 branches missed.">        if (evenParityBad) {</span>
+<span class="nc" id="L403">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+<span class="fc" id="L405">        decrementOdd = true;</span>
+      } else {
+<span class="pc bpc" id="L407" title="1 of 2 branches missed.">        if (!evenParityBad) {</span>
+<span class="nc" id="L408">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+<span class="fc" id="L410">        decrementEven = true;</span>
+      }
+<span class="fc bfc" id="L412" title="All 2 branches covered.">    } else if (mismatch == -1) {</span>
+<span class="fc bfc" id="L413" title="All 2 branches covered.">      if (oddParityBad) {</span>
+<span class="pc bpc" id="L414" title="1 of 2 branches missed.">        if (evenParityBad) {</span>
+<span class="nc" id="L415">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+<span class="fc" id="L417">        incrementOdd = true;</span>
+      } else {
+<span class="pc bpc" id="L419" title="1 of 2 branches missed.">        if (!evenParityBad) {</span>
+<span class="nc" id="L420">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+<span class="fc" id="L422">        incrementEven = true;</span>
+      }
+<span class="fc bfc" id="L424" title="All 2 branches covered.">    } else if (mismatch == 0) {</span>
+<span class="fc bfc" id="L425" title="All 2 branches covered.">      if (oddParityBad) {</span>
+<span class="pc bpc" id="L426" title="1 of 2 branches missed.">        if (!evenParityBad) {</span>
+<span class="nc" id="L427">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+        // Both bad
+<span class="fc bfc" id="L430" title="All 2 branches covered.">        if (oddSum &lt; evenSum) {</span>
+<span class="fc" id="L431">          incrementOdd = true;</span>
+<span class="fc" id="L432">          decrementEven = true;</span>
+        } else {
+<span class="fc" id="L434">          decrementOdd = true;</span>
+<span class="fc" id="L435">          incrementEven = true;</span>
+        }
+      } else {
+<span class="pc bpc" id="L438" title="1 of 2 branches missed.">        if (evenParityBad) {</span>
+<span class="nc" id="L439">          throw NotFoundException.getNotFoundInstance();</span>
+        }
+        // Nothing to do!
+      }
+    } else {
+<span class="fc" id="L444">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc bfc" id="L447" title="All 2 branches covered.">    if (incrementOdd) {</span>
+<span class="fc bfc" id="L448" title="All 2 branches covered.">      if (decrementOdd) {</span>
+<span class="fc" id="L449">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L451">      increment(getOddCounts(), getOddRoundingErrors());</span>
+    }
+<span class="fc bfc" id="L453" title="All 2 branches covered.">    if (decrementOdd) {</span>
+<span class="fc" id="L454">      decrement(getOddCounts(), getOddRoundingErrors());</span>
+    }
+<span class="fc bfc" id="L456" title="All 2 branches covered.">    if (incrementEven) {</span>
+<span class="pc bpc" id="L457" title="1 of 2 branches missed.">      if (decrementEven) {</span>
+<span class="nc" id="L458">        throw NotFoundException.getNotFoundInstance();</span>
+      }
+<span class="fc" id="L460">      increment(getEvenCounts(), getOddRoundingErrors());</span>
+    }
+<span class="fc bfc" id="L462" title="All 2 branches covered.">    if (decrementEven) {</span>
+<span class="fc" id="L463">      decrement(getEvenCounts(), getEvenRoundingErrors());</span>
+    }
+
+<span class="fc" id="L466">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

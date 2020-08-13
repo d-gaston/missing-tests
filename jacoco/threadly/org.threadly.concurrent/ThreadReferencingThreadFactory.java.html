@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ThreadReferencingThreadFactory.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">ThreadReferencingThreadFactory.java</span></div><h1>ThreadReferencingThreadFactory.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionHandler;
+
+/**
+ * A thread factory which keeps a {@link WeakReference} to each thread.  These threads (if still 
+ * referenced by the VM) can then be retrieved by using {@link #getThreads(boolean)}.
+ * 
+ * @since 5.15
+ */
+public class ThreadReferencingThreadFactory extends ConfigurableThreadFactory {
+  private static final int REFERENCE_QUEUE_CHECK_INTERVAL_MILLIS = 10_000;
+  
+<span class="fc" id="L23">  private final Collection&lt;WeakReference&lt;Thread&gt;&gt; threads = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="fc" id="L24">  private volatile long lastCleanupTime = Clock.lastKnownForwardProgressingMillis();</span>
+  
+  /**
+   * Constructs a new {@link ThreadReferencingThreadFactory} with the default parameters.  Threads 
+   * produced from this should behave exactly like Executors.defaultThreadFactory(), except the 
+   * pool number provided in the thread name will be respective to the ones created from other 
+   * {@link ThreadReferencingThreadFactory} instances.
+   */
+  public ThreadReferencingThreadFactory() {
+<span class="fc" id="L33">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, Thread.NORM_PRIORITY, null, null);</span>
+<span class="fc" id="L34">  }</span>
+  
+  /**
+   * Constructs a new {@link ThreadReferencingThreadFactory} specifying the prefix for the name of 
+   * newly created threads.  
+   * &lt;p&gt;
+   * If specified with {@code true} for {@code appendPoolIdToPrefix} it will append a unique 
+   * &quot;pool&quot; id to the prefix, giving it the format of 
+   * {@code threadNamePrefix + UNIQUE_POOL_ID + &quot;-thread-&quot;}.  If {@code appendPoolIdToPrefix} is 
+   * specified as {@code false}, only a unique thread id will be appended to the prefix.  In 
+   * either case, the produced threads name will be appended with a unique thread id for the 
+   * factory instance.
+   * 
+   * @param threadNamePrefix prefix for all threads created
+   * @param appendPoolIdToPrefix {@code true} to append a unique pool id to the thread prefix
+   */
+  public ThreadReferencingThreadFactory(String threadNamePrefix, boolean appendPoolIdToPrefix) {
+<span class="fc" id="L51">    this(threadNamePrefix, appendPoolIdToPrefix, </span>
+         DEFAULT_NEW_THREADS_DAEMON, Thread.NORM_PRIORITY, null, null);
+<span class="fc" id="L53">  }</span>
+  
+  /**
+   * Constructs a new {@link ThreadReferencingThreadFactory} specifying the behavior for if threads 
+   * should be daemon or not.
+   * 
+   * @param useDaemonThreads {@code true} if produced threads should be daemon threads
+   */
+  public ThreadReferencingThreadFactory(boolean useDaemonThreads) {
+<span class="fc" id="L62">    this(null, true, useDaemonThreads, Thread.NORM_PRIORITY, null, null);</span>
+<span class="fc" id="L63">  }</span>
+  
+  /**
+   * Constructs a new {@link ThreadReferencingThreadFactory} specifying the priority for produced 
+   * threads.  
+   * &lt;p&gt;
+   * If the priority is below or above the max available thread priority, this will be adjusted to 
+   * the limit of the system.
+   * 
+   * @param threadPriority Priority for newly created threads
+   */
+  public ThreadReferencingThreadFactory(int threadPriority) {
+<span class="fc" id="L75">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, threadPriority, null, null);</span>
+<span class="fc" id="L76">  }</span>
+  
+  /**
+   * Constructs a new {@link ThreadReferencingThreadFactory} specifying an 
+   * {@link UncaughtExceptionHandler} that will be provided to all newly created threads.
+   * 
+   * @param defaultUncaughtExceptionHandler {@link UncaughtExceptionHandler} to provide to newly created threads
+   */
+  public ThreadReferencingThreadFactory(UncaughtExceptionHandler defaultUncaughtExceptionHandler) {
+<span class="fc" id="L85">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, </span>
+         Thread.NORM_PRIORITY, defaultUncaughtExceptionHandler, null);
+<span class="fc" id="L87">  }</span>
+  
+  /**
+   * Constructs a new {@link ConfigurableThreadFactory} specifying an {@link ExceptionHandler} 
+   * that will be provided to all newly created threads.
+   * 
+   * @param defaultThreadlyExceptionHandler {@link ExceptionHandler} to provide to newly created threads
+   */
+  public ThreadReferencingThreadFactory(ExceptionHandler defaultThreadlyExceptionHandler) {
+<span class="fc" id="L96">    this(null, true, DEFAULT_NEW_THREADS_DAEMON, </span>
+         Thread.NORM_PRIORITY, null, defaultThreadlyExceptionHandler);
+<span class="fc" id="L98">  }</span>
+  
+  /**
+   * Constructs a new {@link ThreadReferencingThreadFactory} allowing you to provide specific values 
+   * for everything which this class allows to be configured.  You must use this constructor if 
+   * you need to adjust two or more values.  
+   * &lt;p&gt;
+   * If specified with {@code true} for {@code appendPoolIdToPrefix} it will append a unique 
+   * &quot;pool&quot; id to the prefix, giving it the format of 
+   * {@code threadNamePrefix + UNIQUE_POOL_ID + &quot;-thread-&quot;}.  If {@code appendPoolIdToPrefix} is 
+   * specified as {@code false}, only a unique thread id will be appended to the prefix.  In 
+   * either case, the produced threads name will be appended with a unique thread id for the 
+   * factory instance.
+   * &lt;p&gt;
+   * If the priority is below or above the max available thread priority, this will be adjusted to 
+   * the limit of the system.
+   * 
+   * @param threadNamePrefix prefix for all threads created, {@code null} to match default
+   * @param appendPoolIdToPrefix {@code true} to append a unique pool id to the thread prefix, 
+   *                             {@code true} to match default
+   * @param useDaemonThreads true if produced threads should be daemon threads, false to match default
+   * @param threadPriority Priority for newly created threads, {@code Thread.NORM_PRIORITY} to match default
+   * @param uncaughtExceptionHandler UncaughtExceptionHandler to provide to newly created threads, 
+   *                                 {@code null} to match default
+   * @param defaultThreadlyExceptionHandler {@link ExceptionHandler} to provide to newly created threads
+   */
+  public ThreadReferencingThreadFactory(String threadNamePrefix, boolean appendPoolIdToPrefix, 
+                                        boolean useDaemonThreads, int threadPriority, 
+                                        UncaughtExceptionHandler uncaughtExceptionHandler, 
+                                        ExceptionHandler defaultThreadlyExceptionHandler) {
+<span class="fc" id="L128">    super(threadNamePrefix, appendPoolIdToPrefix, useDaemonThreads, threadPriority, </span>
+          uncaughtExceptionHandler, defaultThreadlyExceptionHandler);
+<span class="fc" id="L130">  }</span>
+  
+  /**
+   * Get a list of currently known threads.  This provides the ability to check if the thread is 
+   * still alive before it is added, but threads may die / stop while the result is building so 
+   * inactive threads may still be returned.
+   * 
+   * @param requireAlive {@code true} to only provide threads currently seen as alive
+   * @return A list of known thread references still reachable
+   */
+  public List&lt;Thread&gt; getThreads(boolean requireAlive) {
+<span class="fc" id="L141">    List&lt;Thread&gt; result = new ArrayList&lt;&gt;(threads.size());</span>
+<span class="fc" id="L142">    Iterator&lt;WeakReference&lt;Thread&gt;&gt; it = threads.iterator();</span>
+<span class="fc bfc" id="L143" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L144">      Thread t = it.next().get();</span>
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">      if (t == null) {</span>
+<span class="nc" id="L146">        it.remove();</span>
+<span class="fc bfc" id="L147" title="All 4 branches covered.">      } else if (! requireAlive || t.isAlive()) { </span>
+<span class="fc" id="L148">        result.add(t);</span>
+      }
+<span class="fc" id="L150">    }</span>
+<span class="fc" id="L151">    return result;</span>
+  }
+
+  @Override
+  public Thread newThread(Runnable r) {
+<span class="fc" id="L156">    Thread result = super.newThread(r);</span>
+    
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">    if (Clock.lastKnownForwardProgressingMillis() - lastCleanupTime &gt; REFERENCE_QUEUE_CHECK_INTERVAL_MILLIS) {</span>
+      // not designed to be a memory barrier, can be done in parallel, just dont want it done too much
+<span class="nc" id="L160">      lastCleanupTime = Clock.lastKnownForwardProgressingMillis();</span>
+<span class="nc" id="L161">      Iterator&lt;WeakReference&lt;Thread&gt;&gt; it = threads.iterator();</span>
+<span class="nc bnc" id="L162" title="All 2 branches missed.">      while (it.hasNext()) {</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">        if (it.next().get() == null) {</span>
+<span class="nc" id="L164">          it.remove();</span>
+        }
+      }
+    }
+    
+<span class="fc" id="L169">    threads.add(new WeakReference&lt;&gt;(result));</span>
+    
+<span class="fc" id="L171">    return result;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

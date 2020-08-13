@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SchedulerServiceLimiter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">SchedulerServiceLimiter.java</span></div><h1>SchedulerServiceLimiter.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import java.lang.ref.WeakReference;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import org.threadly.concurrent.ContainerHelper;
+import org.threadly.concurrent.SchedulerService;
+import org.threadly.concurrent.future.ListenableFuture;
+
+/**
+ * This class is designed to limit how much parallel execution happens on a provided 
+ * {@link SchedulerService}.  This allows the implementor to have one thread pool for all 
+ * their code, and if they want certain sections to have less levels of parallelism (possibly 
+ * because those those sections would completely consume the global pool), they can wrap the 
+ * executor in this class.
+ * &lt;p&gt;
+ * Thus providing you better control on the absolute thread count and how much parallelism can 
+ * occur in different sections of the program.
+ * &lt;p&gt;
+ * This is an alternative from having to create multiple thread pools.  By using this you also are 
+ * able to accomplish more efficiently thread use than multiple thread pools would.
+ * &lt;p&gt;
+ * This extends the {@link SubmitterSchedulerLimiter} to add {@link SchedulerService} features.  
+ * This does not cause any performance hits, but does require a source {@link SchedulerService} to 
+ * rely on.  If you have a {@link SchedulerService} available this implementation should be 
+ * preferred over the {@link SubmitterSchedulerLimiter}.
+ * &lt;p&gt;
+ * If limiting to a single thread, please see {@link SingleThreadSchedulerSubPool} as a possible 
+ * alternative.
+ * 
+ * @since 4.6.0 (since 2.0.0 at org.threadly.concurrent.limiter)
+ */
+public class SchedulerServiceLimiter extends SubmitterSchedulerLimiter
+                                     implements SchedulerService {
+  protected final SchedulerService scheduler;
+  private final Collection&lt;WeakReference&lt;RecurringWrapper&gt;&gt; recurringTasks;
+  
+  /**
+   * Constructs a new limiter that implements the {@link SchedulerService}.
+   * 
+   * @param scheduler {@link SchedulerService} implementation to submit task executions to.
+   * @param maxConcurrency maximum quantity of runnables to run in parallel
+   */
+  public SchedulerServiceLimiter(SchedulerService scheduler, int maxConcurrency) {
+<span class="fc" id="L48">    this(scheduler, maxConcurrency, DEFAULT_LIMIT_FUTURE_LISTENER_EXECUTION);</span>
+<span class="fc" id="L49">  }</span>
+  
+  /**
+   * Constructs a new limiter that implements the {@link SchedulerService}.
+   * &lt;p&gt;
+   * This constructor allows you to specify if listeners / 
+   * {@link org.threadly.concurrent.future.FutureCallback}'s / functions in 
+   * {@link ListenableFuture#map(java.util.function.Function)} or 
+   * {@link ListenableFuture#flatMap(java.util.function.Function)} should be counted towards the 
+   * concurrency limit.  Specifying {@code false} will release the limit as soon as the original 
+   * task completes.  Specifying {@code true} will continue to enforce the limit until all listeners 
+   * (without an executor) complete.
+   * 
+   * @param scheduler {@link SchedulerService} implementation to submit task executions to.
+   * @param maxConcurrency maximum quantity of runnables to run in parallel
+   * @param limitFutureListenersExecution {@code true} to include listener / mapped functions towards execution limit
+   */
+  public SchedulerServiceLimiter(SchedulerService scheduler, int maxConcurrency, 
+                                 boolean limitFutureListenersExecution) {
+<span class="fc" id="L68">    super(scheduler, maxConcurrency, limitFutureListenersExecution);</span>
+    
+<span class="fc" id="L70">    this.scheduler = scheduler;</span>
+<span class="fc" id="L71">    this.recurringTasks = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="fc" id="L72">  }</span>
+  
+  @Override
+  protected void initialRecurringSchedule(RecurringWrapper rw, long initialDelay) {
+    // first cleanup if needed
+<span class="fc" id="L77">    Iterator&lt;WeakReference&lt;RecurringWrapper&gt;&gt; it = recurringTasks.iterator();</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">      if (it.next().get() == null) {</span>
+<span class="nc" id="L80">        it.remove();</span>
+      }
+    }
+
+<span class="fc" id="L84">    recurringTasks.add(new WeakReference&lt;&gt;(rw));</span>
+    
+<span class="fc" id="L86">    super.initialRecurringSchedule(rw, initialDelay);</span>
+<span class="fc" id="L87">  }</span>
+
+  @Override
+  public boolean remove(Runnable task) {
+<span class="fc" id="L91">    Iterator&lt;WeakReference&lt;RecurringWrapper&gt;&gt; it = recurringTasks.iterator();</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L93">      RecurringWrapper rw = it.next().get();</span>
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">      if (rw == null) {</span>
+<span class="nc" id="L95">        it.remove();</span>
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">      } else if (ContainerHelper.isContained(rw, task)) {</span>
+<span class="fc" id="L97">        it.remove();</span>
+        
+<span class="pc bpc" id="L99" title="1 of 2 branches missed.">        if (rw.invalidate()) {</span>
+          // try to remove proactively
+<span class="fc" id="L101">          waitingTasks.remove(rw);</span>
+<span class="fc" id="L102">          scheduler.remove(rw.delayRunnable);</span>
+<span class="fc" id="L103">          scheduler.remove(rw);</span>
+<span class="fc" id="L104">          return true;</span>
+        }
+      }
+<span class="nc" id="L107">    }</span>
+    
+    // synchronize on this so that we don't consume tasks while trying to remove
+<span class="fc" id="L110">    synchronized (this) {</span>
+<span class="fc bfc" id="L111" title="All 4 branches covered.">      return ContainerHelper.remove(waitingTasks, task) || scheduler.remove(task);</span>
+    }
+  }
+
+  @Override
+  public boolean remove(Callable&lt;?&gt; task) {
+<span class="fc" id="L117">    Iterator&lt;WeakReference&lt;RecurringWrapper&gt;&gt; it = recurringTasks.iterator();</span>
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">    while (it.hasNext()) {</span>
+<span class="nc" id="L119">      RecurringWrapper rw = it.next().get();</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">      if (rw == null) {</span>
+<span class="nc" id="L121">        it.remove();</span>
+<span class="nc bnc" id="L122" title="All 2 branches missed.">      } else if (ContainerHelper.isContained(rw, task)) {</span>
+<span class="nc" id="L123">        it.remove();</span>
+        
+<span class="nc bnc" id="L125" title="All 2 branches missed.">        if (rw.invalidate()) {</span>
+          // try to remove proactively
+<span class="nc" id="L127">          waitingTasks.remove(rw);</span>
+<span class="nc" id="L128">          scheduler.remove(rw.delayRunnable);</span>
+<span class="nc" id="L129">          scheduler.remove(rw);</span>
+<span class="nc" id="L130">          return true;</span>
+        }
+      }
+<span class="nc" id="L133">    }</span>
+    
+    // synchronize on this so that we don't consume tasks while trying to remove
+<span class="fc" id="L136">    synchronized (this) {</span>
+<span class="fc bfc" id="L137" title="All 4 branches covered.">      return ContainerHelper.remove(waitingTasks, task) || scheduler.remove(task);</span>
+    }
+  }
+
+  @Override
+  public int getActiveTaskCount() {
+<span class="fc" id="L143">    return scheduler.getActiveTaskCount();</span>
+  }
+
+  @Override
+  public int getQueuedTaskCount() {
+<span class="fc" id="L148">    return scheduler.getQueuedTaskCount() + waitingTasks.size();</span>
+  }
+
+  @Override
+  public int getWaitingForExecutionTaskCount() {
+<span class="fc" id="L153">    return scheduler.getWaitingForExecutionTaskCount() + waitingTasks.size();</span>
+  }
+
+  @Override
+  public boolean isShutdown() {
+<span class="fc" id="L158">    return scheduler.isShutdown();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

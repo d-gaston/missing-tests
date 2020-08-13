@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ExecutorTaskInterceptor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.interceptor</a> &gt; <span class="el_source">ExecutorTaskInterceptor.java</span></div><h1>ExecutorTaskInterceptor.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.interceptor;
+
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.function.Function;
+
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * Class to wrap {@link Executor} pool so that tasks can be intercepted and either wrapped, or 
+ * modified, before being submitted to the pool. This class can be passed a lamba in the 
+ * constructor, or you can extend this class and override the function {@link #wrapTask(Runnable)}
+ * to provide the task which should be submitted to the {@link Executor}.  Please see the javadocs
+ * of {@link #wrapTask(Runnable)} for more details about ways a task can be modified or wrapped.
+ * &lt;p&gt;
+ * Other variants of task wrappers: {@link SubmitterSchedulerTaskInterceptor}, 
+ * {@link SchedulerServiceTaskInterceptor}, {@link PrioritySchedulerTaskInterceptor}.
+ * 
+ * @since 4.6.0
+ */
+public class ExecutorTaskInterceptor implements SubmitterExecutor {
+  protected final Executor parentExecutor;
+  protected final Function&lt;Runnable, Runnable&gt; taskManipulator;
+  
+  /**
+   * When using this constructor, {@link #wrapTask(Runnable)} must be overridden to handle the 
+   * task manipulation before the task is submitted to the provided {@link Executor}.  Please see 
+   * the javadocs of {@link #wrapTask(Runnable)} for more details about ways a task can be 
+   * modified or wrapped.
+   * 
+   * @param parentExecutor An instance of {@link Executor} to wrap
+   */
+  protected ExecutorTaskInterceptor(Executor parentExecutor) {
+<span class="fc" id="L37">    this(parentExecutor, (r) -&gt; { throw new RuntimeException(&quot;Must override wrapTask(Runnable)&quot;); });</span>
+<span class="fc" id="L38">  }</span>
+  
+  /**
+   * Constructs a wrapper for {@link Executor} pool so that tasks can be intercepted and modified,
+   * before being submitted to the pool.
+   * 
+   * @param parentExecutor An instance of {@link Executor} to wrap
+   * @param taskManipulator A lambda to manipulate a {@link Runnable} that was submitted for execution
+   */
+<span class="fc" id="L47">  public ExecutorTaskInterceptor(Executor parentExecutor, Function&lt;Runnable, Runnable&gt; taskManipulator) {</span>
+<span class="fc" id="L48">    ArgumentVerifier.assertNotNull(parentExecutor, &quot;parentExecutor&quot;);</span>
+<span class="fc" id="L49">    ArgumentVerifier.assertNotNull(taskManipulator, &quot;taskManipulator&quot;);</span>
+    
+<span class="fc" id="L51">    this.taskManipulator = taskManipulator;</span>
+<span class="fc" id="L52">    this.parentExecutor = parentExecutor;</span>
+<span class="fc" id="L53">  }</span>
+  
+  /**
+   * Implementation to modify a provided task.  The provided runnable will be the one submitted to 
+   * the Executor, unless a {@link Callable} was submitted, in which case a 
+   * {@link ListenableFutureTask} will be provided. In the last condition the original callable 
+   * can be retrieved by invoking {@link ListenableFutureTask#getContainedCallable()}. The returned 
+   * task can not be null, but could be either the original task, a modified task, a wrapper to the 
+   * provided task, or if no action is desired 
+   * {@link org.threadly.concurrent.DoNothingRunnable#instance()} may be provided.  However caution 
+   * should be used in that if a {@link ListenableFutureTask} is provided, and then never returned 
+   * (and not canceled), then the future will never complete (and thus possibly forever blocked).  
+   * So if you are doing conditional checks for {@link ListenableFutureTask} and may not 
+   * execute/return the provided task, then you should be careful to ensure 
+   * {@link ListenableFutureTask#cancel(boolean)} is invoked.
+   * 
+   * @param task A runnable that was submitted for execution
+   * @return A non-null task that will be provided to the parent executor
+   */
+  public Runnable wrapTask(Runnable task) {
+<span class="fc" id="L73">    return this.taskManipulator.apply(task);</span>
+  }
+
+  @Override
+  public void execute(Runnable task) {
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    parentExecutor.execute(task == null ? null : wrapTask(task));</span>
+<span class="fc" id="L79">  }</span>
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result) {
+<span class="fc" id="L83">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L85">    ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, wrapTask(task), result, this);</span>
+    
+<span class="fc" id="L87">    parentExecutor.execute(lft);</span>
+    
+<span class="fc" id="L89">    return lft;</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task) {
+<span class="fc" id="L94">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L96">    ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, this);</span>
+
+<span class="fc" id="L98">    parentExecutor.execute(wrapTask(lft));</span>
+    
+<span class="fc" id="L100">    return lft;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

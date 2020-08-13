@@ -1,0 +1,533 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Relation.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.table</a> &gt; <span class="el_source">Relation.java</span></div><h1>Relation.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.table;
+
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+import tech.tablesaw.api.BooleanColumn;
+import tech.tablesaw.api.CategoricalColumn;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.DateColumn;
+import tech.tablesaw.api.DateTimeColumn;
+import tech.tablesaw.api.DoubleColumn;
+import tech.tablesaw.api.FloatColumn;
+import tech.tablesaw.api.InstantColumn;
+import tech.tablesaw.api.IntColumn;
+import tech.tablesaw.api.LongColumn;
+import tech.tablesaw.api.NumericColumn;
+import tech.tablesaw.api.Row;
+import tech.tablesaw.api.ShortColumn;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.api.TextColumn;
+import tech.tablesaw.api.TimeColumn;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.conversion.TableConverter;
+import tech.tablesaw.conversion.smile.SmileConverter;
+import tech.tablesaw.io.string.DataFramePrinter;
+import tech.tablesaw.sorting.comparators.DescendingIntComparator;
+
+/**
+ * A tabular data structure like a table in a relational database, but not formally implementing the
+ * relational algebra
+ */
+<span class="fc" id="L50">public abstract class Relation implements Iterable&lt;Row&gt; {</span>
+
+  public abstract Relation addColumns(Column&lt;?&gt;... cols);
+
+  public abstract Relation setName(String name);
+
+  public boolean isEmpty() {
+<span class="fc bfc" id="L57" title="All 2 branches covered.">    return rowCount() == 0;</span>
+  }
+
+  public String shape() {
+<span class="fc" id="L61">    return rowCount() + &quot; rows X &quot; + columnCount() + &quot; cols&quot;;</span>
+  }
+
+  public Relation removeColumns(int... columnIndexes) {
+<span class="fc" id="L65">    IntArrays.quickSort(columnIndexes, DescendingIntComparator.instance());</span>
+<span class="fc bfc" id="L66" title="All 2 branches covered.">    for (int i : columnIndexes) {</span>
+<span class="fc" id="L67">      removeColumns(column(i));</span>
+    }
+<span class="fc" id="L69">    return this;</span>
+  }
+
+  /** Removes the given columns from the receiver */
+  public abstract Relation removeColumns(Column&lt;?&gt;... columns);
+
+  public Relation removeColumns(String... columnName) {
+<span class="fc" id="L76">    Column&lt;?&gt;[] cols = new Column&lt;?&gt;[columnName.length];</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">    for (int i = 0; i &lt; columnName.length; i++) {</span>
+<span class="fc" id="L78">      cols[i] = column(columnName[i]);</span>
+    }
+<span class="fc" id="L80">    removeColumns(cols);</span>
+<span class="fc" id="L81">    return this;</span>
+  }
+
+  public List&lt;Column&lt;?&gt;&gt; columnsOfType(ColumnType type) {
+<span class="nc bnc" id="L85" title="All 2 branches missed.">    return columns().stream().filter(column -&gt; column.type() == type).collect(Collectors.toList());</span>
+  }
+
+  public abstract Table first(int nRows);
+
+  /** Returns the index of the column with the given columnName */
+  public int columnIndex(String columnName) {
+<span class="pc bpc" id="L92" title="1 of 2 branches missed.">    for (int i = 0; i &lt; columnCount(); i++) {</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">      if (columnNames().get(i).equalsIgnoreCase(columnName)) {</span>
+<span class="fc" id="L94">        return i;</span>
+      }
+    }
+<span class="nc" id="L97">    throw new IllegalArgumentException(</span>
+<span class="nc" id="L98">        String.format(&quot;Column %s is not present in table %s&quot;, columnName, name()));</span>
+  }
+
+  /** Returns the column with the given columnName, ignoring case */
+  public Column&lt;?&gt; column(String columnName) {
+<span class="pc bpc" id="L103" title="1 of 2 branches missed.">    for (Column&lt;?&gt; column : columns()) {</span>
+<span class="fc" id="L104">      String name = column.name().trim();</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">      if (name.equalsIgnoreCase(columnName)) {</span>
+<span class="fc" id="L106">        return column;</span>
+      }
+<span class="fc" id="L108">    }</span>
+<span class="nc" id="L109">    throw new IllegalStateException(</span>
+<span class="nc" id="L110">        String.format(&quot;Column %s does not exist in table %s&quot;, columnName, name()));</span>
+  }
+
+  /**
+   * Returns the column at columnIndex (0-based)
+   *
+   * @param columnIndex an integer at least 0 and less than number of columns in the relation
+   * @return the column at the given index
+   */
+  public abstract Column&lt;?&gt; column(int columnIndex);
+
+  /** Returns the number of columns in the relation */
+  public abstract int columnCount();
+
+  /** Returns the number of rows in the relation */
+  public abstract int rowCount();
+
+  /** Returns a list of all the columns in the relation */
+  public abstract List&lt;Column&lt;?&gt;&gt; columns();
+
+  /** Returns the columns whose names are given in the input array */
+  public List&lt;Column&lt;?&gt;&gt; columns(String... columnName) {
+<span class="fc" id="L132">    List&lt;Column&lt;?&gt;&gt; cols = new ArrayList&lt;&gt;(columnName.length);</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    for (String aColumnName : columnName) {</span>
+<span class="fc" id="L134">      cols.add(column(aColumnName));</span>
+    }
+<span class="fc" id="L136">    return cols;</span>
+  }
+
+  /** Returns the columns whose indices are given in the input array */
+  public List&lt;Column&lt;?&gt;&gt; columns(int... columnIndices) {
+<span class="nc" id="L141">    List&lt;Column&lt;?&gt;&gt; cols = new ArrayList&lt;&gt;(columnIndices.length);</span>
+<span class="nc bnc" id="L142" title="All 2 branches missed.">    for (int i : columnIndices) {</span>
+<span class="nc" id="L143">      cols.add(column(i));</span>
+    }
+<span class="nc" id="L145">    return cols;</span>
+  }
+
+  /** Returns the index of the given column */
+  public abstract int columnIndex(Column&lt;?&gt; col);
+
+  /**
+   * Returns the value at the given row and column indexes
+   *
+   * @param r the row index, 0 based
+   * @param c the column index, 0 based
+   */
+  public Object get(int r, int c) {
+<span class="fc" id="L158">    Column&lt;?&gt; column = column(c);</span>
+<span class="fc" id="L159">    return column.get(r);</span>
+  }
+
+  /** Returns the name of this relation */
+  public abstract String name();
+
+  /** Clears all the dat in the relation, leaving the structure intact */
+  public abstract void clear();
+
+  public abstract List&lt;String&gt; columnNames();
+
+  /**
+   * Returns an array of the column types of all columns in the relation, including duplicates as
+   * appropriate, and maintaining order
+   */
+  public ColumnType[] columnTypes() {
+<span class="nc" id="L175">    ColumnType[] columnTypes = new ColumnType[columnCount()];</span>
+<span class="nc bnc" id="L176" title="All 2 branches missed.">    for (int i = 0; i &lt; columnCount(); i++) {</span>
+<span class="nc" id="L177">      columnTypes[i] = columns().get(i).type();</span>
+    }
+<span class="nc" id="L179">    return columnTypes;</span>
+  }
+
+  /** Returns an array of column widths for printing tables */
+  public int[] colWidths() {
+<span class="nc" id="L184">    int cols = columnCount();</span>
+<span class="nc" id="L185">    int[] widths = new int[cols];</span>
+
+<span class="nc bnc" id="L187" title="All 2 branches missed.">    for (int i = 0; i &lt; columnCount(); i++) {</span>
+<span class="nc" id="L188">      widths[i] = columns().get(i).columnWidth();</span>
+    }
+<span class="nc" id="L190">    return widths;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="fc" id="L195">    return print();</span>
+  }
+
+  public String printAll() {
+<span class="nc" id="L199">    return print(rowCount());</span>
+  }
+
+  public String print(int rowLimit) {
+<span class="fc" id="L203">    ByteArrayOutputStream baos = new ByteArrayOutputStream();</span>
+<span class="fc" id="L204">    DataFramePrinter printer = new DataFramePrinter(rowLimit, baos);</span>
+<span class="fc" id="L205">    printer.print(this);</span>
+<span class="fc" id="L206">    return new String(baos.toByteArray());</span>
+  }
+
+  public String print() {
+<span class="fc" id="L210">    return print(20);</span>
+  }
+
+  public Table structure() {
+<span class="nc" id="L214">    StringBuilder nameBuilder = new StringBuilder();</span>
+<span class="nc" id="L215">    nameBuilder</span>
+<span class="nc" id="L216">        .append(&quot;Table: &quot;)</span>
+<span class="nc" id="L217">        .append(name())</span>
+<span class="nc" id="L218">        .append(&quot; - &quot;)</span>
+<span class="nc" id="L219">        .append(rowCount())</span>
+<span class="nc" id="L220">        .append(&quot; observations (rows) of &quot;)</span>
+<span class="nc" id="L221">        .append(columnCount())</span>
+<span class="nc" id="L222">        .append(&quot; variables (cols)&quot;);</span>
+
+<span class="nc" id="L224">    Table structure = Table.create(nameBuilder.toString());</span>
+<span class="nc" id="L225">    structure.addColumns(DoubleColumn.create(&quot;Index&quot;));</span>
+<span class="nc" id="L226">    structure.addColumns(StringColumn.create(&quot;Column Name&quot;));</span>
+<span class="nc" id="L227">    structure.addColumns(StringColumn.create(&quot;Type&quot;));</span>
+<span class="nc" id="L228">    structure.addColumns(DoubleColumn.create(&quot;Unique Values&quot;));</span>
+<span class="nc" id="L229">    structure.addColumns(StringColumn.create(&quot;First&quot;));</span>
+<span class="nc" id="L230">    structure.addColumns(StringColumn.create(&quot;Last&quot;));</span>
+
+<span class="nc bnc" id="L232" title="All 2 branches missed.">    for (Column&lt;?&gt; column : columns()) {</span>
+<span class="nc" id="L233">      structure.intColumn(&quot;Index&quot;).append(columnIndex(column));</span>
+<span class="nc" id="L234">      structure.stringColumn(&quot;Column Name&quot;).append(column.name());</span>
+<span class="nc" id="L235">      structure.stringColumn(&quot;Type&quot;).append(column.type().name());</span>
+<span class="nc" id="L236">      structure.intColumn(&quot;Unique Values&quot;).append(column.countUnique());</span>
+<span class="nc" id="L237">      structure.stringColumn(&quot;First&quot;).append(column.getString(0));</span>
+<span class="nc" id="L238">      structure.stringColumn(&quot;Last&quot;).append(column.getString(column.size() - 1));</span>
+<span class="nc" id="L239">    }</span>
+<span class="nc" id="L240">    return structure;</span>
+  }
+
+  public String summary() {
+<span class="nc" id="L244">    StringBuilder builder = new StringBuilder();</span>
+<span class="nc" id="L245">    builder</span>
+<span class="nc" id="L246">        .append(System.lineSeparator())</span>
+<span class="nc" id="L247">        .append(&quot;Table summary for: &quot;)</span>
+<span class="nc" id="L248">        .append(name())</span>
+<span class="nc" id="L249">        .append(System.lineSeparator());</span>
+<span class="nc bnc" id="L250" title="All 2 branches missed.">    for (Column&lt;?&gt; column : columns()) {</span>
+<span class="nc" id="L251">      builder.append(column.summary().print());</span>
+<span class="nc" id="L252">      builder.append(System.lineSeparator());</span>
+<span class="nc" id="L253">    }</span>
+<span class="nc" id="L254">    builder.append(System.lineSeparator());</span>
+<span class="nc" id="L255">    return builder.toString();</span>
+  }
+
+  public BooleanColumn booleanColumn(int columnIndex) {
+<span class="fc" id="L259">    return (BooleanColumn) column(columnIndex);</span>
+  }
+
+  public BooleanColumn booleanColumn(String columnName) {
+<span class="fc" id="L263">    return (BooleanColumn) column(columnName);</span>
+  }
+
+  /**
+   * Returns the NumberColumn at the given index. If the index points to a String or a boolean
+   * column, a new NumberColumn is created and returned TODO(lwhite):Consider separating the indexed
+   * access and the column type mods, which must be for ML functions (in smile or elsewhere)
+   *
+   * @param columnIndex The 0-based index of a column in the table
+   * @return A number column
+   * @throws ClassCastException if the cast to NumberColumn fails
+   */
+  public NumericColumn&lt;?&gt; numberColumn(int columnIndex) {
+<span class="fc" id="L276">    Column&lt;?&gt; c = column(columnIndex);</span>
+<span class="pc bpc" id="L277" title="1 of 2 branches missed.">    if (c.type() == ColumnType.STRING) {</span>
+<span class="nc" id="L278">      return ((StringColumn) c).asDoubleColumn();</span>
+<span class="pc bpc" id="L279" title="1 of 2 branches missed.">    } else if (c.type() == ColumnType.BOOLEAN) {</span>
+<span class="nc" id="L280">      return ((BooleanColumn) c).asDoubleColumn();</span>
+<span class="pc bpc" id="L281" title="1 of 2 branches missed.">    } else if (c.type() == ColumnType.LOCAL_DATE) {</span>
+<span class="nc" id="L282">      return ((DateColumn) c).asDoubleColumn();</span>
+<span class="pc bpc" id="L283" title="1 of 2 branches missed.">    } else if (c.type() == ColumnType.LOCAL_DATE_TIME) {</span>
+<span class="nc" id="L284">      return ((DateTimeColumn) c).asDoubleColumn();</span>
+<span class="pc bpc" id="L285" title="1 of 2 branches missed.">    } else if (c.type() == ColumnType.INSTANT) {</span>
+<span class="nc" id="L286">      return ((InstantColumn) c).asDoubleColumn();</span>
+<span class="pc bpc" id="L287" title="1 of 2 branches missed.">    } else if (c.type() == ColumnType.LOCAL_TIME) {</span>
+<span class="nc" id="L288">      return ((TimeColumn) c).asDoubleColumn();</span>
+    }
+<span class="fc" id="L290">    return (NumericColumn&lt;?&gt;) column(columnIndex);</span>
+  }
+
+  public NumericColumn&lt;?&gt; numberColumn(String columnName) {
+<span class="fc" id="L294">    return numberColumn(columnIndex(columnName));</span>
+  }
+
+  public DoubleColumn doubleColumn(String columnName) {
+<span class="fc" id="L298">    return doubleColumn(columnIndex(columnName));</span>
+  }
+
+  public DoubleColumn doubleColumn(int columnIndex) {
+<span class="fc" id="L302">    return (DoubleColumn) column(columnIndex);</span>
+  }
+
+  public StringColumn[] stringColumns() {
+<span class="nc" id="L306">    return columns().stream()</span>
+<span class="nc bnc" id="L307" title="All 2 branches missed.">        .filter(e -&gt; e.type() == ColumnType.STRING)</span>
+<span class="nc" id="L308">        .toArray(StringColumn[]::new);</span>
+  }
+
+  public NumericColumn&lt;?&gt;[] numberColumns() {
+<span class="fc" id="L312">    return columns().stream()</span>
+<span class="fc" id="L313">        .filter(e -&gt; e instanceof NumericColumn&lt;?&gt;)</span>
+<span class="fc" id="L314">        .toArray(NumericColumn[]::new);</span>
+  }
+
+  /** Returns all the NumericColumns in the relation */
+  public List&lt;NumericColumn&lt;?&gt;&gt; numericColumns() {
+<span class="fc" id="L319">    return Arrays.asList(numberColumns());</span>
+  }
+
+  /** Returns all the NumericColumns in the relation */
+  public List&lt;NumericColumn&lt;?&gt;&gt; numericColumns(int... columnIndices) {
+<span class="nc" id="L324">    List&lt;NumericColumn&lt;?&gt;&gt; cols = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L325" title="All 2 branches missed.">    for (int i : columnIndices) {</span>
+<span class="nc" id="L326">      cols.add(numberColumn(i));</span>
+    }
+
+<span class="nc" id="L329">    return cols;</span>
+  }
+
+  /** Returns all the NumericColumns in the relation */
+  public List&lt;NumericColumn&lt;?&gt;&gt; numericColumns(String... columnNames) {
+<span class="fc" id="L334">    List&lt;NumericColumn&lt;?&gt;&gt; cols = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L335" title="All 2 branches covered.">    for (String name : columnNames) {</span>
+<span class="fc" id="L336">      cols.add(numberColumn(name));</span>
+    }
+
+<span class="fc" id="L339">    return cols;</span>
+  }
+
+  public BooleanColumn[] booleanColumns() {
+<span class="nc" id="L343">    return columns().stream()</span>
+<span class="nc bnc" id="L344" title="All 2 branches missed.">        .filter(e -&gt; e.type() == ColumnType.BOOLEAN)</span>
+<span class="nc" id="L345">        .toArray(BooleanColumn[]::new);</span>
+  }
+
+  public DateColumn[] dateColumns() {
+<span class="nc" id="L349">    return columns().stream()</span>
+<span class="nc bnc" id="L350" title="All 2 branches missed.">        .filter(e -&gt; e.type() == ColumnType.LOCAL_DATE)</span>
+<span class="nc" id="L351">        .toArray(DateColumn[]::new);</span>
+  }
+
+  public DateTimeColumn[] dateTimeColumns() {
+<span class="nc" id="L355">    return columns().stream()</span>
+<span class="nc bnc" id="L356" title="All 2 branches missed.">        .filter(e -&gt; e.type() == ColumnType.LOCAL_DATE_TIME)</span>
+<span class="nc" id="L357">        .toArray(DateTimeColumn[]::new);</span>
+  }
+
+  public InstantColumn[] instantColumns() {
+<span class="nc" id="L361">    return columns().stream()</span>
+<span class="nc bnc" id="L362" title="All 2 branches missed.">        .filter(e -&gt; e.type() == ColumnType.INSTANT)</span>
+<span class="nc" id="L363">        .toArray(InstantColumn[]::new);</span>
+  }
+
+  public TimeColumn[] timeColumns() {
+<span class="nc" id="L367">    return columns().stream()</span>
+<span class="nc bnc" id="L368" title="All 2 branches missed.">        .filter(e -&gt; e.type() == ColumnType.LOCAL_TIME)</span>
+<span class="nc" id="L369">        .toArray(TimeColumn[]::new);</span>
+  }
+
+  public CategoricalColumn&lt;?&gt; categoricalColumn(String columnName) {
+<span class="fc" id="L373">    return (CategoricalColumn&lt;?&gt;) column(columnName);</span>
+  }
+
+  public CategoricalColumn&lt;?&gt; categoricalColumn(int columnNumber) {
+<span class="nc" id="L377">    return (CategoricalColumn&lt;?&gt;) column(columnNumber);</span>
+  }
+
+  /** Returns the columns whose names are given in the input array */
+  public List&lt;CategoricalColumn&lt;?&gt;&gt; categoricalColumns(String... columnName) {
+<span class="nc" id="L382">    List&lt;CategoricalColumn&lt;?&gt;&gt; cols = new ArrayList&lt;&gt;(columnName.length);</span>
+<span class="nc bnc" id="L383" title="All 2 branches missed.">    for (String aColumnName : columnName) {</span>
+<span class="nc" id="L384">      cols.add(categoricalColumn(aColumnName));</span>
+    }
+<span class="nc" id="L386">    return cols;</span>
+  }
+
+  /**
+   * Returns the column with the given name cast to a NumberColumn
+   *
+   * &lt;p&gt;Shorthand for numberColumn()
+   */
+  public NumericColumn&lt;?&gt; nCol(String columnName) {
+<span class="fc" id="L395">    return numberColumn(columnName);</span>
+  }
+
+  /**
+   * Returns the column with the given name cast to a NumberColumn
+   *
+   * &lt;p&gt;Shorthand for numberColumn()
+   */
+  public NumericColumn&lt;?&gt; nCol(int columnIndex) {
+<span class="nc" id="L404">    return numberColumn(columnIndex);</span>
+  }
+
+  public IntColumn intColumn(String columnName) {
+<span class="fc" id="L408">    return intColumn(columnIndex(columnName));</span>
+  }
+
+  public IntColumn intColumn(int columnIndex) {
+<span class="fc" id="L412">    return (IntColumn) column(columnIndex);</span>
+  }
+
+  public ShortColumn shortColumn(String columnName) {
+<span class="fc" id="L416">    return shortColumn(columnIndex(columnName));</span>
+  }
+
+  public ShortColumn shortColumn(int columnIndex) {
+<span class="fc" id="L420">    return (ShortColumn) column(columnIndex);</span>
+  }
+
+  public LongColumn longColumn(String columnName) {
+<span class="fc" id="L424">    return longColumn(columnIndex(columnName));</span>
+  }
+
+  public LongColumn longColumn(int columnIndex) {
+<span class="fc" id="L428">    return (LongColumn) column(columnIndex);</span>
+  }
+
+  public FloatColumn floatColumn(String columnName) {
+<span class="fc" id="L432">    return floatColumn(columnIndex(columnName));</span>
+  }
+
+  public FloatColumn floatColumn(int columnIndex) {
+<span class="fc" id="L436">    return (FloatColumn) column(columnIndex);</span>
+  }
+
+  public DateColumn dateColumn(int columnIndex) {
+<span class="fc" id="L440">    return (DateColumn) column(columnIndex);</span>
+  }
+
+  public DateColumn dateColumn(String columnName) {
+<span class="fc" id="L444">    return (DateColumn) column(columnName);</span>
+  }
+
+  public TimeColumn timeColumn(String columnName) {
+<span class="fc" id="L448">    return (TimeColumn) column(columnName);</span>
+  }
+
+  public TimeColumn timeColumn(int columnIndex) {
+<span class="fc" id="L452">    return (TimeColumn) column(columnIndex);</span>
+  }
+
+  public StringColumn stringColumn(String columnName) {
+<span class="fc" id="L456">    return (StringColumn) column(columnName);</span>
+  }
+
+  public StringColumn stringColumn(int columnIndex) {
+<span class="fc" id="L460">    return (StringColumn) column(columnIndex);</span>
+  }
+
+  public TextColumn textColumn(String columnName) {
+<span class="fc" id="L464">    return (TextColumn) column(columnName);</span>
+  }
+
+  public TextColumn textColumn(int columnIndex) {
+<span class="fc" id="L468">    return (TextColumn) column(columnIndex);</span>
+  }
+
+  public DateTimeColumn dateTimeColumn(int columnIndex) {
+<span class="fc" id="L472">    return (DateTimeColumn) column(columnIndex);</span>
+  }
+
+  public DateTimeColumn dateTimeColumn(String columnName) {
+<span class="fc" id="L476">    return (DateTimeColumn) column(columnName);</span>
+  }
+
+  public InstantColumn instantColumn(int columnIndex) {
+<span class="nc" id="L480">    return (InstantColumn) column(columnIndex);</span>
+  }
+
+  public InstantColumn instantColumn(String columnName) {
+<span class="fc" id="L484">    return (InstantColumn) column(columnName);</span>
+  }
+
+  public TableConverter as() {
+<span class="fc" id="L488">    return new TableConverter(this);</span>
+  }
+
+  public SmileConverter smile() {
+<span class="fc" id="L492">    return new SmileConverter(this);</span>
+  }
+
+  /**
+   * Returns a string representation of the value at the given row and column indexes
+   *
+   * @param r the row index, 0 based
+   * @param c the column index, 0 based
+   */
+  public String getUnformatted(int r, int c) {
+<span class="fc" id="L502">    Column&lt;?&gt; column = column(c);</span>
+<span class="fc" id="L503">    return column.getUnformattedString(r);</span>
+  }
+
+  /**
+   * Returns a string representation of the value at the given row and column indexes
+   *
+   * @param r the row index, 0 based
+   * @param columnName the name of the column to be returned
+   *     &lt;p&gt;// TODO: performance would be enhanced if columns could be referenced via a hashTable
+   */
+  public String getString(int r, String columnName) {
+<span class="fc" id="L514">    return getString(r, columnIndex(columnName));</span>
+  }
+
+  /**
+   * Returns a string representation of the value at the given row and column indexes
+   *
+   * @param r the row index, 0 based
+   * @param columnIndex the index of the column to be returned
+   *     &lt;p&gt;// TODO: performance would be enhanced if columns could be referenced via a hashTable
+   */
+  public String getString(int r, int columnIndex) {
+<span class="fc" id="L525">    Column&lt;?&gt; column = column(columnIndex);</span>
+<span class="fc" id="L526">    return column.getString(r);</span>
+  }
+
+  public boolean containsColumn(Column&lt;?&gt; column) {
+<span class="fc" id="L530">    return columns().contains(column);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

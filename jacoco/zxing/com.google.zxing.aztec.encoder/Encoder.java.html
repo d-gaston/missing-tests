@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Encoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.aztec.encoder</a> &gt; <span class="el_source">Encoder.java</span></div><h1>Encoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.aztec.encoder;
+
+import com.google.zxing.common.BitArray;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.reedsolomon.GenericGF;
+import com.google.zxing.common.reedsolomon.ReedSolomonEncoder;
+
+/**
+ * Generates Aztec 2D barcodes.
+ *
+ * @author Rustam Abdullaev
+ */
+public final class Encoder {
+
+  public static final int DEFAULT_EC_PERCENT = 33; // default minimal percentage of error check words
+  public static final int DEFAULT_AZTEC_LAYERS = 0;
+  private static final int MAX_NB_BITS = 32;
+  private static final int MAX_NB_BITS_COMPACT = 4;
+
+<span class="fc" id="L36">  private static final int[] WORD_SIZE = {</span>
+    4, 6, 6, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+    12, 12, 12, 12, 12, 12, 12, 12, 12, 12
+  };
+
+  private Encoder() {
+  }
+
+  /**
+   * Encodes the given binary content as an Aztec symbol
+   *
+   * @param data input data string
+   * @return Aztec symbol matrix with metadata
+   */
+  public static AztecCode encode(byte[] data) {
+<span class="nc" id="L51">    return encode(data, DEFAULT_EC_PERCENT, DEFAULT_AZTEC_LAYERS);</span>
+  }
+
+  /**
+   * Encodes the given binary content as an Aztec symbol
+   *
+   * @param data input data string
+   * @param minECCPercent minimal percentage of error check words (According to ISO/IEC 24778:2008,
+   *                      a minimum of 23% + 3 words is recommended)
+   * @param userSpecifiedLayers if non-zero, a user-specified value for the number of layers
+   * @return Aztec symbol matrix with metadata
+   */
+  public static AztecCode encode(byte[] data, int minECCPercent, int userSpecifiedLayers) {
+    // High-level encode
+<span class="fc" id="L65">    BitArray bits = new HighLevelEncoder(data).encode();</span>
+
+    // stuff bits and choose symbol size
+<span class="fc" id="L68">    int eccBits = bits.getSize() * minECCPercent / 100 + 11;</span>
+<span class="fc" id="L69">    int totalSizeBits = bits.getSize() + eccBits;</span>
+    boolean compact;
+    int layers;
+    int totalBitsInLayer;
+    int wordSize;
+    BitArray stuffedBits;
+<span class="fc bfc" id="L75" title="All 2 branches covered.">    if (userSpecifiedLayers != DEFAULT_AZTEC_LAYERS) {</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">      compact = userSpecifiedLayers &lt; 0;</span>
+<span class="fc" id="L77">      layers = Math.abs(userSpecifiedLayers);</span>
+<span class="fc bfc" id="L78" title="All 4 branches covered.">      if (layers &gt; (compact ? MAX_NB_BITS_COMPACT : MAX_NB_BITS)) {</span>
+<span class="fc" id="L79">        throw new IllegalArgumentException(</span>
+<span class="fc" id="L80">            String.format(&quot;Illegal value %s for layers&quot;, userSpecifiedLayers));</span>
+      }
+<span class="fc" id="L82">      totalBitsInLayer = totalBitsInLayer(layers, compact);</span>
+<span class="fc" id="L83">      wordSize = WORD_SIZE[layers];</span>
+<span class="fc" id="L84">      int usableBitsInLayers = totalBitsInLayer - (totalBitsInLayer % wordSize);</span>
+<span class="fc" id="L85">      stuffedBits = stuffBits(bits, wordSize);</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      if (stuffedBits.getSize() + eccBits &gt; usableBitsInLayers) {</span>
+<span class="fc" id="L87">        throw new IllegalArgumentException(&quot;Data to large for user specified layer&quot;);</span>
+      }
+<span class="fc bfc" id="L89" title="All 4 branches covered.">      if (compact &amp;&amp; stuffedBits.getSize() &gt; wordSize * 64) {</span>
+        // Compact format only allows 64 data words, though C4 can hold more words than that
+<span class="fc" id="L91">        throw new IllegalArgumentException(&quot;Data to large for user specified layer&quot;);</span>
+      }
+<span class="fc" id="L93">    } else {</span>
+<span class="fc" id="L94">      wordSize = 0;</span>
+<span class="fc" id="L95">      stuffedBits = null;</span>
+      // We look at the possible table sizes in the order Compact1, Compact2, Compact3,
+      // Compact4, Normal4,...  Normal(i) for i &lt; 4 isn't typically used since Compact(i+1)
+      // is the same size, but has more data.
+<span class="fc" id="L99">      for (int i = 0; ; i++) {</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">        if (i &gt; MAX_NB_BITS) {</span>
+<span class="nc" id="L101">          throw new IllegalArgumentException(&quot;Data too large for an Aztec code&quot;);</span>
+        }
+<span class="fc bfc" id="L103" title="All 2 branches covered.">        compact = i &lt;= 3;</span>
+<span class="fc bfc" id="L104" title="All 2 branches covered.">        layers = compact ? i + 1 : i;</span>
+<span class="fc" id="L105">        totalBitsInLayer = totalBitsInLayer(layers, compact);</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">        if (totalSizeBits &gt; totalBitsInLayer) {</span>
+<span class="fc" id="L107">          continue;</span>
+        }
+        // [Re]stuff the bits if this is the first opportunity, or if the
+        // wordSize has changed
+<span class="pc bpc" id="L111" title="1 of 4 branches missed.">        if (stuffedBits == null || wordSize != WORD_SIZE[layers]) {</span>
+<span class="fc" id="L112">          wordSize = WORD_SIZE[layers];</span>
+<span class="fc" id="L113">          stuffedBits = stuffBits(bits, wordSize);</span>
+        }
+<span class="fc" id="L115">        int usableBitsInLayers = totalBitsInLayer - (totalBitsInLayer % wordSize);</span>
+<span class="fc bfc" id="L116" title="All 4 branches covered.">        if (compact &amp;&amp; stuffedBits.getSize() &gt; wordSize * 64) {</span>
+          // Compact format only allows 64 data words, though C4 can hold more words than that
+<span class="fc" id="L118">          continue;</span>
+        }
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">        if (stuffedBits.getSize() + eccBits &lt;= usableBitsInLayers) {</span>
+<span class="fc" id="L121">          break;</span>
+        }
+      }
+    }
+<span class="fc" id="L125">    BitArray messageBits = generateCheckWords(stuffedBits, totalBitsInLayer, wordSize);</span>
+
+    // generate mode message
+<span class="fc" id="L128">    int messageSizeInWords = stuffedBits.getSize() / wordSize;</span>
+<span class="fc" id="L129">    BitArray modeMessage = generateModeMessage(compact, layers, messageSizeInWords);</span>
+
+    // allocate symbol
+<span class="fc bfc" id="L132" title="All 2 branches covered.">    int baseMatrixSize = (compact ? 11 : 14) + layers * 4; // not including alignment lines</span>
+<span class="fc" id="L133">    int[] alignmentMap = new int[baseMatrixSize];</span>
+    int matrixSize;
+<span class="fc bfc" id="L135" title="All 2 branches covered.">    if (compact) {</span>
+      // no alignment marks in compact mode, alignmentMap is a no-op
+<span class="fc" id="L137">      matrixSize = baseMatrixSize;</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">      for (int i = 0; i &lt; alignmentMap.length; i++) {</span>
+<span class="fc" id="L139">        alignmentMap[i] = i;</span>
+      }
+    } else {
+<span class="fc" id="L142">      matrixSize = baseMatrixSize + 1 + 2 * ((baseMatrixSize / 2 - 1) / 15);</span>
+<span class="fc" id="L143">      int origCenter = baseMatrixSize / 2;</span>
+<span class="fc" id="L144">      int center = matrixSize / 2;</span>
+<span class="fc bfc" id="L145" title="All 2 branches covered.">      for (int i = 0; i &lt; origCenter; i++) {</span>
+<span class="fc" id="L146">        int newOffset = i + i / 15;</span>
+<span class="fc" id="L147">        alignmentMap[origCenter - i - 1] = center - newOffset - 1;</span>
+<span class="fc" id="L148">        alignmentMap[origCenter + i] = center + newOffset + 1;</span>
+      }
+    }
+<span class="fc" id="L151">    BitMatrix matrix = new BitMatrix(matrixSize);</span>
+
+    // draw data bits
+<span class="fc bfc" id="L154" title="All 2 branches covered.">    for (int i = 0, rowOffset = 0; i &lt; layers; i++) {</span>
+<span class="fc bfc" id="L155" title="All 2 branches covered.">      int rowSize = (layers - i) * 4 + (compact ? 9 : 12);</span>
+<span class="fc bfc" id="L156" title="All 2 branches covered.">      for (int j = 0; j &lt; rowSize; j++) {</span>
+<span class="fc" id="L157">        int columnOffset = j * 2;</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">        for (int k = 0; k &lt; 2; k++) {</span>
+<span class="fc bfc" id="L159" title="All 2 branches covered.">          if (messageBits.get(rowOffset + columnOffset + k)) {</span>
+<span class="fc" id="L160">            matrix.set(alignmentMap[i * 2 + k], alignmentMap[i * 2 + j]);</span>
+          }
+<span class="fc bfc" id="L162" title="All 2 branches covered.">          if (messageBits.get(rowOffset + rowSize * 2 + columnOffset + k)) {</span>
+<span class="fc" id="L163">            matrix.set(alignmentMap[i * 2 + j], alignmentMap[baseMatrixSize - 1 - i * 2 - k]);</span>
+          }
+<span class="fc bfc" id="L165" title="All 2 branches covered.">          if (messageBits.get(rowOffset + rowSize * 4 + columnOffset + k)) {</span>
+<span class="fc" id="L166">            matrix.set(alignmentMap[baseMatrixSize - 1 - i * 2 - k], alignmentMap[baseMatrixSize - 1 - i * 2 - j]);</span>
+          }
+<span class="fc bfc" id="L168" title="All 2 branches covered.">          if (messageBits.get(rowOffset + rowSize * 6 + columnOffset + k)) {</span>
+<span class="fc" id="L169">            matrix.set(alignmentMap[baseMatrixSize - 1 - i * 2 - j], alignmentMap[i * 2 + k]);</span>
+          }
+        }
+      }
+<span class="fc" id="L173">      rowOffset += rowSize * 8;</span>
+    }
+
+    // draw mode message
+<span class="fc" id="L177">    drawModeMessage(matrix, compact, matrixSize, modeMessage);</span>
+
+    // draw alignment marks
+<span class="fc bfc" id="L180" title="All 2 branches covered.">    if (compact) {</span>
+<span class="fc" id="L181">      drawBullsEye(matrix, matrixSize / 2, 5);</span>
+    } else {
+<span class="fc" id="L183">      drawBullsEye(matrix, matrixSize / 2, 7);</span>
+<span class="fc bfc" id="L184" title="All 2 branches covered.">      for (int i = 0, j = 0; i &lt; baseMatrixSize / 2 - 1; i += 15, j += 16) {</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">        for (int k = (matrixSize / 2) &amp; 1; k &lt; matrixSize; k += 2) {</span>
+<span class="fc" id="L186">          matrix.set(matrixSize / 2 - j, k);</span>
+<span class="fc" id="L187">          matrix.set(matrixSize / 2 + j, k);</span>
+<span class="fc" id="L188">          matrix.set(k, matrixSize / 2 - j);</span>
+<span class="fc" id="L189">          matrix.set(k, matrixSize / 2 + j);</span>
+        }
+      }
+    }
+
+<span class="fc" id="L194">    AztecCode aztec = new AztecCode();</span>
+<span class="fc" id="L195">    aztec.setCompact(compact);</span>
+<span class="fc" id="L196">    aztec.setSize(matrixSize);</span>
+<span class="fc" id="L197">    aztec.setLayers(layers);</span>
+<span class="fc" id="L198">    aztec.setCodeWords(messageSizeInWords);</span>
+<span class="fc" id="L199">    aztec.setMatrix(matrix);</span>
+<span class="fc" id="L200">    return aztec;</span>
+  }
+
+  private static void drawBullsEye(BitMatrix matrix, int center, int size) {
+<span class="fc bfc" id="L204" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i += 2) {</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">      for (int j = center - i; j &lt;= center + i; j++) {</span>
+<span class="fc" id="L206">        matrix.set(j, center - i);</span>
+<span class="fc" id="L207">        matrix.set(j, center + i);</span>
+<span class="fc" id="L208">        matrix.set(center - i, j);</span>
+<span class="fc" id="L209">        matrix.set(center + i, j);</span>
+      }
+    }
+<span class="fc" id="L212">    matrix.set(center - size, center - size);</span>
+<span class="fc" id="L213">    matrix.set(center - size + 1, center - size);</span>
+<span class="fc" id="L214">    matrix.set(center - size, center - size + 1);</span>
+<span class="fc" id="L215">    matrix.set(center + size, center - size);</span>
+<span class="fc" id="L216">    matrix.set(center + size, center - size + 1);</span>
+<span class="fc" id="L217">    matrix.set(center + size, center + size - 1);</span>
+<span class="fc" id="L218">  }</span>
+
+  static BitArray generateModeMessage(boolean compact, int layers, int messageSizeInWords) {
+<span class="fc" id="L221">    BitArray modeMessage = new BitArray();</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">    if (compact) {</span>
+<span class="fc" id="L223">      modeMessage.appendBits(layers - 1, 2);</span>
+<span class="fc" id="L224">      modeMessage.appendBits(messageSizeInWords - 1, 6);</span>
+<span class="fc" id="L225">      modeMessage = generateCheckWords(modeMessage, 28, 4);</span>
+    } else {
+<span class="fc" id="L227">      modeMessage.appendBits(layers - 1, 5);</span>
+<span class="fc" id="L228">      modeMessage.appendBits(messageSizeInWords - 1, 11);</span>
+<span class="fc" id="L229">      modeMessage = generateCheckWords(modeMessage, 40, 4);</span>
+    }
+<span class="fc" id="L231">    return modeMessage;</span>
+  }
+
+  private static void drawModeMessage(BitMatrix matrix, boolean compact, int matrixSize, BitArray modeMessage) {
+<span class="fc" id="L235">    int center = matrixSize / 2;</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">    if (compact) {</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">      for (int i = 0; i &lt; 7; i++) {</span>
+<span class="fc" id="L238">        int offset = center - 3 + i;</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">        if (modeMessage.get(i)) {</span>
+<span class="fc" id="L240">          matrix.set(offset, center - 5);</span>
+        }
+<span class="fc bfc" id="L242" title="All 2 branches covered.">        if (modeMessage.get(i + 7)) {</span>
+<span class="fc" id="L243">          matrix.set(center + 5, offset);</span>
+        }
+<span class="fc bfc" id="L245" title="All 2 branches covered.">        if (modeMessage.get(20 - i)) {</span>
+<span class="fc" id="L246">          matrix.set(offset, center + 5);</span>
+        }
+<span class="fc bfc" id="L248" title="All 2 branches covered.">        if (modeMessage.get(27 - i)) {</span>
+<span class="fc" id="L249">          matrix.set(center - 5, offset);</span>
+        }
+      }
+    } else {
+<span class="fc bfc" id="L253" title="All 2 branches covered.">      for (int i = 0; i &lt; 10; i++) {</span>
+<span class="fc" id="L254">        int offset = center - 5 + i + i / 5;</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">        if (modeMessage.get(i)) {</span>
+<span class="fc" id="L256">          matrix.set(offset, center - 7);</span>
+        }
+<span class="fc bfc" id="L258" title="All 2 branches covered.">        if (modeMessage.get(i + 10)) {</span>
+<span class="fc" id="L259">          matrix.set(center + 7, offset);</span>
+        }
+<span class="fc bfc" id="L261" title="All 2 branches covered.">        if (modeMessage.get(29 - i)) {</span>
+<span class="fc" id="L262">          matrix.set(offset, center + 7);</span>
+        }
+<span class="fc bfc" id="L264" title="All 2 branches covered.">        if (modeMessage.get(39 - i)) {</span>
+<span class="fc" id="L265">          matrix.set(center - 7, offset);</span>
+        }
+      }
+    }
+<span class="fc" id="L269">  }</span>
+
+  private static BitArray generateCheckWords(BitArray bitArray, int totalBits, int wordSize) {
+    // bitArray is guaranteed to be a multiple of the wordSize, so no padding needed
+<span class="fc" id="L273">    int messageSizeInWords = bitArray.getSize() / wordSize;</span>
+<span class="fc" id="L274">    ReedSolomonEncoder rs = new ReedSolomonEncoder(getGF(wordSize));</span>
+<span class="fc" id="L275">    int totalWords = totalBits / wordSize;</span>
+<span class="fc" id="L276">    int[] messageWords = bitsToWords(bitArray, wordSize, totalWords);</span>
+<span class="fc" id="L277">    rs.encode(messageWords, totalWords - messageSizeInWords);</span>
+<span class="fc" id="L278">    int startPad = totalBits % wordSize;</span>
+<span class="fc" id="L279">    BitArray messageBits = new BitArray();</span>
+<span class="fc" id="L280">    messageBits.appendBits(0, startPad);</span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">    for (int messageWord : messageWords) {</span>
+<span class="fc" id="L282">      messageBits.appendBits(messageWord, wordSize);</span>
+    }
+<span class="fc" id="L284">    return messageBits;</span>
+  }
+
+  private static int[] bitsToWords(BitArray stuffedBits, int wordSize, int totalWords) {
+<span class="fc" id="L288">    int[] message = new int[totalWords];</span>
+    int i;
+    int n;
+<span class="fc bfc" id="L291" title="All 2 branches covered.">    for (i = 0, n = stuffedBits.getSize() / wordSize; i &lt; n; i++) {</span>
+<span class="fc" id="L292">      int value = 0;</span>
+<span class="fc bfc" id="L293" title="All 2 branches covered.">      for (int j = 0; j &lt; wordSize; j++) {</span>
+<span class="fc bfc" id="L294" title="All 2 branches covered.">        value |= stuffedBits.get(i * wordSize + j) ? (1 &lt;&lt; wordSize - j - 1) : 0;</span>
+      }
+<span class="fc" id="L296">      message[i] = value;</span>
+    }
+<span class="fc" id="L298">    return message;</span>
+  }
+
+  private static GenericGF getGF(int wordSize) {
+<span class="pc bpc" id="L302" title="1 of 6 branches missed.">    switch (wordSize) {</span>
+      case 4:
+<span class="fc" id="L304">        return GenericGF.AZTEC_PARAM;</span>
+      case 6:
+<span class="fc" id="L306">        return GenericGF.AZTEC_DATA_6;</span>
+      case 8:
+<span class="fc" id="L308">        return GenericGF.AZTEC_DATA_8;</span>
+      case 10:
+<span class="fc" id="L310">        return GenericGF.AZTEC_DATA_10;</span>
+      case 12:
+<span class="fc" id="L312">        return GenericGF.AZTEC_DATA_12;</span>
+      default:
+<span class="nc" id="L314">        throw new IllegalArgumentException(&quot;Unsupported word size &quot; + wordSize);</span>
+    }
+  }
+
+  static BitArray stuffBits(BitArray bits, int wordSize) {
+<span class="fc" id="L319">    BitArray out = new BitArray();</span>
+
+<span class="fc" id="L321">    int n = bits.getSize();</span>
+<span class="fc" id="L322">    int mask = (1 &lt;&lt; wordSize) - 2;</span>
+<span class="fc bfc" id="L323" title="All 2 branches covered.">    for (int i = 0; i &lt; n; i += wordSize) {</span>
+<span class="fc" id="L324">      int word = 0;</span>
+<span class="fc bfc" id="L325" title="All 2 branches covered.">      for (int j = 0; j &lt; wordSize; j++) {</span>
+<span class="fc bfc" id="L326" title="All 4 branches covered.">        if (i + j &gt;= n || bits.get(i + j)) {</span>
+<span class="fc" id="L327">          word |= 1 &lt;&lt; (wordSize - 1 - j);</span>
+        }
+      }
+<span class="fc bfc" id="L330" title="All 2 branches covered.">      if ((word &amp; mask) == mask) {</span>
+<span class="fc" id="L331">        out.appendBits(word &amp; mask, wordSize);</span>
+<span class="fc" id="L332">        i--;</span>
+<span class="fc bfc" id="L333" title="All 2 branches covered.">      } else if ((word &amp; mask) == 0) {</span>
+<span class="fc" id="L334">        out.appendBits(word | 1, wordSize);</span>
+<span class="fc" id="L335">        i--;</span>
+      } else {
+<span class="fc" id="L337">        out.appendBits(word, wordSize);</span>
+      }
+    }
+<span class="fc" id="L340">    return out;</span>
+  }
+
+  private static int totalBitsInLayer(int layers, boolean compact) {
+<span class="fc bfc" id="L344" title="All 2 branches covered.">    return ((compact ? 88 : 112) + 16 * layers) * layers;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

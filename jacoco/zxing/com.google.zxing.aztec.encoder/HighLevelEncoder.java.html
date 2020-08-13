@@ -1,0 +1,307 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>HighLevelEncoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.aztec.encoder</a> &gt; <span class="el_source">HighLevelEncoder.java</span></div><h1>HighLevelEncoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.aztec.encoder;
+
+import com.google.zxing.common.BitArray;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedList;
+
+/**
+ * This produces nearly optimal encodings of text into the first-level of
+ * encoding used by Aztec code.
+ *
+ * It uses a dynamic algorithm.  For each prefix of the string, it determines
+ * a set of encodings that could lead to this prefix.  We repeatedly add a
+ * character and generate a new set of optimal encodings until we have read
+ * through the entire input.
+ *
+ * @author Frank Yellin
+ * @author Rustam Abdullaev
+ */
+public final class HighLevelEncoder {
+
+<span class="fc" id="L42">  static final String[] MODE_NAMES = {&quot;UPPER&quot;, &quot;LOWER&quot;, &quot;DIGIT&quot;, &quot;MIXED&quot;, &quot;PUNCT&quot;};</span>
+
+  static final int MODE_UPPER = 0; // 5 bits
+  static final int MODE_LOWER = 1; // 5 bits
+  static final int MODE_DIGIT = 2; // 4 bits
+  static final int MODE_MIXED = 3; // 5 bits
+  static final int MODE_PUNCT = 4; // 5 bits
+
+  // The Latch Table shows, for each pair of Modes, the optimal method for
+  // getting from one mode to another.  In the worst possible case, this can
+  // be up to 14 bits.  In the best possible case, we are already there!
+  // The high half-word of each entry gives the number of bits.
+  // The low half-word of each entry are the actual bits necessary to change
+<span class="fc" id="L55">  static final int[][] LATCH_TABLE = {</span>
+    {
+      0,
+      (5 &lt;&lt; 16) + 28,              // UPPER -&gt; LOWER
+      (5 &lt;&lt; 16) + 30,              // UPPER -&gt; DIGIT
+      (5 &lt;&lt; 16) + 29,              // UPPER -&gt; MIXED
+      (10 &lt;&lt; 16) + (29 &lt;&lt; 5) + 30, // UPPER -&gt; MIXED -&gt; PUNCT
+    },
+    {
+      (9 &lt;&lt; 16) + (30 &lt;&lt; 4) + 14,  // LOWER -&gt; DIGIT -&gt; UPPER
+      0,
+      (5 &lt;&lt; 16) + 30,              // LOWER -&gt; DIGIT
+      (5 &lt;&lt; 16) + 29,              // LOWER -&gt; MIXED
+      (10 &lt;&lt; 16) + (29 &lt;&lt; 5) + 30, // LOWER -&gt; MIXED -&gt; PUNCT
+    },
+    {
+      (4 &lt;&lt; 16) + 14,              // DIGIT -&gt; UPPER
+      (9 &lt;&lt; 16) + (14 &lt;&lt; 5) + 28,  // DIGIT -&gt; UPPER -&gt; LOWER
+      0,
+      (9 &lt;&lt; 16) + (14 &lt;&lt; 5) + 29,  // DIGIT -&gt; UPPER -&gt; MIXED
+      (14 &lt;&lt; 16) + (14 &lt;&lt; 10) + (29 &lt;&lt; 5) + 30,
+                                   // DIGIT -&gt; UPPER -&gt; MIXED -&gt; PUNCT
+    },
+    {
+      (5 &lt;&lt; 16) + 29,              // MIXED -&gt; UPPER
+      (5 &lt;&lt; 16) + 28,              // MIXED -&gt; LOWER
+      (10 &lt;&lt; 16) + (29 &lt;&lt; 5) + 30, // MIXED -&gt; UPPER -&gt; DIGIT
+      0,
+      (5 &lt;&lt; 16) + 30,              // MIXED -&gt; PUNCT
+    },
+    {
+      (5 &lt;&lt; 16) + 31,              // PUNCT -&gt; UPPER
+      (10 &lt;&lt; 16) + (31 &lt;&lt; 5) + 28, // PUNCT -&gt; UPPER -&gt; LOWER
+      (10 &lt;&lt; 16) + (31 &lt;&lt; 5) + 30, // PUNCT -&gt; UPPER -&gt; DIGIT
+      (10 &lt;&lt; 16) + (31 &lt;&lt; 5) + 29, // PUNCT -&gt; UPPER -&gt; MIXED
+      0,
+    },
+  };
+
+  // A reverse mapping from [mode][char] to the encoding for that character
+  // in that mode.  An entry of 0 indicates no mapping exists.
+<span class="fc" id="L96">  private static final int[][] CHAR_MAP = new int[5][256];</span>
+  static {
+<span class="fc" id="L98">    CHAR_MAP[MODE_UPPER][' '] = 1;</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    for (int c = 'A'; c &lt;= 'Z'; c++) {</span>
+<span class="fc" id="L100">      CHAR_MAP[MODE_UPPER][c] = c - 'A' + 2;</span>
+    }
+<span class="fc" id="L102">    CHAR_MAP[MODE_LOWER][' '] = 1;</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    for (int c = 'a'; c &lt;= 'z'; c++) {</span>
+<span class="fc" id="L104">      CHAR_MAP[MODE_LOWER][c] = c - 'a' + 2;</span>
+    }
+<span class="fc" id="L106">    CHAR_MAP[MODE_DIGIT][' '] = 1;</span>
+<span class="fc bfc" id="L107" title="All 2 branches covered.">    for (int c = '0'; c &lt;= '9'; c++) {</span>
+<span class="fc" id="L108">      CHAR_MAP[MODE_DIGIT][c] = c - '0' + 2;</span>
+    }
+<span class="fc" id="L110">    CHAR_MAP[MODE_DIGIT][','] = 12;</span>
+<span class="fc" id="L111">    CHAR_MAP[MODE_DIGIT]['.'] = 13;</span>
+<span class="fc" id="L112">    int[] mixedTable = {</span>
+        '\0', ' ', '\1', '\2', '\3', '\4', '\5', '\6', '\7', '\b', '\t', '\n',
+        '\13', '\f', '\r', '\33', '\34', '\35', '\36', '\37', '@', '\\', '^',
+        '_', '`', '|', '~', '\177'
+    };
+<span class="fc bfc" id="L117" title="All 2 branches covered.">    for (int i = 0; i &lt; mixedTable.length; i++) {</span>
+<span class="fc" id="L118">      CHAR_MAP[MODE_MIXED][mixedTable[i]] = i;</span>
+    }
+<span class="fc" id="L120">    int[] punctTable = {</span>
+        '\0', '\r', '\0', '\0', '\0', '\0', '!', '\'', '#', '$', '%', '&amp;', '\'',
+        '(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '&lt;', '=', '&gt;', '?',
+        '[', ']', '{', '}'
+    };
+<span class="fc bfc" id="L125" title="All 2 branches covered.">    for (int i = 0; i &lt; punctTable.length; i++) {</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">      if (punctTable[i] &gt; 0) {</span>
+<span class="fc" id="L127">        CHAR_MAP[MODE_PUNCT][punctTable[i]] = i;</span>
+      }
+    }
+  }
+
+  // A map showing the available shift codes.  (The shifts to BINARY are not
+  // shown
+<span class="fc" id="L134">  static final int[][] SHIFT_TABLE = new int[6][6]; // mode shift codes, per table</span>
+  static {
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    for (int[] table : SHIFT_TABLE) {</span>
+<span class="fc" id="L137">      Arrays.fill(table, -1);</span>
+    }
+<span class="fc" id="L139">    SHIFT_TABLE[MODE_UPPER][MODE_PUNCT] = 0;</span>
+
+<span class="fc" id="L141">    SHIFT_TABLE[MODE_LOWER][MODE_PUNCT] = 0;</span>
+<span class="fc" id="L142">    SHIFT_TABLE[MODE_LOWER][MODE_UPPER] = 28;</span>
+
+<span class="fc" id="L144">    SHIFT_TABLE[MODE_MIXED][MODE_PUNCT] = 0;</span>
+
+<span class="fc" id="L146">    SHIFT_TABLE[MODE_DIGIT][MODE_PUNCT] = 0;</span>
+<span class="fc" id="L147">    SHIFT_TABLE[MODE_DIGIT][MODE_UPPER] = 15;</span>
+<span class="fc" id="L148">  }</span>
+
+  private final byte[] text;
+
+<span class="fc" id="L152">  public HighLevelEncoder(byte[] text) {</span>
+<span class="fc" id="L153">    this.text = text;</span>
+<span class="fc" id="L154">  }</span>
+
+  /**
+   * @return text represented by this encoder encoded as a {@link BitArray}
+   */
+  public BitArray encode() {
+<span class="fc" id="L160">    Collection&lt;State&gt; states = Collections.singletonList(State.INITIAL_STATE);</span>
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    for (int index = 0; index &lt; text.length; index++) {</span>
+      int pairCode;
+<span class="fc bfc" id="L163" title="All 2 branches covered.">      int nextChar = index + 1 &lt; text.length ? text[index + 1] : 0;</span>
+<span class="fc bfc" id="L164" title="All 5 branches covered.">      switch (text[index]) {</span>
+        case '\r':
+<span class="pc bpc" id="L166" title="1 of 2 branches missed.">          pairCode = nextChar == '\n' ? 2 : 0;</span>
+<span class="fc" id="L167">          break;</span>
+        case '.' :
+<span class="fc bfc" id="L169" title="All 2 branches covered.">          pairCode = nextChar == ' ' ? 3 : 0;</span>
+<span class="fc" id="L170">          break;</span>
+        case ',' :
+<span class="pc bpc" id="L172" title="1 of 2 branches missed.">          pairCode = nextChar == ' ' ? 4 : 0;</span>
+<span class="fc" id="L173">          break;</span>
+        case ':' :
+<span class="fc bfc" id="L175" title="All 2 branches covered.">          pairCode = nextChar == ' ' ? 5 : 0;</span>
+<span class="fc" id="L176">          break;</span>
+        default:
+<span class="fc" id="L178">          pairCode = 0;</span>
+      }
+<span class="fc bfc" id="L180" title="All 2 branches covered.">      if (pairCode &gt; 0) {</span>
+        // We have one of the four special PUNCT pairs.  Treat them specially.
+        // Get a new set of states for the two new characters.
+<span class="fc" id="L183">        states = updateStateListForPair(states, index, pairCode);</span>
+<span class="fc" id="L184">        index++;</span>
+      } else {
+        // Get a new set of states for the new character.
+<span class="fc" id="L187">        states = updateStateListForChar(states, index);</span>
+      }
+    }
+    // We are left with a set of states.  Find the shortest one.
+<span class="fc" id="L191">    State minState = Collections.min(states, new Comparator&lt;State&gt;() {</span>
+      @Override
+      public int compare(State a, State b) {
+<span class="fc" id="L194">        return a.getBitCount() - b.getBitCount();</span>
+      }
+    });
+    // Convert it to a bit array, and return.
+<span class="fc" id="L198">    return minState.toBitArray(text);</span>
+  }
+
+  // We update a set of states for a new character by updating each state
+  // for the new character, merging the results, and then removing the
+  // non-optimal states.
+  private Collection&lt;State&gt; updateStateListForChar(Iterable&lt;State&gt; states, int index) {
+<span class="fc" id="L205">    Collection&lt;State&gt; result = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L206" title="All 2 branches covered.">    for (State state : states) {</span>
+<span class="fc" id="L207">      updateStateForChar(state, index, result);</span>
+<span class="fc" id="L208">    }</span>
+<span class="fc" id="L209">    return simplifyStates(result);</span>
+  }
+
+  // Return a set of states that represent the possible ways of updating this
+  // state for the next character.  The resulting set of states are added to
+  // the &quot;result&quot; list.
+  private void updateStateForChar(State state, int index, Collection&lt;State&gt; result) {
+<span class="fc" id="L216">    char ch = (char) (text[index] &amp; 0xFF);</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">    boolean charInCurrentTable = CHAR_MAP[state.getMode()][ch] &gt; 0;</span>
+<span class="fc" id="L218">    State stateNoBinary = null;</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">    for (int mode = 0; mode &lt;= MODE_PUNCT; mode++) {</span>
+<span class="fc" id="L220">      int charInMode = CHAR_MAP[mode][ch];</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">      if (charInMode &gt; 0) {</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">        if (stateNoBinary == null) {</span>
+          // Only create stateNoBinary the first time it's required.
+<span class="fc" id="L224">          stateNoBinary = state.endBinaryShift(index);</span>
+        }
+        // Try generating the character by latching to its mode
+<span class="fc bfc" id="L227" title="All 6 branches covered.">        if (!charInCurrentTable || mode == state.getMode() || mode == MODE_DIGIT) {</span>
+          // If the character is in the current table, we don't want to latch to
+          // any other mode except possibly digit (which uses only 4 bits).  Any
+          // other latch would be equally successful *after* this character, and
+          // so wouldn't save any bits.
+<span class="fc" id="L232">          State latchState = stateNoBinary.latchAndAppend(mode, charInMode);</span>
+<span class="fc" id="L233">          result.add(latchState);</span>
+        }
+        // Try generating the character by switching to its mode.
+<span class="fc bfc" id="L236" title="All 4 branches covered.">        if (!charInCurrentTable &amp;&amp; SHIFT_TABLE[state.getMode()][mode] &gt;= 0) {</span>
+          // It never makes sense to temporarily shift to another mode if the
+          // character exists in the current mode.  That can never save bits.
+<span class="fc" id="L239">          State shiftState = stateNoBinary.shiftAndAppend(mode, charInMode);</span>
+<span class="fc" id="L240">          result.add(shiftState);</span>
+        }
+      }
+    }
+<span class="fc bfc" id="L244" title="All 4 branches covered.">    if (state.getBinaryShiftByteCount() &gt; 0 || CHAR_MAP[state.getMode()][ch] == 0) {</span>
+      // It's never worthwhile to go into binary shift mode if you're not already
+      // in binary shift mode, and the character exists in your current mode.
+      // That can never save bits over just outputting the char in the current mode.
+<span class="fc" id="L248">      State binaryState = state.addBinaryShiftChar(index);</span>
+<span class="fc" id="L249">      result.add(binaryState);</span>
+    }
+<span class="fc" id="L251">  }</span>
+
+  private static Collection&lt;State&gt; updateStateListForPair(Iterable&lt;State&gt; states, int index, int pairCode) {
+<span class="fc" id="L254">    Collection&lt;State&gt; result = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">    for (State state : states) {</span>
+<span class="fc" id="L256">      updateStateForPair(state, index, pairCode, result);</span>
+<span class="fc" id="L257">    }</span>
+<span class="fc" id="L258">    return simplifyStates(result);</span>
+  }
+
+  private static void updateStateForPair(State state, int index, int pairCode, Collection&lt;State&gt; result) {
+<span class="fc" id="L262">    State stateNoBinary = state.endBinaryShift(index);</span>
+    // Possibility 1.  Latch to MODE_PUNCT, and then append this code
+<span class="fc" id="L264">    result.add(stateNoBinary.latchAndAppend(MODE_PUNCT, pairCode));</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">    if (state.getMode() != MODE_PUNCT) {</span>
+      // Possibility 2.  Shift to MODE_PUNCT, and then append this code.
+      // Every state except MODE_PUNCT (handled above) can shift
+<span class="fc" id="L268">      result.add(stateNoBinary.shiftAndAppend(MODE_PUNCT, pairCode));</span>
+    }
+<span class="fc bfc" id="L270" title="All 4 branches covered.">    if (pairCode == 3 || pairCode == 4) {</span>
+      // both characters are in DIGITS.  Sometimes better to just add two digits
+<span class="fc" id="L272">      State digitState = stateNoBinary</span>
+<span class="fc" id="L273">          .latchAndAppend(MODE_DIGIT, 16 - pairCode)  // period or comma in DIGIT</span>
+<span class="fc" id="L274">          .latchAndAppend(MODE_DIGIT, 1);             // space in DIGIT</span>
+<span class="fc" id="L275">      result.add(digitState);</span>
+    }
+<span class="fc bfc" id="L277" title="All 2 branches covered.">    if (state.getBinaryShiftByteCount() &gt; 0) {</span>
+      // It only makes sense to do the characters as binary if we're already
+      // in binary mode.
+<span class="fc" id="L280">      State binaryState = state.addBinaryShiftChar(index).addBinaryShiftChar(index + 1);</span>
+<span class="fc" id="L281">      result.add(binaryState);</span>
+    }
+<span class="fc" id="L283">  }</span>
+
+  private static Collection&lt;State&gt; simplifyStates(Iterable&lt;State&gt; states) {
+<span class="fc" id="L286">    Collection&lt;State&gt; result = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L287" title="All 2 branches covered.">    for (State newState : states) {</span>
+<span class="fc" id="L288">      boolean add = true;</span>
+<span class="fc bfc" id="L289" title="All 2 branches covered.">      for (Iterator&lt;State&gt; iterator = result.iterator(); iterator.hasNext();) {</span>
+<span class="fc" id="L290">        State oldState = iterator.next();</span>
+<span class="fc bfc" id="L291" title="All 2 branches covered.">        if (oldState.isBetterThanOrEqualTo(newState)) {</span>
+<span class="fc" id="L292">          add = false;</span>
+<span class="fc" id="L293">          break;</span>
+        }
+<span class="fc bfc" id="L295" title="All 2 branches covered.">        if (newState.isBetterThanOrEqualTo(oldState)) {</span>
+<span class="fc" id="L296">          iterator.remove();</span>
+        }
+<span class="fc" id="L298">      }</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">      if (add) {</span>
+<span class="fc" id="L300">        result.add(newState);</span>
+      }
+<span class="fc" id="L302">    }</span>
+<span class="fc" id="L303">    return result;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ExecutorStatisticWrapper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.statistics</a> &gt; <span class="el_source">ExecutorStatisticWrapper.java</span></div><h1>ExecutorStatisticWrapper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.statistics;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.LongAdder;
+
+import org.threadly.concurrent.AbstractSubmitterExecutor;
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.concurrent.statistics.StatisticExecutor;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.Pair;
+import org.threadly.util.StatisticsUtils;
+
+/**
+ * Wrap an {@link Executor} to get statistics based off executions through this wrapper.  If 
+ * statistics are desired on the {@link org.threadly.concurrent.PriorityScheduler}, 
+ * {@link org.threadly.concurrent.statistics.PrioritySchedulerStatisticTracker} may be a better 
+ * option, taking advantages by extending and replacing logic rather than wrapping and just adding 
+ * logic.  Similarly 
+ * {@link org.threadly.concurrent.statistics.SingleThreadSchedulerStatisticTracker} and 
+ * {@link org.threadly.concurrent.statistics.NoThreadSchedulerStatisticTracker} should be used as 
+ * an alternative for their respective schedulers.
+ * 
+ * @since 4.6.0 (since 4.5.0 at org.threadly.concurrent.statistics)
+ */
+public class ExecutorStatisticWrapper extends AbstractSubmitterExecutor 
+                                      implements StatisticExecutor {
+  private final Executor executor;
+  private final StatsContainer statsContainer;
+  
+  /**
+   * Constructs a new statistics tracker wrapper for a given executor.  This constructor uses 
+   * a sensible default for the memory usage of collected statistics.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using {@link #ExecutorStatisticWrapper(Executor, boolean)}.
+   * 
+   * @param executor Executor to defer executions to
+   */
+  public ExecutorStatisticWrapper(Executor executor) {
+<span class="fc" id="L50">    this(executor, false);</span>
+<span class="fc" id="L51">  }</span>
+  
+  /**
+   * Constructs a new statistics tracker wrapper for a given executor.  This constructor uses 
+   * a sensible default for the memory usage of collected statistics.
+   * 
+   * @param executor Executor to defer executions to
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public ExecutorStatisticWrapper(Executor executor, boolean accurateTime) {
+<span class="fc" id="L61">    this(executor, 1000, accurateTime);</span>
+<span class="fc" id="L62">  }</span>
+
+  /**
+   * Constructs a new statistics tracker wrapper for a given executor.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using {@link #ExecutorStatisticWrapper(Executor, int, boolean)}.
+   * 
+   * @param executor Executor to defer executions to
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public ExecutorStatisticWrapper(Executor executor, int maxStatisticWindowSize) {
+<span class="nc" id="L75">    this(executor, maxStatisticWindowSize, false);</span>
+<span class="nc" id="L76">  }</span>
+
+  /**
+   * Constructs a new statistics tracker wrapper for a given executor.
+   * 
+   * @param executor Executor to defer executions to
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public ExecutorStatisticWrapper(Executor executor, 
+<span class="fc" id="L86">                                  int maxStatisticWindowSize, boolean accurateTime) {</span>
+<span class="fc" id="L87">    ArgumentVerifier.assertGreaterThanZero(maxStatisticWindowSize, &quot;maxStatisticWindowSize&quot;);</span>
+    
+<span class="fc" id="L89">    this.executor = executor;</span>
+<span class="fc" id="L90">    this.statsContainer = new StatsContainer(maxStatisticWindowSize, accurateTime);</span>
+<span class="fc" id="L91">  }</span>
+  
+  @Override
+  protected void doExecute(Runnable task) {
+<span class="fc" id="L95">    statsContainer.queuedTaskCount.increment();</span>
+    
+<span class="fc" id="L97">    executor.execute(new StatisticRunnable(task, Clock.accurateForwardProgressingMillis(), </span>
+                                           statsContainer));
+<span class="fc" id="L99">  }</span>
+  
+  @Override
+  public List&lt;Long&gt; getExecutionDelaySamples() {
+    ArrayList&lt;Long&gt; runDelays;
+<span class="fc" id="L104">    synchronized (statsContainer.runDelays) {</span>
+<span class="fc" id="L105">      runDelays = new ArrayList&lt;&gt;(statsContainer.runDelays);</span>
+<span class="fc" id="L106">    }</span>
+<span class="fc" id="L107">    return runDelays;</span>
+  }
+  
+  @Override
+  public double getAverageExecutionDelay() {
+<span class="fc" id="L112">    List&lt;Long&gt; delaySamples = getExecutionDelaySamples();</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    if (delaySamples.isEmpty()) {</span>
+<span class="fc" id="L114">      return -1;</span>
+    }
+<span class="fc" id="L116">    return StatisticsUtils.getAverage(delaySamples);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(double ... percentiles) {
+<span class="fc" id="L121">    List&lt;Long&gt; samples = getExecutionDelaySamples();</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">    if (samples.isEmpty()) {</span>
+<span class="fc" id="L123">      samples.add(0L);</span>
+    }
+<span class="fc" id="L125">    return StatisticsUtils.getPercentiles(samples, percentiles);</span>
+  }
+
+  @Override
+  public List&lt;Long&gt; getExecutionDurationSamples() {
+    ArrayList&lt;Long&gt; runDurations;
+<span class="fc" id="L131">    synchronized (statsContainer.runDurations) {</span>
+<span class="fc" id="L132">      runDurations = new ArrayList&lt;&gt;(statsContainer.runDurations);</span>
+<span class="fc" id="L133">    }</span>
+<span class="fc" id="L134">    return runDurations;</span>
+  }
+
+  @Override
+  public double getAverageExecutionDuration() {
+<span class="fc" id="L139">    List&lt;Long&gt; durationSamples = getExecutionDurationSamples();</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">    if (durationSamples.isEmpty()) {</span>
+<span class="fc" id="L141">      return -1;</span>
+    }
+<span class="fc" id="L143">    return StatisticsUtils.getAverage(durationSamples);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(double ... percentiles) {
+<span class="fc" id="L148">    List&lt;Long&gt; samples = getExecutionDurationSamples();</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">    if (samples.isEmpty()) {</span>
+<span class="fc" id="L150">      samples.add(0L);</span>
+    }
+<span class="fc" id="L152">    return StatisticsUtils.getPercentiles(samples, percentiles);</span>
+  }
+  
+  @Override
+  public List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; getLongRunningTasks(long durationLimitMillis) {
+<span class="fc" id="L157">    List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; result = new ArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">    if (statsContainer.accurateTime) {</span>
+      // ensure clock is updated before loop
+<span class="fc" id="L160">      Clock.accurateForwardProgressingMillis();</span>
+    }
+<span class="fc bfc" id="L162" title="All 2 branches covered.">    for (Map.Entry&lt;Pair&lt;Thread, Runnable&gt;, Long&gt; e : statsContainer.runningTasks.entrySet()) {</span>
+<span class="fc bfc" id="L163" title="All 2 branches covered.">      if (Clock.lastKnownForwardProgressingMillis() - e.getValue() &gt; durationLimitMillis) {</span>
+<span class="fc" id="L164">        Runnable task = e.getKey().getRight();</span>
+<span class="fc bfc" id="L165" title="All 2 branches covered.">        if (task instanceof ListenableFutureTask) {</span>
+<span class="fc" id="L166">          ListenableFutureTask&lt;?&gt; lft = (ListenableFutureTask&lt;?&gt;)task;</span>
+<span class="pc bpc" id="L167" title="1 of 2 branches missed.">          if (lft.getContainedCallable() instanceof RunnableCallableAdapter) {</span>
+<span class="fc" id="L168">            RunnableCallableAdapter&lt;?&gt; rca = (RunnableCallableAdapter&lt;?&gt;)lft.getContainedCallable();</span>
+<span class="fc" id="L169">            task = rca.getContainedRunnable();</span>
+          }
+        }
+<span class="fc" id="L172">        StackTraceElement[] stack = e.getKey().getLeft().getStackTrace();</span>
+        // verify still in collection after capturing stack
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">        if (statsContainer.runningTasks.containsKey(e.getKey())) {</span>
+<span class="fc" id="L175">          result.add(new Pair&lt;&gt;(task, stack));</span>
+        }
+      }
+<span class="fc" id="L178">    }</span>
+    
+<span class="fc" id="L180">    return result;</span>
+  }
+  
+  @Override
+  public int getLongRunningTasksQty(long durationLimitMillis) {
+<span class="fc" id="L185">    int result = 0;</span>
+
+<span class="pc bpc" id="L187" title="1 of 2 branches missed.">    if (statsContainer.accurateTime) {</span>
+      // ensure clock is updated before loop
+<span class="fc" id="L189">      Clock.accurateForwardProgressingMillis();</span>
+    }
+<span class="fc bfc" id="L191" title="All 2 branches covered.">    for (Long l : statsContainer.runningTasks.values()) {</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">      if (Clock.lastKnownForwardProgressingMillis() - l &gt; durationLimitMillis) {</span>
+<span class="fc" id="L193">        result++;</span>
+      }
+<span class="fc" id="L195">    }</span>
+    
+<span class="fc" id="L197">    return result;</span>
+  }
+  
+  /**
+   * Call to check how many tasks are queued waiting for execution.  If provided an executor that 
+   * allows task removal, removing tasks from that executor will cause this value to be 
+   * inaccurate.  A task which is submitted, and then removed (to prevent execution), will be 
+   * forever seen as queued since this wrapper has no opportunity to know about such removals.
+   * 
+   * @return Number of tasks still waiting to be executed.
+   */
+  @Override
+  public int getQueuedTaskCount() {
+<span class="fc" id="L210">    return statsContainer.queuedTaskCount.intValue();</span>
+  }
+
+  @Override
+  public long getTotalExecutionCount() {
+<span class="fc" id="L215">    return statsContainer.totalExecutionCount.sum();</span>
+  }
+  
+  @Override
+  public void resetCollectedStats() {
+<span class="fc" id="L220">    synchronized (statsContainer.runDelays) {</span>
+<span class="fc" id="L221">      statsContainer.runDelays.clear();</span>
+<span class="fc" id="L222">    }</span>
+<span class="fc" id="L223">    synchronized (statsContainer.runDurations) {</span>
+<span class="fc" id="L224">      statsContainer.runDurations.clear();</span>
+<span class="fc" id="L225">    }</span>
+<span class="fc" id="L226">  }</span>
+  
+  /**
+   * Runnable wrapper that will track task execution statistics.
+   * 
+   * @since 4.5.0
+   */
+  protected static class StatisticRunnable implements RunnableContainer, Runnable {
+    private final Runnable task;
+    private final long expectedRunTime;
+    private final StatsContainer statsContainer;
+    
+<span class="fc" id="L238">    public StatisticRunnable(Runnable task, long expectedRunTime, StatsContainer statsContainer) {</span>
+<span class="fc" id="L239">      this.task = task;</span>
+<span class="fc" id="L240">      this.expectedRunTime = expectedRunTime;</span>
+<span class="fc" id="L241">      this.statsContainer = statsContainer;</span>
+<span class="fc" id="L242">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L246">      Pair&lt;Thread, Runnable&gt; taskPair = new Pair&lt;&gt;(Thread.currentThread(), task);</span>
+<span class="fc" id="L247">      statsContainer.trackStart(taskPair, expectedRunTime);</span>
+      try {
+<span class="fc" id="L249">        task.run();</span>
+      } finally {
+<span class="fc" id="L251">        statsContainer.trackFinish(taskPair);</span>
+      }
+<span class="fc" id="L253">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="nc" id="L257">      return task;</span>
+    }
+  }
+  
+  /**
+   * Class which contains and maintains the statistics collected by a statistic tracker.
+   * 
+   * @since 4.5.0
+   */
+  protected static class StatsContainer {
+    public final int maxStatisticWindowSize;
+    public final boolean accurateTime;
+    protected final LongAdder totalExecutionCount;
+    protected final LongAdder queuedTaskCount;
+    protected final Map&lt;Pair&lt;Thread, Runnable&gt;, Long&gt; runningTasks;
+    protected final Deque&lt;Long&gt; runDurations;
+    protected final Deque&lt;Long&gt; runDelays;
+    
+<span class="fc" id="L275">    public StatsContainer(int maxStatisticWindowSize, boolean accurateTime) {</span>
+<span class="fc" id="L276">      this.maxStatisticWindowSize = maxStatisticWindowSize;</span>
+<span class="fc" id="L277">      this.accurateTime = accurateTime;</span>
+<span class="fc" id="L278">      this.totalExecutionCount = new LongAdder();</span>
+<span class="fc" id="L279">      this.queuedTaskCount = new LongAdder();</span>
+<span class="fc" id="L280">      this.runningTasks = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="fc" id="L281">      this.runDurations = new ArrayDeque&lt;&gt;();</span>
+<span class="fc" id="L282">      this.runDelays = new ArrayDeque&lt;&gt;();</span>
+<span class="fc" id="L283">    }</span>
+    
+    public void trackStart(Pair&lt;Thread, Runnable&gt; taskPair, long expectedRunTime) {
+      // get start time before any operations for hopefully more accurate execution delay
+<span class="fc" id="L287">      long startTime = Clock.accurateForwardProgressingMillis();</span>
+      
+<span class="fc" id="L289">      queuedTaskCount.decrement();</span>
+<span class="fc" id="L290">      totalExecutionCount.increment();</span>
+      
+<span class="fc" id="L292">      synchronized (runDelays) {</span>
+<span class="fc" id="L293">        runDelays.addLast(startTime - expectedRunTime);</span>
+<span class="pc bpc" id="L294" title="1 of 2 branches missed.">        if (runDelays.size() &gt; maxStatisticWindowSize) {</span>
+<span class="nc" id="L295">          runDelays.removeFirst();</span>
+        }
+<span class="fc" id="L297">      }</span>
+      
+      // get possibly newer time so we don't penalize stats tracking as duration
+<span class="fc" id="L300">      runningTasks.put(taskPair, Clock.lastKnownForwardProgressingMillis());</span>
+<span class="fc" id="L301">    }</span>
+    
+    public void trackFinish(Pair&lt;Thread, Runnable&gt; taskPair) {
+<span class="fc bfc" id="L304" title="All 2 branches covered.">      long runDuration = (accurateTime ? </span>
+<span class="fc" id="L305">                           Clock.accurateForwardProgressingMillis() : Clock.lastKnownForwardProgressingMillis()) - </span>
+<span class="fc" id="L306">                           runningTasks.remove(taskPair);</span>
+
+<span class="fc" id="L308">      synchronized (runDurations) {</span>
+<span class="fc" id="L309">        runDurations.addLast(runDuration);</span>
+<span class="pc bpc" id="L310" title="1 of 2 branches missed.">        if (runDurations.size() &gt; maxStatisticWindowSize) {</span>
+<span class="nc" id="L311">          runDurations.removeFirst();</span>
+        }
+<span class="fc" id="L313">      }</span>
+<span class="fc" id="L314">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

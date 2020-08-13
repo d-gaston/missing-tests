@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LocalizedMessageTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.api</a> &gt; <span class="el_source">LocalizedMessageTest.java</span></div><h1>LocalizedMessageTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.api;
+
+import static com.puppycrawl.tools.checkstyle.utils.CommonUtil.EMPTY_OBJECT_ARRAY;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.net.URLConnection;
+import java.net.URLStreamHandler;
+import java.util.Locale;
+import java.util.Map;
+import java.util.ResourceBundle;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.junit.After;
+import org.junit.Test;
+import org.powermock.reflect.Whitebox;
+
+import nl.jqno.equalsverifier.EqualsVerifier;
+import nl.jqno.equalsverifier.EqualsVerifierReport;
+
+/**
+ * Custom class loader is needed to pass URLs to pretend these are loaded from the classpath
+ * though we can't add/change the files for testing. The class loader is nested in this class,
+ * so the custom class loader we are using is safe.
+ * @noinspection ClassLoaderInstantiation
+ */
+<span class="fc" id="L52">public class LocalizedMessageTest {</span>
+
+<span class="fc" id="L54">    private static final Locale DEFAULT_LOCALE = Locale.getDefault();</span>
+
+    @Test
+    public void testEqualsAndHashCode() {
+<span class="fc" id="L58">        final EqualsVerifierReport ev = EqualsVerifier.forClass(LocalizedMessage.class)</span>
+<span class="fc" id="L59">                .usingGetClass().report();</span>
+<span class="fc" id="L60">        assertEquals(&quot;Error: &quot; + ev.getMessage(), EqualsVerifierReport.SUCCESS, ev);</span>
+<span class="fc" id="L61">    }</span>
+
+    @Test
+    public void testGetSeverityLevel() {
+<span class="fc" id="L65">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L67">        assertEquals(&quot;Invalid severity level&quot;, SeverityLevel.ERROR,</span>
+<span class="fc" id="L68">                localizedMessage.getSeverityLevel());</span>
+<span class="fc" id="L69">    }</span>
+
+    @Test
+    public void testGetModuleId() {
+<span class="fc" id="L73">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L75">        assertEquals(&quot;Invalid module id&quot;, &quot;module&quot;, localizedMessage.getModuleId());</span>
+<span class="fc" id="L76">    }</span>
+
+    @Test
+    public void testGetSourceName() {
+<span class="fc" id="L80">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L82">        assertEquals(&quot;Invalid source name&quot;, &quot;com.puppycrawl.tools.checkstyle.api.LocalizedMessage&quot;,</span>
+<span class="fc" id="L83">                localizedMessage.getSourceName());</span>
+<span class="fc" id="L84">    }</span>
+
+    @Test
+    public void testMessageInEnglish() {
+<span class="fc" id="L88">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+<span class="fc" id="L89">        LocalizedMessage.setLocale(Locale.ENGLISH);</span>
+
+<span class="fc" id="L91">        assertEquals(&quot;Invalid message&quot;, &quot;Empty statement.&quot;, localizedMessage.getMessage());</span>
+<span class="fc" id="L92">    }</span>
+
+    @Test
+    public void testBundleReloadUrlNull() throws IOException {
+<span class="fc" id="L96">        final LocalizedMessage.Utf8Control control = new LocalizedMessage.Utf8Control();</span>
+<span class="fc" id="L97">        final ResourceBundle bundle = control.newBundle(</span>
+                &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;,
+                Locale.ENGLISH, &quot;java.class&quot;,
+<span class="fc" id="L100">                Thread.currentThread().getContextClassLoader(), true);</span>
+<span class="fc" id="L101">        assertNull(&quot;Bundle should be null when reload is true and URL is null&quot;, bundle);</span>
+<span class="fc" id="L102">    }</span>
+
+    /**
+     * Ignore resource errors for testing.
+     * @noinspection resource, IOResourceOpenedButNotSafelyClosed
+     */
+    @Test
+    public void testBundleReloadUrlNotNull() throws IOException {
+<span class="fc" id="L110">        final AtomicBoolean closed = new AtomicBoolean();</span>
+
+<span class="fc" id="L112">        final InputStream inputStream = new InputStream() {</span>
+            @Override
+            public int read() {
+<span class="fc" id="L115">                return -1;</span>
+            }
+
+            @Override
+            public void close() {
+<span class="fc" id="L120">                closed.set(true);</span>
+<span class="fc" id="L121">            }</span>
+        };
+<span class="fc" id="L123">        final URLConnection urlConnection = new URLConnection(null) {</span>
+            @Override
+            public void connect() {
+                // no code
+<span class="nc" id="L127">            }</span>
+
+            @Override
+            public InputStream getInputStream() {
+<span class="fc" id="L131">                return inputStream;</span>
+            }
+        };
+<span class="fc" id="L134">        final URL url = new URL(&quot;test&quot;, null, 0, &quot;&quot;, new URLStreamHandler() {</span>
+            @Override
+            protected URLConnection openConnection(URL u) {
+<span class="fc" id="L137">                return urlConnection;</span>
+            }
+        });
+
+<span class="fc" id="L141">        final LocalizedMessage.Utf8Control control = new LocalizedMessage.Utf8Control();</span>
+<span class="fc" id="L142">        final ResourceBundle bundle = control.newBundle(</span>
+                &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;, Locale.ENGLISH,
+                &quot;java.class&quot;, new TestUrlsClassLoader(url), true);
+
+<span class="fc" id="L146">        assertNotNull(&quot;Bundle should not be null when stream is not null&quot;, bundle);</span>
+<span class="fc" id="L147">        assertFalse(&quot;connection should not be using caches&quot;, urlConnection.getUseCaches());</span>
+<span class="fc" id="L148">        assertTrue(&quot;connection should be closed&quot;, closed.get());</span>
+<span class="fc" id="L149">    }</span>
+
+    /**
+     * Ignore resource errors for testing.
+     * @noinspection resource, IOResourceOpenedButNotSafelyClosed
+     */
+    @Test
+    public void testBundleReloadUrlNotNullFalseReload() throws IOException {
+<span class="fc" id="L157">        final AtomicBoolean closed = new AtomicBoolean();</span>
+
+<span class="fc" id="L159">        final InputStream inputStream = new InputStream() {</span>
+            @Override
+            public int read() {
+<span class="fc" id="L162">                return -1;</span>
+            }
+
+            @Override
+            public void close() {
+<span class="fc" id="L167">                closed.set(true);</span>
+<span class="fc" id="L168">            }</span>
+        };
+<span class="fc" id="L170">        final URLConnection urlConnection = new URLConnection(null) {</span>
+            @Override
+            public void connect() {
+                // no code
+<span class="nc" id="L174">            }</span>
+
+            @Override
+            public InputStream getInputStream() {
+<span class="fc" id="L178">                return inputStream;</span>
+            }
+        };
+<span class="fc" id="L181">        final URL url = new URL(&quot;test&quot;, null, 0, &quot;&quot;, new URLStreamHandler() {</span>
+            @Override
+            protected URLConnection openConnection(URL u) {
+<span class="fc" id="L184">                return urlConnection;</span>
+            }
+        });
+
+<span class="fc" id="L188">        final LocalizedMessage.Utf8Control control = new LocalizedMessage.Utf8Control();</span>
+<span class="fc" id="L189">        final ResourceBundle bundle = control.newBundle(</span>
+                &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;, Locale.ENGLISH,
+                &quot;java.class&quot;, new TestUrlsClassLoader(url), false);
+
+<span class="fc" id="L193">        assertNotNull(&quot;Bundle should not be null when stream is not null&quot;, bundle);</span>
+<span class="fc" id="L194">        assertTrue(&quot;connection should not be using caches&quot;, urlConnection.getUseCaches());</span>
+<span class="fc" id="L195">        assertTrue(&quot;connection should be closed&quot;, closed.get());</span>
+<span class="fc" id="L196">    }</span>
+
+    @Test
+    public void testBundleReloadUrlNotNullStreamNull() throws IOException {
+<span class="fc" id="L200">        final URL url = new URL(&quot;test&quot;, null, 0, &quot;&quot;, new URLStreamHandler() {</span>
+            @Override
+            protected URLConnection openConnection(URL u) {
+<span class="fc" id="L203">                return null;</span>
+            }
+        });
+
+<span class="fc" id="L207">        final LocalizedMessage.Utf8Control control = new LocalizedMessage.Utf8Control();</span>
+<span class="fc" id="L208">        final ResourceBundle bundle = control.newBundle(</span>
+                &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;,
+                Locale.ENGLISH, &quot;java.class&quot;,
+                new TestUrlsClassLoader(url), true);
+<span class="fc" id="L212">        assertNull(&quot;Bundle should be null when stream is null&quot;, bundle);</span>
+<span class="fc" id="L213">    }</span>
+
+    @Test
+    public void testMessageInFrench() {
+<span class="fc" id="L217">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+<span class="fc" id="L218">        LocalizedMessage.setLocale(Locale.FRENCH);</span>
+
+<span class="fc" id="L220">        assertEquals(&quot;Invalid message&quot;, &quot;Instruction vide.&quot;, localizedMessage.getMessage());</span>
+<span class="fc" id="L221">    }</span>
+
+    @Test
+    public void testEnforceEnglishLanguageBySettingUnitedStatesLocale() {
+<span class="fc" id="L225">        Locale.setDefault(Locale.FRENCH);</span>
+<span class="fc" id="L226">        LocalizedMessage.setLocale(Locale.US);</span>
+<span class="fc" id="L227">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L229">        assertEquals(&quot;Invalid message&quot;, &quot;Empty statement.&quot;, localizedMessage.getMessage());</span>
+<span class="fc" id="L230">    }</span>
+
+    @Test
+    public void testEnforceEnglishLanguageBySettingRootLocale() {
+<span class="fc" id="L234">        Locale.setDefault(Locale.FRENCH);</span>
+<span class="fc" id="L235">        LocalizedMessage.setLocale(Locale.ROOT);</span>
+<span class="fc" id="L236">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L238">        assertEquals(&quot;Invalid message&quot;, &quot;Empty statement.&quot;, localizedMessage.getMessage());</span>
+<span class="fc" id="L239">    }</span>
+
+    @Test
+    public void testGetKey() {
+<span class="fc" id="L243">        Locale.setDefault(Locale.FRENCH);</span>
+<span class="fc" id="L244">        LocalizedMessage.setLocale(Locale.US);</span>
+<span class="fc" id="L245">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L247">        assertEquals(&quot;Invalid message key&quot;, &quot;empty.statement&quot;, localizedMessage.getKey());</span>
+<span class="fc" id="L248">    }</span>
+
+    @Test
+    public void testCleatBundleCache() {
+<span class="fc" id="L252">        Locale.setDefault(Locale.FRENCH);</span>
+<span class="fc" id="L253">        LocalizedMessage.setLocale(Locale.ROOT);</span>
+<span class="fc" id="L254">        final LocalizedMessage localizedMessage = createSampleLocalizedMessage();</span>
+
+<span class="fc" id="L256">        assertEquals(&quot;Invalid message&quot;, &quot;Empty statement.&quot;, localizedMessage.getMessage());</span>
+
+<span class="fc" id="L258">        final Map&lt;String, ResourceBundle&gt; bundleCache =</span>
+<span class="fc" id="L259">                Whitebox.getInternalState(LocalizedMessage.class, &quot;BUNDLE_CACHE&quot;);</span>
+
+<span class="fc" id="L261">        assertEquals(&quot;Invalid bundle cache size&quot;, 1, bundleCache.size());</span>
+
+<span class="fc" id="L263">        LocalizedMessage.setLocale(Locale.CHINA);</span>
+
+<span class="fc" id="L265">        assertEquals(&quot;Invalid bundle cache size&quot;, 0, bundleCache.size());</span>
+<span class="fc" id="L266">    }</span>
+
+    @Test
+    public void testTokenType() {
+<span class="fc" id="L270">        final LocalizedMessage localizedMessage1 = new LocalizedMessage(1, 1, TokenTypes.CLASS_DEF,</span>
+                &quot;messages.properties&quot;, &quot;key&quot;, null, SeverityLevel.ERROR, null,
+<span class="fc" id="L272">                getClass(), null);</span>
+<span class="fc" id="L273">        final LocalizedMessage localizedMessage2 = new LocalizedMessage(1, 1, TokenTypes.OBJBLOCK,</span>
+                &quot;messages.properties&quot;, &quot;key&quot;, EMPTY_OBJECT_ARRAY, SeverityLevel.ERROR, null,
+<span class="fc" id="L275">                getClass(), null);</span>
+
+<span class="fc" id="L277">        assertEquals(&quot;Invalid token type&quot;, TokenTypes.CLASS_DEF, localizedMessage1.getTokenType());</span>
+<span class="fc" id="L278">        assertEquals(&quot;Invalid token type&quot;, TokenTypes.OBJBLOCK, localizedMessage2.getTokenType());</span>
+<span class="fc" id="L279">    }</span>
+
+    @Test
+    public void testGetColumnCharIndex() {
+<span class="fc" id="L283">        final LocalizedMessage localizedMessage1 = new LocalizedMessage(1, 1, 123,</span>
+                TokenTypes.CLASS_DEF, &quot;messages.properties&quot;, &quot;key&quot;, null, SeverityLevel.ERROR,
+<span class="fc" id="L285">                null, getClass(), null);</span>
+
+<span class="fc" id="L287">        assertEquals(&quot;Invalid column char index&quot;, 123, localizedMessage1.getColumnCharIndex());</span>
+<span class="fc" id="L288">    }</span>
+
+    @Test
+    public void testCompareToWithDifferentModuleId() {
+<span class="fc" id="L292">        final LocalizedMessage message1 = createSampleLocalizedMessageWithId(&quot;module1&quot;);</span>
+<span class="fc" id="L293">        final LocalizedMessage message2 = createSampleLocalizedMessageWithId(&quot;module2&quot;);</span>
+<span class="fc" id="L294">        final LocalizedMessage messageNull = createSampleLocalizedMessageWithId(null);</span>
+
+<span class="pc bpc" id="L296" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, message1.compareTo(messageNull) &gt; 0);</span>
+<span class="pc bpc" id="L297" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, messageNull.compareTo(message1) &lt; 0);</span>
+<span class="pc bpc" id="L298" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, message1.compareTo(message2) &lt; 0);</span>
+<span class="fc" id="L299">    }</span>
+
+    @Test
+    public void testCompareToWithDifferentLines() {
+<span class="fc" id="L303">        final LocalizedMessage message1 = createSampleLocalizedMessageWithLine(1);</span>
+<span class="fc" id="L304">        final LocalizedMessage message1a = createSampleLocalizedMessageWithLine(1);</span>
+<span class="fc" id="L305">        final LocalizedMessage message2 = createSampleLocalizedMessageWithLine(2);</span>
+
+<span class="pc bpc" id="L307" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, message1.compareTo(message2) &lt; 0);</span>
+<span class="pc bpc" id="L308" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, message2.compareTo(message1) &gt; 0);</span>
+<span class="fc" id="L309">        assertEquals(&quot;Invalid comparing result&quot;, 0, message1.compareTo(message1a));</span>
+<span class="fc" id="L310">    }</span>
+
+    @Test
+    public void testCompareToWithDifferentColumns() {
+<span class="fc" id="L314">        final LocalizedMessage message1 = createSampleLocalizedMessageWithColumn(1);</span>
+<span class="fc" id="L315">        final LocalizedMessage message1a = createSampleLocalizedMessageWithColumn(1);</span>
+<span class="fc" id="L316">        final LocalizedMessage message2 = createSampleLocalizedMessageWithColumn(2);</span>
+
+<span class="pc bpc" id="L318" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, message1.compareTo(message2) &lt; 0);</span>
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">        assertTrue(&quot;Invalid comparing result&quot;, message2.compareTo(message1) &gt; 0);</span>
+<span class="fc" id="L320">        assertEquals(&quot;Invalid comparing result&quot;, 0, message1.compareTo(message1a));</span>
+<span class="fc" id="L321">    }</span>
+
+    private static LocalizedMessage createSampleLocalizedMessage() {
+<span class="fc" id="L324">        return createSampleLocalizedMessageWithId(&quot;module&quot;);</span>
+    }
+
+    private static LocalizedMessage createSampleLocalizedMessageWithId(String id) {
+<span class="fc" id="L328">        return new LocalizedMessage(1, &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;,</span>
+                &quot;empty.statement&quot;, EMPTY_OBJECT_ARRAY, id, LocalizedMessage.class, null);
+    }
+
+    private static LocalizedMessage createSampleLocalizedMessageWithLine(int line) {
+<span class="fc" id="L333">        return new LocalizedMessage(line, &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;,</span>
+                &quot;empty.statement&quot;, EMPTY_OBJECT_ARRAY, &quot;module&quot;, LocalizedMessage.class, null);
+    }
+
+    private static LocalizedMessage createSampleLocalizedMessageWithColumn(int column) {
+<span class="fc" id="L338">        return new LocalizedMessage(1, column,</span>
+                &quot;com.puppycrawl.tools.checkstyle.checks.coding.messages&quot;, &quot;empty.statement&quot;,
+                EMPTY_OBJECT_ARRAY, &quot;module&quot;, LocalizedMessage.class, null);
+    }
+
+    @After
+    public void tearDown() {
+<span class="fc" id="L345">        Locale.setDefault(DEFAULT_LOCALE);</span>
+<span class="fc" id="L346">        LocalizedMessage.clearCache();</span>
+<span class="fc" id="L347">        LocalizedMessage.setLocale(DEFAULT_LOCALE);</span>
+<span class="fc" id="L348">    }</span>
+
+    /**
+     * Custom class loader is needed to pass URLs to pretend these are loaded from the classpath
+     * though we can't add/change the files for testing.
+     * @noinspection CustomClassloader
+     */
+    private static class TestUrlsClassLoader extends ClassLoader {
+
+        private final URL url;
+
+<span class="fc" id="L359">        /* package */ TestUrlsClassLoader(URL url) {</span>
+<span class="fc" id="L360">            this.url = url;</span>
+<span class="fc" id="L361">        }</span>
+
+        @Override
+        public URL getResource(String name) {
+<span class="fc" id="L365">            return url;</span>
+        }
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

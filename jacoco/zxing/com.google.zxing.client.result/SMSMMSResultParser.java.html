@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SMSMMSResultParser.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.client.result</a> &gt; <span class="el_source">SMSMMSResultParser.java</span></div><h1>SMSMMSResultParser.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.client.result;
+
+import com.google.zxing.Result;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * &lt;p&gt;Parses an &quot;sms:&quot; URI result, which specifies a number to SMS.
+ * See &lt;a href=&quot;http://tools.ietf.org/html/rfc5724&quot;&gt; RFC 5724&lt;/a&gt; on this.&lt;/p&gt;
+ *
+ * &lt;p&gt;This class supports &quot;via&quot; syntax for numbers, which is not part of the spec.
+ * For example &quot;+12125551212;via=+12124440101&quot; may appear as a number.
+ * It also supports a &quot;subject&quot; query parameter, which is not mentioned in the spec.
+ * These are included since they were mentioned in earlier IETF drafts and might be
+ * used.&lt;/p&gt;
+ *
+ * &lt;p&gt;This actually also parses URIs starting with &quot;mms:&quot; and treats them all the same way,
+ * and effectively converts them to an &quot;sms:&quot; URI for purposes of forwarding to the platform.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+<span class="fc" id="L41">public final class SMSMMSResultParser extends ResultParser {</span>
+
+  @Override
+  public SMSParsedResult parse(Result result) {
+<span class="fc" id="L45">    String rawText = getMassagedText(result);</span>
+<span class="fc bfc" id="L46" title="All 4 branches covered.">    if (!(rawText.startsWith(&quot;sms:&quot;) || rawText.startsWith(&quot;SMS:&quot;) ||</span>
+<span class="fc bfc" id="L47" title="All 4 branches covered.">          rawText.startsWith(&quot;mms:&quot;) || rawText.startsWith(&quot;MMS:&quot;))) {</span>
+<span class="fc" id="L48">      return null;</span>
+    }
+
+    // Check up front if this is a URI syntax string with query arguments
+<span class="fc" id="L52">    Map&lt;String,String&gt; nameValuePairs = parseNameValuePairs(rawText);</span>
+<span class="fc" id="L53">    String subject = null;</span>
+<span class="fc" id="L54">    String body = null;</span>
+<span class="fc" id="L55">    boolean querySyntax = false;</span>
+<span class="pc bpc" id="L56" title="1 of 4 branches missed.">    if (nameValuePairs != null &amp;&amp; !nameValuePairs.isEmpty()) {</span>
+<span class="fc" id="L57">      subject = nameValuePairs.get(&quot;subject&quot;);</span>
+<span class="fc" id="L58">      body = nameValuePairs.get(&quot;body&quot;);</span>
+<span class="fc" id="L59">      querySyntax = true;</span>
+    }
+
+    // Drop sms, query portion
+<span class="fc" id="L63">    int queryStart = rawText.indexOf('?', 4);</span>
+    String smsURIWithoutQuery;
+    // If it's not query syntax, the question mark is part of the subject or message
+<span class="pc bpc" id="L66" title="1 of 4 branches missed.">    if (queryStart &lt; 0 || !querySyntax) {</span>
+<span class="fc" id="L67">      smsURIWithoutQuery = rawText.substring(4);</span>
+    } else {
+<span class="fc" id="L69">      smsURIWithoutQuery = rawText.substring(4, queryStart);</span>
+    }
+
+<span class="fc" id="L72">    int lastComma = -1;</span>
+    int comma;
+<span class="fc" id="L74">    List&lt;String&gt; numbers = new ArrayList&lt;&gt;(1);</span>
+<span class="fc" id="L75">    List&lt;String&gt; vias = new ArrayList&lt;&gt;(1);</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    while ((comma = smsURIWithoutQuery.indexOf(',', lastComma + 1)) &gt; lastComma) {</span>
+<span class="fc" id="L77">      String numberPart = smsURIWithoutQuery.substring(lastComma + 1, comma);</span>
+<span class="fc" id="L78">      addNumberVia(numbers, vias, numberPart);</span>
+<span class="fc" id="L79">      lastComma = comma;</span>
+<span class="fc" id="L80">    }</span>
+<span class="fc" id="L81">    addNumberVia(numbers, vias, smsURIWithoutQuery.substring(lastComma + 1));    </span>
+
+<span class="fc" id="L83">    return new SMSParsedResult(numbers.toArray(EMPTY_STR_ARRAY),</span>
+<span class="fc" id="L84">                               vias.toArray(EMPTY_STR_ARRAY),</span>
+                               subject,
+                               body);
+  }
+
+  private static void addNumberVia(Collection&lt;String&gt; numbers,
+                                   Collection&lt;String&gt; vias,
+                                   String numberPart) {
+<span class="fc" id="L92">    int numberEnd = numberPart.indexOf(';');</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">    if (numberEnd &lt; 0) {</span>
+<span class="fc" id="L94">      numbers.add(numberPart);</span>
+<span class="fc" id="L95">      vias.add(null);</span>
+    } else {
+<span class="fc" id="L97">      numbers.add(numberPart.substring(0, numberEnd));</span>
+<span class="fc" id="L98">      String maybeVia = numberPart.substring(numberEnd + 1);</span>
+      String via;
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">      if (maybeVia.startsWith(&quot;via=&quot;)) {</span>
+<span class="fc" id="L101">        via = maybeVia.substring(4);</span>
+      } else {
+<span class="nc" id="L103">        via = null;</span>
+      }
+<span class="fc" id="L105">      vias.add(via);</span>
+    }
+<span class="fc" id="L107">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

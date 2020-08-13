@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BitSource.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common</a> &gt; <span class="el_source">BitSource.java</span></div><h1>BitSource.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common;
+
+/**
+ * &lt;p&gt;This provides an easy abstraction to read bits at a time from a sequence of bytes, where the
+ * number of bits read is not often a multiple of 8.&lt;/p&gt;
+ *
+ * &lt;p&gt;This class is thread-safe but not reentrant -- unless the caller modifies the bytes array
+ * it passed in, in which case all bets are off.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+public final class BitSource {
+
+  private final byte[] bytes;
+  private int byteOffset;
+  private int bitOffset;
+
+  /**
+   * @param bytes bytes from which this will read bits. Bits will be read from the first byte first.
+   * Bits are read within a byte from most-significant to least-significant bit.
+   */
+<span class="fc" id="L38">  public BitSource(byte[] bytes) {</span>
+<span class="fc" id="L39">    this.bytes = bytes;</span>
+<span class="fc" id="L40">  }</span>
+
+  /**
+   * @return index of next bit in current byte which would be read by the next call to {@link #readBits(int)}.
+   */
+  public int getBitOffset() {
+<span class="fc" id="L46">    return bitOffset;</span>
+  }
+
+  /**
+   * @return index of next byte in input byte array which would be read by the next call to {@link #readBits(int)}.
+   */
+  public int getByteOffset() {
+<span class="fc" id="L53">    return byteOffset;</span>
+  }
+
+  /**
+   * @param numBits number of bits to read
+   * @return int representing the bits read. The bits will appear as the least-significant
+   *         bits of the int
+   * @throws IllegalArgumentException if numBits isn't in [1,32] or more than is available
+   */
+  public int readBits(int numBits) {
+<span class="pc bpc" id="L63" title="3 of 6 branches missed.">    if (numBits &lt; 1 || numBits &gt; 32 || numBits &gt; available()) {</span>
+<span class="nc" id="L64">      throw new IllegalArgumentException(String.valueOf(numBits));</span>
+    }
+
+<span class="fc" id="L67">    int result = 0;</span>
+
+    // First, read remainder from current byte
+<span class="fc bfc" id="L70" title="All 2 branches covered.">    if (bitOffset &gt; 0) {</span>
+<span class="fc" id="L71">      int bitsLeft = 8 - bitOffset;</span>
+<span class="fc bfc" id="L72" title="All 2 branches covered.">      int toRead = numBits &lt; bitsLeft ? numBits : bitsLeft;</span>
+<span class="fc" id="L73">      int bitsToNotRead = bitsLeft - toRead;</span>
+<span class="fc" id="L74">      int mask = (0xFF &gt;&gt; (8 - toRead)) &lt;&lt; bitsToNotRead;</span>
+<span class="fc" id="L75">      result = (bytes[byteOffset] &amp; mask) &gt;&gt; bitsToNotRead;</span>
+<span class="fc" id="L76">      numBits -= toRead;</span>
+<span class="fc" id="L77">      bitOffset += toRead;</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">      if (bitOffset == 8) {</span>
+<span class="fc" id="L79">        bitOffset = 0;</span>
+<span class="fc" id="L80">        byteOffset++;</span>
+      }
+    }
+
+    // Next read whole bytes
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    if (numBits &gt; 0) {</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      while (numBits &gt;= 8) {</span>
+<span class="fc" id="L87">        result = (result &lt;&lt; 8) | (bytes[byteOffset] &amp; 0xFF);</span>
+<span class="fc" id="L88">        byteOffset++;</span>
+<span class="fc" id="L89">        numBits -= 8;</span>
+      }
+
+      // Finally read a partial byte
+<span class="fc bfc" id="L93" title="All 2 branches covered.">      if (numBits &gt; 0) {</span>
+<span class="fc" id="L94">        int bitsToNotRead = 8 - numBits;</span>
+<span class="fc" id="L95">        int mask = (0xFF &gt;&gt; bitsToNotRead) &lt;&lt; bitsToNotRead;</span>
+<span class="fc" id="L96">        result = (result &lt;&lt; numBits) | ((bytes[byteOffset] &amp; mask) &gt;&gt; bitsToNotRead);</span>
+<span class="fc" id="L97">        bitOffset += numBits;</span>
+      }
+    }
+
+<span class="fc" id="L101">    return result;</span>
+  }
+
+  /**
+   * @return number of bits that can be read successfully
+   */
+  public int available() {
+<span class="fc" id="L108">    return 8 * (bytes.length - byteOffset) - bitOffset;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

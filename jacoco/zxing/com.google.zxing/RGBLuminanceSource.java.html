@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RGBLuminanceSource.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing</a> &gt; <span class="el_source">RGBLuminanceSource.java</span></div><h1>RGBLuminanceSource.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2009 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing;
+
+/**
+ * This class is used to help decode images from files which arrive as RGB data from
+ * an ARGB pixel array. It does not support rotation.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ * @author Betaminos
+ */
+public final class RGBLuminanceSource extends LuminanceSource {
+
+  private final byte[] luminances;
+  private final int dataWidth;
+  private final int dataHeight;
+  private final int left;
+  private final int top;
+
+  public RGBLuminanceSource(int width, int height, int[] pixels) {
+<span class="fc" id="L35">    super(width, height);</span>
+
+<span class="fc" id="L37">    dataWidth = width;</span>
+<span class="fc" id="L38">    dataHeight = height;</span>
+<span class="fc" id="L39">    left = 0;</span>
+<span class="fc" id="L40">    top = 0;</span>
+
+    // In order to measure pure decoding speed, we convert the entire image to a greyscale array
+    // up front, which is the same as the Y channel of the YUVLuminanceSource in the real app.
+    //
+    // Total number of pixels suffices, can ignore shape
+<span class="fc" id="L46">    int size = width * height;</span>
+<span class="fc" id="L47">    luminances = new byte[size];</span>
+<span class="fc bfc" id="L48" title="All 2 branches covered.">    for (int offset = 0; offset &lt; size; offset++) {</span>
+<span class="fc" id="L49">      int pixel = pixels[offset];</span>
+<span class="fc" id="L50">      int r = (pixel &gt;&gt; 16) &amp; 0xff; // red</span>
+<span class="fc" id="L51">      int g2 = (pixel &gt;&gt; 7) &amp; 0x1fe; // 2 * green</span>
+<span class="fc" id="L52">      int b = pixel &amp; 0xff; // blue</span>
+      // Calculate green-favouring average cheaply
+<span class="fc" id="L54">      luminances[offset] = (byte) ((r + g2 + b) / 4);</span>
+    }
+<span class="fc" id="L56">  }</span>
+
+  private RGBLuminanceSource(byte[] pixels,
+                             int dataWidth,
+                             int dataHeight,
+                             int left,
+                             int top,
+                             int width,
+                             int height) {
+<span class="fc" id="L65">    super(width, height);</span>
+<span class="pc bpc" id="L66" title="2 of 4 branches missed.">    if (left + width &gt; dataWidth || top + height &gt; dataHeight) {</span>
+<span class="nc" id="L67">      throw new IllegalArgumentException(&quot;Crop rectangle does not fit within image data.&quot;);</span>
+    }
+<span class="fc" id="L69">    this.luminances = pixels;</span>
+<span class="fc" id="L70">    this.dataWidth = dataWidth;</span>
+<span class="fc" id="L71">    this.dataHeight = dataHeight;</span>
+<span class="fc" id="L72">    this.left = left;</span>
+<span class="fc" id="L73">    this.top = top;</span>
+<span class="fc" id="L74">  }</span>
+
+  @Override
+  public byte[] getRow(int y, byte[] row) {
+<span class="pc bpc" id="L78" title="2 of 4 branches missed.">    if (y &lt; 0 || y &gt;= getHeight()) {</span>
+<span class="nc" id="L79">      throw new IllegalArgumentException(&quot;Requested row is outside the image: &quot; + y);</span>
+    }
+<span class="fc" id="L81">    int width = getWidth();</span>
+<span class="pc bpc" id="L82" title="1 of 4 branches missed.">    if (row == null || row.length &lt; width) {</span>
+<span class="fc" id="L83">      row = new byte[width];</span>
+    }
+<span class="fc" id="L85">    int offset = (y + top) * dataWidth + left;</span>
+<span class="fc" id="L86">    System.arraycopy(luminances, offset, row, 0, width);</span>
+<span class="fc" id="L87">    return row;</span>
+  }
+
+  @Override
+  public byte[] getMatrix() {
+<span class="fc" id="L92">    int width = getWidth();</span>
+<span class="fc" id="L93">    int height = getHeight();</span>
+
+    // If the caller asks for the entire underlying image, save the copy and give them the
+    // original data. The docs specifically warn that result.length must be ignored.
+<span class="fc bfc" id="L97" title="All 4 branches covered.">    if (width == dataWidth &amp;&amp; height == dataHeight) {</span>
+<span class="fc" id="L98">      return luminances;</span>
+    }
+
+<span class="fc" id="L101">    int area = width * height;</span>
+<span class="fc" id="L102">    byte[] matrix = new byte[area];</span>
+<span class="fc" id="L103">    int inputOffset = top * dataWidth + left;</span>
+
+    // If the width matches the full width of the underlying data, perform a single copy.
+<span class="fc bfc" id="L106" title="All 2 branches covered.">    if (width == dataWidth) {</span>
+<span class="fc" id="L107">      System.arraycopy(luminances, inputOffset, matrix, 0, area);</span>
+<span class="fc" id="L108">      return matrix;</span>
+    }
+
+    // Otherwise copy one cropped row at a time.
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc" id="L113">      int outputOffset = y * width;</span>
+<span class="fc" id="L114">      System.arraycopy(luminances, inputOffset, matrix, outputOffset, width);</span>
+<span class="fc" id="L115">      inputOffset += dataWidth;</span>
+    }
+<span class="fc" id="L117">    return matrix;</span>
+  }
+
+  @Override
+  public boolean isCropSupported() {
+<span class="fc" id="L122">    return true;</span>
+  }
+
+  @Override
+  public LuminanceSource crop(int left, int top, int width, int height) {
+<span class="fc" id="L127">    return new RGBLuminanceSource(luminances,</span>
+                                  dataWidth,
+                                  dataHeight,
+                                  this.left + left,
+                                  this.top + top,
+                                  width,
+                                  height);
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,624 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KeyDistributedExecutorTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper</a> &gt; <span class="el_source">KeyDistributedExecutorTest.java</span></div><h1>KeyDistributedExecutorTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper;
+
+import static org.junit.Assert.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.threadly.BlockingTestRunnable;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.PriorityScheduler;
+import org.threadly.concurrent.StrictPriorityScheduler;
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.TestCallable;
+import org.threadly.concurrent.TestRuntimeFailureRunnable;
+import org.threadly.concurrent.UnfairExecutor;
+import org.threadly.concurrent.wrapper.limiter.ExecutorLimiter;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.test.concurrent.TestUtils;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.SuppressedStackRuntimeException;
+import org.threadly.util.TestExceptionHandler;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L38">public class KeyDistributedExecutorTest extends ThreadlyTester {</span>
+<span class="fc" id="L39">  private static final int PARALLEL_LEVEL = TEST_QTY;</span>
+<span class="fc" id="L40">  private static final int RUNNABLE_COUNT_PER_LEVEL = TEST_QTY * 2;</span>
+  
+  @BeforeClass
+  public static void setupClass() {
+<span class="fc" id="L44">    setIgnoreExceptionHandler();</span>
+<span class="fc" id="L45">  }</span>
+
+  protected UnfairExecutor executor;
+  protected KeyDistributedExecutor distributor;
+  
+  @Before
+  public void setup() {
+<span class="fc" id="L52">    executor = new UnfairExecutor((PARALLEL_LEVEL * 2) + 1);</span>
+<span class="fc" id="L53">    distributor = new KeyDistributedExecutor(executor, Integer.MAX_VALUE, false);</span>
+<span class="fc" id="L54">  }</span>
+  
+  @After
+  public void cleanup() {
+<span class="fc" id="L58">    executor.shutdownNow();</span>
+<span class="fc" id="L59">    executor = null;</span>
+<span class="fc" id="L60">    distributor = null;</span>
+<span class="fc" id="L61">  }</span>
+  
+  protected List&lt;KDRunnable&gt; populate(AddHandler ah) {
+<span class="fc" id="L64">    final List&lt;KDRunnable&gt; runs = new ArrayList&lt;&gt;(PARALLEL_LEVEL * RUNNABLE_COUNT_PER_LEVEL);</span>
+
+<span class="fc" id="L66">    BlockingTestRunnable[] btrs = new BlockingTestRunnable[PARALLEL_LEVEL];</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">    for (int i = 0; i &lt; PARALLEL_LEVEL; i++) {</span>
+<span class="fc" id="L68">      ThreadContainer tc = new ThreadContainer();</span>
+<span class="fc" id="L69">      KDRunnable previous = null;</span>
+<span class="fc" id="L70">      btrs[i] = new BlockingTestRunnable();</span>
+<span class="fc" id="L71">      distributor.execute(tc, btrs[i]);</span>
+<span class="fc bfc" id="L72" title="All 2 branches covered.">      for (int j = 0; j &lt; RUNNABLE_COUNT_PER_LEVEL; j++) {</span>
+<span class="fc" id="L73">        KDRunnable tr = new KDRunnable(tc, previous);</span>
+<span class="fc" id="L74">        runs.add(tr);</span>
+<span class="fc" id="L75">        ah.addTDRunnable(tc, tr);</span>
+        
+<span class="fc" id="L77">        previous = tr;</span>
+      }
+    }
+    
+<span class="fc bfc" id="L81" title="All 2 branches covered.">    for (BlockingTestRunnable btr : btrs) {</span>
+      // allow all to execute once submitted / queued, the thread should be consistent at this point
+<span class="fc" id="L83">      btr.unblock();</span>
+    }
+    
+<span class="fc" id="L86">    return runs;</span>
+  }
+  
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test
+  public void constructorTest() {
+    // none should throw exception
+<span class="fc" id="L93">    new KeyDistributedExecutor(executor);</span>
+<span class="fc" id="L94">    new KeyDistributedExecutor(executor, true);</span>
+<span class="fc" id="L95">    new KeyDistributedExecutor(executor, 1);</span>
+<span class="fc" id="L96">    new KeyDistributedExecutor(executor, 1, true);</span>
+<span class="fc" id="L97">  }</span>
+  
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test
+  public void constructorFail() {
+    try {
+<span class="nc" id="L103">      new KeyDistributedExecutor(null);</span>
+<span class="nc" id="L104">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L105">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L107">    }</span>
+    try {
+<span class="nc" id="L109">      new KeyDistributedExecutor(executor, -1, false);</span>
+<span class="nc" id="L110">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L111">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L113">    }</span>
+<span class="fc" id="L114">  }</span>
+  
+  @Test
+  public void getExecutorTest() {
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">    assertTrue(executor == distributor.getExecutor());</span>
+<span class="fc" id="L119">  }</span>
+  
+  @Test
+  public void keyBasedSubmitterConsistentThreadTest() {
+<span class="fc" id="L123">    List&lt;KDRunnable&gt; runs = populate(new AddHandler() {</span>
+      @Override
+      public void addTDRunnable(Object key, KDRunnable tdr) {
+<span class="fc" id="L126">        SubmitterExecutor keySubmitter = distributor.getExecutorForKey(key);</span>
+<span class="fc" id="L127">        keySubmitter.submit(tdr);</span>
+<span class="fc" id="L128">      }</span>
+    });
+    
+<span class="fc" id="L131">    Iterator&lt;KDRunnable&gt; it = runs.iterator();</span>
+<span class="fc bfc" id="L132" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L133">      KDRunnable tr = it.next();</span>
+<span class="fc" id="L134">      tr.blockTillFinished(1000 * 20);</span>
+<span class="fc" id="L135">      assertEquals(1, tr.getRunCount()); // verify each only ran once</span>
+<span class="fc" id="L136">      assertTrue(tr.threadTracker.threadConsistent());  // verify that all threads for a given key ran in the same thread</span>
+<span class="fc" id="L137">      assertTrue(tr.previousRanFirst());  // verify runnables were run in order</span>
+<span class="fc" id="L138">    }</span>
+<span class="fc" id="L139">  }</span>
+  
+  @Test (expected = IllegalArgumentException.class)
+  public void getExecutorForKeyFail() {
+<span class="nc" id="L143">    distributor.getExecutorForKey(null);</span>
+<span class="nc" id="L144">  }</span>
+  
+  @Test
+  public void executeFail() {
+    try {
+<span class="nc" id="L149">      distributor.execute(null, DoNothingRunnable.instance());</span>
+<span class="nc" id="L150">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L151">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L153">    }</span>
+
+    try {
+<span class="nc" id="L156">      distributor.execute(new Object(), null);</span>
+<span class="nc" id="L157">      fail(&quot;Exception should have been thrown&quot;);</span>
+<span class="fc" id="L158">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L160">    }</span>
+<span class="fc" id="L161">  }</span>
+  
+  @Test
+  public void executeConsistentThreadTest() {
+<span class="fc" id="L165">    List&lt;KDRunnable&gt; runs = populate(new AddHandler() {</span>
+      @Override
+      public void addTDRunnable(Object key, KDRunnable tdr) {
+<span class="fc" id="L168">        distributor.execute(key, tdr);</span>
+<span class="fc" id="L169">      }</span>
+    });
+
+<span class="fc" id="L172">    Iterator&lt;KDRunnable&gt; it = runs.iterator();</span>
+<span class="fc bfc" id="L173" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L174">      KDRunnable tr = it.next();</span>
+<span class="fc" id="L175">      tr.blockTillFinished(20 * 1000);</span>
+<span class="fc" id="L176">      assertEquals(1, tr.getRunCount()); // verify each only ran once</span>
+<span class="fc" id="L177">      assertTrue(tr.threadTracker.threadConsistent());  // verify that all threads for a given key ran in the same thread</span>
+<span class="fc" id="L178">      assertTrue(tr.previousRanFirst());  // verify runnables were run in order</span>
+<span class="fc" id="L179">    }</span>
+<span class="fc" id="L180">  }</span>
+  
+  @Test
+  public void submitRunnableFail() {
+    try {
+<span class="nc" id="L185">      distributor.submit(null, DoNothingRunnable.instance());</span>
+<span class="nc" id="L186">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L187">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L189">    }</span>
+    try {
+<span class="nc" id="L191">      distributor.submit(new Object(), null, null);</span>
+<span class="nc" id="L192">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L193">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L195">    }</span>
+<span class="fc" id="L196">  }</span>
+  
+  @Test
+  public void submitRunnableConsistentThreadTest() {
+<span class="fc" id="L200">    List&lt;KDRunnable&gt; runs = populate(new AddHandler() {</span>
+      @Override
+      public void addTDRunnable(Object key, KDRunnable tdr) {
+<span class="fc" id="L203">        distributor.submit(key, tdr);</span>
+<span class="fc" id="L204">      }</span>
+    });
+    
+<span class="fc" id="L207">    Iterator&lt;KDRunnable&gt; it = runs.iterator();</span>
+<span class="fc bfc" id="L208" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L209">      KDRunnable tr = it.next();</span>
+<span class="fc" id="L210">      tr.blockTillFinished(20 * 1000);</span>
+<span class="fc" id="L211">      assertEquals(1, tr.getRunCount()); // verify each only ran once</span>
+<span class="fc" id="L212">      assertTrue(tr.threadTracker.threadConsistent());  // verify that all threads for a given key ran in the same thread</span>
+<span class="fc" id="L213">      assertTrue(tr.previousRanFirst());  // verify runnables were run in order</span>
+<span class="fc" id="L214">    }</span>
+<span class="fc" id="L215">  }</span>
+  
+  @Test
+  public void submitCallableConsistentThreadTest() {
+<span class="fc" id="L219">    List&lt;KDCallable&gt; runs = new ArrayList&lt;&gt;(PARALLEL_LEVEL * RUNNABLE_COUNT_PER_LEVEL);</span>
+
+<span class="fc" id="L221">    BlockingTestRunnable[] btrs = new BlockingTestRunnable[PARALLEL_LEVEL];</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">    for (int i = 0; i &lt; PARALLEL_LEVEL; i++) {</span>
+<span class="fc" id="L223">      ThreadContainer tc = new ThreadContainer();</span>
+<span class="fc" id="L224">      KDCallable previous = null;</span>
+<span class="fc" id="L225">      btrs[i] = new BlockingTestRunnable();</span>
+<span class="fc" id="L226">      distributor.execute(tc, btrs[i]);</span>
+<span class="fc bfc" id="L227" title="All 2 branches covered.">      for (int j = 0; j &lt; RUNNABLE_COUNT_PER_LEVEL; j++) {</span>
+<span class="fc" id="L228">        KDCallable tr = new KDCallable(tc, previous);</span>
+<span class="fc" id="L229">        runs.add(tr);</span>
+<span class="fc" id="L230">        distributor.submit(tc, tr);</span>
+          
+<span class="fc" id="L232">        previous = tr;</span>
+      }
+    }
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    for (BlockingTestRunnable btr : btrs) {</span>
+      // allow all to execute once submitted / queued, the thread should be consistent at this point
+<span class="fc" id="L237">      btr.unblock();</span>
+    }
+    
+<span class="fc" id="L240">    Iterator&lt;KDCallable&gt; it = runs.iterator();</span>
+<span class="fc bfc" id="L241" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L242">      KDCallable tr = it.next();</span>
+<span class="fc" id="L243">      tr.blockTillFinished(20 * 1000);</span>
+<span class="fc" id="L244">      assertTrue(tr.threadTracker.threadConsistent());  // verify that all threads for a given key ran in the same thread</span>
+<span class="fc" id="L245">      assertTrue(tr.previousRanFirst());  // verify runnables were run in order</span>
+<span class="fc" id="L246">    }</span>
+<span class="fc" id="L247">  }</span>
+  
+  @Test
+  public void submitCallableFail() {
+    try {
+<span class="nc" id="L252">      distributor.submit(null, new TestCallable());</span>
+<span class="nc" id="L253">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L254">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L256">    }</span>
+    try {
+<span class="nc" id="L258">      distributor.submit(new Object(), (Callable&lt;Void&gt;)null);</span>
+<span class="nc" id="L259">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L260">    } catch (IllegalArgumentException e) {</span>
+      // expected
+<span class="nc" id="L262">    }</span>
+<span class="fc" id="L263">  }</span>
+
+  @Test
+  public void executeStressTest() {
+<span class="fc" id="L267">    final Object testLock = new Object();</span>
+<span class="fc" id="L268">    final int expectedCount = (PARALLEL_LEVEL * 2) * (RUNNABLE_COUNT_PER_LEVEL * 2);</span>
+<span class="fc" id="L269">    final List&lt;KDRunnable&gt; runs = new ArrayList&lt;&gt;(expectedCount);</span>
+    
+    // we can't use populate here because we don't want to delay execution
+    
+<span class="fc" id="L273">    executor.execute(new Runnable() {</span>
+<span class="fc" id="L274">      private final Map&lt;Integer, ThreadContainer&gt; containers = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L275">      private final Map&lt;Integer, KDRunnable&gt; previousRunnables = new HashMap&lt;&gt;();</span>
+      
+      @Override
+      public void run() {
+<span class="fc" id="L279">        synchronized (testLock) {</span>
+<span class="fc bfc" id="L280" title="All 2 branches covered.">          for (int i = 0; i &lt; RUNNABLE_COUNT_PER_LEVEL * 2; i++) {</span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">            for (int j = 0; j &lt; PARALLEL_LEVEL * 2; j++) {</span>
+<span class="fc" id="L282">              ThreadContainer tc = containers.get(j);</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">              if (tc == null) {</span>
+<span class="fc" id="L284">                tc = new ThreadContainer();</span>
+<span class="fc" id="L285">                containers.put(j, tc);</span>
+              }
+              
+<span class="fc" id="L288">              KDRunnable tr = new KDRunnable(tc, previousRunnables.get(j)) {</span>
+<span class="fc" id="L289">                private boolean added = false;</span>
+                
+                @Override
+                public void handleRunFinish() {
+<span class="fc bfc" id="L293" title="All 2 branches covered.">                  if (! added) {</span>
+<span class="fc" id="L294">                    distributor.execute(threadTracker, this);</span>
+<span class="fc" id="L295">                    added = true;</span>
+                  }
+<span class="fc" id="L297">                }</span>
+              };
+<span class="fc" id="L299">              runs.add(tr);</span>
+<span class="fc" id="L300">              distributor.execute(tc, tr);</span>
+<span class="fc" id="L301">              previousRunnables.put(j, tr);</span>
+            }
+          }
+<span class="fc" id="L304">        }</span>
+<span class="fc" id="L305">      }</span>
+    });
+    
+    // block till ready to ensure other thread got testLock lock
+<span class="fc" id="L309">    new TestCondition(() -&gt; {</span>
+<span class="fc" id="L310">      synchronized (testLock) {</span>
+<span class="fc" id="L311">        return runs.size();</span>
+      }
+<span class="pc bpc" id="L313" title="1 of 2 branches missed.">    }, (size) -&gt; size == expectedCount).blockTillTrue(20 * 1000, 100);</span>
+
+<span class="fc" id="L315">    synchronized (testLock) {</span>
+<span class="fc" id="L316">      Iterator&lt;KDRunnable&gt; it = runs.iterator();</span>
+<span class="fc bfc" id="L317" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L318">        KDRunnable tr = it.next();</span>
+<span class="fc" id="L319">        tr.blockTillFinished(20 * 1000, 2);</span>
+<span class="fc" id="L320">        assertEquals(2, tr.getRunCount()); // verify each only ran twice</span>
+<span class="fc" id="L321">        assertTrue(tr.previousRanFirst);  // verify runnables were run in order</span>
+<span class="fc" id="L322">        assertFalse(tr.ranConcurrently());  // verify that it never run in parallel</span>
+<span class="fc" id="L323">      }</span>
+<span class="fc" id="L324">    }</span>
+<span class="fc" id="L325">  }</span>
+  
+  @Test
+  public void taskExceptionTest() {
+<span class="fc" id="L329">    Integer key = 1;</span>
+<span class="fc" id="L330">    TestExceptionHandler teh = new TestExceptionHandler();</span>
+<span class="fc" id="L331">    final RuntimeException testException = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L332">    ExceptionUtils.setDefaultExceptionHandler(teh);</span>
+<span class="fc" id="L333">    TestRunnable exceptionRunnable = new TestRuntimeFailureRunnable(testException);</span>
+<span class="fc" id="L334">    TestRunnable followRunnable = new TestRunnable();</span>
+<span class="fc" id="L335">    distributor.execute(key, exceptionRunnable);</span>
+<span class="fc" id="L336">    distributor.execute(key, followRunnable);</span>
+<span class="fc" id="L337">    exceptionRunnable.blockTillFinished();</span>
+<span class="fc" id="L338">    followRunnable.blockTillStarted();  // verify that it ran despite the exception</span>
+    
+<span class="fc" id="L340">    assertEquals(1, teh.getCallCount());</span>
+<span class="fc" id="L341">    assertEquals(testException, teh.getLastThrowable());</span>
+<span class="fc" id="L342">  }</span>
+  
+  @Test
+  public void limitExecutionPerCycleTest() {
+<span class="fc" id="L346">    final AtomicInteger execCount = new AtomicInteger(0);</span>
+<span class="fc" id="L347">    KeyDistributedExecutor distributor = new KeyDistributedExecutor(new Executor() {</span>
+      @Override
+      public void execute(Runnable command) {
+<span class="fc" id="L350">        execCount.incrementAndGet();</span>
+        
+<span class="fc" id="L352">        new Thread(command).start();</span>
+<span class="fc" id="L353">      }</span>
+    }, 1);
+    
+<span class="fc" id="L356">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+    
+<span class="fc" id="L358">    distributor.execute(this, btr);</span>
+<span class="fc" id="L359">    btr.blockTillStarted();</span>
+    
+    // add second task while we know worker is active
+<span class="fc" id="L362">    TestRunnable secondTask = new TestRunnable();</span>
+<span class="fc" id="L363">    distributor.execute(this, secondTask);</span>
+    
+<span class="fc" id="L365">    assertEquals(1, distributor.taskWorkers.size());</span>
+<span class="fc" id="L366">    assertEquals(1, distributor.taskWorkers.get(this).queue.size());</span>
+    
+<span class="fc" id="L368">    btr.unblock();</span>
+    
+<span class="fc" id="L370">    secondTask.blockTillFinished();</span>
+    
+    // verify worker execed out between task
+<span class="fc" id="L373">    assertEquals(2, execCount.get());</span>
+<span class="fc" id="L374">  }</span>
+  
+  @Test
+  public void limitExecutionPerCycleStressTest() {
+<span class="fc" id="L378">    PriorityScheduler scheduler = new StrictPriorityScheduler(3);</span>
+<span class="fc" id="L379">    final AtomicBoolean testComplete = new AtomicBoolean(false);</span>
+    try {
+<span class="fc" id="L381">      final Integer key1 = 1;</span>
+<span class="fc" id="L382">      final Integer key2 = 2;</span>
+<span class="fc" id="L383">      Executor singleThreadedExecutor = new ExecutorLimiter(scheduler, 1);</span>
+<span class="fc" id="L384">      final KeyDistributedExecutor distributor = new KeyDistributedExecutor(singleThreadedExecutor, 2);</span>
+<span class="fc" id="L385">      final AtomicInteger waitingTasks = new AtomicInteger();</span>
+<span class="fc" id="L386">      final AtomicReference&lt;TestRunnable&gt; lastTestRunnable = new AtomicReference&lt;&gt;();</span>
+<span class="fc" id="L387">      scheduler.execute(new Runnable() {  // execute thread to add for key 1</span>
+        @Override
+        public void run() {
+<span class="fc bfc" id="L390" title="All 2 branches covered.">          while (! testComplete.get()) {</span>
+<span class="fc" id="L391">            TestRunnable next = new TestRunnable() {</span>
+              @Override
+              public void handleRunStart() {
+<span class="fc" id="L394">                waitingTasks.decrementAndGet();</span>
+                
+<span class="fc" id="L396">                TestUtils.sleep(20);  // wait to make sure producer is faster than executor</span>
+<span class="fc" id="L397">              }</span>
+            };
+<span class="fc" id="L399">            lastTestRunnable.set(next);</span>
+<span class="fc" id="L400">            waitingTasks.incrementAndGet();</span>
+<span class="fc" id="L401">            distributor.execute(key1, next);</span>
+<span class="fc" id="L402">          }</span>
+<span class="fc" id="L403">        }</span>
+      });
+      
+      // block till there is for sure a backup of key1 tasks
+<span class="pc bpc" id="L407" title="1 of 2 branches missed.">      new TestCondition(waitingTasks::get, (c) -&gt; c &gt; 10).blockTillTrue();</span>
+      
+<span class="fc" id="L409">      TestRunnable key2Runnable = new TestRunnable();</span>
+<span class="fc" id="L410">      distributor.execute(key2, key2Runnable);</span>
+<span class="fc" id="L411">      TestRunnable lastKey1Runnable = lastTestRunnable.get();</span>
+<span class="fc" id="L412">      key2Runnable.blockTillStarted();  // will throw exception if not started</span>
+      // verify it ran before the lastKey1Runnable
+<span class="fc" id="L414">      assertFalse(lastKey1Runnable.ranOnce());</span>
+    } finally {
+<span class="fc" id="L416">      testComplete.set(true);</span>
+<span class="fc" id="L417">      scheduler.shutdownNow();</span>
+    }
+<span class="fc" id="L419">  }</span>
+  
+  private static void getTaskQueueSizeSimpleTest(boolean accurateDistributor) {
+<span class="fc" id="L422">    final Object taskKey = new Object();</span>
+<span class="fc" id="L423">    KeyDistributedExecutor kde = new KeyDistributedExecutor(new Executor() {</span>
+      @Override
+      public void execute(Runnable command) {
+        // kidding, don't actually execute, haha
+<span class="fc" id="L427">      }</span>
+    }, accurateDistributor);
+    
+<span class="fc" id="L430">    assertEquals(0, kde.getTaskQueueSize(taskKey));</span>
+    
+<span class="fc" id="L432">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+    
+    // should add as first task
+<span class="fc" id="L435">    assertEquals(1, kde.getTaskQueueSize(taskKey));</span>
+    
+<span class="fc" id="L437">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+    
+    // will now add into the queue
+<span class="fc" id="L440">    assertEquals(2, kde.getTaskQueueSize(taskKey));</span>
+<span class="fc" id="L441">  }</span>
+  
+  private void getTaskQueueSizeThreadedTest(boolean accurateDistributor) {
+<span class="fc" id="L444">    final Object taskKey = new Object();</span>
+<span class="fc" id="L445">    KeyDistributedExecutor kde = new KeyDistributedExecutor(executor, accurateDistributor);</span>
+    
+<span class="fc" id="L447">    assertEquals(0, kde.getTaskQueueSize(taskKey));</span>
+    
+<span class="fc" id="L449">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L450">    kde.execute(taskKey, btr);</span>
+    
+    // add more tasks while remaining blocked
+<span class="fc" id="L453">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+<span class="fc" id="L454">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+    
+<span class="fc" id="L456">    btr.blockTillStarted();</span>
+    
+<span class="fc" id="L458">    assertEquals(2, kde.getTaskQueueSize(taskKey));</span>
+    
+<span class="fc" id="L460">    btr.unblock();</span>
+<span class="fc" id="L461">  }</span>
+  
+  @Test
+  public void getTaskQueueSizeInaccurateTest() {
+<span class="fc" id="L465">    getTaskQueueSizeSimpleTest(false);</span>
+<span class="fc" id="L466">    getTaskQueueSizeThreadedTest(false);</span>
+<span class="fc" id="L467">  }</span>
+  
+  @Test
+  public void getTaskQueueSizeAccurateTest() {
+<span class="fc" id="L471">    getTaskQueueSizeSimpleTest(true);</span>
+<span class="fc" id="L472">    getTaskQueueSizeThreadedTest(true);</span>
+<span class="fc" id="L473">  }</span>
+  
+  private static void getTaskQueueSizeMapSimpleTest(boolean accurateDistributor) {
+<span class="fc" id="L476">    final Object taskKey = new Object();</span>
+<span class="fc" id="L477">    KeyDistributedExecutor kde = new KeyDistributedExecutor(new Executor() {</span>
+      @Override
+      public void execute(Runnable command) {
+        // kidding, don't actually execute, haha
+<span class="fc" id="L481">      }</span>
+    }, accurateDistributor);
+    
+<span class="fc" id="L484">    Map&lt;?, Integer&gt; result = kde.getTaskQueueSizeMap();</span>
+<span class="fc" id="L485">    assertTrue(result.isEmpty());</span>
+    
+<span class="fc" id="L487">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+    
+    // should add as first task
+<span class="fc" id="L490">    result = kde.getTaskQueueSizeMap();</span>
+<span class="fc" id="L491">    assertEquals(1, result.size());</span>
+<span class="fc" id="L492">    assertEquals((Integer)1, result.get(taskKey));</span>
+    
+<span class="fc" id="L494">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+    
+    // will now add into the queue
+<span class="fc" id="L497">    result = kde.getTaskQueueSizeMap();</span>
+<span class="fc" id="L498">    assertEquals(1, result.size());</span>
+<span class="fc" id="L499">    assertEquals((Integer)2, result.get(taskKey));</span>
+<span class="fc" id="L500">  }</span>
+  
+  private void getTaskQueueSizeMapThreadedTest(boolean accurateDistributor) {
+<span class="fc" id="L503">    final Object taskKey = new Object();</span>
+<span class="fc" id="L504">    KeyDistributedExecutor kde = new KeyDistributedExecutor(executor, accurateDistributor);</span>
+
+<span class="fc" id="L506">    Map&lt;?, Integer&gt; result = kde.getTaskQueueSizeMap();</span>
+<span class="fc" id="L507">    assertTrue(result.isEmpty());</span>
+    
+<span class="fc" id="L509">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+<span class="fc" id="L510">    kde.execute(taskKey, btr);</span>
+    
+    // add more tasks while remaining blocked
+<span class="fc" id="L513">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+<span class="fc" id="L514">    kde.execute(taskKey, DoNothingRunnable.instance());</span>
+    
+<span class="fc" id="L516">    btr.blockTillStarted();</span>
+    
+<span class="fc" id="L518">    result = kde.getTaskQueueSizeMap();</span>
+<span class="fc" id="L519">    assertEquals(1, result.size());</span>
+<span class="fc" id="L520">    assertEquals((Integer)2, result.get(taskKey));</span>
+    
+<span class="fc" id="L522">    btr.unblock();</span>
+<span class="fc" id="L523">  }</span>
+  
+  @Test
+  public void getTaskQueueSizeMapInaccurateTest() {
+<span class="fc" id="L527">    getTaskQueueSizeMapSimpleTest(false);</span>
+<span class="fc" id="L528">    getTaskQueueSizeMapThreadedTest(false);</span>
+<span class="fc" id="L529">  }</span>
+  
+  @Test
+  public void getTaskQueueSizeMapAccurateTest() {
+<span class="fc" id="L533">    getTaskQueueSizeMapSimpleTest(true);</span>
+<span class="fc" id="L534">    getTaskQueueSizeMapThreadedTest(true);</span>
+<span class="fc" id="L535">  }</span>
+  
+  public static class KDRunnable extends TestRunnable {
+    public final KDRunnable previousRunnable;
+    public final ThreadContainer threadTracker;
+    private volatile boolean previousRanFirst;
+    private volatile boolean verifiedPrevious;
+    
+<span class="fc" id="L543">    public KDRunnable(ThreadContainer threadTracker, KDRunnable previousRunnable) {</span>
+<span class="fc" id="L544">      this.threadTracker = threadTracker;</span>
+<span class="fc" id="L545">      this.previousRunnable = previousRunnable;</span>
+<span class="fc" id="L546">      previousRanFirst = false;</span>
+<span class="fc" id="L547">      verifiedPrevious = false;</span>
+<span class="fc" id="L548">    }</span>
+    
+    @Override
+    public void handleRunStart() {
+<span class="fc" id="L552">      threadTracker.running();</span>
+      
+<span class="fc bfc" id="L554" title="All 2 branches covered.">      if (! verifiedPrevious) {</span>
+<span class="fc bfc" id="L555" title="All 2 branches covered.">        if (previousRunnable != null) {</span>
+<span class="fc bfc" id="L556" title="All 2 branches covered.">          previousRanFirst = previousRunnable.getRunCount() &gt;= 1;</span>
+        } else {
+<span class="fc" id="L558">          previousRanFirst = true;</span>
+        }
+        
+<span class="fc" id="L561">        verifiedPrevious = true;</span>
+      }
+<span class="fc" id="L563">    }</span>
+    
+    public boolean previousRanFirst() {
+<span class="fc" id="L566">      return previousRanFirst;</span>
+    }
+  }
+  
+  public static class KDCallable extends TestCallable {
+    public final KDCallable previousRunnable;
+    public final ThreadContainer threadTracker;
+    private volatile boolean previousRanFirst;
+    private volatile boolean verifiedPrevious;
+    
+<span class="fc" id="L576">    public KDCallable(ThreadContainer threadTracker, KDCallable previousRunnable) {</span>
+<span class="fc" id="L577">      this.threadTracker = threadTracker;</span>
+<span class="fc" id="L578">      this.previousRunnable = previousRunnable;</span>
+<span class="fc" id="L579">      previousRanFirst = false;</span>
+<span class="fc" id="L580">      verifiedPrevious = false;</span>
+<span class="fc" id="L581">    }</span>
+    
+    @Override
+    public void handleCallStart() {
+<span class="fc" id="L585">      threadTracker.running();</span>
+      
+<span class="pc bpc" id="L587" title="1 of 2 branches missed.">      if (! verifiedPrevious) {</span>
+<span class="fc bfc" id="L588" title="All 2 branches covered.">        if (previousRunnable != null) {</span>
+<span class="fc" id="L589">          previousRanFirst = previousRunnable.isDone();</span>
+        } else {
+<span class="fc" id="L591">          previousRanFirst = true;</span>
+        }
+        
+<span class="fc" id="L594">        verifiedPrevious = true;</span>
+      }
+<span class="fc" id="L596">    }</span>
+    
+    public boolean previousRanFirst() {
+<span class="fc" id="L599">      return previousRanFirst;</span>
+    }
+  }
+  
+<span class="fc" id="L603">  public static class ThreadContainer {</span>
+<span class="fc" id="L604">    private Thread runningThread = null;</span>
+<span class="fc" id="L605">    private boolean threadConsistent = true;</span>
+
+    public synchronized void running() {
+<span class="fc bfc" id="L608" title="All 2 branches covered.">      if (runningThread == null) {</span>
+<span class="fc" id="L609">        runningThread = Thread.currentThread();</span>
+      } else {
+<span class="fc bfc" id="L611" title="All 4 branches covered.">        threadConsistent = threadConsistent &amp;&amp; runningThread == Thread.currentThread();</span>
+      }
+<span class="fc" id="L613">    }</span>
+    
+    public boolean threadConsistent() {
+<span class="fc" id="L616">      return threadConsistent;</span>
+    }
+  }
+  
+  protected interface AddHandler {
+    public void addTDRunnable(Object key, KDRunnable tdr);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

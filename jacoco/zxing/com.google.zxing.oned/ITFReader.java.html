@@ -1,0 +1,377 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ITFReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">ITFReader.java</span></div><h1>ITFReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitArray;
+
+import java.util.Map;
+
+/**
+ * &lt;p&gt;Implements decoding of the ITF format, or Interleaved Two of Five.&lt;/p&gt;
+ *
+ * &lt;p&gt;This Reader will scan ITF barcodes of certain lengths only.
+ * At the moment it reads length 6, 8, 10, 12, 14, 16, 18, 20, 24, and 44 as these have appeared &quot;in the wild&quot;. Not all
+ * lengths are scanned, especially shorter ones, to avoid false positives. This in turn is due to a lack of
+ * required checksum function.&lt;/p&gt;
+ *
+ * &lt;p&gt;The checksum is optional and is not applied by this Reader. The consumer of the decoded
+ * value will have to apply a checksum if required.&lt;/p&gt;
+ *
+ * &lt;p&gt;&lt;a href=&quot;http://en.wikipedia.org/wiki/Interleaved_2_of_5&quot;&gt;http://en.wikipedia.org/wiki/Interleaved_2_of_5&lt;/a&gt;
+ * is a great reference for Interleaved 2 of 5 information.&lt;/p&gt;
+ *
+ * @author kevin.osullivan@sita.aero, SITA Lab.
+ */
+<span class="fc" id="L45">public final class ITFReader extends OneDReader {</span>
+
+  private static final float MAX_AVG_VARIANCE = 0.38f;
+  private static final float MAX_INDIVIDUAL_VARIANCE = 0.5f;
+
+  private static final int W = 3; // Pixel width of a 3x wide line
+  private static final int w = 2; // Pixel width of a 2x wide line
+  private static final int N = 1; // Pixed width of a narrow line
+
+  /** Valid ITF lengths. Anything longer than the largest value is also allowed. */
+<span class="fc" id="L55">  private static final int[] DEFAULT_ALLOWED_LENGTHS = {6, 8, 10, 12, 14};</span>
+
+  // Stores the actual narrow line width of the image being decoded.
+<span class="fc" id="L58">  private int narrowLineWidth = -1;</span>
+
+  /**
+   * Start/end guard pattern.
+   *
+   * Note: The end pattern is reversed because the row is reversed before
+   * searching for the END_PATTERN
+   */
+<span class="fc" id="L66">  private static final int[] START_PATTERN = {N, N, N, N};</span>
+<span class="fc" id="L67">  private static final int[][] END_PATTERN_REVERSED = {</span>
+      {N, N, w}, // 2x
+      {N, N, W}  // 3x
+  };
+
+  // See ITFWriter.PATTERNS
+
+  /**
+   * Patterns of Wide / Narrow lines to indicate each digit
+   */
+<span class="fc" id="L77">  private static final int[][] PATTERNS = {</span>
+      {N, N, w, w, N}, // 0
+      {w, N, N, N, w}, // 1
+      {N, w, N, N, w}, // 2
+      {w, w, N, N, N}, // 3
+      {N, N, w, N, w}, // 4
+      {w, N, w, N, N}, // 5
+      {N, w, w, N, N}, // 6
+      {N, N, N, w, w}, // 7
+      {w, N, N, w, N}, // 8
+      {N, w, N, w, N}, // 9
+      {N, N, W, W, N}, // 0
+      {W, N, N, N, W}, // 1
+      {N, W, N, N, W}, // 2
+      {W, W, N, N, N}, // 3
+      {N, N, W, N, W}, // 4
+      {W, N, W, N, N}, // 5
+      {N, W, W, N, N}, // 6
+      {N, N, N, W, W}, // 7
+      {W, N, N, W, N}, // 8
+      {N, W, N, W, N}  // 9
+  };
+
+  @Override
+  public Result decodeRow(int rowNumber, BitArray row, Map&lt;DecodeHintType,?&gt; hints)
+      throws FormatException, NotFoundException {
+
+    // Find out where the Middle section (payload) starts &amp; ends
+<span class="fc" id="L105">    int[] startRange = decodeStart(row);</span>
+<span class="fc" id="L106">    int[] endRange = decodeEnd(row);</span>
+
+<span class="fc" id="L108">    StringBuilder result = new StringBuilder(20);</span>
+<span class="fc" id="L109">    decodeMiddle(row, startRange[1], endRange[0], result);</span>
+<span class="fc" id="L110">    String resultString = result.toString();</span>
+
+<span class="fc" id="L112">    int[] allowedLengths = null;</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    if (hints != null) {</span>
+<span class="fc" id="L114">      allowedLengths = (int[]) hints.get(DecodeHintType.ALLOWED_LENGTHS);</span>
+
+    }
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">    if (allowedLengths == null) {</span>
+<span class="fc" id="L118">      allowedLengths = DEFAULT_ALLOWED_LENGTHS;</span>
+    }
+
+    // To avoid false positives with 2D barcodes (and other patterns), make
+    // an assumption that the decoded string must be a 'standard' length if it's short
+<span class="fc" id="L123">    int length = resultString.length();</span>
+<span class="fc" id="L124">    boolean lengthOK = false;</span>
+<span class="fc" id="L125">    int maxAllowedLength = 0;</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">    for (int allowedLength : allowedLengths) {</span>
+<span class="fc bfc" id="L127" title="All 2 branches covered.">      if (length == allowedLength) {</span>
+<span class="fc" id="L128">        lengthOK = true;</span>
+<span class="fc" id="L129">        break;</span>
+      }
+<span class="pc bpc" id="L131" title="1 of 2 branches missed.">      if (allowedLength &gt; maxAllowedLength) {</span>
+<span class="fc" id="L132">        maxAllowedLength = allowedLength;</span>
+      }
+    }
+<span class="pc bpc" id="L135" title="1 of 4 branches missed.">    if (!lengthOK &amp;&amp; length &gt; maxAllowedLength) {</span>
+<span class="nc" id="L136">      lengthOK = true;</span>
+    }
+<span class="fc bfc" id="L138" title="All 2 branches covered.">    if (!lengthOK) {</span>
+<span class="fc" id="L139">      throw FormatException.getFormatInstance();</span>
+    }
+
+<span class="fc" id="L142">    return new Result(</span>
+        resultString,
+        null, // no natural byte representation for these barcodes
+        new ResultPoint[] {new ResultPoint(startRange[1], rowNumber),
+                           new ResultPoint(endRange[0], rowNumber)},
+        BarcodeFormat.ITF);
+  }
+
+  /**
+   * @param row          row of black/white values to search
+   * @param payloadStart offset of start pattern
+   * @param resultString {@link StringBuilder} to append decoded chars to
+   * @throws NotFoundException if decoding could not complete successfully
+   */
+  private static void decodeMiddle(BitArray row,
+                                   int payloadStart,
+                                   int payloadEnd,
+                                   StringBuilder resultString) throws NotFoundException {
+
+    // Digits are interleaved in pairs - 5 black lines for one digit, and the
+    // 5
+    // interleaved white lines for the second digit.
+    // Therefore, need to scan 10 lines and then
+    // split these into two arrays
+<span class="fc" id="L166">    int[] counterDigitPair = new int[10];</span>
+<span class="fc" id="L167">    int[] counterBlack = new int[5];</span>
+<span class="fc" id="L168">    int[] counterWhite = new int[5];</span>
+
+<span class="fc bfc" id="L170" title="All 2 branches covered.">    while (payloadStart &lt; payloadEnd) {</span>
+
+      // Get 10 runs of black/white.
+<span class="fc" id="L173">      recordPattern(row, payloadStart, counterDigitPair);</span>
+      // Split them into each array
+<span class="fc bfc" id="L175" title="All 2 branches covered.">      for (int k = 0; k &lt; 5; k++) {</span>
+<span class="fc" id="L176">        int twoK = 2 * k;</span>
+<span class="fc" id="L177">        counterBlack[k] = counterDigitPair[twoK];</span>
+<span class="fc" id="L178">        counterWhite[k] = counterDigitPair[twoK + 1];</span>
+      }
+
+<span class="fc" id="L181">      int bestMatch = decodeDigit(counterBlack);</span>
+<span class="fc" id="L182">      resultString.append((char) ('0' + bestMatch));</span>
+<span class="fc" id="L183">      bestMatch = decodeDigit(counterWhite);</span>
+<span class="fc" id="L184">      resultString.append((char) ('0' + bestMatch));</span>
+
+<span class="fc bfc" id="L186" title="All 2 branches covered.">      for (int counterDigit : counterDigitPair) {</span>
+<span class="fc" id="L187">        payloadStart += counterDigit;</span>
+      }
+<span class="fc" id="L189">    }</span>
+<span class="fc" id="L190">  }</span>
+
+  /**
+   * Identify where the start of the middle / payload section starts.
+   *
+   * @param row row of black/white values to search
+   * @return Array, containing index of start of 'start block' and end of
+   *         'start block'
+   */
+  private int[] decodeStart(BitArray row) throws NotFoundException {
+<span class="fc" id="L200">    int endStart = skipWhiteSpace(row);</span>
+<span class="fc" id="L201">    int[] startPattern = findGuardPattern(row, endStart, START_PATTERN);</span>
+
+    // Determine the width of a narrow line in pixels. We can do this by
+    // getting the width of the start pattern and dividing by 4 because its
+    // made up of 4 narrow lines.
+<span class="fc" id="L206">    this.narrowLineWidth = (startPattern[1] - startPattern[0]) / 4;</span>
+
+<span class="fc" id="L208">    validateQuietZone(row, startPattern[0]);</span>
+
+<span class="fc" id="L210">    return startPattern;</span>
+  }
+
+  /**
+   * The start &amp; end patterns must be pre/post fixed by a quiet zone. This
+   * zone must be at least 10 times the width of a narrow line.  Scan back until
+   * we either get to the start of the barcode or match the necessary number of
+   * quiet zone pixels.
+   *
+   * Note: Its assumed the row is reversed when using this method to find
+   * quiet zone after the end pattern.
+   *
+   * ref: http://www.barcode-1.net/i25code.html
+   *
+   * @param row bit array representing the scanned barcode.
+   * @param startPattern index into row of the start or end pattern.
+   * @throws NotFoundException if the quiet zone cannot be found
+   */
+  private void validateQuietZone(BitArray row, int startPattern) throws NotFoundException {
+
+<span class="fc" id="L230">    int quietCount = this.narrowLineWidth * 10;  // expect to find this many pixels of quiet zone</span>
+
+    // if there are not so many pixel at all let's try as many as possible
+<span class="fc bfc" id="L233" title="All 2 branches covered.">    quietCount = quietCount &lt; startPattern ? quietCount : startPattern;</span>
+
+<span class="pc bpc" id="L235" title="1 of 4 branches missed.">    for (int i = startPattern - 1; quietCount &gt; 0 &amp;&amp; i &gt;= 0; i--) {</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">      if (row.get(i)) {</span>
+<span class="fc" id="L237">        break;</span>
+      }
+<span class="fc" id="L239">      quietCount--;</span>
+    }
+<span class="fc bfc" id="L241" title="All 2 branches covered.">    if (quietCount != 0) {</span>
+      // Unable to find the necessary number of quiet zone pixels.
+<span class="fc" id="L243">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L245">  }</span>
+
+  /**
+   * Skip all whitespace until we get to the first black line.
+   *
+   * @param row row of black/white values to search
+   * @return index of the first black line.
+   * @throws NotFoundException Throws exception if no black lines are found in the row
+   */
+  private static int skipWhiteSpace(BitArray row) throws NotFoundException {
+<span class="fc" id="L255">    int width = row.getSize();</span>
+<span class="fc" id="L256">    int endStart = row.getNextSet(0);</span>
+<span class="fc bfc" id="L257" title="All 2 branches covered.">    if (endStart == width) {</span>
+<span class="fc" id="L258">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc" id="L261">    return endStart;</span>
+  }
+
+  /**
+   * Identify where the end of the middle / payload section ends.
+   *
+   * @param row row of black/white values to search
+   * @return Array, containing index of start of 'end block' and end of 'end
+   *         block'
+   */
+  private int[] decodeEnd(BitArray row) throws NotFoundException {
+
+    // For convenience, reverse the row and then
+    // search from 'the start' for the end block
+<span class="fc" id="L275">    row.reverse();</span>
+    try {
+<span class="fc" id="L277">      int endStart = skipWhiteSpace(row);</span>
+      int[] endPattern;
+      try {
+<span class="fc" id="L280">        endPattern = findGuardPattern(row, endStart, END_PATTERN_REVERSED[0]);</span>
+<span class="fc" id="L281">      } catch (NotFoundException nfe) {</span>
+<span class="fc" id="L282">        endPattern = findGuardPattern(row, endStart, END_PATTERN_REVERSED[1]);</span>
+<span class="fc" id="L283">      }</span>
+
+      // The start &amp; end patterns must be pre/post fixed by a quiet zone. This
+      // zone must be at least 10 times the width of a narrow line.
+      // ref: http://www.barcode-1.net/i25code.html
+<span class="fc" id="L288">      validateQuietZone(row, endPattern[0]);</span>
+
+      // Now recalculate the indices of where the 'endblock' starts &amp; stops to
+      // accommodate
+      // the reversed nature of the search
+<span class="fc" id="L293">      int temp = endPattern[0];</span>
+<span class="fc" id="L294">      endPattern[0] = row.getSize() - endPattern[1];</span>
+<span class="fc" id="L295">      endPattern[1] = row.getSize() - temp;</span>
+
+<span class="fc" id="L297">      return endPattern;</span>
+    } finally {
+      // Put the row back the right way.
+<span class="fc" id="L300">      row.reverse();</span>
+    }
+  }
+
+  /**
+   * @param row       row of black/white values to search
+   * @param rowOffset position to start search
+   * @param pattern   pattern of counts of number of black and white pixels that are
+   *                  being searched for as a pattern
+   * @return start/end horizontal offset of guard pattern, as an array of two
+   *         ints
+   * @throws NotFoundException if pattern is not found
+   */
+  private static int[] findGuardPattern(BitArray row,
+                                        int rowOffset,
+                                        int[] pattern) throws NotFoundException {
+<span class="fc" id="L316">    int patternLength = pattern.length;</span>
+<span class="fc" id="L317">    int[] counters = new int[patternLength];</span>
+<span class="fc" id="L318">    int width = row.getSize();</span>
+<span class="fc" id="L319">    boolean isWhite = false;</span>
+
+<span class="fc" id="L321">    int counterPosition = 0;</span>
+<span class="fc" id="L322">    int patternStart = rowOffset;</span>
+<span class="fc bfc" id="L323" title="All 2 branches covered.">    for (int x = rowOffset; x &lt; width; x++) {</span>
+<span class="fc bfc" id="L324" title="All 2 branches covered.">      if (row.get(x) != isWhite) {</span>
+<span class="fc" id="L325">        counters[counterPosition]++;</span>
+      } else {
+<span class="fc bfc" id="L327" title="All 2 branches covered.">        if (counterPosition == patternLength - 1) {</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">          if (patternMatchVariance(counters, pattern, MAX_INDIVIDUAL_VARIANCE) &lt; MAX_AVG_VARIANCE) {</span>
+<span class="fc" id="L329">            return new int[]{patternStart, x};</span>
+          }
+<span class="fc" id="L331">          patternStart += counters[0] + counters[1];</span>
+<span class="fc" id="L332">          System.arraycopy(counters, 2, counters, 0, counterPosition - 1);</span>
+<span class="fc" id="L333">          counters[counterPosition - 1] = 0;</span>
+<span class="fc" id="L334">          counters[counterPosition] = 0;</span>
+<span class="fc" id="L335">          counterPosition--;</span>
+        } else {
+<span class="fc" id="L337">          counterPosition++;</span>
+        }
+<span class="fc" id="L339">        counters[counterPosition] = 1;</span>
+<span class="fc bfc" id="L340" title="All 2 branches covered.">        isWhite = !isWhite;</span>
+      }
+    }
+<span class="fc" id="L343">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  /**
+   * Attempts to decode a sequence of ITF black/white lines into single
+   * digit.
+   *
+   * @param counters the counts of runs of observed black/white/black/... values
+   * @return The decoded digit
+   * @throws NotFoundException if digit cannot be decoded
+   */
+  private static int decodeDigit(int[] counters) throws NotFoundException {
+<span class="fc" id="L355">    float bestVariance = MAX_AVG_VARIANCE; // worst variance we'll accept</span>
+<span class="fc" id="L356">    int bestMatch = -1;</span>
+<span class="fc" id="L357">    int max = PATTERNS.length;</span>
+<span class="fc bfc" id="L358" title="All 2 branches covered.">    for (int i = 0; i &lt; max; i++) {</span>
+<span class="fc" id="L359">      int[] pattern = PATTERNS[i];</span>
+<span class="fc" id="L360">      float variance = patternMatchVariance(counters, pattern, MAX_INDIVIDUAL_VARIANCE);</span>
+<span class="fc bfc" id="L361" title="All 2 branches covered.">      if (variance &lt; bestVariance) {</span>
+<span class="fc" id="L362">        bestVariance = variance;</span>
+<span class="fc" id="L363">        bestMatch = i;</span>
+<span class="fc bfc" id="L364" title="All 2 branches covered.">      } else if (variance == bestVariance) {</span>
+        // if we find a second 'best match' with the same variance, we can not reliably report to have a suitable match
+<span class="fc" id="L366">        bestMatch = -1;</span>
+      }
+    }
+<span class="fc bfc" id="L369" title="All 2 branches covered.">    if (bestMatch &gt;= 0) {</span>
+<span class="fc" id="L370">      return bestMatch % 10;</span>
+    } else {
+<span class="fc" id="L372">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

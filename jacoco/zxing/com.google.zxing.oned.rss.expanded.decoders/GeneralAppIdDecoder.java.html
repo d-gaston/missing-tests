@@ -1,0 +1,470 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>GeneralAppIdDecoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned.rss.expanded.decoders</a> &gt; <span class="el_source">GeneralAppIdDecoder.java</span></div><h1>GeneralAppIdDecoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright (C) 2010 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * These authors would like to acknowledge the Spanish Ministry of Industry,
+ * Tourism and Trade, for the support in the project TSI020301-2008-2
+ * &quot;PIRAmIDE: Personalizable Interactions with Resources on AmI-enabled
+ * Mobile Dynamic Environments&quot;, led by Treelogic
+ * ( http://www.treelogic.com/ ):
+ *
+ *   http://www.piramidepse.com/
+ */
+
+package com.google.zxing.oned.rss.expanded.decoders;
+
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.common.BitArray;
+
+/**
+ * @author Pablo Orduña, University of Deusto (pablo.orduna@deusto.es)
+ * @author Eduardo Castillejo, University of Deusto (eduardo.castillejo@deusto.es)
+ */
+final class GeneralAppIdDecoder {
+
+  private final BitArray information;
+<span class="fc" id="L40">  private final CurrentParsingState current = new CurrentParsingState();</span>
+<span class="fc" id="L41">  private final StringBuilder buffer = new StringBuilder();</span>
+
+<span class="fc" id="L43">  GeneralAppIdDecoder(BitArray information) {</span>
+<span class="fc" id="L44">    this.information = information;</span>
+<span class="fc" id="L45">  }</span>
+
+  String decodeAllCodes(StringBuilder buff, int initialPosition) throws NotFoundException, FormatException {
+<span class="fc" id="L48">    int currentPosition = initialPosition;</span>
+<span class="fc" id="L49">    String remaining = null;</span>
+    do {
+<span class="fc" id="L51">      DecodedInformation info = this.decodeGeneralPurposeField(currentPosition, remaining);</span>
+<span class="fc" id="L52">      String parsedFields = FieldParser.parseFieldsInGeneralPurpose(info.getNewString());</span>
+<span class="fc bfc" id="L53" title="All 2 branches covered.">      if (parsedFields != null) {</span>
+<span class="fc" id="L54">        buff.append(parsedFields);</span>
+      }
+<span class="fc bfc" id="L56" title="All 2 branches covered.">      if (info.isRemaining()) {</span>
+<span class="fc" id="L57">        remaining = String.valueOf(info.getRemainingValue());</span>
+      } else {
+<span class="fc" id="L59">        remaining = null;</span>
+      }
+
+<span class="fc bfc" id="L62" title="All 2 branches covered.">      if (currentPosition == info.getNewPosition()) { // No step forward!</span>
+<span class="fc" id="L63">        break;</span>
+      }
+<span class="fc" id="L65">      currentPosition = info.getNewPosition();</span>
+<span class="fc" id="L66">    } while (true);</span>
+
+<span class="fc" id="L68">    return buff.toString();</span>
+  }
+
+  private boolean isStillNumeric(int pos) {
+    // It's numeric if it still has 7 positions
+    // and one of the first 4 bits is &quot;1&quot;.
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    if (pos + 7 &gt; this.information.getSize()) {</span>
+<span class="fc bfc" id="L75" title="All 2 branches covered.">      return pos + 4 &lt;= this.information.getSize();</span>
+    }
+
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    for (int i = pos; i &lt; pos + 3; ++i) {</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      if (this.information.get(i)) {</span>
+<span class="fc" id="L80">        return true;</span>
+      }
+    }
+
+<span class="fc" id="L84">    return this.information.get(pos + 3);</span>
+  }
+
+  private DecodedNumeric decodeNumeric(int pos) throws FormatException {
+<span class="fc bfc" id="L88" title="All 2 branches covered.">    if (pos + 7 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L89">      int numeric = extractNumericValueFromBitArray(pos, 4);</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">      if (numeric == 0) {</span>
+<span class="fc" id="L91">        return new DecodedNumeric(this.information.getSize(), DecodedNumeric.FNC1, DecodedNumeric.FNC1);</span>
+      }
+<span class="fc" id="L93">      return new DecodedNumeric(this.information.getSize(), numeric - 1, DecodedNumeric.FNC1);</span>
+    }
+<span class="fc" id="L95">    int numeric = extractNumericValueFromBitArray(pos, 7);</span>
+
+<span class="fc" id="L97">    int digit1  = (numeric - 8) / 11;</span>
+<span class="fc" id="L98">    int digit2  = (numeric - 8) % 11;</span>
+
+<span class="fc" id="L100">    return new DecodedNumeric(pos + 7, digit1, digit2);</span>
+  }
+
+  int extractNumericValueFromBitArray(int pos, int bits) {
+<span class="fc" id="L104">    return extractNumericValueFromBitArray(this.information, pos, bits);</span>
+  }
+
+  static int extractNumericValueFromBitArray(BitArray information, int pos, int bits) {
+<span class="fc" id="L108">    int value = 0;</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    for (int i = 0; i &lt; bits; ++i) {</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">      if (information.get(pos + i)) {</span>
+<span class="fc" id="L111">        value |= 1 &lt;&lt; (bits - i - 1);</span>
+      }
+    }
+
+<span class="fc" id="L115">    return value;</span>
+  }
+
+  DecodedInformation decodeGeneralPurposeField(int pos, String remaining) throws FormatException {
+<span class="fc" id="L119">    this.buffer.setLength(0);</span>
+
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    if (remaining != null) {</span>
+<span class="fc" id="L122">      this.buffer.append(remaining);</span>
+    }
+
+<span class="fc" id="L125">    this.current.setPosition(pos);</span>
+
+<span class="fc" id="L127">    DecodedInformation lastDecoded = parseBlocks();</span>
+<span class="fc bfc" id="L128" title="All 4 branches covered.">    if (lastDecoded != null &amp;&amp; lastDecoded.isRemaining()) {</span>
+<span class="fc" id="L129">      return new DecodedInformation(this.current.getPosition(), this.buffer.toString(), lastDecoded.getRemainingValue());</span>
+    }
+<span class="fc" id="L131">    return new DecodedInformation(this.current.getPosition(), this.buffer.toString());</span>
+  }
+
+  private DecodedInformation parseBlocks() throws FormatException {
+    boolean isFinished;
+    BlockParsedResult result;
+    do {
+<span class="fc" id="L138">      int initialPosition = current.getPosition();</span>
+
+<span class="fc bfc" id="L140" title="All 2 branches covered.">      if (current.isAlpha()) {</span>
+<span class="fc" id="L141">        result = parseAlphaBlock();</span>
+<span class="fc" id="L142">        isFinished = result.isFinished();</span>
+<span class="fc bfc" id="L143" title="All 2 branches covered.">      } else if (current.isIsoIec646()) {</span>
+<span class="fc" id="L144">        result = parseIsoIec646Block();</span>
+<span class="fc" id="L145">        isFinished = result.isFinished();</span>
+      } else { // it must be numeric
+<span class="fc" id="L147">        result = parseNumericBlock();</span>
+<span class="fc" id="L148">        isFinished = result.isFinished();</span>
+      }
+
+<span class="fc bfc" id="L151" title="All 2 branches covered.">      boolean positionChanged = initialPosition != current.getPosition();</span>
+<span class="pc bpc" id="L152" title="1 of 4 branches missed.">      if (!positionChanged &amp;&amp; !isFinished) {</span>
+<span class="fc" id="L153">        break;</span>
+      }
+<span class="fc bfc" id="L155" title="All 2 branches covered.">    } while (!isFinished);</span>
+
+<span class="fc" id="L157">    return result.getDecodedInformation();</span>
+  }
+
+  private BlockParsedResult parseNumericBlock() throws FormatException {
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    while (isStillNumeric(current.getPosition())) {</span>
+<span class="fc" id="L162">      DecodedNumeric numeric = decodeNumeric(current.getPosition());</span>
+<span class="fc" id="L163">      current.setPosition(numeric.getNewPosition());</span>
+
+<span class="fc bfc" id="L165" title="All 2 branches covered.">      if (numeric.isFirstDigitFNC1()) {</span>
+        DecodedInformation information;
+<span class="fc bfc" id="L167" title="All 2 branches covered.">        if (numeric.isSecondDigitFNC1()) {</span>
+<span class="fc" id="L168">          information = new DecodedInformation(current.getPosition(), buffer.toString());</span>
+        } else {
+<span class="fc" id="L170">          information = new DecodedInformation(current.getPosition(), buffer.toString(), numeric.getSecondDigit());</span>
+        }
+<span class="fc" id="L172">        return new BlockParsedResult(information, true);</span>
+      }
+<span class="fc" id="L174">      buffer.append(numeric.getFirstDigit());</span>
+
+<span class="fc bfc" id="L176" title="All 2 branches covered.">      if (numeric.isSecondDigitFNC1()) {</span>
+<span class="fc" id="L177">        DecodedInformation information = new DecodedInformation(current.getPosition(), buffer.toString());</span>
+<span class="fc" id="L178">        return new BlockParsedResult(information, true);</span>
+      }
+<span class="fc" id="L180">      buffer.append(numeric.getSecondDigit());</span>
+<span class="fc" id="L181">    }</span>
+
+<span class="fc bfc" id="L183" title="All 2 branches covered.">    if (isNumericToAlphaNumericLatch(current.getPosition())) {</span>
+<span class="fc" id="L184">      current.setAlpha();</span>
+<span class="fc" id="L185">      current.incrementPosition(4);</span>
+    }
+<span class="fc" id="L187">    return new BlockParsedResult(false);</span>
+  }
+
+  private BlockParsedResult parseIsoIec646Block() throws FormatException {
+<span class="fc bfc" id="L191" title="All 2 branches covered.">    while (isStillIsoIec646(current.getPosition())) {</span>
+<span class="fc" id="L192">      DecodedChar iso = decodeIsoIec646(current.getPosition());</span>
+<span class="fc" id="L193">      current.setPosition(iso.getNewPosition());</span>
+
+<span class="fc bfc" id="L195" title="All 2 branches covered.">      if (iso.isFNC1()) {</span>
+<span class="fc" id="L196">        DecodedInformation information = new DecodedInformation(current.getPosition(), buffer.toString());</span>
+<span class="fc" id="L197">        return new BlockParsedResult(information, true);</span>
+      }
+<span class="fc" id="L199">      buffer.append(iso.getValue());</span>
+<span class="fc" id="L200">    }</span>
+
+<span class="fc bfc" id="L202" title="All 2 branches covered.">    if (isAlphaOr646ToNumericLatch(current.getPosition())) {</span>
+<span class="fc" id="L203">      current.incrementPosition(3);</span>
+<span class="fc" id="L204">      current.setNumeric();</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">    } else if (isAlphaTo646ToAlphaLatch(current.getPosition())) {</span>
+<span class="fc bfc" id="L206" title="All 2 branches covered.">      if (current.getPosition() + 5 &lt; this.information.getSize()) {</span>
+<span class="fc" id="L207">        current.incrementPosition(5);</span>
+      } else {
+<span class="fc" id="L209">        current.setPosition(this.information.getSize());</span>
+      }
+
+<span class="fc" id="L212">      current.setAlpha();</span>
+    }
+<span class="fc" id="L214">    return new BlockParsedResult(false);</span>
+  }
+
+  private BlockParsedResult parseAlphaBlock() {
+<span class="fc bfc" id="L218" title="All 2 branches covered.">    while (isStillAlpha(current.getPosition())) {</span>
+<span class="fc" id="L219">      DecodedChar alpha = decodeAlphanumeric(current.getPosition());</span>
+<span class="fc" id="L220">      current.setPosition(alpha.getNewPosition());</span>
+
+<span class="fc bfc" id="L222" title="All 2 branches covered.">      if (alpha.isFNC1()) {</span>
+<span class="fc" id="L223">        DecodedInformation information = new DecodedInformation(current.getPosition(), buffer.toString());</span>
+<span class="fc" id="L224">        return new BlockParsedResult(information, true); //end of the char block</span>
+      }
+
+<span class="fc" id="L227">      buffer.append(alpha.getValue());</span>
+<span class="fc" id="L228">    }</span>
+
+<span class="fc bfc" id="L230" title="All 2 branches covered.">    if (isAlphaOr646ToNumericLatch(current.getPosition())) {</span>
+<span class="fc" id="L231">      current.incrementPosition(3);</span>
+<span class="fc" id="L232">      current.setNumeric();</span>
+<span class="fc bfc" id="L233" title="All 2 branches covered.">    } else if (isAlphaTo646ToAlphaLatch(current.getPosition())) {</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">      if (current.getPosition() + 5 &lt; this.information.getSize()) {</span>
+<span class="fc" id="L235">        current.incrementPosition(5);</span>
+      } else {
+<span class="fc" id="L237">        current.setPosition(this.information.getSize());</span>
+      }
+
+<span class="fc" id="L240">      current.setIsoIec646();</span>
+    }
+<span class="fc" id="L242">    return new BlockParsedResult(false);</span>
+  }
+
+  private boolean isStillIsoIec646(int pos) {
+<span class="fc bfc" id="L246" title="All 2 branches covered.">    if (pos + 5 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L247">      return false;</span>
+    }
+
+<span class="fc" id="L250">    int fiveBitValue = extractNumericValueFromBitArray(pos, 5);</span>
+<span class="fc bfc" id="L251" title="All 4 branches covered.">    if (fiveBitValue &gt;= 5 &amp;&amp; fiveBitValue &lt; 16) {</span>
+<span class="fc" id="L252">      return true;</span>
+    }
+
+<span class="pc bpc" id="L255" title="1 of 2 branches missed.">    if (pos + 7 &gt; this.information.getSize()) {</span>
+<span class="nc" id="L256">      return false;</span>
+    }
+
+<span class="fc" id="L259">    int sevenBitValue = extractNumericValueFromBitArray(pos, 7);</span>
+<span class="fc bfc" id="L260" title="All 4 branches covered.">    if (sevenBitValue &gt;= 64 &amp;&amp; sevenBitValue &lt; 116) {</span>
+<span class="fc" id="L261">      return true;</span>
+    }
+
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    if (pos + 8 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L265">      return false;</span>
+    }
+
+<span class="fc" id="L268">    int eightBitValue = extractNumericValueFromBitArray(pos, 8);</span>
+<span class="pc bpc" id="L269" title="1 of 4 branches missed.">    return eightBitValue &gt;= 232 &amp;&amp; eightBitValue &lt; 253;</span>
+
+  }
+
+  private DecodedChar decodeIsoIec646(int pos) throws FormatException {
+<span class="fc" id="L274">    int fiveBitValue = extractNumericValueFromBitArray(pos, 5);</span>
+<span class="fc bfc" id="L275" title="All 2 branches covered.">    if (fiveBitValue == 15) {</span>
+<span class="fc" id="L276">      return new DecodedChar(pos + 5, DecodedChar.FNC1);</span>
+    }
+
+<span class="pc bpc" id="L279" title="1 of 4 branches missed.">    if (fiveBitValue &gt;= 5 &amp;&amp; fiveBitValue &lt; 15) {</span>
+<span class="fc" id="L280">      return new DecodedChar(pos + 5, (char) ('0' + fiveBitValue - 5));</span>
+    }
+
+<span class="fc" id="L283">    int sevenBitValue = extractNumericValueFromBitArray(pos, 7);</span>
+
+<span class="pc bpc" id="L285" title="1 of 4 branches missed.">    if (sevenBitValue &gt;= 64 &amp;&amp; sevenBitValue &lt; 90) {</span>
+<span class="fc" id="L286">      return new DecodedChar(pos + 7, (char) (sevenBitValue + 1));</span>
+    }
+
+<span class="pc bpc" id="L289" title="1 of 4 branches missed.">    if (sevenBitValue &gt;= 90 &amp;&amp; sevenBitValue &lt; 116) {</span>
+<span class="fc" id="L290">      return new DecodedChar(pos + 7, (char) (sevenBitValue + 7));</span>
+    }
+
+<span class="fc" id="L293">    int eightBitValue = extractNumericValueFromBitArray(pos, 8);</span>
+    char c;
+<span class="pc bpc" id="L295" title="7 of 22 branches missed.">    switch (eightBitValue) {</span>
+      case 232:
+<span class="fc" id="L297">        c = '!';</span>
+<span class="fc" id="L298">        break;</span>
+      case 233:
+<span class="fc" id="L300">        c = '&quot;';</span>
+<span class="fc" id="L301">        break;</span>
+      case 234:
+<span class="fc" id="L303">        c = '%';</span>
+<span class="fc" id="L304">        break;</span>
+      case 235:
+<span class="fc" id="L306">        c = '&amp;';</span>
+<span class="fc" id="L307">        break;</span>
+      case 236:
+<span class="fc" id="L309">        c = '\'';</span>
+<span class="fc" id="L310">        break;</span>
+      case 237:
+<span class="nc" id="L312">        c = '(';</span>
+<span class="nc" id="L313">        break;</span>
+      case 238:
+<span class="nc" id="L315">        c = ')';</span>
+<span class="nc" id="L316">        break;</span>
+      case 239:
+<span class="nc" id="L318">        c = '*';</span>
+<span class="nc" id="L319">        break;</span>
+      case 240:
+<span class="fc" id="L321">        c = '+';</span>
+<span class="fc" id="L322">        break;</span>
+      case 241:
+<span class="nc" id="L324">        c = ',';</span>
+<span class="nc" id="L325">        break;</span>
+      case 242:
+<span class="nc" id="L327">        c = '-';</span>
+<span class="nc" id="L328">        break;</span>
+      case 243:
+<span class="nc" id="L330">        c = '.';</span>
+<span class="nc" id="L331">        break;</span>
+      case 244:
+<span class="fc" id="L333">        c = '/';</span>
+<span class="fc" id="L334">        break;</span>
+      case 245:
+<span class="fc" id="L336">        c = ':';</span>
+<span class="fc" id="L337">        break;</span>
+      case 246:
+<span class="fc" id="L339">        c = ';';</span>
+<span class="fc" id="L340">        break;</span>
+      case 247:
+<span class="fc" id="L342">        c = '&lt;';</span>
+<span class="fc" id="L343">        break;</span>
+      case 248:
+<span class="fc" id="L345">        c = '=';</span>
+<span class="fc" id="L346">        break;</span>
+      case 249:
+<span class="fc" id="L348">        c = '&gt;';</span>
+<span class="fc" id="L349">        break;</span>
+      case 250:
+<span class="fc" id="L351">        c = '?';</span>
+<span class="fc" id="L352">        break;</span>
+      case 251:
+<span class="fc" id="L354">        c = '_';</span>
+<span class="fc" id="L355">        break;</span>
+      case 252:
+<span class="fc" id="L357">        c = ' ';</span>
+<span class="fc" id="L358">        break;</span>
+      default:
+<span class="nc" id="L360">        throw FormatException.getFormatInstance();</span>
+    }
+<span class="fc" id="L362">    return new DecodedChar(pos + 8, c);</span>
+  }
+
+  private boolean isStillAlpha(int pos) {
+<span class="fc bfc" id="L366" title="All 2 branches covered.">    if (pos + 5 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L367">      return false;</span>
+    }
+
+    // We now check if it's a valid 5-bit value (0..9 and FNC1)
+<span class="fc" id="L371">    int fiveBitValue = extractNumericValueFromBitArray(pos, 5);</span>
+<span class="fc bfc" id="L372" title="All 4 branches covered.">    if (fiveBitValue &gt;= 5 &amp;&amp; fiveBitValue &lt; 16) {</span>
+<span class="fc" id="L373">      return true;</span>
+    }
+
+<span class="fc bfc" id="L376" title="All 2 branches covered.">    if (pos + 6 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L377">      return false;</span>
+    }
+
+<span class="fc" id="L380">    int sixBitValue =  extractNumericValueFromBitArray(pos, 6);</span>
+<span class="pc bpc" id="L381" title="1 of 4 branches missed.">    return sixBitValue &gt;= 16 &amp;&amp; sixBitValue &lt; 63; // 63 not included</span>
+  }
+
+  private DecodedChar decodeAlphanumeric(int pos) {
+<span class="fc" id="L385">    int fiveBitValue = extractNumericValueFromBitArray(pos, 5);</span>
+<span class="fc bfc" id="L386" title="All 2 branches covered.">    if (fiveBitValue == 15) {</span>
+<span class="fc" id="L387">      return new DecodedChar(pos + 5, DecodedChar.FNC1);</span>
+    }
+
+<span class="pc bpc" id="L390" title="1 of 4 branches missed.">    if (fiveBitValue &gt;= 5 &amp;&amp; fiveBitValue &lt; 15) {</span>
+<span class="fc" id="L391">      return new DecodedChar(pos + 5, (char) ('0' + fiveBitValue - 5));</span>
+    }
+
+<span class="fc" id="L394">    int sixBitValue =  extractNumericValueFromBitArray(pos, 6);</span>
+
+<span class="pc bpc" id="L396" title="1 of 4 branches missed.">    if (sixBitValue &gt;= 32 &amp;&amp; sixBitValue &lt; 58) {</span>
+<span class="fc" id="L397">      return new DecodedChar(pos + 6, (char) (sixBitValue + 33));</span>
+    }
+
+    char c;
+<span class="pc bpc" id="L401" title="1 of 6 branches missed.">    switch (sixBitValue) {</span>
+      case 58:
+<span class="fc" id="L403">        c = '*';</span>
+<span class="fc" id="L404">        break;</span>
+      case 59:
+<span class="fc" id="L406">        c = ',';</span>
+<span class="fc" id="L407">        break;</span>
+      case 60:
+<span class="fc" id="L409">        c = '-';</span>
+<span class="fc" id="L410">        break;</span>
+      case 61:
+<span class="fc" id="L412">        c = '.';</span>
+<span class="fc" id="L413">        break;</span>
+      case 62:
+<span class="fc" id="L415">        c = '/';</span>
+<span class="fc" id="L416">        break;</span>
+      default:
+<span class="nc" id="L418">        throw new IllegalStateException(&quot;Decoding invalid alphanumeric value: &quot; + sixBitValue);</span>
+    }
+<span class="fc" id="L420">    return new DecodedChar(pos + 6, c);</span>
+  }
+
+  private boolean isAlphaTo646ToAlphaLatch(int pos) {
+<span class="fc bfc" id="L424" title="All 2 branches covered.">    if (pos + 1 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L425">      return false;</span>
+    }
+
+<span class="fc bfc" id="L428" title="All 4 branches covered.">    for (int i = 0; i &lt; 5 &amp;&amp; i + pos &lt; this.information.getSize(); ++i) {</span>
+<span class="fc bfc" id="L429" title="All 2 branches covered.">      if (i == 2) {</span>
+<span class="pc bpc" id="L430" title="1 of 2 branches missed.">        if (!this.information.get(pos + 2)) {</span>
+<span class="nc" id="L431">          return false;</span>
+        }
+<span class="pc bpc" id="L433" title="1 of 2 branches missed.">      } else if (this.information.get(pos + i)) {</span>
+<span class="nc" id="L434">        return false;</span>
+      }
+    }
+
+<span class="fc" id="L438">    return true;</span>
+  }
+
+  private boolean isAlphaOr646ToNumericLatch(int pos) {
+    // Next is alphanumeric if there are 3 positions and they are all zeros
+<span class="fc bfc" id="L443" title="All 2 branches covered.">    if (pos + 3 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L444">      return false;</span>
+    }
+
+<span class="fc bfc" id="L447" title="All 2 branches covered.">    for (int i = pos; i &lt; pos + 3; ++i) {</span>
+<span class="fc bfc" id="L448" title="All 2 branches covered.">      if (this.information.get(i)) {</span>
+<span class="fc" id="L449">        return false;</span>
+      }
+    }
+<span class="fc" id="L452">    return true;</span>
+  }
+
+  private boolean isNumericToAlphaNumericLatch(int pos) {
+    // Next is alphanumeric if there are 4 positions and they are all zeros, or
+    // if there is a subset of this just before the end of the symbol
+<span class="fc bfc" id="L458" title="All 2 branches covered.">    if (pos + 1 &gt; this.information.getSize()) {</span>
+<span class="fc" id="L459">      return false;</span>
+    }
+
+<span class="fc bfc" id="L462" title="All 4 branches covered.">    for (int i = 0; i &lt; 4 &amp;&amp; i + pos &lt; this.information.getSize(); ++i) {</span>
+<span class="pc bpc" id="L463" title="1 of 2 branches missed.">      if (this.information.get(pos + i)) {</span>
+<span class="nc" id="L464">        return false;</span>
+      }
+    }
+<span class="fc" id="L467">    return true;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

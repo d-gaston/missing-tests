@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>NonLinearConjugateGradientOptimizer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.optim.nonlinear.scalar.gradient</a> &gt; <span class="el_source">NonLinearConjugateGradientOptimizer.java</span></div><h1>NonLinearConjugateGradientOptimizer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.optim.nonlinear.scalar.gradient;
+
+import org.apache.commons.math4.exception.MathInternalError;
+import org.apache.commons.math4.exception.MathUnsupportedOperationException;
+import org.apache.commons.math4.exception.TooManyEvaluationsException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.optim.ConvergenceChecker;
+import org.apache.commons.math4.optim.OptimizationData;
+import org.apache.commons.math4.optim.PointValuePair;
+import org.apache.commons.math4.optim.nonlinear.scalar.GoalType;
+import org.apache.commons.math4.optim.nonlinear.scalar.GradientMultivariateOptimizer;
+import org.apache.commons.math4.optim.nonlinear.scalar.LineSearch;
+
+
+/**
+ * Non-linear conjugate gradient optimizer.
+ * &lt;br&gt;
+ * This class supports both the Fletcher-Reeves and the Polak-Ribière
+ * update formulas for the conjugate search directions.
+ * It also supports optional preconditioning.
+ * &lt;br&gt;
+ * Constraints are not supported: the call to
+ * {@link #optimize(OptimizationData[]) optimize} will throw
+ * {@link MathUnsupportedOperationException} if bounds are passed to it.
+ *
+ * @since 2.0
+ */
+public class NonLinearConjugateGradientOptimizer
+    extends GradientMultivariateOptimizer {
+    /** Update formula for the beta parameter. */
+    private final Formula updateFormula;
+    /** Preconditioner (may be null). */
+    private final Preconditioner preconditioner;
+    /** Line search algorithm. */
+    private final LineSearch line;
+
+    /**
+     * Available choices of update formulas for the updating the parameter
+     * that is used to compute the successive conjugate search directions.
+     * For non-linear conjugate gradients, there are
+     * two formulas:
+     * &lt;ul&gt;
+     *   &lt;li&gt;Fletcher-Reeves formula&lt;/li&gt;
+     *   &lt;li&gt;Polak-Ribière formula&lt;/li&gt;
+     * &lt;/ul&gt;
+     *
+     * On the one hand, the Fletcher-Reeves formula is guaranteed to converge
+     * if the start point is close enough of the optimum whether the
+     * Polak-Ribière formula may not converge in rare cases. On the
+     * other hand, the Polak-Ribière formula is often faster when it
+     * does converge. Polak-Ribière is often used.
+     *
+     * @since 2.0
+     */
+<span class="fc" id="L72">    public enum Formula {</span>
+        /** Fletcher-Reeves formula. */
+<span class="fc" id="L74">        FLETCHER_REEVES,</span>
+        /** Polak-Ribière formula. */
+<span class="fc" id="L76">        POLAK_RIBIERE</span>
+    }
+
+    /**
+     * Constructor with default tolerances for the line search (1e-8) and
+     * {@link IdentityPreconditioner preconditioner}.
+     *
+     * @param updateFormula formula to use for updating the &amp;beta; parameter,
+     * must be one of {@link Formula#FLETCHER_REEVES} or
+     * {@link Formula#POLAK_RIBIERE}.
+     * @param checker Convergence checker.
+     */
+    public NonLinearConjugateGradientOptimizer(final Formula updateFormula,
+                                               ConvergenceChecker&lt;PointValuePair&gt; checker) {
+<span class="fc" id="L90">        this(updateFormula,</span>
+             checker,
+             1e-8,
+             1e-8,
+             1e-8,
+             new IdentityPreconditioner());
+<span class="fc" id="L96">    }</span>
+
+    /**
+     * Constructor with default {@link IdentityPreconditioner preconditioner}.
+     *
+     * @param updateFormula formula to use for updating the &amp;beta; parameter,
+     * must be one of {@link Formula#FLETCHER_REEVES} or
+     * {@link Formula#POLAK_RIBIERE}.
+     * @param checker Convergence checker.
+     * @param relativeTolerance Relative threshold for line search.
+     * @param absoluteTolerance Absolute threshold for line search.
+     * @param initialBracketingRange Extent of the initial interval used to
+     * find an interval that brackets the optimum in order to perform the
+     * line search.
+     *
+     * @see LineSearch#LineSearch(MultivariateOptimizer,double,double,double)
+     * @since 3.3
+     */
+    public NonLinearConjugateGradientOptimizer(final Formula updateFormula,
+                                               ConvergenceChecker&lt;PointValuePair&gt; checker,
+                                               double relativeTolerance,
+                                               double absoluteTolerance,
+                                               double initialBracketingRange) {
+<span class="fc" id="L119">        this(updateFormula,</span>
+             checker,
+             relativeTolerance,
+             absoluteTolerance,
+             initialBracketingRange,
+             new IdentityPreconditioner());
+<span class="fc" id="L125">    }</span>
+
+    /**
+     * @param updateFormula formula to use for updating the &amp;beta; parameter,
+     * must be one of {@link Formula#FLETCHER_REEVES} or
+     * {@link Formula#POLAK_RIBIERE}.
+     * @param checker Convergence checker.
+     * @param preconditioner Preconditioner.
+     * @param relativeTolerance Relative threshold for line search.
+     * @param absoluteTolerance Absolute threshold for line search.
+     * @param initialBracketingRange Extent of the initial interval used to
+     * find an interval that brackets the optimum in order to perform the
+     * line search.
+     *
+     * @see LineSearch#LineSearch(MultivariateOptimizer,double,double,double)
+     * @since 3.3
+     */
+    public NonLinearConjugateGradientOptimizer(final Formula updateFormula,
+                                               ConvergenceChecker&lt;PointValuePair&gt; checker,
+                                               double relativeTolerance,
+                                               double absoluteTolerance,
+                                               double initialBracketingRange,
+                                               final Preconditioner preconditioner) {
+<span class="fc" id="L148">        super(checker);</span>
+
+<span class="fc" id="L150">        this.updateFormula = updateFormula;</span>
+<span class="fc" id="L151">        this.preconditioner = preconditioner;</span>
+<span class="fc" id="L152">        line = new LineSearch(this,</span>
+                              relativeTolerance,
+                              absoluteTolerance,
+                              initialBracketingRange);
+<span class="fc" id="L156">    }</span>
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public PointValuePair optimize(OptimizationData... optData)
+        throws TooManyEvaluationsException {
+        // Set up base class and perform computation.
+<span class="fc" id="L165">        return super.optimize(optData);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    protected PointValuePair doOptimize() {
+<span class="fc" id="L171">        final ConvergenceChecker&lt;PointValuePair&gt; checker = getConvergenceChecker();</span>
+<span class="fc" id="L172">        final double[] point = getStartPoint();</span>
+<span class="fc" id="L173">        final GoalType goal = getGoalType();</span>
+<span class="fc" id="L174">        final int n = point.length;</span>
+<span class="fc" id="L175">        double[] r = computeObjectiveGradient(point);</span>
+<span class="pc bpc" id="L176" title="1 of 2 branches missed.">        if (goal == GoalType.MINIMIZE) {</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">            for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L178">                r[i] = -r[i];</span>
+            }
+        }
+
+        // Initial search direction.
+<span class="fc" id="L183">        double[] steepestDescent = preconditioner.precondition(point, r);</span>
+<span class="fc" id="L184">        double[] searchDirection = steepestDescent.clone();</span>
+
+<span class="fc" id="L186">        double delta = 0;</span>
+<span class="fc bfc" id="L187" title="All 2 branches covered.">        for (int i = 0; i &lt; n; ++i) {</span>
+<span class="fc" id="L188">            delta += r[i] * searchDirection[i];</span>
+        }
+
+<span class="fc" id="L191">        PointValuePair current = null;</span>
+        while (true) {
+<span class="fc" id="L193">            incrementIterationCount();</span>
+
+<span class="fc" id="L195">            final double objective = computeObjectiveValue(point);</span>
+<span class="fc" id="L196">            PointValuePair previous = current;</span>
+<span class="fc" id="L197">            current = new PointValuePair(point, objective);</span>
+<span class="fc bfc" id="L198" title="All 4 branches covered.">            if (previous != null &amp;&amp; checker.converged(getIterations(), previous, current)) {</span>
+                // We have found an optimum.
+<span class="fc" id="L200">                return current;</span>
+            }
+
+<span class="fc" id="L203">            final double step = line.search(point, searchDirection).getPoint();</span>
+
+            // Validate new point.
+<span class="fc bfc" id="L206" title="All 2 branches covered.">            for (int i = 0; i &lt; point.length; ++i) {</span>
+<span class="fc" id="L207">                point[i] += step * searchDirection[i];</span>
+            }
+
+<span class="fc" id="L210">            r = computeObjectiveGradient(point);</span>
+<span class="pc bpc" id="L211" title="1 of 2 branches missed.">            if (goal == GoalType.MINIMIZE) {</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">                for (int i = 0; i &lt; n; ++i) {</span>
+<span class="fc" id="L213">                    r[i] = -r[i];</span>
+                }
+            }
+
+            // Compute beta.
+<span class="fc" id="L218">            final double deltaOld = delta;</span>
+<span class="fc" id="L219">            final double[] newSteepestDescent = preconditioner.precondition(point, r);</span>
+<span class="fc" id="L220">            delta = 0;</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">            for (int i = 0; i &lt; n; ++i) {</span>
+<span class="fc" id="L222">                delta += r[i] * newSteepestDescent[i];</span>
+            }
+
+            final double beta;
+<span class="pc bpc" id="L226" title="2 of 3 branches missed.">            switch (updateFormula) {</span>
+            case FLETCHER_REEVES:
+<span class="nc" id="L228">                beta = delta / deltaOld;</span>
+<span class="nc" id="L229">                break;</span>
+            case POLAK_RIBIERE:
+<span class="fc" id="L231">                double deltaMid = 0;</span>
+<span class="fc bfc" id="L232" title="All 2 branches covered.">                for (int i = 0; i &lt; r.length; ++i) {</span>
+<span class="fc" id="L233">                    deltaMid += r[i] * steepestDescent[i];</span>
+                }
+<span class="fc" id="L235">                beta = (delta - deltaMid) / deltaOld;</span>
+<span class="fc" id="L236">                break;</span>
+            default:
+                // Should never happen.
+<span class="nc" id="L239">                throw new MathInternalError();</span>
+            }
+<span class="fc" id="L241">            steepestDescent = newSteepestDescent;</span>
+
+            // Compute conjugate search direction.
+<span class="fc bfc" id="L244" title="All 4 branches covered.">            if (getIterations() % n == 0 ||</span>
+                beta &lt; 0) {
+                // Break conjugation: reset search direction.
+<span class="fc" id="L247">                searchDirection = steepestDescent.clone();</span>
+            } else {
+                // Compute new conjugate search direction.
+<span class="fc bfc" id="L250" title="All 2 branches covered.">                for (int i = 0; i &lt; n; ++i) {</span>
+<span class="fc" id="L251">                    searchDirection[i] = steepestDescent[i] + beta * searchDirection[i];</span>
+                }
+            }
+<span class="fc" id="L254">        }</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void parseOptimizationData(OptimizationData... optData) {
+        // Allow base class to register its own data.
+<span class="fc" id="L263">        super.parseOptimizationData(optData);</span>
+
+<span class="fc" id="L265">        checkParameters();</span>
+<span class="fc" id="L266">    }</span>
+
+    /** Default identity preconditioner. */
+<span class="fc" id="L269">    public static class IdentityPreconditioner implements Preconditioner {</span>
+        /** {@inheritDoc} */
+        @Override
+        public double[] precondition(double[] variables, double[] r) {
+<span class="fc" id="L273">            return r.clone();</span>
+        }
+    }
+
+    // Class is not used anymore (cf. MATH-1092). However, it might
+    // be interesting to create a class similar to &quot;LineSearch&quot;, but
+    // that will take advantage that the model's gradient is available.
+//     /**
+//      * Internal class for line search.
+//      * &lt;p&gt;
+//      * The function represented by this class is the dot product of
+//      * the objective function gradient and the search direction. Its
+//      * value is zero when the gradient is orthogonal to the search
+//      * direction, i.e. when the objective function value is a local
+//      * extremum along the search direction.
+//      * &lt;/p&gt;
+//      */
+//     private class LineSearchFunction implements UnivariateFunction {
+//         /** Current point. */
+//         private final double[] currentPoint;
+//         /** Search direction. */
+//         private final double[] searchDirection;
+
+//         /**
+//          * @param point Current point.
+//          * @param direction Search direction.
+//          */
+//         public LineSearchFunction(double[] point,
+//                                   double[] direction) {
+//             currentPoint = point.clone();
+//             searchDirection = direction.clone();
+//         }
+
+//         /** {@inheritDoc} */
+//         public double value(double x) {
+//             // current point in the search direction
+//             final double[] shiftedPoint = currentPoint.clone();
+//             for (int i = 0; i &lt; shiftedPoint.length; ++i) {
+//                 shiftedPoint[i] += x * searchDirection[i];
+//             }
+
+//             // gradient of the objective function
+//             final double[] gradient = computeObjectiveGradient(shiftedPoint);
+
+//             // dot product with the search direction
+//             double dotProduct = 0;
+//             for (int i = 0; i &lt; gradient.length; ++i) {
+//                 dotProduct += gradient[i] * searchDirection[i];
+//             }
+
+//             return dotProduct;
+//         }
+//     }
+
+    /**
+     * @throws MathUnsupportedOperationException if bounds were passed to the
+     * {@link #optimize(OptimizationData[]) optimize} method.
+     */
+    private void checkParameters() {
+<span class="fc bfc" id="L332" title="All 2 branches covered.">        if (getLowerBound() != null ||</span>
+<span class="pc bpc" id="L333" title="1 of 2 branches missed.">            getUpperBound() != null) {</span>
+<span class="fc" id="L334">            throw new MathUnsupportedOperationException(LocalizedFormats.CONSTRAINT);</span>
+        }
+<span class="fc" id="L336">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

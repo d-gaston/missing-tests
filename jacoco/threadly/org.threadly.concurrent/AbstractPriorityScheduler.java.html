@@ -1,0 +1,961 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractPriorityScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">AbstractPriorityScheduler.java</span></div><h1>AbstractPriorityScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Future;
+import java.util.function.Function;
+
+import org.threadly.concurrent.collections.ConcurrentArrayList;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.concurrent.future.ListenableRunnableFuture;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.SortUtils;
+
+/**
+ * Abstract implementation for implementations of {@link PrioritySchedulerService}.  In general 
+ * this wont be useful outside of Threadly developers, but must be a public interface since it is 
+ * used in sub-packages.
+ * &lt;p&gt;
+ * If you do find yourself using this class, please post an issue on github to tell us why.  If 
+ * there is something you want our schedulers to provide, we are happy to hear about it.
+ * 
+ * @since 4.3.0
+ */
+public abstract class AbstractPriorityScheduler extends AbstractSubmitterScheduler 
+                                                implements PrioritySchedulerService {
+<span class="fc" id="L34">  protected static final TaskPriority DEFAULT_PRIORITY = TaskPriority.High;</span>
+  protected static final int DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS = 500;
+  // tuned for performance of scheduled tasks
+  protected static final int QUEUE_FRONT_PADDING = 0;
+  protected static final int QUEUE_REAR_PADDING = 2;
+
+  protected final TaskPriority defaultPriority;
+  
+<span class="fc" id="L42">  protected AbstractPriorityScheduler(TaskPriority defaultPriority) {</span>
+<span class="fc bfc" id="L43" title="All 2 branches covered.">    if (defaultPriority == null) {</span>
+<span class="fc" id="L44">      defaultPriority = DEFAULT_PRIORITY;</span>
+    }
+<span class="fc" id="L46">    this.defaultPriority = defaultPriority;</span>
+<span class="fc" id="L47">  }</span>
+  
+  /**
+   * Changes the max wait time for low priority tasks.  This is the amount of time that a low 
+   * priority task will wait if there are ready to execute high priority tasks.  After a low 
+   * priority task has waited this amount of time, it will be executed fairly with high priority 
+   * tasks (meaning it will only execute the high priority task if it has been waiting longer than 
+   * the low priority task).
+   * 
+   * @param maxWaitForLowPriorityInMs new wait time in milliseconds for low priority tasks during thread contention
+   */
+  public void setMaxWaitForLowPriority(long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L59">    getQueueManager().setMaxWaitForLowPriority(maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L60">  }</span>
+  
+  @Override
+  public long getMaxWaitForLowPriority() {
+<span class="fc" id="L64">    return getQueueManager().getMaxWaitForLowPriority();</span>
+  }
+
+  @Override
+  public TaskPriority getDefaultPriority() {
+<span class="fc" id="L69">    return defaultPriority;</span>
+  }
+
+  @Override
+  protected final void doSchedule(Runnable task, long delayInMillis) {
+<span class="fc" id="L74">    doSchedule(task, delayInMillis, defaultPriority);</span>
+<span class="fc" id="L75">  }</span>
+
+  /**
+   * Constructs a {@link OneTimeTaskWrapper} and adds it to the most efficient queue.  If there is 
+   * no delay it will use {@link #addToExecuteQueue(OneTimeTaskWrapper)}, if there is a delay it 
+   * will be added to {@link #addToScheduleQueue(TaskWrapper)}.
+   * 
+   * @param task Runnable to be executed
+   * @param delayInMillis delay to wait before task is run
+   * @param priority Priority for task execution
+   * @return Wrapper that was scheduled
+   */
+  protected abstract OneTimeTaskWrapper doSchedule(Runnable task, 
+                                                   long delayInMillis, TaskPriority priority);
+
+  @Override
+  public void execute(Runnable task, TaskPriority priority) {
+<span class="fc" id="L92">    schedule(task, 0, priority);</span>
+<span class="fc" id="L93">  }</span>
+  
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result, TaskPriority priority) {
+<span class="fc" id="L97">    return submitScheduled(task, result, 0, priority);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task, TaskPriority priority) {
+<span class="fc" id="L102">    return submitScheduled(task, 0, priority);</span>
+  }
+
+  @Override
+  public void schedule(Runnable task, long delayInMs, TaskPriority priority) {
+<span class="fc" id="L107">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L108">    ArgumentVerifier.assertNotNegative(delayInMs, &quot;delayInMs&quot;);</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L110">      priority = defaultPriority;</span>
+    }
+
+<span class="fc" id="L113">    doSchedule(task, delayInMs, priority);</span>
+<span class="fc" id="L114">  }</span>
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Runnable task, T result, 
+                                                 long delayInMs, TaskPriority priority) {
+<span class="fc" id="L119">    return submitScheduled(RunnableCallableAdapter.adapt(task, result), delayInMs, priority);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Callable&lt;T&gt; task, long delayInMs, 
+                                                 TaskPriority priority) {
+<span class="fc" id="L125">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L126">    ArgumentVerifier.assertNotNegative(delayInMs, &quot;delayInMs&quot;);</span>
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">    if (priority == null) {</span>
+<span class="nc" id="L128">      priority = defaultPriority;</span>
+    }
+
+<span class="fc" id="L131">    ListenableRunnableFuture&lt;T&gt; rf = new ListenableFutureTask&lt;&gt;(false, task, this);</span>
+<span class="fc" id="L132">    doSchedule(rf, delayInMs, priority);</span>
+    
+<span class="fc" id="L134">    return rf;</span>
+  }
+  
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay) {
+<span class="fc" id="L139">    scheduleWithFixedDelay(task, initialDelay, recurringDelay, null);</span>
+<span class="fc" id="L140">  }</span>
+  
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period) {
+<span class="fc" id="L144">    scheduleAtFixedRate(task, initialDelay, period, null);</span>
+<span class="fc" id="L145">  }</span>
+
+  @Override
+  public boolean remove(Runnable task) {
+<span class="fc" id="L149">    return getQueueManager().remove(task);</span>
+  }
+  
+  @Override
+  public boolean remove(Callable&lt;?&gt; task) {
+<span class="fc" id="L154">    return getQueueManager().remove(task);</span>
+  }
+
+  /**
+   * Call to get reference to {@link QueueManager}.  This reference can be used to get access to 
+   * queues directly, or perform operations which are distributed to multiple queues.  This 
+   * reference can not be maintained in this abstract class to allow the potential for 
+   * {@link QueueSetListener}'s which want to reference things in {@code this}.
+   * 
+   * @return Manager for queue sets
+   */
+  protected abstract QueueManager getQueueManager();
+  
+  @Override
+  public int getQueuedTaskCount() {
+<span class="fc" id="L169">    int result = 0;</span>
+<span class="fc bfc" id="L170" title="All 2 branches covered.">    for (TaskPriority p : TaskPriority.values()) {</span>
+<span class="fc" id="L171">      result += getQueueManager().getQueueSet(p).queueSize();</span>
+    }
+<span class="fc" id="L173">    return result;</span>
+  }
+  
+  @Override
+  public int getQueuedTaskCount(TaskPriority priority) {
+<span class="fc bfc" id="L178" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L179">      return getQueuedTaskCount();</span>
+    }
+    
+<span class="fc" id="L182">    return getQueueManager().getQueueSet(priority).queueSize();</span>
+  }
+  
+  @Override
+  public int getWaitingForExecutionTaskCount() {
+<span class="fc" id="L187">    int result = 0;</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">    for (TaskPriority p : TaskPriority.values()) {</span>
+<span class="fc" id="L189">      result += getWaitingForExecutionTaskCount(p);</span>
+    }
+<span class="fc" id="L191">    return result;</span>
+  }
+  
+  @Override
+  public int getWaitingForExecutionTaskCount(TaskPriority priority) {
+<span class="fc bfc" id="L196" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L197">      return getWaitingForExecutionTaskCount();</span>
+    }
+    
+<span class="fc" id="L200">    QueueSet qs = getQueueManager().getQueueSet(priority);</span>
+<span class="fc" id="L201">    int result = qs.executeQueue.size();</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">    for (int i = 0; i &lt; qs.scheduleQueue.size(); i++) {</span>
+      try {
+<span class="fc bfc" id="L204" title="All 2 branches covered.">        if (qs.scheduleQueue.get(i).getScheduleDelay() &gt; 0) {</span>
+<span class="fc" id="L205">          break;</span>
+        } else {
+<span class="fc" id="L207">          result++;</span>
+        }
+<span class="nc" id="L209">      } catch (IndexOutOfBoundsException e) {</span>
+<span class="nc" id="L210">        break;</span>
+<span class="fc" id="L211">      }</span>
+    }
+<span class="fc" id="L213">    return result;</span>
+  }
+  
+  /**
+   * Interface to be notified when relevant changes happen to the queue set.
+   * 
+   * @since 4.3.0
+   */
+  protected interface QueueSetListener {
+    /**
+     * Invoked when the head of the queue set has been updated.  This can be used to wake up 
+     * blocking threads waiting for tasks to consume.
+     */
+    public void handleQueueUpdate();
+  }
+
+  /**
+   * Class to contain structures for both execution and scheduling.  It also contains logic for 
+   * how we get and add tasks to this queue.
+   * &lt;p&gt;
+   * This allows us to have one structure for each priority.  Each structure determines what is 
+   * the next task for a given priority.
+   * 
+   * @since 4.0.0
+   */
+  protected static class QueueSet {
+    protected final QueueSetListener queueListener;
+    protected final ConcurrentLinkedQueue&lt;OneTimeTaskWrapper&gt; executeQueue;
+    protected final ConcurrentArrayList&lt;TaskWrapper&gt; scheduleQueue;
+    protected final Function&lt;Integer, Long&gt; scheduleQueueRunTimeByIndex;
+    
+<span class="fc" id="L244">    public QueueSet(QueueSetListener queueListener) {</span>
+<span class="fc" id="L245">      this.queueListener = queueListener;</span>
+<span class="fc" id="L246">      this.executeQueue = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="fc" id="L247">      this.scheduleQueue = new ConcurrentArrayList&lt;&gt;(QUEUE_FRONT_PADDING, QUEUE_REAR_PADDING);</span>
+<span class="fc" id="L248">      scheduleQueueRunTimeByIndex = (index) -&gt; scheduleQueue.get(index).getRunTime();</span>
+<span class="fc" id="L249">    }</span>
+
+    /**
+     * Adds a task for immediate execution.  No safety checks are done at this point, the task 
+     * will be immediately added and available for consumption.
+     * 
+     * @param task Task to add to end of execute queue
+     */
+    public void addExecute(OneTimeTaskWrapper task) {
+<span class="fc" id="L258">      executeQueue.add(task);</span>
+
+<span class="fc" id="L260">      queueListener.handleQueueUpdate();</span>
+<span class="fc" id="L261">    }</span>
+
+    /**
+     * Adds a task for delayed execution.  No safety checks are done at this point.  This call 
+     * will safely find the insertion point in the scheduled queue and insert it into that 
+     * queue.
+     * 
+     * @param task Task to insert into the schedule queue
+     */
+    public void addScheduled(TaskWrapper task) {
+      int insertionIndex;
+<span class="fc" id="L272">      synchronized (scheduleQueue.getModificationLock()) {</span>
+<span class="fc" id="L273">        insertionIndex = SortUtils.getInsertionEndIndex(scheduleQueueRunTimeByIndex, </span>
+<span class="fc" id="L274">                                                        scheduleQueue.size() - 1, </span>
+<span class="fc" id="L275">                                                        task.getRunTime(), true);</span>
+<span class="fc" id="L276">        scheduleQueue.add(insertionIndex, task);</span>
+<span class="fc" id="L277">      }</span>
+      
+<span class="fc bfc" id="L279" title="All 2 branches covered.">      if (insertionIndex == 0) {</span>
+<span class="fc" id="L280">        queueListener.handleQueueUpdate();</span>
+      }
+<span class="fc" id="L282">    }</span>
+
+    /**
+     * Removes a given callable from the internal queues (if it exists).
+     * 
+     * @param task Callable to search for and remove
+     * @return {@code true} if the task was found and removed
+     */
+    public boolean remove(Callable&lt;?&gt; task) {
+      {
+<span class="fc" id="L292">        Iterator&lt;? extends TaskWrapper&gt; it = executeQueue.iterator();</span>
+<span class="fc bfc" id="L293" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L294">          TaskWrapper tw = it.next();</span>
+<span class="pc bpc" id="L295" title="1 of 4 branches missed.">          if (ContainerHelper.isContained(tw.task, task) &amp;&amp; executeQueue.remove(tw)) {</span>
+<span class="fc" id="L296">            tw.invalidate();</span>
+<span class="fc" id="L297">            return true;</span>
+          }
+<span class="fc" id="L299">        }</span>
+      }
+<span class="fc" id="L301">      synchronized (scheduleQueue.getModificationLock()) {</span>
+<span class="fc" id="L302">        Iterator&lt;? extends TaskWrapper&gt; it = scheduleQueue.iterator();</span>
+<span class="fc bfc" id="L303" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L304">          TaskWrapper tw = it.next();</span>
+<span class="fc bfc" id="L305" title="All 2 branches covered.">          if (ContainerHelper.isContained(tw.task, task)) {</span>
+<span class="fc" id="L306">            tw.invalidate();</span>
+<span class="fc" id="L307">            it.remove();</span>
+            
+<span class="fc" id="L309">            return true;</span>
+          }
+<span class="fc" id="L311">        }</span>
+<span class="fc" id="L312">      }</span>
+      
+<span class="fc" id="L314">      return false;</span>
+    }
+
+    /**
+     * Removes a given Runnable from the internal queues (if it exists).
+     * 
+     * @param task Runnable to search for and remove
+     * @return {@code true} if the task was found and removed
+     */
+    public boolean remove(Runnable task) {
+      {
+<span class="fc" id="L325">        Iterator&lt;? extends TaskWrapper&gt; it = executeQueue.iterator();</span>
+<span class="fc bfc" id="L326" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L327">          TaskWrapper tw = it.next();</span>
+<span class="pc bpc" id="L328" title="1 of 4 branches missed.">          if (ContainerHelper.isContained(tw.task, task) &amp;&amp; executeQueue.remove(tw)) {</span>
+<span class="fc" id="L329">            tw.invalidate();</span>
+<span class="fc" id="L330">            return true;</span>
+          }
+<span class="fc" id="L332">        }</span>
+      }
+<span class="fc" id="L334">      synchronized (scheduleQueue.getModificationLock()) {</span>
+<span class="fc" id="L335">        Iterator&lt;? extends TaskWrapper&gt; it = scheduleQueue.iterator();</span>
+<span class="fc bfc" id="L336" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L337">          TaskWrapper tw = it.next();</span>
+<span class="fc bfc" id="L338" title="All 2 branches covered.">          if (ContainerHelper.isContained(tw.task, task)) {</span>
+<span class="fc" id="L339">            tw.invalidate();</span>
+<span class="fc" id="L340">            it.remove();</span>
+            
+<span class="fc" id="L342">            return true;</span>
+          }
+<span class="fc" id="L344">        }</span>
+<span class="fc" id="L345">      }</span>
+      
+<span class="fc" id="L347">      return false;</span>
+    }
+
+    /**
+     * Call to get the total quantity of tasks within both stored queues.  This returns the total 
+     * quantity of items in both the execute and scheduled queue.  If there are scheduled tasks 
+     * which are NOT ready to run, they will still be included in this total.
+     * 
+     * @return Total quantity of tasks queued
+     */
+    public int queueSize() {
+<span class="fc" id="L358">      return executeQueue.size() + scheduleQueue.size();</span>
+    }
+
+    public void drainQueueInto(List&lt;TaskWrapper&gt; removedTasks) {
+<span class="fc" id="L362">      clearQueue(executeQueue, removedTasks);</span>
+<span class="fc" id="L363">      synchronized (scheduleQueue.getModificationLock()) {</span>
+<span class="fc" id="L364">        clearQueue(scheduleQueue, removedTasks);</span>
+<span class="fc" id="L365">      }</span>
+<span class="fc" id="L366">    }</span>
+  
+    private static void clearQueue(Collection&lt;? extends TaskWrapper&gt; queue, 
+                                   List&lt;TaskWrapper&gt; resultList) {
+<span class="fc" id="L370">      boolean resultWasEmpty = resultList.isEmpty();</span>
+<span class="fc" id="L371">      Iterator&lt;? extends TaskWrapper&gt; it = queue.iterator();</span>
+<span class="fc bfc" id="L372" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L373">        TaskWrapper tw = it.next();</span>
+        // no need to cancel and return tasks which are already canceled
+<span class="fc bfc" id="L375" title="All 4 branches covered.">        if (! (tw.task instanceof Future) || ! ((Future&lt;?&gt;)tw.task).isCancelled()) {</span>
+<span class="fc" id="L376">          tw.invalidate();</span>
+          // don't return tasks which were used only for internal behavior management
+<span class="fc bfc" id="L378" title="All 2 branches covered.">          if (! (tw.task instanceof InternalRunnable)) {</span>
+<span class="fc bfc" id="L379" title="All 2 branches covered.">            if (resultWasEmpty) {</span>
+<span class="fc" id="L380">              resultList.add(tw);</span>
+            } else {
+<span class="fc" id="L382">              resultList.add(SortUtils.getInsertionEndIndex((index) -&gt; </span>
+<span class="fc" id="L383">                                                              resultList.get(index).getRunTime(), </span>
+<span class="fc" id="L384">                                                            resultList.size() - 1, </span>
+<span class="fc" id="L385">                                                            tw.getRunTime(), true), </span>
+                             tw);
+            }
+          }
+        }
+<span class="fc" id="L390">      }</span>
+<span class="fc" id="L391">      queue.clear();</span>
+<span class="fc" id="L392">    }</span>
+    
+    /**
+     * Gets the next task from this {@link QueueSet}.  This inspects both the execute queue and 
+     * against scheduled tasks to determine which task in this {@link QueueSet} should be executed 
+     * next.
+     * &lt;p&gt;
+     * The task returned from this may not be ready to executed, but at the time of calling it 
+     * will be the next one to execute.
+     * 
+     * @return TaskWrapper which will be executed next, or {@code null} if there are no tasks
+     */
+    public TaskWrapper getNextTask() {
+<span class="fc" id="L405">      TaskWrapper scheduledTask = scheduleQueue.peekFirst();</span>
+<span class="fc" id="L406">      TaskWrapper executeTask = executeQueue.peek();</span>
+<span class="fc bfc" id="L407" title="All 2 branches covered.">      if (executeTask != null) {</span>
+<span class="fc bfc" id="L408" title="All 4 branches covered.">        if (scheduledTask != null &amp;&amp; scheduledTask.getRunTime() &lt; executeTask.getRunTime()) {</span>
+<span class="fc" id="L409">          return scheduledTask;</span>
+        } else {
+<span class="fc" id="L411">          return executeTask;</span>
+        }
+      } else {
+<span class="fc" id="L414">        return scheduledTask;</span>
+      }
+    }
+  }
+  
+  /**
+   * A service which manages the execute queues.  It runs a task to consume from the queues and 
+   * execute those tasks as workers become available.  It also manages the queues as tasks are 
+   * added, removed, or rescheduled.
+   * 
+   * @since 3.4.0
+   */
+  protected static class QueueManager {
+    protected final QueueSet highPriorityQueueSet;
+    protected final QueueSet lowPriorityQueueSet;
+    protected final QueueSet starvablePriorityQueueSet;
+    private volatile long maxWaitForLowPriorityInMs;
+    
+<span class="fc" id="L432">    public QueueManager(QueueSetListener queueSetListener, long maxWaitForLowPriorityInMs) {</span>
+<span class="fc" id="L433">      this.highPriorityQueueSet = new QueueSet(queueSetListener);</span>
+<span class="fc" id="L434">      this.lowPriorityQueueSet = new QueueSet(queueSetListener);</span>
+<span class="fc" id="L435">      this.starvablePriorityQueueSet = new QueueSet(queueSetListener);</span>
+      
+      // call to verify and set values
+<span class="fc" id="L438">      setMaxWaitForLowPriority(maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L439">    }</span>
+    
+    /**
+     * Returns the {@link QueueSet} for a specified priority.
+     * 
+     * @param priority Priority that should match to the given {@link QueueSet}
+     * @return {@link QueueSet} which matches to the priority
+     */
+    public QueueSet getQueueSet(TaskPriority priority) {
+<span class="fc bfc" id="L448" title="All 2 branches covered.">      if (priority == TaskPriority.High) {</span>
+<span class="fc" id="L449">        return highPriorityQueueSet;</span>
+<span class="fc bfc" id="L450" title="All 2 branches covered.">      } else if (priority == TaskPriority.Low) {</span>
+<span class="fc" id="L451">        return lowPriorityQueueSet;</span>
+      } else {
+<span class="fc" id="L453">        return starvablePriorityQueueSet;</span>
+      }
+    }
+    
+    /**
+     * Removes any tasks waiting to be run.  Will not interrupt any tasks currently running.  But 
+     * will avoid additional tasks from being run (unless they are allowed to be added during or 
+     * after this call).  
+     * &lt;p&gt;
+     * If tasks are added concurrently during this invocation they may or may not be removed.
+     * 
+     * @return List of runnables which were waiting in the task queue to be executed (and were now removed)
+     */
+    public List&lt;Runnable&gt; clearQueue() {
+<span class="fc" id="L467">      List&lt;TaskWrapper&gt; wrapperList = new ArrayList&lt;&gt;(highPriorityQueueSet.queueSize() + </span>
+<span class="fc" id="L468">                                                        lowPriorityQueueSet.queueSize() + </span>
+<span class="fc" id="L469">                                                        starvablePriorityQueueSet.queueSize());</span>
+<span class="fc" id="L470">      highPriorityQueueSet.drainQueueInto(wrapperList);</span>
+<span class="fc" id="L471">      lowPriorityQueueSet.drainQueueInto(wrapperList);</span>
+<span class="fc" id="L472">      starvablePriorityQueueSet.drainQueueInto(wrapperList);</span>
+      
+<span class="fc" id="L474">      return ContainerHelper.getContainedRunnables(wrapperList);</span>
+    }
+    
+    /**
+     * Gets the next task currently queued for execution.  This task may be ready to execute, or 
+     * just queued.  If a queue update comes in, this must be re-invoked to see what task is now 
+     * next.  If there are no tasks ready to be executed this will simply return {@code null}.
+     * 
+     * @return Task to be executed next, or {@code null} if no tasks at all are queued
+     */
+    public TaskWrapper getNextTask() {
+      // First compare between high and low priority task queues
+      // then depending on that state, we may check starvable
+      TaskWrapper nextTask;
+<span class="fc" id="L488">      TaskWrapper nextHighPriorityTask = highPriorityQueueSet.getNextTask();</span>
+<span class="fc" id="L489">      TaskWrapper nextLowPriorityTask = lowPriorityQueueSet.getNextTask();</span>
+<span class="fc bfc" id="L490" title="All 2 branches covered.">      if (nextLowPriorityTask == null) {</span>
+<span class="fc" id="L491">        nextTask = nextHighPriorityTask;</span>
+<span class="fc bfc" id="L492" title="All 2 branches covered.">      } else if (nextHighPriorityTask == null) {</span>
+<span class="fc" id="L493">        nextTask = nextLowPriorityTask;</span>
+<span class="fc bfc" id="L494" title="All 2 branches covered.">      } else if (nextHighPriorityTask.getRunTime() &lt;= nextLowPriorityTask.getRunTime()) {</span>
+<span class="fc" id="L495">        nextTask = nextHighPriorityTask;</span>
+<span class="fc bfc" id="L496" title="All 2 branches covered.">      } else if (nextHighPriorityTask.getScheduleDelay() &gt; 0 || </span>
+          // before the above check we know the low priority has been waiting longer than the high 
+          // priority, but since the high priority is not ready to run, we can just return the low 
+          // priority a clock call was invoked IF the high priority task was not already known to 
+          // be ready to run
+          //
+          // OR
+          //
+          // at this point we know the high task is ready to run
+          // but the low priority task has been waiting LONGER (and thus also ready to run)
+          // So we will return the low priority task IF it has been waiting over the max wait time
+          // At this point there may or may not have been a single clock invocation to check if the 
+          // high priority task was ready (if it was known ready, none was invoked)
+          // because of that we _may_ have to invoke the clock here
+<span class="fc bfc" id="L510" title="All 2 branches covered.">          Clock.lastKnownForwardProgressingMillis() - nextLowPriorityTask.getRunTime() &gt; maxWaitForLowPriorityInMs || </span>
+<span class="fc bfc" id="L511" title="All 2 branches covered.">          Clock.accurateForwardProgressingMillis() - nextLowPriorityTask.getRunTime() &gt; maxWaitForLowPriorityInMs) {</span>
+<span class="fc" id="L512">        nextTask = nextLowPriorityTask;</span>
+      } else {
+        // task is ready to run, low priority is also ready, but has not been waiting long enough
+<span class="fc" id="L515">        nextTask = nextHighPriorityTask;</span>
+      }
+      
+<span class="fc bfc" id="L518" title="All 2 branches covered.">      if (nextTask == null) {</span>
+<span class="fc" id="L519">        return starvablePriorityQueueSet.getNextTask();</span>
+      } else {
+<span class="fc" id="L521">        long nextTaskDelay = nextTask.getScheduleDelay();</span>
+<span class="fc bfc" id="L522" title="All 2 branches covered.">        if (nextTaskDelay &gt; 0) {</span>
+<span class="fc" id="L523">          TaskWrapper nextStarvableTask = starvablePriorityQueueSet.getNextTask();</span>
+<span class="fc bfc" id="L524" title="All 2 branches covered.">          if (nextStarvableTask != null &amp;&amp; </span>
+<span class="pc bpc" id="L525" title="1 of 2 branches missed.">              nextStarvableTask.getPureRunTime() &lt; nextTask.getPureRunTime()) {</span>
+<span class="nc" id="L526">            return nextStarvableTask;</span>
+          } else {
+<span class="fc" id="L528">            return nextTask;</span>
+          }
+        } else {
+<span class="fc" id="L531">          return nextTask;</span>
+        }
+      }
+    }
+    
+    /**
+     * Removes the runnable task from the execution queue.  It is possible for the runnable to 
+     * still run until this call has returned.
+     * &lt;p&gt;
+     * Note that this call has high guarantees on the ability to remove the task (as in a complete 
+     * guarantee).  But while this is being invoked, it will reduce the throughput of execution, 
+     * so should NOT be used extremely frequently.
+     * 
+     * @param task The original runnable provided to the executor
+     * @return {@code true} if the runnable was found and removed
+     */
+    public boolean remove(Runnable task) {
+<span class="fc bfc" id="L548" title="All 4 branches covered.">      return highPriorityQueueSet.remove(task) || lowPriorityQueueSet.remove(task) || </span>
+<span class="fc bfc" id="L549" title="All 2 branches covered.">               starvablePriorityQueueSet.remove(task);</span>
+    }
+    
+    /**
+     * Removes the callable task from the execution queue.  It is possible for the callable to 
+     * still run until this call has returned.
+     * &lt;p&gt;
+     * Note that this call has high guarantees on the ability to remove the task (as in a complete 
+     * guarantee).  But while this is being invoked, it will reduce the throughput of execution, 
+     * so should NOT be used extremely frequently.
+     * 
+     * @param task The original callable provided to the executor
+     * @return {@code true} if the callable was found and removed
+     */
+    public boolean remove(Callable&lt;?&gt; task) {
+<span class="fc bfc" id="L564" title="All 4 branches covered.">      return highPriorityQueueSet.remove(task) || lowPriorityQueueSet.remove(task) || </span>
+<span class="fc bfc" id="L565" title="All 2 branches covered.">               starvablePriorityQueueSet.remove(task);</span>
+    }
+    
+    /**
+     * Changes the max wait time for low priority tasks.  This is the amount of time that a low 
+     * priority task will wait if there are ready to execute high priority tasks.  After a low 
+     * priority task has waited this amount of time, it will be executed fairly with high priority 
+     * tasks (meaning it will only execute the high priority task if it has been waiting longer than 
+     * the low priority task).
+     * 
+     * @param maxWaitForLowPriorityInMs new wait time in milliseconds for low priority tasks during thread contention
+     */
+    public void setMaxWaitForLowPriority(long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L578">      ArgumentVerifier.assertNotNegative(maxWaitForLowPriorityInMs, &quot;maxWaitForLowPriorityInMs&quot;);</span>
+      
+<span class="fc" id="L580">      this.maxWaitForLowPriorityInMs = maxWaitForLowPriorityInMs;</span>
+<span class="fc" id="L581">    }</span>
+    
+    /**
+     * Getter for the amount of time a low priority task will wait during thread contention before 
+     * it is eligible for execution.
+     * 
+     * @return currently set max wait for low priority task
+     */
+    public long getMaxWaitForLowPriority() {
+<span class="fc" id="L590">      return maxWaitForLowPriorityInMs;</span>
+    }
+  }
+  
+  /**
+   * Abstract implementation for all tasks handled by this pool.
+   * 
+   * @since 1.0.0
+   */
+  protected abstract static class TaskWrapper implements RunnableContainer {
+    protected final Runnable task;
+    protected volatile boolean invalidated;
+    
+<span class="fc" id="L603">    public TaskWrapper(Runnable task) {</span>
+<span class="fc" id="L604">      this.task = task;</span>
+<span class="fc" id="L605">      invalidated = false;</span>
+<span class="fc" id="L606">    }</span>
+    
+    /**
+     * Similar to {@link Runnable#run()}, this is invoked to execute the contained task.  One 
+     * critical difference is this implementation should never throw an exception (even 
+     * {@link RuntimeException}'s).  Throwing such an exception would result in the worker thread 
+     * dying (and being leaked from the pool).
+     */
+    public abstract void runTask();
+
+    /**
+     * Attempts to invalidate the task from running (assuming it has not started yet).  If the 
+     * task is recurring then future executions will also be avoided.
+     */
+    public void invalidate() {
+<span class="fc" id="L621">      invalidated = true;</span>
+<span class="fc" id="L622">    }</span>
+    
+    /**
+     * Get an execution reference so that we can ensure thread safe access into 
+     * {@link #canExecute(short)}.
+     * 
+     * @return Short to identify execution state 
+     */
+    public abstract short getExecuteReference();
+    
+    /**
+     * Called as the task is being removed from the queue to prepare for execution.  The reference 
+     * provided here should be captured from {@link #getExecuteReference()}.
+     * 
+     * @param executeReference Reference checked to ensure thread safe task execution
+     * @return true if the task should be executed
+     */
+    public abstract boolean canExecute(short executeReference);
+    
+    /**
+     * Get the absolute time when this should run, in comparison with the time returned from 
+     * {@link org.threadly.util.Clock#accurateForwardProgressingMillis()}.
+     * 
+     * @return Absolute time in millis this task should run
+     */
+    public abstract long getRunTime();
+    
+    /**
+     * Simple getter for the run time, this is expected to do NO operations for calculating the 
+     * run time.  The main reason this is used over {@link #getRunTime()} is to allow the JVM to 
+     * jit the function better.  Because of the nature of this, this can only be used at very 
+     * specific points in the tasks lifecycle, and can not be used for sorting operations.
+     * 
+     * @return An un-molested representation of the stored absolute run time
+     */
+    public abstract long getPureRunTime();
+    
+    /**
+     * Call to see how long the task should be delayed before execution.  While this may return 
+     * either positive or negative numbers, only an accurate number is returned if the task must 
+     * be delayed for execution.  If the task is ready to execute it may return zero even though 
+     * it is past due.  For that reason you can NOT use this to compare two tasks for execution 
+     * order, instead you should use {@link #getRunTime()}.
+     * 
+     * @return delay in milliseconds till task can be run
+     */
+    public long getScheduleDelay() {
+<span class="fc bfc" id="L669" title="All 2 branches covered.">      if (getRunTime() &gt; Clock.lastKnownForwardProgressingMillis()) {</span>
+<span class="fc" id="L670">        return getRunTime() - Clock.accurateForwardProgressingMillis();</span>
+      } else {
+<span class="fc" id="L672">        return 0;</span>
+      }
+    }
+    
+    @Override
+    public String toString() {
+<span class="fc" id="L678">      return task.toString();</span>
+    }
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L683">      return task;</span>
+    }
+  }
+  
+  /**
+   * Wrapper for tasks which only executes once.
+   * 
+   * @since 1.0.0
+   */
+  protected static class OneTimeTaskWrapper extends TaskWrapper {
+    protected final Queue&lt;? extends TaskWrapper&gt; taskQueue;
+    protected final long runTime;
+    // optimization to avoid queue traversal on failure to remove, cheaper than AtomicBoolean
+    private volatile boolean executed;
+    
+    protected OneTimeTaskWrapper(Runnable task, Queue&lt;? extends TaskWrapper&gt; taskQueue, long runTime) {
+<span class="fc" id="L699">      super(task);</span>
+      
+<span class="fc" id="L701">      this.taskQueue = taskQueue;</span>
+<span class="fc" id="L702">      this.runTime = runTime;</span>
+<span class="fc" id="L703">      this.executed = false;</span>
+<span class="fc" id="L704">    }</span>
+    
+    @Override
+    public long getPureRunTime() {
+<span class="fc" id="L708">      return runTime;</span>
+    }
+    
+    @Override
+    public long getRunTime() {
+<span class="fc" id="L713">      return runTime;</span>
+    }
+
+    @Override
+    public void runTask() {
+<span class="fc bfc" id="L718" title="All 2 branches covered.">      if (! invalidated) {</span>
+        try {
+<span class="fc" id="L720">          task.run();</span>
+<span class="fc" id="L721">        } catch (Throwable t) {</span>
+<span class="fc" id="L722">          ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L723">        }</span>
+      }
+<span class="fc" id="L725">    }</span>
+    
+    @Override
+    public short getExecuteReference() {
+      // we ignore the reference since one time tasks are deterministically removed from the queue
+<span class="fc" id="L730">      return 0;</span>
+    }
+
+    @Override
+    public boolean canExecute(short ignoredExecuteReference) {
+<span class="fc bfc" id="L735" title="All 2 branches covered.">      if (! executed &amp;&amp; </span>
+          (executed = true) &amp; // set executed as soon as possible, before removal attempt
+<span class="fc bfc" id="L737" title="All 2 branches covered.">          taskQueue.remove(this)) { // every task is wrapped in a unique wrapper, so we can remove 'this' safely</span>
+<span class="fc" id="L738">        return true;</span>
+      } else {
+<span class="fc" id="L740">        return false;</span>
+      }
+    }
+  }
+  
+  /**
+   * Similar to {@link OneTimeTaskWrapper} except that this task must always be eligible for 
+   * execution immediately.  This allows for some minor assumptions to be made to facilitate 
+   * performance.
+   * 
+   * @since 5.26
+   */
+  protected static class ImmediateTaskWrapper extends OneTimeTaskWrapper {
+    protected ImmediateTaskWrapper(Runnable task, Queue&lt;? extends TaskWrapper&gt; taskQueue) {
+<span class="fc" id="L754">      super(task, taskQueue, Clock.lastKnownForwardProgressingMillis());</span>
+<span class="fc" id="L755">    }</span>
+    
+    @Override
+    public long getScheduleDelay() {
+      // override to avoid volatile read performance hit
+<span class="fc" id="L760">      return 0;</span>
+    }
+  }
+  
+  /**
+   * Abstract wrapper for any tasks which run repeatedly.
+   * 
+   * @since 3.1.0
+   */
+  protected abstract static class RecurringTaskWrapper extends TaskWrapper {
+    protected final QueueSet queueSet;
+    protected volatile boolean executing;
+    protected long nextRunTime;
+    // executeFlipCounter is used to prevent multiple executions when consumed concurrently
+    // only changed when queue is locked...overflow is fine
+    private volatile short executeFlipCounter;
+    
+    protected RecurringTaskWrapper(Runnable task, QueueSet queueSet, long firstRunTime) {
+<span class="fc" id="L778">      super(task);</span>
+      
+<span class="fc" id="L780">      this.queueSet = queueSet;</span>
+<span class="fc" id="L781">      executing = false;</span>
+<span class="fc" id="L782">      this.nextRunTime = firstRunTime;</span>
+<span class="fc" id="L783">      executeFlipCounter = 0;</span>
+<span class="fc" id="L784">    }</span>
+    
+    @Override
+    public long getPureRunTime() {
+<span class="fc" id="L788">      return nextRunTime;</span>
+    }
+    
+    @Override
+    public long getRunTime() {
+<span class="fc bfc" id="L793" title="All 2 branches covered.">      if (executing) {</span>
+<span class="fc" id="L794">        return Long.MAX_VALUE;</span>
+      } else {
+<span class="fc" id="L796">        return nextRunTime;</span>
+      }
+    }
+    
+    @Override
+    public long getScheduleDelay() {
+<span class="fc bfc" id="L802" title="All 2 branches covered.">      if (executing) {</span>
+        // this would only be likely if two threads were trying to run the same task
+<span class="fc" id="L804">        return Long.MAX_VALUE;</span>
+<span class="fc bfc" id="L805" title="All 2 branches covered.">      } else if (nextRunTime &gt; Clock.lastKnownForwardProgressingMillis()) {</span>
+<span class="fc" id="L806">        return nextRunTime - Clock.accurateForwardProgressingMillis();</span>
+      } else {
+<span class="fc" id="L808">        return 0;</span>
+      }
+    }
+    
+    @Override
+    public short getExecuteReference() {
+<span class="fc" id="L814">      return executeFlipCounter;</span>
+    }
+
+    @Override
+    public boolean canExecute(short executeReference) {
+<span class="fc bfc" id="L819" title="All 4 branches covered.">      if (executing | executeFlipCounter != executeReference) {</span>
+<span class="fc" id="L820">        return false;</span>
+      }
+<span class="fc" id="L822">      synchronized (queueSet.scheduleQueue.getModificationLock()) {</span>
+<span class="fc bfc" id="L823" title="All 4 branches covered.">        if (executing | executeFlipCounter != executeReference) {</span>
+          // this task is already running, or not ready to run, so ignore
+<span class="fc" id="L825">          return false;</span>
+        } else {
+          /* we have to reposition to the end atomically so that this task can be removed if 
+           * requested to be removed.  We can put it at the end because we know this task wont 
+           * run again till it has finished (which it will be inserted at the correct point in 
+           * queue then.
+           */
+<span class="fc" id="L832">          int sourceIndex = queueSet.scheduleQueue.indexOf(this);</span>
+<span class="fc bfc" id="L833" title="All 2 branches covered.">          if (sourceIndex &gt;= 0) {</span>
+<span class="fc bfc" id="L834" title="All 2 branches covered.">            if (sourceIndex &lt; queueSet.scheduleQueue.size() - 1 &amp;&amp; </span>
+<span class="fc bfc" id="L835" title="All 2 branches covered.">                queueSet.scheduleQueue.get(sourceIndex + 1).getRunTime() != Long.MAX_VALUE) {</span>
+<span class="fc" id="L836">              queueSet.scheduleQueue.reposition(sourceIndex, queueSet.scheduleQueue.size());</span>
+            }
+<span class="fc" id="L838">            executing = true;</span>
+<span class="fc" id="L839">            executeFlipCounter++;</span>
+<span class="fc" id="L840">            return true;</span>
+          } else {
+<span class="fc" id="L842">            return false;</span>
+          }
+        }
+      }
+    }
+
+    /**
+     * Call to find and reposition a scheduled task.  It is expected that the task provided has 
+     * already been added to the queue.  This call will use 
+     * {@link RecurringTaskWrapper#getRunTime()} to figure out what the new position within the 
+     * queue should be.
+     */
+    protected void reschedule() {
+<span class="fc" id="L855">      int insertionIndex = -1;</span>
+<span class="fc" id="L856">      synchronized (queueSet.scheduleQueue.getModificationLock()) {</span>
+<span class="fc" id="L857">        int currentIndex = queueSet.scheduleQueue.lastIndexOf(this);</span>
+<span class="fc bfc" id="L858" title="All 2 branches covered.">        if (currentIndex &gt; 0) {</span>
+<span class="fc" id="L859">          insertionIndex = SortUtils.getInsertionEndIndex(queueSet.scheduleQueueRunTimeByIndex, </span>
+<span class="fc" id="L860">                                                          queueSet.scheduleQueue.size() - 1, </span>
+                                                          nextRunTime, true);
+          
+<span class="fc" id="L863">          queueSet.scheduleQueue.reposition(currentIndex, insertionIndex);</span>
+<span class="pc bpc" id="L864" title="1 of 2 branches missed.">        } else if (currentIndex == 0) {</span>
+<span class="fc" id="L865">          insertionIndex = 0;</span>
+        } else {
+          // task removed, no-op, but might as well tidy up the state even though nothing cares
+        }
+        
+        // we can only update executing AFTER the reposition has finished
+        // The synchronization lock must be held during this because changing executing
+        // changes the scheduled delay, and thus we can not have other threads examining the task queue
+<span class="fc" id="L873">        executing = false;</span>
+<span class="fc" id="L874">        executeFlipCounter++;  // increment again to indicate execute state change</span>
+<span class="fc" id="L875">      }</span>
+
+      // kind of awkward we need to know here, but we we need to let the queue set know if the head changed
+<span class="fc bfc" id="L878" title="All 2 branches covered.">      if (insertionIndex == 0) {</span>
+<span class="fc" id="L879">        queueSet.queueListener.handleQueueUpdate();</span>
+      }
+<span class="fc" id="L881">    }</span>
+    
+    /**
+     * Called when the implementing class should update the variable {@code nextRunTime} to be the 
+     * next absolute time in milliseconds the task should run.
+     */
+    protected abstract void updateNextRunTime();
+
+    @Override
+    public void runTask() {
+<span class="pc bpc" id="L891" title="1 of 2 branches missed.">      if (invalidated) {</span>
+<span class="nc" id="L892">        return;</span>
+      }
+      
+      try {
+<span class="fc" id="L896">        task.run();</span>
+<span class="nc" id="L897">      } catch (Throwable t) {</span>
+<span class="nc" id="L898">        ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L899">      }</span>
+      
+<span class="fc bfc" id="L901" title="All 2 branches covered.">      if (! invalidated) {</span>
+<span class="fc" id="L902">        updateNextRunTime();</span>
+        // now that nextRunTime has been set, resort the queue (ask reschedule)
+<span class="fc" id="L904">        reschedule();  // this will set executing to false atomically with the resort</span>
+      }
+<span class="fc" id="L906">    }</span>
+  }
+  
+  /**
+   * Container for tasks which run with a fixed delay after the previous run.
+   * 
+   * @since 3.1.0
+   */
+  protected static class RecurringDelayTaskWrapper extends RecurringTaskWrapper {
+    protected final long recurringDelay;
+    
+    protected RecurringDelayTaskWrapper(Runnable task, QueueSet queueSet, 
+                                        long firstRunTime, long recurringDelay) {
+<span class="fc" id="L919">      super(task, queueSet, firstRunTime);</span>
+      
+<span class="fc" id="L921">      this.recurringDelay = recurringDelay;</span>
+<span class="fc" id="L922">    }</span>
+    
+    @Override
+    protected void updateNextRunTime() {
+<span class="fc" id="L926">      nextRunTime = Clock.accurateForwardProgressingMillis() + recurringDelay;</span>
+<span class="fc" id="L927">    }</span>
+  }
+  
+  /**
+   * Wrapper for tasks which run at a fixed period (regardless of execution time).
+   * 
+   * @since 3.1.0
+   */
+  protected static class RecurringRateTaskWrapper extends RecurringTaskWrapper {
+    protected final long period;
+    
+    protected RecurringRateTaskWrapper(Runnable task, QueueSet queueSet, 
+                                       long firstRunTime, long period) {
+<span class="fc" id="L940">      super(task, queueSet, firstRunTime);</span>
+      
+<span class="fc" id="L942">      this.period = period;</span>
+<span class="fc" id="L943">    }</span>
+    
+    @Override
+    protected void updateNextRunTime() {
+<span class="fc" id="L947">      nextRunTime += period;</span>
+<span class="fc" id="L948">    }</span>
+  }
+  
+  /**
+   * Small interface so we can determine internal tasks which were not submitted by users.  That 
+   * way they can be filtered out (for example in draining the queue).
+   * 
+   * @since 4.3.0
+   */
+  protected interface InternalRunnable extends Runnable {
+    // nothing added here
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

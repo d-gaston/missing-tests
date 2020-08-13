@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CsvReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.io.csv</a> &gt; <span class="el_source">CsvReader.java</span></div><h1>CsvReader.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.io.csv;
+
+import com.google.common.io.CharStreams;
+import com.univocity.parsers.common.AbstractParser;
+import com.univocity.parsers.csv.CsvFormat;
+import com.univocity.parsers.csv.CsvParser;
+import com.univocity.parsers.csv.CsvParserSettings;
+import java.io.IOException;
+import java.io.Reader;
+import javax.annotation.concurrent.Immutable;
+import org.apache.commons.math3.util.Pair;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.io.DataReader;
+import tech.tablesaw.io.FileReader;
+import tech.tablesaw.io.ReaderRegistry;
+import tech.tablesaw.io.Source;
+
+@Immutable
+public class CsvReader extends FileReader implements DataReader&lt;CsvReadOptions&gt; {
+
+<span class="fc" id="L36">  private static final CsvReader INSTANCE = new CsvReader();</span>
+
+  static {
+<span class="fc" id="L39">    register(Table.defaultReaderRegistry);</span>
+<span class="fc" id="L40">  }</span>
+
+  public static void register(ReaderRegistry registry) {
+<span class="fc" id="L43">    registry.registerExtension(&quot;csv&quot;, INSTANCE);</span>
+<span class="fc" id="L44">    registry.registerMimeType(&quot;text/csv&quot;, INSTANCE);</span>
+<span class="fc" id="L45">    registry.registerOptions(CsvReadOptions.class, INSTANCE);</span>
+<span class="fc" id="L46">  }</span>
+
+  /** Constructs a CsvReader */
+  public CsvReader() {
+<span class="fc" id="L50">    super();</span>
+<span class="fc" id="L51">  }</span>
+
+  /**
+   * Determines column types if not provided by the user Reads all input into memory unless File was
+   * provided
+   */
+  private Pair&lt;Reader, ColumnType[]&gt; getReaderAndColumnTypes(Source source, CsvReadOptions options)
+      throws IOException {
+<span class="fc" id="L59">    ColumnType[] types = options.columnTypes();</span>
+<span class="fc" id="L60">    byte[] bytesCache = null;</span>
+
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    if (types == null) {</span>
+<span class="fc" id="L63">      Reader reader = source.createReader(bytesCache);</span>
+<span class="fc bfc" id="L64" title="All 2 branches covered.">      if (source.file() == null) {</span>
+<span class="fc" id="L65">        bytesCache = CharStreams.toString(reader).getBytes();</span>
+        // create a new reader since we just exhausted the existing one
+<span class="fc" id="L67">        reader = source.createReader(bytesCache);</span>
+      }
+<span class="fc" id="L69">      types = detectColumnTypes(reader, options);</span>
+    }
+
+<span class="fc" id="L72">    return Pair.create(source.createReader(bytesCache), types);</span>
+  }
+
+  public Table read(CsvReadOptions options) throws IOException {
+<span class="fc" id="L76">    return read(options, false);</span>
+  }
+
+  private Table read(CsvReadOptions options, boolean headerOnly) throws IOException {
+<span class="fc" id="L80">    Pair&lt;Reader, ColumnType[]&gt; pair = getReaderAndColumnTypes(options.source(), options);</span>
+<span class="fc" id="L81">    Reader reader = pair.getKey();</span>
+<span class="fc" id="L82">    ColumnType[] types = pair.getValue();</span>
+
+<span class="fc" id="L84">    AbstractParser&lt;?&gt; parser = csvParser(options);</span>
+
+    try {
+<span class="fc" id="L87">      return parseRows(options, headerOnly, reader, types, parser);</span>
+    } finally {
+<span class="fc bfc" id="L89" title="All 2 branches covered.">      if (options.source().reader() == null) {</span>
+        // if we get a reader back from options it means the client opened it, so let the client
+        // close it
+        // if it's null, we close it here.
+<span class="fc" id="L93">        parser.stopParsing();</span>
+<span class="fc" id="L94">        reader.close();</span>
+      }
+    }
+  }
+
+  /**
+   * Returns a string representation of the column types in file {@code csvFilename}, as determined
+   * by the type-detection algorithm
+   *
+   * &lt;p&gt;This method is intended to help analysts quickly fix any erroneous types, by printing out
+   * the types in a format such that they can be edited to correct any mistakes, and used in an
+   * array literal
+   *
+   * &lt;p&gt;For example:
+   *
+   * &lt;p&gt;LOCAL_DATE, // 0 date SHORT, // 1 approval STRING, // 2 who
+   *
+   * &lt;p&gt;Note that the types are array separated, and that the index position and the column name are
+   * printed such that they would be interpreted as comments if you paste the output into an array:
+   *
+   * &lt;p&gt;
+   *
+   * @throws IOException if file cannot be read
+   */
+  public String printColumnTypes(CsvReadOptions options) throws IOException {
+<span class="fc" id="L119">    Table structure = read(options, true).structure();</span>
+<span class="fc" id="L120">    return getTypeString(structure);</span>
+  }
+
+  /**
+   * Estimates and returns the type for each column in the delimited text file {@code file}
+   *
+   * &lt;p&gt;The type is determined by checking a sample of the data in the file. Because only a sample
+   * of the data is checked, the types may be incorrect. If that is the case a Parse Exception will
+   * be thrown.
+   *
+   * &lt;p&gt;The method {@code printColumnTypes()} can be used to print a list of the detected columns
+   * that can be corrected and used to explicitly specify the correct column types.
+   */
+  protected ColumnType[] detectColumnTypes(Reader reader, CsvReadOptions options) {
+<span class="fc" id="L134">    boolean header = options.header();</span>
+<span class="fc bfc" id="L135" title="All 2 branches covered.">    int linesToSkip = header ? 1 : 0;</span>
+
+<span class="fc" id="L137">    CsvParser parser = csvParser(options);</span>
+
+    try {
+<span class="fc" id="L140">      return getColumnTypes(reader, options, linesToSkip, parser);</span>
+    } finally {
+<span class="fc" id="L142">      parser.stopParsing();</span>
+      // we don't close the reader since we didn't create it
+    }
+  }
+
+  private CsvParser csvParser(CsvReadOptions options) {
+<span class="fc" id="L148">    CsvParserSettings settings = new CsvParserSettings();</span>
+<span class="fc" id="L149">    settings.setLineSeparatorDetectionEnabled(options.lineSeparatorDetectionEnabled());</span>
+<span class="fc" id="L150">    settings.setFormat(csvFormat(options));</span>
+<span class="fc" id="L151">    settings.setMaxCharsPerColumn(options.maxCharsPerColumn());</span>
+<span class="pc bpc" id="L152" title="1 of 2 branches missed.">    if (options.maxNumberOfColumns() != null) {</span>
+<span class="fc" id="L153">      settings.setMaxColumns(options.maxNumberOfColumns());</span>
+    }
+<span class="fc" id="L155">    return new CsvParser(settings);</span>
+  }
+
+  private CsvFormat csvFormat(CsvReadOptions options) {
+<span class="fc" id="L159">    CsvFormat format = new CsvFormat();</span>
+<span class="pc bpc" id="L160" title="1 of 2 branches missed.">    if (options.quoteChar() != null) {</span>
+<span class="nc" id="L161">      format.setQuote(options.quoteChar());</span>
+    }
+<span class="pc bpc" id="L163" title="1 of 2 branches missed.">    if (options.separator() != null) {</span>
+<span class="fc" id="L164">      format.setDelimiter(options.separator());</span>
+    }
+<span class="fc bfc" id="L166" title="All 2 branches covered.">    if (options.lineEnding() != null) {</span>
+<span class="fc" id="L167">      format.setLineSeparator(options.lineEnding());</span>
+    }
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    if (options.commentPrefix() != null) {</span>
+<span class="fc" id="L170">      format.setComment(options.commentPrefix());</span>
+    }
+<span class="fc" id="L172">    return format;</span>
+  }
+
+  @Override
+  public Table read(Source source) throws IOException {
+<span class="fc" id="L177">    return read(CsvReadOptions.builder(source).build());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

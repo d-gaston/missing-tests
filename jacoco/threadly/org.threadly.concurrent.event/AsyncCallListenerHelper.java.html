@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AsyncCallListenerHelper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.event</a> &gt; <span class="el_source">AsyncCallListenerHelper.java</span></div><h1>AsyncCallListenerHelper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.event;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.Executor;
+
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * This class changes the behavior of how listeners are called from the parent class 
+ * {@link ListenerHelper}.  In this implementation when listeners are invoked with the 
+ * {@link #call()} function, the invocation of all the listeners will occur on the 
+ * {@link Executor} that was provided at construction.  If the listener was added without a 
+ * provided executor it will then run on the provided executor (in the thread doing the 
+ * {@link #call()} invocation, AKA it will run that listener before executing other listeners).  
+ * If the listener was added with a provided executor, that listener will still execute on the 
+ * provided executor (so not necessarily the executor provided at construction time).
+ * &lt;p&gt;
+ * If it is desired that all listeners are executed asynchronously from each other, you should 
+ * actually use the normal {@link ListenerHelper}, and instead just ensure that an executor is 
+ * provided when each listener is added.  If you want listeners to execute concurrently from each 
+ * other, but not concurrently for any single listener, {@link DefaultExecutorListenerHelper} is 
+ * likely a better choice.  This class is only designed to ensure that {@link #call()} invocations 
+ * will never block.
+ * &lt;p&gt;
+ * To better clarify when this implementation makes sense compared to {@link ListenerHelper} and 
+ * {@link DefaultExecutorListenerHelper}.  If you have a LOT of quick running listeners, this is 
+ * the right class for you.  If you have few listeners that execute quickly, then the normal 
+ * {@link ListenerHelper} is likely a better choice.  If you have long running/complex listeners, 
+ * {@link DefaultExecutorListenerHelper} is possibly the better choice.  Alternative for the last 
+ * condition you could use the normal {@link ListenerHelper}, and just ensure that an executor is 
+ * provided for every listener (but if you want to ensure a given listener is not executed 
+ * concurrently the {@link DefaultExecutorListenerHelper} will handle this for you).
+ * &lt;p&gt;
+ * It is important to note that this class does not ensure ordering of how listeners are called.  
+ * For example if you provided a multi-threaded executor, and are calling the listeners twice, 
+ * those listeners call order is non-deterministic.  If this is important to you, you must ensure 
+ * that the Executor provided is single threaded (ie by using the 
+ * {@link org.threadly.concurrent.wrapper.KeyDistributedExecutor} to get an executor from a single 
+ * key, or by using the {@link org.threadly.concurrent.wrapper.limiter.ExecutorLimiter} with a 
+ * limit of one, or an instance of the {@link org.threadly.concurrent.SingleThreadScheduler}).
+ * 
+ * @since 2.2.0
+ * @param &lt;T&gt; Interface for listeners to implement and called into with
+ */
+public class AsyncCallListenerHelper&lt;T&gt; extends ListenerHelper&lt;T&gt; {
+  protected final Executor executor;
+
+  /**
+   * Constructs a new {@link AsyncCallListenerHelper} that will handle listeners with the provided 
+   * interface.  The provided class MUST be an interface.  All {@link #call()} invocations will 
+   * occur on the provided executor, but listeners may run on different executors if they are 
+   * added with their respective executors.
+   * 
+   * @param listenerInterface Interface that listeners need to implement
+   * @param executor {@link Executor} that {@link #call()} invocation will occur on
+   */
+  public AsyncCallListenerHelper(Class&lt;? super T&gt; listenerInterface, Executor executor) {
+<span class="fc" id="L59">    super(listenerInterface);</span>
+
+<span class="fc" id="L61">    ArgumentVerifier.assertNotNull(executor, &quot;executor&quot;);</span>
+    
+<span class="fc" id="L63">    this.executor = executor;</span>
+<span class="fc" id="L64">  }</span>
+  
+  @Override
+  @SuppressWarnings(&quot;unchecked&quot;)
+  protected T makeProxyInstance(Class&lt;? super T&gt; listenerInterface) {
+<span class="fc" id="L69">    return (T) Proxy.newProxyInstance(listenerInterface.getClassLoader(), </span>
+                                      new Class&lt;?&gt;[] { listenerInterface }, 
+                                      new AsyncListenerCaller());
+  }
+  
+  /**
+   * Implementation of the {@link ListenerCaller} which verifies the method, and then calls the 
+   * listeners on the {@link Executor} that is stored within the {@link AsyncCallListenerHelper} 
+   * class.
+   * 
+   * @since 2.2.0
+   */
+<span class="fc" id="L81">  protected class AsyncListenerCaller extends ListenerCaller {</span>
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) {
+<span class="fc" id="L84">      verifyValidMethod(method);</span>
+      
+<span class="fc" id="L86">      executor.execute(new CallListenersTask(method, args));</span>
+      
+      // always returns null
+<span class="fc" id="L89">      return null;</span>
+    }
+    
+    /**
+     * Small class to provide task to executor which invokes 
+     * {@link #callListeners(Method, Object[])}.
+     * 
+     * @since 4.9.0
+     */
+    protected class CallListenersTask implements Runnable {
+      private final Method method;
+      private final Object[] args;
+      
+<span class="fc" id="L102">      public CallListenersTask(Method method, Object[] args) {</span>
+<span class="fc" id="L103">        this.method = method;</span>
+<span class="fc" id="L104">        this.args = args;</span>
+<span class="fc" id="L105">      }</span>
+      
+      @Override
+      public void run() {
+<span class="fc" id="L109">        callListeners(method, args);</span>
+<span class="fc" id="L110">      }</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

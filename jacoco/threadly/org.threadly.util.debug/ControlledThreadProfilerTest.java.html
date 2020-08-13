@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ControlledThreadProfilerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.util.debug</a> &gt; <span class="el_source">ControlledThreadProfilerTest.java</span></div><h1>ControlledThreadProfilerTest.java</h1><pre class="source lang-java linenums">package org.threadly.util.debug;
+
+import static org.junit.Assert.*;
+
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.concurrent.CentralThreadlyPool;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestUtils;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.debug.Profiler.ThreadSample;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L23">public class ControlledThreadProfilerTest extends ProfilerTest {</span>
+  private static final int POLL_INTERVAL = 1;
+  private static final int WAIT_TIME_FOR_COLLECTION = 50;
+  
+  private ControlledThreadProfiler ctProfiler;
+  
+  @Before
+  @Override
+  public void setup() {
+<span class="fc" id="L32">    ctProfiler = new ControlledThreadProfiler(POLL_INTERVAL);</span>
+<span class="fc" id="L33">    profiler = ctProfiler;</span>
+<span class="fc" id="L34">  }</span>
+  
+  @Override
+  protected void profilingExecutor(Executor executor) {
+<span class="fc" id="L38">    AtomicReference&lt;Thread&gt; tAR = new AtomicReference&lt;&gt;();</span>
+<span class="fc" id="L39">    executor.execute(() -&gt; tAR.set(Thread.currentThread()));</span>
+<span class="fc bfc" id="L40" title="All 2 branches covered.">    new TestCondition(() -&gt; tAR.get() != null).blockTillTrue();</span>
+<span class="fc" id="L41">    ctProfiler.addProfiledThread(tAR.get());</span>
+<span class="fc" id="L42">  }</span>
+  
+  @Test
+  @Override
+  public void constructorTest() {
+<span class="fc" id="L47">    int testPollInterval = Profiler.DEFAULT_POLL_INTERVAL_IN_MILLIS * 10;</span>
+    ControlledThreadProfiler p;
+    
+<span class="fc" id="L50">    p = new ControlledThreadProfiler();</span>
+<span class="fc" id="L51">    assertNotNull(p.controledThreadStore.threadTraces);</span>
+<span class="fc" id="L52">    assertTrue(p.controledThreadStore.threadTraces.isEmpty());</span>
+<span class="fc" id="L53">    assertEquals(Profiler.DEFAULT_POLL_INTERVAL_IN_MILLIS, p.controledThreadStore.pollIntervalInMs);</span>
+<span class="fc" id="L54">    assertNull(p.controledThreadStore.collectorThread.get());</span>
+<span class="fc" id="L55">    assertNull(p.controledThreadStore.dumpingThread);</span>
+<span class="fc" id="L56">    assertNotNull(p.startStopLock);</span>
+<span class="fc" id="L57">    assertTrue(p.controledThreadStore.profiledThreads.isEmpty());</span>
+    
+<span class="fc" id="L59">    p = new ControlledThreadProfiler(testPollInterval);</span>
+<span class="fc" id="L60">    assertNotNull(p.controledThreadStore.threadTraces);</span>
+<span class="fc" id="L61">    assertTrue(p.controledThreadStore.threadTraces.isEmpty());</span>
+<span class="fc" id="L62">    assertEquals(testPollInterval, p.controledThreadStore.pollIntervalInMs);</span>
+<span class="fc" id="L63">    assertNull(p.controledThreadStore.collectorThread.get());</span>
+<span class="fc" id="L64">    assertNull(p.controledThreadStore.dumpingThread);</span>
+<span class="fc" id="L65">    assertNotNull(p.startStopLock);</span>
+<span class="fc" id="L66">    assertTrue(p.controledThreadStore.profiledThreads.isEmpty());</span>
+<span class="fc" id="L67">  }</span>
+  
+  @Test
+  public void getProfileThreadsIteratorEmptyTest() {
+<span class="fc" id="L71">    Iterator&lt;?&gt; it = profiler.pStore.getProfileThreadsIterator();</span>
+    
+<span class="fc" id="L73">    assertNotNull(it);</span>
+<span class="fc" id="L74">    assertFalse(it.hasNext());</span>
+<span class="fc" id="L75">  }</span>
+  
+  @Test
+  @Override
+  public void getProfileThreadsIteratorTest() {
+<span class="fc" id="L80">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+<span class="fc" id="L81">    Iterator&lt;? extends ThreadSample&gt; it = profiler.pStore.getProfileThreadsIterator();</span>
+    
+<span class="fc" id="L83">    assertNotNull(it);</span>
+<span class="fc" id="L84">    assertTrue(it.hasNext());</span>
+<span class="pc bpc" id="L85" title="1 of 2 branches missed.">    assertTrue(it.next().getThread() == Thread.currentThread());</span>
+    // should only have the one added thread
+<span class="fc" id="L87">    assertFalse(it.hasNext());</span>
+<span class="fc" id="L88">  }</span>
+  
+  @Test
+  @Override
+  public void profileThreadsIteratorRemoveFail() {
+    // not relevant for this class
+<span class="fc" id="L94">  }</span>
+  
+  @Override
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test (expected = IllegalArgumentException.class)
+  public void constructorFail() {
+<span class="nc" id="L100">    new ControlledThreadProfiler(-1);</span>
+<span class="nc" id="L101">  }</span>
+  
+  @Test
+  public void addProfiledThreadTest() {
+<span class="fc" id="L105">    assertTrue(ctProfiler.controledThreadStore.profiledThreads.isEmpty());</span>
+    
+<span class="fc" id="L107">    Thread currentThread = Thread.currentThread();</span>
+<span class="fc" id="L108">    ctProfiler.addProfiledThread(currentThread);</span>
+    
+<span class="fc" id="L110">    assertEquals(1, ctProfiler.controledThreadStore.profiledThreads.size());</span>
+<span class="fc" id="L111">  }</span>
+  
+  @Test
+  public void addProfiledThreadDuplicateThreadTest() {
+<span class="fc" id="L115">    assertEquals(0, ctProfiler.controledThreadStore.profiledThreads.size());</span>
+    
+<span class="fc" id="L117">    Thread currentThread = Thread.currentThread();</span>
+<span class="fc" id="L118">    ctProfiler.addProfiledThread(currentThread);</span>
+    
+<span class="fc" id="L120">    assertEquals(1, ctProfiler.controledThreadStore.profiledThreads.size());</span>
+    
+<span class="fc" id="L122">    ctProfiler.addProfiledThread(currentThread);</span>
+    // nothing should have changed
+<span class="fc" id="L124">    assertEquals(1, ctProfiler.controledThreadStore.profiledThreads.size());</span>
+<span class="fc" id="L125">  }</span>
+  
+  @Test
+  public void addNullProfiledThreadTest() {
+<span class="fc" id="L129">    assertTrue(ctProfiler.controledThreadStore.profiledThreads.isEmpty());</span>
+    
+<span class="fc" id="L131">    ctProfiler.addProfiledThread(null);</span>
+    
+<span class="fc" id="L133">    assertTrue(ctProfiler.controledThreadStore.profiledThreads.isEmpty());</span>
+<span class="fc" id="L134">  }</span>
+  
+  @Test
+  public void removeProfiledThreadTest() {
+<span class="fc" id="L138">    assertTrue(ctProfiler.controledThreadStore.profiledThreads.isEmpty());</span>
+    
+<span class="fc" id="L140">    Thread thread1 = new Thread();</span>
+<span class="fc" id="L141">    Thread thread2 = new Thread();</span>
+<span class="fc" id="L142">    ctProfiler.addProfiledThread(thread1);</span>
+<span class="fc" id="L143">    ctProfiler.addProfiledThread(thread2);</span>
+    
+<span class="fc" id="L145">    assertEquals(2, ctProfiler.controledThreadStore.profiledThreads.size());</span>
+    
+<span class="fc" id="L147">    assertTrue(ctProfiler.removeProfiledThread(thread1));</span>
+    
+<span class="fc" id="L149">    assertEquals(1, ctProfiler.controledThreadStore.profiledThreads.size());</span>
+<span class="fc" id="L150">  }</span>
+  
+  @Test
+  @Override
+  public void startWithoutExecutorTest() {
+<span class="fc" id="L155">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L157">    super.startWithoutExecutorTest();</span>
+<span class="fc" id="L158">  }</span>
+  
+  @Test
+  @Override
+  public void startWithExecutorTest() {
+<span class="fc" id="L163">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L165">    super.startWithExecutorTest();</span>
+<span class="fc" id="L166">  }</span>
+  
+  @Test
+  @Override
+  public void startWithSameThreadExecutorTest() throws InterruptedException, TimeoutException {
+    try {
+<span class="fc" id="L172">      CentralThreadlyPool.lowPriorityPool()</span>
+<span class="fc" id="L173">                         .submit(() -&gt; ctProfiler.addProfiledThread(Thread.currentThread())).get();</span>
+<span class="nc" id="L174">    } catch (ExecutionException e) {</span>
+<span class="nc" id="L175">      throw ExceptionUtils.makeRuntime(e.getCause());</span>
+<span class="fc" id="L176">    }</span>
+    
+<span class="fc" id="L178">    super.startWithSameThreadExecutorTest();</span>
+<span class="fc" id="L179">  }</span>
+  
+  @Test
+  @Override
+  public void startWithSameThreadExecutorAndTimeoutTest() {
+    try {
+<span class="fc" id="L185">      CentralThreadlyPool.lowPriorityPool()</span>
+<span class="fc" id="L186">                         .submit(() -&gt; ctProfiler.addProfiledThread(Thread.currentThread())).get();</span>
+<span class="nc" id="L187">    } catch (ExecutionException e) {</span>
+<span class="nc" id="L188">      throw ExceptionUtils.makeRuntime(e.getCause());</span>
+<span class="nc" id="L189">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L190">      Thread.currentThread().interrupt();</span>
+<span class="nc" id="L191">      throw new RuntimeException(e);</span>
+<span class="fc" id="L192">    }</span>
+    
+<span class="fc" id="L194">    super.startWithSameThreadExecutorAndTimeoutTest();</span>
+<span class="fc" id="L195">  }</span>
+  
+  @Test
+  public void getProfiledThreadCountTest() {
+<span class="fc" id="L199">    int testThreadCount = 10;</span>
+<span class="fc" id="L200">    assertEquals(0, ctProfiler.getProfiledThreadCount());</span>
+    
+<span class="fc" id="L202">    List&lt;Thread&gt; addedThreads = new ArrayList&lt;&gt;(testThreadCount);</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">    for (int i = 0; i &lt; testThreadCount; i++) {</span>
+<span class="fc" id="L204">      Thread t = new Thread();</span>
+<span class="fc" id="L205">      addedThreads.add(t);</span>
+<span class="fc" id="L206">      ctProfiler.addProfiledThread(t);</span>
+<span class="fc" id="L207">      assertEquals(i + 1, ctProfiler.getProfiledThreadCount());</span>
+    }
+    
+<span class="fc" id="L210">    Iterator&lt;Thread&gt; it = addedThreads.iterator();</span>
+<span class="fc" id="L211">    int removedCount = 0;</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L213">      Thread t = it.next();</span>
+<span class="fc" id="L214">      ctProfiler.removeProfiledThread(t);</span>
+<span class="fc" id="L215">      removedCount++;</span>
+<span class="fc" id="L216">      assertEquals(testThreadCount - removedCount, ctProfiler.getProfiledThreadCount());</span>
+<span class="fc" id="L217">    }</span>
+<span class="fc" id="L218">  }</span>
+  @Test
+  @Override
+  public void resetTest() {
+<span class="fc" id="L222">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L224">    super.resetTest();</span>
+<span class="fc" id="L225">  }</span>
+  
+  @Test
+  public void dumpStoppedStringEmptyTest() {
+<span class="fc" id="L229">    profiler.start();</span>
+    
+<span class="fc" id="L231">    TestUtils.sleep(WAIT_TIME_FOR_COLLECTION);</span>
+    
+<span class="fc" id="L233">    profiler.stop();</span>
+    
+<span class="fc" id="L235">    String resultStr = profiler.dump();</span>
+    
+    // no dump since no threads set to track
+<span class="fc" id="L238">    assertEquals(0, resultStr.length());</span>
+<span class="fc" id="L239">  }</span>
+  
+  @Test
+  @Override
+  public void dumpStoppedStringTest() {
+<span class="fc" id="L244">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L246">    super.dumpStoppedStringTest();</span>
+<span class="fc" id="L247">  }</span>
+  
+  @Test
+  public void dumpStoppedOutputStreamEmptyTest() {
+<span class="fc" id="L251">    profiler.start();</span>
+    
+<span class="fc" id="L253">    TestUtils.sleep(WAIT_TIME_FOR_COLLECTION);</span>
+    
+<span class="fc" id="L255">    profiler.stop();</span>
+    
+<span class="fc" id="L257">    ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L258">    profiler.dump(out);</span>
+    
+<span class="fc" id="L260">    String resultStr = out.toString();</span>
+    
+    // no dump since no threads set to track
+<span class="fc" id="L263">    assertEquals(0, resultStr.length());</span>
+<span class="fc" id="L264">  }</span>
+  
+  @Test
+  @Override
+  public void dumpStoppedOutputStreamTest() {
+<span class="fc" id="L269">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L271">    super.dumpStoppedOutputStreamTest();</span>
+<span class="fc" id="L272">  }</span>
+  
+  @Test
+  public void dumpStringEmptyTest() {
+<span class="fc" id="L276">    profiler.start();</span>
+    
+<span class="fc" id="L278">    TestUtils.sleep(WAIT_TIME_FOR_COLLECTION);</span>
+    
+<span class="fc" id="L280">    String resultStr = profiler.dump();</span>
+    
+    // no dump since no threads set to track
+<span class="fc" id="L283">    assertEquals(0, resultStr.length());</span>
+<span class="fc" id="L284">  }</span>
+  
+  @Test
+  @Override
+  public void dumpStringTest() {
+<span class="fc" id="L289">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L291">    super.dumpStringTest();</span>
+<span class="fc" id="L292">  }</span>
+  
+  @Test
+  public void dumpOutputStreamEmptyTest() {
+<span class="fc" id="L296">    profiler.start();</span>
+    
+<span class="fc" id="L298">    TestUtils.sleep(WAIT_TIME_FOR_COLLECTION);</span>
+    
+<span class="fc" id="L300">    ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L301">    profiler.dump(out);</span>
+    
+<span class="fc" id="L303">    String resultStr = out.toString();</span>
+    
+    // no dump since no threads set to track
+<span class="fc" id="L306">    assertEquals(0, resultStr.length());</span>
+<span class="fc" id="L307">  }</span>
+  
+  @Test
+  @Override
+  public void dumpOutputStreamTest() {
+<span class="fc" id="L312">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L314">    super.dumpOutputStreamTest();</span>
+<span class="fc" id="L315">  }</span>
+  
+  @Test
+  @Override
+  public void dumpStringOnlySummaryTest() {
+<span class="fc" id="L320">    ctProfiler.addProfiledThread(Thread.currentThread());</span>
+    
+<span class="fc" id="L322">    super.dumpStringOnlySummaryTest();</span>
+<span class="fc" id="L323">  }</span>
+  
+  @Test
+  @Override
+  public void idlePrioritySchedulerTest() {
+    // ignored because we can't easily access both threads in the scheduler
+<span class="fc" id="L329">  }</span>
+  
+  @Test
+  @Override
+  public void idlePrioritySchedulerWithExceptionHandlerTest() {
+    // ignored because we can't easily access both threads in the scheduler
+<span class="fc" id="L335">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

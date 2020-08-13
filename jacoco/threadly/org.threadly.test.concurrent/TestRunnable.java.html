@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TestRunnable.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.test.concurrent</a> &gt; <span class="el_source">TestRunnable.java</span></div><h1>TestRunnable.java</h1><pre class="source lang-java linenums">package org.threadly.test.concurrent;
+
+import java.util.Collections;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.threadly.concurrent.collections.ConcurrentArrayList;
+import org.threadly.util.Clock;
+
+/**
+ * Generic runnable implementation that can be used in unit tests for verifying execution occurred.
+ * &lt;p&gt;
+ * This structure is used extensively within threadly's own unit tests.  Please use those as 
+ * examples using this class.
+ * 
+ * @since 1.0.0
+ */
+public class TestRunnable implements Runnable {
+  protected static final int DEFAULT_TIMEOUT_PER_RUN = 10 * 1000;
+  protected static final int RUN_CONDITION_POLL_INTERVAL = 20;
+
+  protected final long creationForwardProgressingMillis;
+  private final ConcurrentArrayList&lt;Long&gt; runTime;
+  private final AtomicInteger runCount;
+  private final AtomicInteger currentRunningCount;
+  private volatile int runDelayInMillis;
+  private volatile boolean ranConcurrent;
+
+  /**
+   * Constructs a new runnable for unit testing.
+   */
+  public TestRunnable() {
+<span class="fc" id="L32">    this(0);</span>
+<span class="fc" id="L33">  }</span>
+
+  /**
+   * Constructs a new runnable for unit testing.  
+   * &lt;p&gt;
+   * This constructor allows the parameter for the runnable to sleep after {@link #handleRunStart()} 
+   * was called and before {@link #handleRunFinish()} is called.
+   * 
+   * @param runTimeInMillis time for runnable to sleep in milliseconds
+   */
+<span class="fc" id="L43">  public TestRunnable(int runTimeInMillis) {</span>
+<span class="fc" id="L44">    this.creationForwardProgressingMillis = Clock.accurateForwardProgressingMillis();</span>
+    
+<span class="fc" id="L46">    setRunDelayInMillis(runTimeInMillis);</span>
+<span class="fc" id="L47">    this.runTime = new ConcurrentArrayList&lt;&gt;(0, 1);</span>
+<span class="fc" id="L48">    this.runCount = new AtomicInteger(0);</span>
+<span class="fc" id="L49">    this.currentRunningCount = new AtomicInteger(0);</span>
+<span class="fc" id="L50">    this.ranConcurrent = false;</span>
+<span class="fc" id="L51">  }</span>
+  
+  /**
+   * Changes the amount of time the runnable will sleep/block when called.  This change will only 
+   * be for future run calls that are not already blocking.
+   * 
+   * @param runDelayInMillis new amount to wait when run is called
+   */
+  public void setRunDelayInMillis(int runDelayInMillis) {
+<span class="fc" id="L60">    this.runDelayInMillis = runDelayInMillis;</span>
+<span class="fc" id="L61">  }</span>
+  
+  /**
+   * Getter for the currently set amount of time the {@link TestRunnable} will block after 
+   * {@link #handleRunStart()} and before {@link #handleRunFinish()} is called.
+   * 
+   * @return current set sleep time in milliseconds
+   */
+  public int getRunDelayInMillis() {
+<span class="fc" id="L70">    return runDelayInMillis;</span>
+  }
+  
+  /**
+   * Returns the millis returned from {@link Clock#accurateForwardProgressingMillis()}, that was 
+   * recorded when this runnable was constructed.
+   * 
+   * @return Forward progressing time in milliseconds {@link TestRunnable} was constructed
+   */
+  public long getCreationTime() {
+<span class="fc" id="L80">    return creationForwardProgressingMillis;</span>
+  }
+  
+  /**
+   * Check if this instance has ever been detected to run concurrently.  Keep in mind that just 
+   * because this call returns false does not guarantee the runnable is incapable of running 
+   * parallel.  It does it's best to detect a situation where it is started while another instance 
+   * has not returned from the run function.  Adding a delay in {@link #handleRunStart()}, 
+   * {@link #handleRunFinish()}, or in the constructor increases the chances of detecting 
+   * concurrency.
+   * 
+   * @return True if this instance ran in parallel at least once
+   */
+  public boolean ranConcurrently() {
+<span class="fc" id="L94">    return ranConcurrent;</span>
+  }
+  
+  /**
+   * Getter to check if the runnable has run exactly once.
+   * 
+   * @return {@code true} if the runnable has been called once
+   */
+  public boolean ranOnce() {
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    return runCount.get() == 1;</span>
+  }
+  
+  /**
+   * Check to see if the run function has started but has not completed returned yet.
+   * 
+   * @return True if the runnable's run function is being called currently.
+   */
+  public boolean isRunning() {
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    return currentRunningCount.get() != 0;</span>
+  }
+  
+  /**
+   * Getter for the number of times the run function has completed.
+   * 
+   * @return The number of times the run function has been called
+   */
+  public int getRunCount() {
+<span class="fc" id="L121">    return runCount.get();</span>
+  }
+  
+  /**
+   * This function blocks till the first run completes then will return the time until the first 
+   * run started it's call.
+   * 
+   * @return The amount of time between construction and run being called
+   */
+  public long getDelayTillFirstRun() {
+<span class="fc" id="L131">    return getDelayTillRun(1);</span>
+  }
+  
+  /**
+   * This function blocks till the run provided, and then gets the time between creation and a 
+   * given run.
+   * 
+   * @param runNumber the run count to get delay to
+   * @return The amount of time between construction and run being called
+   */
+  public long getDelayTillRun(int runNumber) {
+<span class="fc" id="L142">    return getDelayTillRun(runNumber, DEFAULT_TIMEOUT_PER_RUN * runNumber);</span>
+  }
+  
+  /**
+   * This function blocks till the run provided, and 
+   * then gets the time between creation and a given run.
+   * 
+   * @param runNumber the run count to get delay to
+   * @param timeout timeout to wait for given run count to finish
+   * @return The amount of time between construction and run being called
+   */
+  public long getDelayTillRun(int runNumber, int timeout) {
+<span class="fc" id="L154">    blockTillFinished(timeout, runNumber);</span>
+    
+<span class="fc" id="L156">    Collections.sort(runTime);</span>
+<span class="fc" id="L157">    return runTime.get(runNumber - 1) - getCreationTime();</span>
+  }
+  
+  /**
+   * Blocks until run has completed at least once.  Will throw an exception if runnable does not 
+   * run within 10 seconds.
+   */
+  public void blockTillFinished() {
+<span class="fc" id="L165">    blockTillFinished(DEFAULT_TIMEOUT_PER_RUN, 1);</span>
+<span class="fc" id="L166">  }</span>
+
+  /**
+   * Blocks until run has completed at least once.
+   * 
+   * @param timeout time to wait for run to be called before throwing exception
+   */
+  public void blockTillFinished(int timeout) {
+<span class="fc" id="L174">    blockTillFinished(timeout, 1);</span>
+<span class="fc" id="L175">  }</span>
+  
+  /**
+   * Blocks until run completed been called the provided quantity of times.
+   * 
+   * @param timeout time to wait for run to be called before throwing exception
+   * @param expectedRunCount run count to wait for
+   */
+  public void blockTillFinished(int timeout, int expectedRunCount) {
+<span class="fc" id="L184">    final int blockRunCount = expectedRunCount;</span>
+    
+<span class="fc" id="L186">    new TestCondition(() -&gt; {</span>
+<span class="fc" id="L187">      int finishCount = runCount.get();</span>
+      
+<span class="fc bfc" id="L189" title="All 2 branches covered.">      if (finishCount &lt; blockRunCount) {</span>
+<span class="fc" id="L190">        return false;</span>
+<span class="fc bfc" id="L191" title="All 2 branches covered.">      } else if (finishCount &gt; blockRunCount) {</span>
+<span class="fc" id="L192">        return true;</span>
+      } else {  // they are equal
+<span class="fc bfc" id="L194" title="All 2 branches covered.">        return currentRunningCount.get() == 0;</span>
+      }
+<span class="fc" id="L196">    }).blockTillTrue(timeout, RUN_CONDITION_POLL_INTERVAL);</span>
+<span class="fc" id="L197">  }</span>
+  
+  /**
+   * Blocks until run has been called at least once.  Will throw an exception if run is not called 
+   * within 10 seconds.
+   */
+  public void blockTillStarted() {
+<span class="fc" id="L204">    blockTillStarted(DEFAULT_TIMEOUT_PER_RUN);</span>
+<span class="fc" id="L205">  }</span>
+
+  /**
+   * Blocks until run has been called at least once.
+   * 
+   * @param timeout time to wait for run to be called before throwing exception
+   */
+  public void blockTillStarted(int timeout) {
+<span class="fc bfc" id="L213" title="All 2 branches covered.">    new TestCondition(() -&gt; ! runTime.isEmpty())</span>
+<span class="fc" id="L214">        .blockTillTrue(timeout, RUN_CONDITION_POLL_INTERVAL);</span>
+<span class="fc" id="L215">  }</span>
+  
+  @Override
+  public final void run() {
+<span class="fc" id="L219">    int startRunningCount = currentRunningCount.incrementAndGet();</span>
+    
+<span class="fc" id="L221">    runTime.addLast(Clock.accurateForwardProgressingMillis());</span>
+    try {
+<span class="fc" id="L223">      handleRunStart();</span>
+<span class="fc" id="L224">    } catch (InterruptedException e) {</span>
+      // ignored, just reset status
+<span class="fc" id="L226">      Thread.currentThread().interrupt();</span>
+    } finally {
+<span class="fc bfc" id="L228" title="All 2 branches covered.">      if (runDelayInMillis &gt; 0) {</span>
+<span class="fc" id="L229">        TestUtils.sleep(runDelayInMillis);</span>
+      }
+      
+<span class="fc" id="L232">      runCount.incrementAndGet();</span>
+      
+      try {
+<span class="fc" id="L235">        handleRunFinish();</span>
+      } finally {
+<span class="pc bpc" id="L237" title="1 of 6 branches missed.">        ranConcurrent = currentRunningCount.decrementAndGet() != 0 || // must be first to ensure decrement is called</span>
+                          ranConcurrent || startRunningCount != 1;
+      }
+    }
+<span class="fc" id="L241">  }</span>
+  
+  /**
+   * Function to be overloaded by extending classes if more data or operations need to happen at 
+   * the run point.  
+   * &lt;p&gt;
+   * This is also the first call to be made in the runnable, but all necessary 
+   * {@link TestRunnable} actions are in a finally block so it is safe to throw any exceptions 
+   * necessary here.
+   * 
+   * @throws InterruptedException only InterruptedExceptions will be swallowed
+   */
+  public void handleRunStart() throws InterruptedException {
+    // only public to include in javadocs, otherwise could be protected
+    // nothing in default implementation
+<span class="fc" id="L256">  }</span>
+  
+  /**
+   * Function to be overloaded by extending classes if more data or operations need to happen at 
+   * the run point.  
+   * &lt;p&gt;
+   * This is the last call to be made in the runnable.  If you want a {@link RuntimeException} to 
+   * get thrown to the caller, it must be thrown from here.
+   */
+  public void handleRunFinish() {
+    // only public to include in javadocs, otherwise could be protected
+    // nothing in default implementation
+<span class="fc" id="L268">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

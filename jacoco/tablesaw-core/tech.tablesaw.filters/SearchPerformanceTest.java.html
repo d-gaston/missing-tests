@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SearchPerformanceTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.filters</a> &gt; <span class="el_source">SearchPerformanceTest.java</span></div><h1>SearchPerformanceTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.filters;
+
+import static java.lang.System.out;
+
+import com.google.common.base.Stopwatch;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import org.apache.commons.lang3.RandomUtils;
+import org.apache.commons.text.RandomStringGenerator;
+import tech.tablesaw.api.DateTimeColumn;
+import tech.tablesaw.api.DoubleColumn;
+import tech.tablesaw.api.Row;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.datetimes.PackedLocalDateTime;
+import tech.tablesaw.columns.numbers.NumberColumnFormatter;
+import tech.tablesaw.index.LongIndex;
+
+/** Tests manipulation of large (but not big) data sets */
+<span class="nc" id="L39">public class SearchPerformanceTest {</span>
+
+  private static final int CONCEPT_COUNT = 10;
+
+  // pools to get random test data from
+<span class="nc" id="L44">  private static List&lt;String&gt; concepts = new ArrayList&lt;&gt;(CONCEPT_COUNT);</span>
+<span class="nc" id="L45">  private static LongArrayList dates = new LongArrayList(5_000_000);</span>
+
+<span class="nc" id="L47">  private static int numberOfRecordsInTable = 5_000_000;</span>
+  private static LongIndex dateIndex;
+
+  public static void main(String[] args) throws Exception {
+
+<span class="nc" id="L52">    Stopwatch stopwatch = Stopwatch.createStarted();</span>
+
+<span class="nc" id="L54">    Table t = defineSchema();</span>
+
+<span class="nc" id="L56">    generateTestData(t, numberOfRecordsInTable, stopwatch);</span>
+<span class="nc" id="L57">    t = t.sortAscendingOn(&quot;date&quot;);</span>
+
+<span class="nc" id="L59">    dateIndex = new LongIndex(t.dateTimeColumn(&quot;date&quot;));</span>
+<span class="nc" id="L60">    t.setName(&quot;Observations&quot;);</span>
+
+<span class="nc" id="L62">    DateTimeColumn dates = t.dateTimeColumn(&quot;date&quot;);</span>
+<span class="nc" id="L63">    DoubleColumn lowValues = t.doubleColumn(&quot;lowValue&quot;);</span>
+<span class="nc" id="L64">    DoubleColumn highValues = t.doubleColumn(&quot;highValue&quot;);</span>
+
+<span class="nc" id="L66">    System.out.println(dates.summary());</span>
+<span class="nc" id="L67">    System.out.println(lowValues.summary());</span>
+<span class="nc" id="L68">    System.out.println(highValues.summary());</span>
+
+<span class="nc" id="L70">    LocalDateTime testDateTime = LocalDate.of(2010, 1, 1).atStartOfDay();</span>
+<span class="nc" id="L71">    double testLowValue = 500;</span>
+<span class="nc" id="L72">    double testHighValue = 999_500;</span>
+
+<span class="nc" id="L74">    stopwatch.reset();</span>
+<span class="nc" id="L75">    stopwatch.start();</span>
+
+<span class="nc" id="L77">    int count = 0;</span>
+<span class="nc bnc" id="L78" title="All 2 branches missed.">    for (int i = 0; i &lt; 1000; i++) {</span>
+<span class="nc" id="L79">      testDateTime = testDateTime.plusDays(2);</span>
+<span class="nc" id="L80">      int rowNumber = getRowNumber(t, testDateTime, testLowValue, testHighValue);</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">      if (rowNumber &gt;= 0) {</span>
+<span class="nc" id="L82">        count++;</span>
+      }
+    }
+
+<span class="nc" id="L86">    stopwatch.stop();</span>
+<span class="nc" id="L87">    System.out.println(</span>
+        &quot;using rows with an index. found &quot;
+            + count
+            + &quot; in &quot;
+<span class="nc" id="L91">            + stopwatch.elapsed(TimeUnit.MILLISECONDS)</span>
+            + &quot; ms&quot;);
+<span class="nc" id="L93">  }</span>
+
+  private static int getRowNumber(
+      Table t, LocalDateTime testDate, double testLow, double testHigh) {
+<span class="nc" id="L97">    int rowNumber = -1;</span>
+<span class="nc" id="L98">    long testPackedDateTime = PackedLocalDateTime.pack(testDate); // packing saves time</span>
+<span class="nc" id="L99">    Row row = new Row(t);</span>
+<span class="nc" id="L100">    row.at(dateIndex.get(testPackedDateTime).get(0));</span>
+<span class="nc bnc" id="L101" title="All 2 branches missed.">    while (row.hasNext()) {</span>
+<span class="nc" id="L102">      row.next();</span>
+<span class="nc bnc" id="L103" title="All 2 branches missed.">      if (row.getPackedDateTime(&quot;date&quot;) &gt;= testPackedDateTime</span>
+<span class="nc bnc" id="L104" title="All 4 branches missed.">          &amp;&amp; (row.getDouble(&quot;lowValue&quot;) &lt;= testLow || row.getDouble(&quot;highValue&quot;) &gt;= testHigh)) {</span>
+<span class="nc" id="L105">        rowNumber = row.getRowNumber();</span>
+<span class="nc" id="L106">        break;</span>
+      }
+    }
+<span class="nc" id="L109">    return rowNumber;</span>
+  }
+
+  private static Table defineSchema() {
+    Table t;
+<span class="nc" id="L114">    t = Table.create(&quot;Observations&quot;);</span>
+<span class="nc" id="L115">    StringColumn conceptId = StringColumn.create(&quot;concept&quot;);</span>
+<span class="nc" id="L116">    DateTimeColumn date = DateTimeColumn.create(&quot;date&quot;);</span>
+<span class="nc" id="L117">    DoubleColumn lowValues = DoubleColumn.create(&quot;lowValue&quot;);</span>
+<span class="nc" id="L118">    DoubleColumn highValues = DoubleColumn.create(&quot;highValue&quot;);</span>
+<span class="nc" id="L119">    highValues.setPrintFormatter(NumberColumnFormatter.ints());</span>
+<span class="nc" id="L120">    lowValues.setPrintFormatter(NumberColumnFormatter.ints());</span>
+
+<span class="nc" id="L122">    t.addColumns(conceptId);</span>
+<span class="nc" id="L123">    t.addColumns(date);</span>
+<span class="nc" id="L124">    t.addColumns(lowValues);</span>
+<span class="nc" id="L125">    t.addColumns(highValues);</span>
+<span class="nc" id="L126">    return t;</span>
+  }
+
+  private static void generateTestData(Table t, int numberOfRecordsInTable, Stopwatch stopwatch)
+      throws IOException {
+<span class="nc" id="L131">    stopwatch.reset().start();</span>
+<span class="nc" id="L132">    out.println(&quot;Generating test data&quot;);</span>
+<span class="nc" id="L133">    LocalDateTime startDateTime = LocalDateTime.of(2008, 1, 1, 0, 0, 0);</span>
+<span class="nc" id="L134">    generateData(numberOfRecordsInTable, startDateTime, t);</span>
+<span class="nc" id="L135">    out.println(</span>
+        &quot;Time to generate &quot;
+            + numberOfRecordsInTable
+            + &quot; records: &quot;
+<span class="nc" id="L139">            + stopwatch.elapsed(TimeUnit.SECONDS)</span>
+            + &quot; seconds&quot;);
+<span class="nc" id="L141">  }</span>
+
+  private static void generateData(int observationCount, LocalDateTime dateTime, Table table) {
+    // createFromCsv pools of random values
+
+<span class="nc" id="L146">    RandomStringGenerator generator =</span>
+<span class="nc" id="L147">        new RandomStringGenerator.Builder().withinRange(32, 127).build();</span>
+
+<span class="nc bnc" id="L149" title="All 2 branches missed.">    while (concepts.size() &lt;= CONCEPT_COUNT) {</span>
+<span class="nc" id="L150">      concepts.add(generator.generate(30));</span>
+    }
+
+<span class="nc bnc" id="L153" title="All 2 branches missed.">    while (dates.size() &lt;= numberOfRecordsInTable) {</span>
+<span class="nc" id="L154">      dates.add(PackedLocalDateTime.pack(dateTime.plusMinutes(1)));</span>
+    }
+
+<span class="nc" id="L157">    DateTimeColumn dateColumn = table.dateTimeColumn(&quot;date&quot;);</span>
+<span class="nc" id="L158">    StringColumn conceptColumn = table.stringColumn(&quot;concept&quot;);</span>
+<span class="nc" id="L159">    DoubleColumn lowValues = table.doubleColumn(&quot;lowValue&quot;);</span>
+<span class="nc" id="L160">    DoubleColumn highValues = table.doubleColumn(&quot;highValue&quot;);</span>
+
+    // sample from the pools to write the data
+<span class="nc bnc" id="L163" title="All 2 branches missed.">    for (int i = 0; i &lt; observationCount; i++) {</span>
+<span class="nc" id="L164">      dateColumn.appendInternal(dates.getLong(i));</span>
+<span class="nc" id="L165">      conceptColumn.append(concepts.get(RandomUtils.nextInt(0, concepts.size())));</span>
+<span class="nc" id="L166">      lowValues.append(RandomUtils.nextDouble(0, 1_000_000));</span>
+<span class="nc" id="L167">      highValues.append(RandomUtils.nextDouble(0, 1_000_000));</span>
+    }
+<span class="nc" id="L169">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

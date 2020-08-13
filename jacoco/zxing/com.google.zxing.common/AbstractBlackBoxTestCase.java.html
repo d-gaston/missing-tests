@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractBlackBoxTestCase.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common</a> &gt; <span class="el_source">AbstractBlackBoxTestCase.java</span></div><h1>AbstractBlackBoxTestCase.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.BufferedImageLuminanceSource;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.LuminanceSource;
+import com.google.zxing.Reader;
+import com.google.zxing.ReaderException;
+import com.google.zxing.Result;
+import com.google.zxing.ResultMetadataType;
+import org.junit.Assert;
+import org.junit.Test;
+
+import javax.imageio.ImageIO;
+import java.awt.Graphics;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.RectangularShape;
+import java.awt.image.AffineTransformOp;
+import java.awt.image.BufferedImage;
+import java.awt.image.BufferedImageOp;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.logging.Logger;
+
+/**
+ * @author Sean Owen
+ * @author dswitkin@google.com (Daniel Switkin)
+ */
+public abstract class AbstractBlackBoxTestCase extends Assert {
+
+<span class="fc" id="L59">  private static final Logger log = Logger.getLogger(AbstractBlackBoxTestCase.class.getSimpleName());</span>
+
+  private final Path testBase;
+  private final Reader barcodeReader;
+  private final BarcodeFormat expectedFormat;
+  private final List&lt;TestResult&gt; testResults;
+
+  public static Path buildTestBase(String testBasePathSuffix) {
+    // A little workaround to prevent aggravation in my IDE
+<span class="fc" id="L68">    Path testBase = Paths.get(testBasePathSuffix);</span>
+<span class="pc bpc" id="L69" title="1 of 2 branches missed.">    if (!Files.exists(testBase)) {</span>
+      // try starting with 'core' since the test base is often given as the project root
+<span class="nc" id="L71">      testBase = Paths.get(&quot;core&quot;).resolve(testBasePathSuffix);</span>
+    }
+<span class="fc" id="L73">    return testBase;</span>
+  }
+
+  protected AbstractBlackBoxTestCase(String testBasePathSuffix,
+                                     Reader barcodeReader,
+<span class="fc" id="L78">                                     BarcodeFormat expectedFormat) {</span>
+<span class="fc" id="L79">    this.testBase = buildTestBase(testBasePathSuffix);</span>
+<span class="fc" id="L80">    this.barcodeReader = barcodeReader;</span>
+<span class="fc" id="L81">    this.expectedFormat = expectedFormat;</span>
+<span class="fc" id="L82">    testResults = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L84">    System.setProperty(&quot;java.util.logging.SimpleFormatter.format&quot;, &quot;%4$s: %5$s%6$s%n&quot;);</span>
+<span class="fc" id="L85">  }</span>
+
+  protected final Path getTestBase() {
+<span class="fc" id="L88">    return testBase;</span>
+  }
+
+  protected final void addTest(int mustPassCount, int tryHarderCount, float rotation) {
+<span class="fc" id="L92">    addTest(mustPassCount, tryHarderCount, 0, 0, rotation);</span>
+<span class="fc" id="L93">  }</span>
+
+  /**
+   * Adds a new test for the current directory of images.
+   *
+   * @param mustPassCount The number of images which must decode for the test to pass.
+   * @param tryHarderCount The number of images which must pass using the try harder flag.
+   * @param maxMisreads Maximum number of images which can fail due to successfully reading the wrong contents
+   * @param maxTryHarderMisreads Maximum number of images which can fail due to successfully
+   *                             reading the wrong contents using the try harder flag
+   * @param rotation The rotation in degrees clockwise to use for this test.
+   */
+  protected final void addTest(int mustPassCount,
+                               int tryHarderCount,
+                               int maxMisreads,
+                               int maxTryHarderMisreads,
+                               float rotation) {
+<span class="fc" id="L110">    testResults.add(new TestResult(mustPassCount, tryHarderCount, maxMisreads, maxTryHarderMisreads, rotation));</span>
+<span class="fc" id="L111">  }</span>
+
+  protected final List&lt;Path&gt; getImageFiles() throws IOException {
+<span class="fc" id="L114">    assertTrue(&quot;Please download and install test images, and run from the 'core' directory&quot;, Files.exists(testBase));</span>
+<span class="fc" id="L115">    List&lt;Path&gt; paths = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L116">    try (DirectoryStream&lt;Path&gt; pathIt = Files.newDirectoryStream(testBase, &quot;*.{jpg,jpeg,gif,png,JPG,JPEG,GIF,PNG}&quot;)) {</span>
+<span class="fc bfc" id="L117" title="All 2 branches covered.">      for (Path path : pathIt) {</span>
+<span class="fc" id="L118">        paths.add(path);</span>
+<span class="fc" id="L119">      }</span>
+    }
+<span class="fc" id="L121">    return paths;</span>
+  }
+
+  final Reader getReader() {
+<span class="fc" id="L125">    return barcodeReader;</span>
+  }
+
+  // This workaround is used because AbstractNegativeBlackBoxTestCase overrides this method but does
+  // not return SummaryResults.
+  @Test
+  public void testBlackBox() throws IOException {
+<span class="fc" id="L132">    testBlackBoxCountingResults(true);</span>
+<span class="fc" id="L133">  }</span>
+
+  private void testBlackBoxCountingResults(boolean assertOnFailure) throws IOException {
+<span class="fc" id="L136">    assertFalse(testResults.isEmpty());</span>
+
+<span class="fc" id="L138">    List&lt;Path&gt; imageFiles = getImageFiles();</span>
+<span class="fc" id="L139">    int testCount = testResults.size();</span>
+
+<span class="fc" id="L141">    int[] passedCounts = new int[testCount];</span>
+<span class="fc" id="L142">    int[] misreadCounts = new int[testCount];</span>
+<span class="fc" id="L143">    int[] tryHarderCounts = new int[testCount];</span>
+<span class="fc" id="L144">    int[] tryHarderMisreadCounts = new int[testCount];</span>
+
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    for (Path testImage : imageFiles) {</span>
+<span class="fc" id="L147">      log.info(String.format(&quot;Starting %s&quot;, testImage));</span>
+
+<span class="fc" id="L149">      BufferedImage image = ImageIO.read(testImage.toFile());</span>
+
+<span class="fc" id="L151">      String testImageFileName = testImage.getFileName().toString();</span>
+<span class="fc" id="L152">      String fileBaseName = testImageFileName.substring(0, testImageFileName.indexOf('.'));</span>
+<span class="fc" id="L153">      Path expectedTextFile = testBase.resolve(fileBaseName + &quot;.txt&quot;);</span>
+      String expectedText;
+<span class="fc bfc" id="L155" title="All 2 branches covered.">      if (Files.exists(expectedTextFile)) {</span>
+<span class="fc" id="L156">        expectedText = readFileAsString(expectedTextFile, StandardCharsets.UTF_8);</span>
+      } else {
+<span class="fc" id="L158">        expectedTextFile = testBase.resolve(fileBaseName + &quot;.bin&quot;);</span>
+<span class="fc" id="L159">        assertTrue(Files.exists(expectedTextFile));</span>
+<span class="fc" id="L160">        expectedText = readFileAsString(expectedTextFile, StandardCharsets.ISO_8859_1);</span>
+      }
+
+<span class="fc" id="L163">      Path expectedMetadataFile = testBase.resolve(fileBaseName + &quot;.metadata.txt&quot;);</span>
+<span class="fc" id="L164">      Properties expectedMetadata = new Properties();</span>
+<span class="fc bfc" id="L165" title="All 2 branches covered.">      if (Files.exists(expectedMetadataFile)) {</span>
+<span class="fc" id="L166">        try (BufferedReader reader = Files.newBufferedReader(expectedMetadataFile, StandardCharsets.UTF_8)) {</span>
+<span class="fc" id="L167">          expectedMetadata.load(reader);</span>
+        }
+      }
+
+<span class="fc bfc" id="L171" title="All 2 branches covered.">      for (int x = 0; x &lt; testCount; x++) {</span>
+<span class="fc" id="L172">        float rotation = testResults.get(x).getRotation();</span>
+<span class="fc" id="L173">        BufferedImage rotatedImage = rotateImage(image, rotation);</span>
+<span class="fc" id="L174">        LuminanceSource source = new BufferedImageLuminanceSource(rotatedImage);</span>
+<span class="fc" id="L175">        BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));</span>
+        try {
+<span class="fc bfc" id="L177" title="All 2 branches covered.">          if (decode(bitmap, rotation, expectedText, expectedMetadata, false)) {</span>
+<span class="fc" id="L178">            passedCounts[x]++;</span>
+          } else {
+<span class="fc" id="L180">            misreadCounts[x]++;</span>
+          }
+<span class="fc" id="L182">        } catch (ReaderException ignored) {</span>
+<span class="fc" id="L183">          log.fine(String.format(&quot;could not read at rotation %f&quot;, rotation));</span>
+<span class="fc" id="L184">        }</span>
+        try {
+<span class="fc bfc" id="L186" title="All 2 branches covered.">          if (decode(bitmap, rotation, expectedText, expectedMetadata, true)) {</span>
+<span class="fc" id="L187">            tryHarderCounts[x]++;</span>
+          } else {
+<span class="fc" id="L189">            tryHarderMisreadCounts[x]++;</span>
+          }
+<span class="fc" id="L191">        } catch (ReaderException ignored) {</span>
+<span class="fc" id="L192">          log.fine(String.format(&quot;could not read at rotation %f w/TH&quot;, rotation));</span>
+<span class="fc" id="L193">        }</span>
+      }
+<span class="fc" id="L195">    }</span>
+
+    // Print the results of all tests first
+<span class="fc" id="L198">    int totalFound = 0;</span>
+<span class="fc" id="L199">    int totalMustPass = 0;</span>
+<span class="fc" id="L200">    int totalMisread = 0;</span>
+<span class="fc" id="L201">    int totalMaxMisread = 0;</span>
+
+<span class="fc bfc" id="L203" title="All 2 branches covered.">    for (int x = 0; x &lt; testResults.size(); x++) {</span>
+<span class="fc" id="L204">      TestResult testResult = testResults.get(x);</span>
+<span class="fc" id="L205">      log.info(String.format(&quot;Rotation %d degrees:&quot;, (int) testResult.getRotation()));</span>
+<span class="fc" id="L206">      log.info(String.format(&quot; %d of %d images passed (%d required)&quot;,</span>
+<span class="fc" id="L207">                             passedCounts[x], imageFiles.size(), testResult.getMustPassCount()));</span>
+<span class="fc" id="L208">      int failed = imageFiles.size() - passedCounts[x];</span>
+<span class="fc" id="L209">      log.info(String.format(&quot; %d failed due to misreads, %d not detected&quot;,</span>
+<span class="fc" id="L210">                             misreadCounts[x], failed - misreadCounts[x]));</span>
+<span class="fc" id="L211">      log.info(String.format(&quot; %d of %d images passed with try harder (%d required)&quot;,</span>
+<span class="fc" id="L212">                             tryHarderCounts[x], imageFiles.size(), testResult.getTryHarderCount()));</span>
+<span class="fc" id="L213">      failed = imageFiles.size() - tryHarderCounts[x];</span>
+<span class="fc" id="L214">      log.info(String.format(&quot; %d failed due to misreads, %d not detected&quot;,</span>
+<span class="fc" id="L215">                             tryHarderMisreadCounts[x], failed - tryHarderMisreadCounts[x]));</span>
+<span class="fc" id="L216">      totalFound += passedCounts[x] + tryHarderCounts[x];</span>
+<span class="fc" id="L217">      totalMustPass += testResult.getMustPassCount() + testResult.getTryHarderCount();</span>
+<span class="fc" id="L218">      totalMisread += misreadCounts[x] + tryHarderMisreadCounts[x];</span>
+<span class="fc" id="L219">      totalMaxMisread += testResult.getMaxMisreads() + testResult.getMaxTryHarderMisreads();</span>
+    }
+
+<span class="fc" id="L222">    int totalTests = imageFiles.size() * testCount * 2;</span>
+<span class="fc" id="L223">    log.info(String.format(&quot;Decoded %d images out of %d (%d%%, %d required)&quot;,</span>
+<span class="fc" id="L224">                           totalFound, totalTests, totalFound * 100 / totalTests, totalMustPass));</span>
+<span class="pc bpc" id="L225" title="1 of 2 branches missed.">    if (totalFound &gt; totalMustPass) {</span>
+<span class="nc" id="L226">      log.warning(String.format(&quot;+++ Test too lax by %d images&quot;, totalFound - totalMustPass));</span>
+<span class="pc bpc" id="L227" title="1 of 2 branches missed.">    } else if (totalFound &lt; totalMustPass) {</span>
+<span class="nc" id="L228">      log.warning(String.format(&quot;--- Test failed by %d images&quot;, totalMustPass - totalFound));</span>
+    }
+
+<span class="pc bpc" id="L231" title="1 of 2 branches missed.">    if (totalMisread &lt; totalMaxMisread) {</span>
+<span class="nc" id="L232">      log.warning(String.format(&quot;+++ Test expects too many misreads by %d images&quot;, totalMaxMisread - totalMisread));</span>
+<span class="pc bpc" id="L233" title="1 of 2 branches missed.">    } else if (totalMisread &gt; totalMaxMisread) {</span>
+<span class="nc" id="L234">      log.warning(String.format(&quot;--- Test had too many misreads by %d images&quot;, totalMisread - totalMaxMisread));</span>
+    }
+
+    // Then run through again and assert if any failed
+<span class="pc bpc" id="L238" title="1 of 2 branches missed.">    if (assertOnFailure) {</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">      for (int x = 0; x &lt; testCount; x++) {</span>
+<span class="fc" id="L240">        TestResult testResult = testResults.get(x);</span>
+<span class="fc" id="L241">        String label = &quot;Rotation &quot; + testResult.getRotation() + &quot; degrees: Too many images failed&quot;;</span>
+<span class="fc" id="L242">        assertTrue(label,</span>
+<span class="pc bpc" id="L243" title="1 of 2 branches missed.">                   passedCounts[x] &gt;= testResult.getMustPassCount());</span>
+<span class="fc" id="L244">        assertTrue(&quot;Try harder, &quot; + label,</span>
+<span class="pc bpc" id="L245" title="1 of 2 branches missed.">                   tryHarderCounts[x] &gt;= testResult.getTryHarderCount());</span>
+<span class="fc" id="L246">        label = &quot;Rotation &quot; + testResult.getRotation() + &quot; degrees: Too many images misread&quot;;</span>
+<span class="fc" id="L247">        assertTrue(label,</span>
+<span class="pc bpc" id="L248" title="1 of 2 branches missed.">                   misreadCounts[x] &lt;= testResult.getMaxMisreads());</span>
+<span class="fc" id="L249">        assertTrue(&quot;Try harder, &quot; + label,</span>
+<span class="pc bpc" id="L250" title="1 of 2 branches missed.">                   tryHarderMisreadCounts[x] &lt;= testResult.getMaxTryHarderMisreads());</span>
+      }
+    }
+<span class="fc" id="L253">  }</span>
+
+  private boolean decode(BinaryBitmap source,
+                         float rotation,
+                         String expectedText,
+                         Map&lt;?,?&gt; expectedMetadata,
+                         boolean tryHarder) throws ReaderException {
+
+<span class="fc bfc" id="L261" title="All 2 branches covered.">    String suffix = String.format(&quot; (%srotation: %d)&quot;, tryHarder ? &quot;try harder, &quot; : &quot;&quot;, (int) rotation);</span>
+
+<span class="fc" id="L263">    Map&lt;DecodeHintType,Object&gt; hints = new EnumMap&lt;&gt;(DecodeHintType.class);</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    if (tryHarder) {</span>
+<span class="fc" id="L265">      hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);</span>
+    }
+
+    // Try in 'pure' mode mostly to exercise PURE_BARCODE code paths for exceptions;
+    // not expected to pass, generally
+<span class="fc" id="L270">    Result result = null;</span>
+    try {
+<span class="fc" id="L272">      Map&lt;DecodeHintType,Object&gt; pureHints = new EnumMap&lt;&gt;(hints);</span>
+<span class="fc" id="L273">      pureHints.put(DecodeHintType.PURE_BARCODE, Boolean.TRUE);</span>
+<span class="fc" id="L274">      result = barcodeReader.decode(source, pureHints);</span>
+<span class="fc" id="L275">    } catch (ReaderException re) {</span>
+      // continue
+<span class="fc" id="L277">    }</span>
+
+<span class="fc bfc" id="L279" title="All 2 branches covered.">    if (result == null) {</span>
+<span class="fc" id="L280">      result = barcodeReader.decode(source, hints);</span>
+    }
+
+<span class="fc bfc" id="L283" title="All 2 branches covered.">    if (expectedFormat != result.getBarcodeFormat()) {</span>
+<span class="fc" id="L284">      log.info(String.format(&quot;Format mismatch: expected '%s' but got '%s'%s&quot;,</span>
+<span class="fc" id="L285">                             expectedFormat, result.getBarcodeFormat(), suffix));</span>
+<span class="fc" id="L286">      return false;</span>
+    }
+
+<span class="fc" id="L289">    String resultText = result.getText();</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">    if (!expectedText.equals(resultText)) {</span>
+<span class="fc" id="L291">      log.info(String.format(&quot;Content mismatch: expected '%s' but got '%s'%s&quot;,</span>
+                             expectedText, resultText, suffix));
+<span class="fc" id="L293">      return false;</span>
+    }
+
+<span class="fc" id="L296">    Map&lt;ResultMetadataType,?&gt; resultMetadata = result.getResultMetadata();</span>
+<span class="fc bfc" id="L297" title="All 2 branches covered.">    for (Map.Entry&lt;?,?&gt; metadatum : expectedMetadata.entrySet()) {</span>
+<span class="fc" id="L298">      ResultMetadataType key = ResultMetadataType.valueOf(metadatum.getKey().toString());</span>
+<span class="fc" id="L299">      Object expectedValue = metadatum.getValue();</span>
+<span class="pc bpc" id="L300" title="1 of 2 branches missed.">      Object actualValue = resultMetadata == null ? null : resultMetadata.get(key);</span>
+<span class="pc bpc" id="L301" title="1 of 2 branches missed.">      if (!expectedValue.equals(actualValue)) {</span>
+<span class="nc" id="L302">        log.info(String.format(&quot;Metadata mismatch for key '%s': expected '%s' but got '%s'&quot;,</span>
+                               key, expectedValue, actualValue));
+<span class="nc" id="L304">        return false;</span>
+      }
+<span class="fc" id="L306">    }</span>
+
+<span class="fc" id="L308">    return true;</span>
+  }
+
+  protected static String readFileAsString(Path file, Charset charset) throws IOException {
+<span class="fc" id="L312">    String stringContents = new String(Files.readAllBytes(file), charset);</span>
+<span class="fc bfc" id="L313" title="All 2 branches covered.">    if (stringContents.endsWith(&quot;\n&quot;)) {</span>
+<span class="fc" id="L314">      log.info(&quot;String contents of file &quot; + file + &quot; end with a newline. &quot; +</span>
+                  &quot;This may not be intended and cause a test failure&quot;);
+    }
+<span class="fc" id="L317">    return stringContents;</span>
+  }
+
+  protected static BufferedImage rotateImage(BufferedImage original, float degrees) {
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    if (degrees == 0.0f) {</span>
+<span class="fc" id="L322">      return original;</span>
+    }
+
+<span class="fc bfc" id="L325" title="All 2 branches covered.">    switch (original.getType()) {</span>
+      case BufferedImage.TYPE_BYTE_INDEXED:
+      case BufferedImage.TYPE_BYTE_BINARY:
+<span class="fc" id="L328">        BufferedImage argb = new BufferedImage(original.getWidth(),</span>
+<span class="fc" id="L329">                                               original.getHeight(),</span>
+                                               BufferedImage.TYPE_INT_ARGB);
+<span class="fc" id="L331">        Graphics g = argb.createGraphics();</span>
+<span class="fc" id="L332">        g.drawImage(original, 0, 0, null);</span>
+<span class="fc" id="L333">        g.dispose();</span>
+<span class="fc" id="L334">        original = argb;</span>
+        break;
+    }
+
+<span class="fc" id="L338">    double radians = Math.toRadians(degrees);</span>
+
+    // Transform simply to find out the new bounding box (don't actually run the image through it)
+<span class="fc" id="L341">    AffineTransform at = new AffineTransform();</span>
+<span class="fc" id="L342">    at.rotate(radians, original.getWidth() / 2.0, original.getHeight() / 2.0);</span>
+<span class="fc" id="L343">    BufferedImageOp op = new AffineTransformOp(at, AffineTransformOp.TYPE_BICUBIC);</span>
+
+<span class="fc" id="L345">    RectangularShape r = op.getBounds2D(original);</span>
+<span class="fc" id="L346">    int width = (int) Math.ceil(r.getWidth());</span>
+<span class="fc" id="L347">    int height = (int) Math.ceil(r.getHeight());</span>
+
+    // Real transform, now that we know the size of the new image and how to translate after we rotate
+    // to keep it centered
+<span class="fc" id="L351">    at = new AffineTransform();</span>
+<span class="fc" id="L352">    at.rotate(radians, width / 2.0, height / 2.0);</span>
+<span class="fc" id="L353">    at.translate((width - original.getWidth()) / 2.0,</span>
+<span class="fc" id="L354">                 (height - original.getHeight()) / 2.0);</span>
+<span class="fc" id="L355">    op = new AffineTransformOp(at, AffineTransformOp.TYPE_BICUBIC);</span>
+
+<span class="fc" id="L357">    return op.filter(original, new BufferedImage(width, height, original.getType()));</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

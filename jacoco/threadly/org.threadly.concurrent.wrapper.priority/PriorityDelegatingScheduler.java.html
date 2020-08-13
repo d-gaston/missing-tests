@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PriorityDelegatingScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.priority</a> &gt; <span class="el_source">PriorityDelegatingScheduler.java</span></div><h1>PriorityDelegatingScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.priority;
+
+import java.util.concurrent.Callable;
+
+import org.threadly.concurrent.AbstractSubmitterScheduler;
+import org.threadly.concurrent.PrioritySchedulerService;
+import org.threadly.concurrent.SchedulerService;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * Wrapper which will delegate the tasks provided to a specific scheduler designated for their 
+ * priority.  This implements the {@link PrioritySchedulerService} with a collection of multiple 
+ * executors (and queues) for each priority rather than a single queue.
+ * &lt;p&gt;
+ * One useful example of this could be in producing a priority aware implementation of 
+ * {@link org.threadly.concurrent.wrapper.limiter.SchedulerServiceLimiter} where different 
+ * priorities are allowed to use a given portion of the pool.
+ * &lt;p&gt;
+ * Because of the use of multiple pools (often times backed by a single pool), this class does have 
+ * some unique considerations.  Most of the non-task execution specific functions of 
+ * {@link PrioritySchedulerService} will have some unique behaviors.  Specifically 
+ * {@link #getMaxWaitForLowPriority()} will always return zero because there is no ability to 
+ * balance the task queues between the different schedulers.  In addition functions like 
+ * {@link #getActiveTaskCount()}, {@link #getQueuedTaskCount()}, 
+ * {@link #getWaitingForExecutionTaskCount()} will return the values from the default priority's 
+ * scheduler (since it is assumed that the provided schedulers may be multiple of the same reference, 
+ * or may delegate to the same parent pool).
+ * 
+ * @since 5.8
+ */
+public class PriorityDelegatingScheduler extends AbstractSubmitterScheduler
+                                         implements PrioritySchedulerService {
+  private final SchedulerService highPriorityScheduler;
+  private final SchedulerService lowPriorityScheduler;
+  private final SchedulerService starvablePriorityScheduler;
+  private final TaskPriority defaultPriority;
+
+  /**
+   * Construct a new {@link PrioritySchedulerService} that delegates to the given schedulers.
+   * &lt;p&gt;
+   * Please see class documentation to understand how {@code defaultPriority} will also provide the 
+   * priority for the non-task execution portions of the {@link SchedulerService} interface.
+   * 
+   * @param highPriorityScheduler Scheduler to be used for high priority tasks
+   * @param lowPriorityScheduler Scheduler to be used for low priority tasks
+   * @param starvablePriorityScheduler Scheduler to be used for starvable priority tasks, 
+   *                                     or {@code null} to delegate to {@code lowPriorityScheduler}
+   * @param defaultPriority The default priority to be used when none is provided
+   */
+  public PriorityDelegatingScheduler(SchedulerService highPriorityScheduler, 
+                                     SchedulerService lowPriorityScheduler, 
+                                     SchedulerService starvablePriorityScheduler, 
+<span class="fc" id="L55">                                     TaskPriority defaultPriority) {</span>
+<span class="fc" id="L56">    ArgumentVerifier.assertNotNull(highPriorityScheduler, &quot;highPriorityScheduler&quot;);</span>
+<span class="fc" id="L57">    ArgumentVerifier.assertNotNull(lowPriorityScheduler, &quot;lowPriorityScheduler&quot;);</span>
+<span class="fc" id="L58">    ArgumentVerifier.assertNotNull(defaultPriority, &quot;defaultPriority&quot;);</span>
+    
+<span class="fc" id="L60">    this.highPriorityScheduler = highPriorityScheduler;</span>
+<span class="fc" id="L61">    this.lowPriorityScheduler = lowPriorityScheduler;</span>
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    this.starvablePriorityScheduler = </span>
+        starvablePriorityScheduler == null ? lowPriorityScheduler : starvablePriorityScheduler;
+<span class="fc" id="L64">    this.defaultPriority = defaultPriority;</span>
+<span class="fc" id="L65">  }</span>
+  
+  /**
+   * Get a scheduler of the specified priority.
+   * 
+   * @param priority Desired priority or {@code null} for default priority
+   * @return Scheduler which corresponds to the priority requested
+   */
+  protected SchedulerService scheduler(TaskPriority priority) {
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    if (priority == TaskPriority.High) {</span>
+<span class="fc" id="L75">      return highPriorityScheduler;</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    } else if (priority == TaskPriority.Low) {</span>
+<span class="fc" id="L77">      return lowPriorityScheduler;</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    } else if (priority == TaskPriority.Starvable) {</span>
+<span class="fc" id="L79">      return starvablePriorityScheduler;</span>
+    } else {
+      // priority must be null
+<span class="fc" id="L82">      return scheduler(defaultPriority);</span>
+    }
+  }
+
+  @Override
+  public TaskPriority getDefaultPriority() {
+<span class="nc" id="L88">    return defaultPriority;</span>
+  }
+
+  @Override
+  public long getMaxWaitForLowPriority() {
+<span class="nc" id="L93">    return 0;</span>
+  }
+
+  @Override
+  public int getQueuedTaskCount(TaskPriority priority) {
+<span class="nc" id="L98">    return scheduler(priority).getQueuedTaskCount();</span>
+  }
+
+  @Override
+  public int getWaitingForExecutionTaskCount(TaskPriority priority) {
+<span class="nc" id="L103">    return scheduler(priority).getWaitingForExecutionTaskCount();</span>
+  }
+
+  @Override
+  public boolean isShutdown() {
+<span class="nc" id="L108">    return highPriorityScheduler.isShutdown() | </span>
+<span class="nc" id="L109">             lowPriorityScheduler.isShutdown() | starvablePriorityScheduler.isShutdown();</span>
+  }
+
+  @Override
+  public int getQueuedTaskCount() {
+<span class="fc" id="L114">    return scheduler(defaultPriority).getQueuedTaskCount();</span>
+  }
+
+  @Override
+  public int getWaitingForExecutionTaskCount() {
+<span class="fc" id="L119">    return scheduler(defaultPriority).getWaitingForExecutionTaskCount();</span>
+  }
+
+  @Override
+  public int getActiveTaskCount() {
+<span class="fc" id="L124">    return scheduler(defaultPriority).getActiveTaskCount();</span>
+  }
+
+  @Override
+  public boolean remove(Runnable task) {
+<span class="fc bfc" id="L129" title="All 2 branches covered.">    if (highPriorityScheduler.remove(task)) {</span>
+<span class="fc" id="L130">      return true;</span>
+<span class="pc bpc" id="L131" title="3 of 4 branches missed.">    } else if (lowPriorityScheduler != highPriorityScheduler &amp;&amp; lowPriorityScheduler.remove(task)) {</span>
+<span class="nc" id="L132">      return true;</span>
+<span class="pc bpc" id="L133" title="3 of 4 branches missed.">    } else if (starvablePriorityScheduler != highPriorityScheduler &amp;&amp; </span>
+                 starvablePriorityScheduler != lowPriorityScheduler &amp;&amp; 
+<span class="nc bnc" id="L135" title="All 2 branches missed.">                 starvablePriorityScheduler.remove(task)) {</span>
+<span class="nc" id="L136">      return true;</span>
+    } else {
+<span class="fc" id="L138">      return false;</span>
+    }
+  }
+
+  @Override
+  public boolean remove(Callable&lt;?&gt; task) {
+<span class="fc bfc" id="L144" title="All 2 branches covered.">    if (highPriorityScheduler.remove(task)) {</span>
+<span class="fc" id="L145">      return true;</span>
+<span class="pc bpc" id="L146" title="3 of 4 branches missed.">    } else if (lowPriorityScheduler != highPriorityScheduler &amp;&amp; lowPriorityScheduler.remove(task)) {</span>
+<span class="nc" id="L147">      return true;</span>
+<span class="pc bpc" id="L148" title="3 of 4 branches missed.">    } else if (starvablePriorityScheduler != highPriorityScheduler &amp;&amp; </span>
+                 starvablePriorityScheduler != lowPriorityScheduler &amp;&amp; 
+<span class="nc bnc" id="L150" title="All 2 branches missed.">                 starvablePriorityScheduler.remove(task)) {</span>
+<span class="nc" id="L151">      return true;</span>
+    } else {
+<span class="fc" id="L153">      return false;</span>
+    }
+  }
+
+  @Override
+  protected void doSchedule(Runnable task, long delayInMs) {
+<span class="fc" id="L159">    scheduler(defaultPriority).schedule(task, delayInMs);</span>
+<span class="fc" id="L160">  }</span>
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay) {
+<span class="fc" id="L164">    scheduler(defaultPriority).scheduleWithFixedDelay(task, initialDelay, recurringDelay);</span>
+<span class="fc" id="L165">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period) {
+<span class="fc" id="L169">    scheduler(defaultPriority).scheduleAtFixedRate(task, initialDelay, period);</span>
+<span class="fc" id="L170">  }</span>
+
+  @Override
+  public void execute(Runnable task, TaskPriority priority) {
+<span class="fc" id="L174">    scheduler(priority).execute(task);</span>
+<span class="fc" id="L175">  }</span>
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result, TaskPriority priority) {
+<span class="fc" id="L179">    return scheduler(priority).submit(task, result);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task, TaskPriority priority) {
+<span class="nc" id="L184">    return scheduler(priority).submit(task);</span>
+  }
+
+  @Override
+  public void schedule(Runnable task, long delayInMs, TaskPriority priority) {
+<span class="nc" id="L189">    scheduler(priority).schedule(task, delayInMs);</span>
+<span class="nc" id="L190">  }</span>
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Runnable task, T result, long delayInMs,
+                                                 TaskPriority priority) {
+<span class="fc" id="L195">    return scheduler(priority).submitScheduled(task, result, delayInMs);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Callable&lt;T&gt; task, long delayInMs,
+                                                 TaskPriority priority) {
+<span class="nc" id="L201">    return scheduler(priority).submitScheduled(task, delayInMs);</span>
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay,
+                                     TaskPriority priority) {
+<span class="nc" id="L207">    scheduler(priority).scheduleWithFixedDelay(task, initialDelay, recurringDelay);</span>
+<span class="nc" id="L208">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period,
+                                  TaskPriority priority) {
+<span class="nc" id="L213">    scheduler(priority).scheduleAtFixedRate(task, initialDelay, period);</span>
+<span class="nc" id="L214">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

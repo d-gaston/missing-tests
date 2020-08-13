@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SubmitterSchedulerLimiter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">SubmitterSchedulerLimiter.java</span></div><h1>SubmitterSchedulerLimiter.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+
+/**
+ * This class is designed to limit how much parallel execution happens on a provided 
+ * {@link SubmitterScheduler}.  This allows the implementor to have one thread pool for all 
+ * their code, and if they want certain sections to have less levels of parallelism (possibly 
+ * because those those sections would completely consume the global pool), they can wrap the 
+ * executor in this class.
+ * &lt;p&gt;
+ * Thus providing you better control on the absolute thread count and how much parallelism can 
+ * occur in different sections of the program.
+ * &lt;p&gt;
+ * This is an alternative from having to create multiple thread pools.  By using this you also are 
+ * able to accomplish more efficiently thread use than multiple thread pools would.
+ * &lt;p&gt;
+ * If limiting to a single thread, please see {@link SingleThreadSchedulerSubPool} as a possible 
+ * alternative.
+ * 
+ * @since 4.6.0 (since 4.3.0 at org.threadly.concurrent.limiter)
+ */
+public class SubmitterSchedulerLimiter extends ExecutorLimiter implements SubmitterScheduler {
+  protected final SubmitterScheduler scheduler;
+  
+  /**
+   * Constructs a new limiter that implements the {@link SubmitterScheduler}.
+   * 
+   * @param scheduler {@link SubmitterScheduler} implementation to submit task executions to.
+   * @param maxConcurrency maximum quantity of runnables to run in parallel
+   */
+  public SubmitterSchedulerLimiter(SubmitterScheduler scheduler, int maxConcurrency) {
+<span class="fc" id="L42">    this(scheduler, maxConcurrency, DEFAULT_LIMIT_FUTURE_LISTENER_EXECUTION);</span>
+<span class="fc" id="L43">  }</span>
+  
+  /**
+   * Constructs a new limiter that implements the {@link SubmitterScheduler}.
+   * &lt;p&gt;
+   * This constructor allows you to specify if listeners / 
+   * {@link org.threadly.concurrent.future.FutureCallback}'s / functions in 
+   * {@link ListenableFuture#map(java.util.function.Function)} or 
+   * {@link ListenableFuture#flatMap(java.util.function.Function)} should be counted towards the 
+   * concurrency limit.  Specifying {@code false} will release the limit as soon as the original 
+   * task completes.  Specifying {@code true} will continue to enforce the limit until all listeners 
+   * (without an executor) complete.
+   * 
+   * @param scheduler {@link SubmitterScheduler} implementation to submit task executions to.
+   * @param maxConcurrency maximum quantity of runnables to run in parallel
+   * @param limitFutureListenersExecution {@code true} to include listener / mapped functions towards execution limit
+   */
+  public SubmitterSchedulerLimiter(SubmitterScheduler scheduler, int maxConcurrency, 
+                                   boolean limitFutureListenersExecution) {
+<span class="fc" id="L62">    super(scheduler, maxConcurrency, limitFutureListenersExecution);</span>
+    
+<span class="fc" id="L64">    this.scheduler = scheduler;</span>
+<span class="fc" id="L65">  }</span>
+
+  @Override
+  public ListenableFuture&lt;?&gt; submitScheduled(Runnable task, long delayInMs) {
+<span class="fc" id="L69">    return submitScheduled(task, null, delayInMs);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Runnable task, T result, long delayInMs) {
+<span class="fc" id="L74">    return submitScheduled(RunnableCallableAdapter.adapt(task, result), delayInMs);</span>
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submitScheduled(Callable&lt;T&gt; task, long delayInMs) {
+<span class="fc" id="L79">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L81">    ListenableFutureTask&lt;T&gt; ft = new ListenableFutureTask&lt;&gt;(false, task, this);</span>
+    
+<span class="fc" id="L83">    doSchedule(ft, ft, delayInMs);</span>
+    
+<span class="fc" id="L85">    return ft;</span>
+  }
+  
+  /**
+   * Adds a task to either execute (delay zero), or schedule with the provided delay.  No safety 
+   * checks are done at this point, so only provide non-null inputs.
+   * 
+   * @param task Task for execution
+   * @param delayInMs delay in milliseconds, greater than or equal to zero
+   */
+  protected void doSchedule(Runnable task, ListenableFuture&lt;?&gt; future, long delayInMs) {
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (delayInMs == 0) {</span>
+<span class="fc" id="L97">      executeOrQueue(task, future);</span>
+    } else {
+<span class="fc" id="L99">      scheduler.schedule(new DelayedExecutionRunnable(task), delayInMs);</span>
+    }
+<span class="fc" id="L101">  }</span>
+
+  @Override
+  public void schedule(Runnable task, long delayInMs) {
+<span class="fc" id="L105">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L106">    ArgumentVerifier.assertNotNegative(delayInMs, &quot;delayInMs&quot;);</span>
+    
+<span class="fc" id="L108">    doSchedule(task, null, delayInMs);</span>
+<span class="fc" id="L109">  }</span>
+  
+  protected void initialRecurringSchedule(RecurringWrapper rw, long initialDelay) {
+<span class="fc" id="L112">    ArgumentVerifier.assertNotNegative(initialDelay, &quot;initialDelay&quot;);</span>
+    
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    if (initialDelay == 0) {</span>
+<span class="fc" id="L115">      executeOrQueueWrapper(rw);</span>
+    } else {
+<span class="fc" id="L117">      scheduler.schedule(rw.delayRunnable, initialDelay);</span>
+    }
+<span class="fc" id="L119">  }</span>
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay) {
+<span class="fc" id="L123">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L124">    ArgumentVerifier.assertNotNegative(recurringDelay, &quot;recurringDelay&quot;);</span>
+    
+<span class="fc" id="L126">    initialRecurringSchedule(new RecurringDelayWrapper(task, recurringDelay), initialDelay);</span>
+<span class="fc" id="L127">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period) {
+<span class="fc" id="L131">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L132">    ArgumentVerifier.assertGreaterThanZero(period, &quot;period&quot;);</span>
+    
+<span class="fc" id="L134">    initialRecurringSchedule(new RecurringRateWrapper(task, initialDelay, period), initialDelay);</span>
+<span class="fc" id="L135">  }</span>
+  
+  /**
+   * Small runnable that allows scheduled tasks to pass through the same execution queue that 
+   * immediate execution has to.
+   * 
+   * @since 1.1.0
+   */
+  protected class DelayedExecutionRunnable implements Runnable, RunnableContainer {
+    private final LimiterRunnableWrapper lrw;
+
+    protected DelayedExecutionRunnable(Runnable runnable) {
+<span class="fc" id="L147">      this(new LimiterRunnableWrapper(runnable));</span>
+<span class="fc" id="L148">    }</span>
+
+<span class="fc" id="L150">    protected DelayedExecutionRunnable(LimiterRunnableWrapper lrw) {</span>
+<span class="fc" id="L151">      this.lrw = lrw;</span>
+<span class="fc" id="L152">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc bfc" id="L156" title="All 2 branches covered.">      if (canRunTask()) {  // we can run in the thread we already have</span>
+<span class="fc" id="L157">        lrw.run();</span>
+      } else {
+<span class="fc" id="L159">        addToQueue(lrw);</span>
+      }
+<span class="fc" id="L161">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L165">      return lrw.getContainedRunnable();</span>
+    }
+  }
+  
+  /**
+   * Abstract class to represent a wrapper for a recurring task.  The primary need for this is to 
+   * deal with the removal of these recurring tasks in the {@link SchedulerServiceLimiter}.
+   * 
+   * @since 5.15
+   */
+  protected abstract class RecurringWrapper extends LimiterRunnableWrapper {
+    protected final AtomicBoolean valid;
+    protected final DelayedExecutionRunnable delayRunnable;
+    
+<span class="fc" id="L179">    public RecurringWrapper(Runnable runnable) {</span>
+<span class="fc" id="L180">      super(runnable);</span>
+      
+<span class="fc" id="L182">      valid = new AtomicBoolean(true);</span>
+<span class="fc" id="L183">      delayRunnable = new DelayedExecutionRunnable(this);</span>
+<span class="fc" id="L184">    }</span>
+    
+    public boolean invalidate() {
+<span class="fc" id="L187">      return valid.compareAndSet(true, false);</span>
+    }
+    
+    @Override
+    public void run() {
+<span class="pc bpc" id="L192" title="1 of 2 branches missed.">      if (valid.get()) {</span>
+<span class="fc" id="L193">        super.run();</span>
+      }
+<span class="fc" id="L195">    }</span>
+  }
+
+  /**
+   * Wrapper for recurring tasks that reschedule with a given delay after completing execution.
+   * 
+   * @since 3.1.0
+   */
+  protected class RecurringDelayWrapper extends RecurringWrapper {
+    protected final long recurringDelay;
+    
+<span class="fc" id="L206">    public RecurringDelayWrapper(Runnable runnable, long recurringDelay) {</span>
+<span class="fc" id="L207">      super(runnable);</span>
+      
+<span class="fc" id="L209">      this.recurringDelay = recurringDelay;</span>
+<span class="fc" id="L210">    }</span>
+    
+    @Override
+    protected void doAfterRunTasks() {
+<span class="fc" id="L214">      scheduler.schedule(delayRunnable, recurringDelay);</span>
+<span class="fc" id="L215">    }</span>
+  }
+
+  /**
+   * Wrapper for recurring tasks that reschedule at a fixed rate after completing execution.
+   * 
+   * @since 3.1.0
+   */
+  protected class RecurringRateWrapper extends RecurringWrapper {
+    protected final long period;
+    private long nextRunTime;
+    
+<span class="fc" id="L227">    public RecurringRateWrapper(Runnable runnable, long initialDelay, long period) {</span>
+<span class="fc" id="L228">      super(runnable);</span>
+      
+<span class="fc" id="L230">      this.period = period;</span>
+<span class="fc" id="L231">      nextRunTime = Clock.accurateForwardProgressingMillis() + initialDelay + period;</span>
+<span class="fc" id="L232">    }</span>
+    
+    @Override
+    protected void doAfterRunTasks() {
+<span class="fc" id="L236">      nextRunTime += period;</span>
+<span class="fc" id="L237">      long nextDelay = nextRunTime - Clock.accurateForwardProgressingMillis();</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">      if (nextDelay &lt; 1) {</span>
+<span class="fc" id="L239">        executeOrQueueWrapper(this);</span>
+      } else {
+<span class="fc" id="L241">        scheduler.schedule(delayRunnable, nextDelay);</span>
+      }
+<span class="fc" id="L243">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

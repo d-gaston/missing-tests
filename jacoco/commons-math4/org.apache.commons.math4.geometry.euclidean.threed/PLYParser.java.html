@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PLYParser.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.geometry.euclidean.threed</a> &gt; <span class="el_source">PLYParser.java</span></div><h1>PLYParser.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.geometry.euclidean.threed;
+
+import java.io.BufferedReader;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.StringTokenizer;
+
+import org.apache.commons.numbers.core.Precision;
+
+/** This class is a small and incomplete parser for PLY files.
+ * &lt;p&gt;
+ * This parser is only intended for test purposes, it does not
+ * parse the full header, it does not handle all properties,
+ * it has rudimentary error handling.
+ * &lt;/p&gt;
+ * @since 3.5
+ */
+public class PLYParser {
+
+    /** Parsed vertices. */
+    private Cartesian3D[] vertices;
+
+    /** Parsed faces. */
+    private int[][] faces;
+
+    /** Reader for PLY data. */
+    private BufferedReader br;
+
+    /** Last parsed line. */
+    private String line;
+
+    /** Simple constructor.
+     * @param stream stream to parse (closing it remains caller responsibility)
+     * @exception IOException if stream cannot be read
+     * @exception ParseException if stream content cannot be parsed
+     */
+    public PLYParser(final InputStream stream)
+<span class="fc" id="L60">        throws IOException, ParseException {</span>
+
+        try {
+<span class="fc" id="L63">            br = new BufferedReader(new InputStreamReader(stream, &quot;UTF-8&quot;));</span>
+
+            // parse the header
+<span class="fc" id="L66">            List&lt;Field&gt; fields = parseNextLine();</span>
+<span class="pc bpc" id="L67" title="2 of 4 branches missed.">            if (fields.size() != 1 || fields.get(0).getToken() != Token.PLY) {</span>
+<span class="nc" id="L68">                complain();</span>
+            }
+
+<span class="fc" id="L71">            boolean parsing       = true;</span>
+<span class="fc" id="L72">            int nbVertices        = -1;</span>
+<span class="fc" id="L73">            int nbFaces           = -1;</span>
+<span class="fc" id="L74">            int xIndex            = -1;</span>
+<span class="fc" id="L75">            int yIndex            = -1;</span>
+<span class="fc" id="L76">            int zIndex            = -1;</span>
+<span class="fc" id="L77">            int vPropertiesNumber = -1;</span>
+<span class="fc" id="L78">            boolean inVertexElt   = false;</span>
+<span class="fc" id="L79">            boolean inFaceElt     = false;</span>
+<span class="fc bfc" id="L80" title="All 2 branches covered.">            while (parsing) {</span>
+<span class="fc" id="L81">                fields = parseNextLine();</span>
+<span class="pc bpc" id="L82" title="1 of 2 branches missed.">                if (fields.size() &lt; 1) {</span>
+<span class="nc" id="L83">                    complain();</span>
+                }
+<span class="pc bpc" id="L85" title="1 of 6 branches missed.">                switch (fields.get(0).getToken()) {</span>
+                    case FORMAT:
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">                        if (fields.size() != 3 ||</span>
+<span class="pc bpc" id="L88" title="1 of 2 branches missed.">                        fields.get(1).getToken() != Token.ASCII ||</span>
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">                        fields.get(2).getToken() != Token.UNKNOWN ||</span>
+<span class="pc bpc" id="L90" title="1 of 2 branches missed.">                        !Precision.equals(Double.parseDouble(fields.get(2).getValue()), 1.0, 0.001)) {</span>
+<span class="nc" id="L91">                            complain();</span>
+                        }
+<span class="fc" id="L93">                        inVertexElt = false;</span>
+<span class="fc" id="L94">                        inFaceElt   = false;</span>
+<span class="fc" id="L95">                        break;</span>
+                    case COMMENT:
+                        // we just ignore this line
+<span class="fc" id="L98">                        break;</span>
+                    case ELEMENT:
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">                        if (fields.size() != 3 ||</span>
+<span class="pc bpc" id="L101" title="1 of 4 branches missed.">                        (fields.get(1).getToken() != Token.VERTEX &amp;&amp; fields.get(1).getToken() != Token.FACE) ||</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">                        fields.get(2).getToken() != Token.UNKNOWN) {</span>
+<span class="nc" id="L103">                            complain();</span>
+                        }
+<span class="fc bfc" id="L105" title="All 2 branches covered.">                        if (fields.get(1).getToken() == Token.VERTEX) {</span>
+<span class="fc" id="L106">                            nbVertices  = Integer.parseInt(fields.get(2).getValue());</span>
+<span class="fc" id="L107">                            inVertexElt = true;</span>
+<span class="fc" id="L108">                            inFaceElt   = false;</span>
+                        } else {
+<span class="fc" id="L110">                            nbFaces     = Integer.parseInt(fields.get(2).getValue());</span>
+<span class="fc" id="L111">                            inVertexElt = false;</span>
+<span class="fc" id="L112">                            inFaceElt   = true;</span>
+                        }
+<span class="fc" id="L114">                        break;</span>
+                    case PROPERTY:
+<span class="fc bfc" id="L116" title="All 2 branches covered.">                        if (inVertexElt) {</span>
+<span class="fc" id="L117">                            ++vPropertiesNumber;</span>
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">                            if (fields.size() != 3 ||</span>
+<span class="pc bpc" id="L119" title="1 of 2 branches missed.">                                (fields.get(1).getToken() != Token.CHAR   &amp;&amp;</span>
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">                                 fields.get(1).getToken() != Token.UCHAR  &amp;&amp;</span>
+<span class="pc bpc" id="L121" title="1 of 2 branches missed.">                                 fields.get(1).getToken() != Token.SHORT  &amp;&amp;</span>
+<span class="pc bpc" id="L122" title="1 of 2 branches missed.">                                 fields.get(1).getToken() != Token.USHORT &amp;&amp;</span>
+<span class="pc bpc" id="L123" title="1 of 2 branches missed.">                                 fields.get(1).getToken() != Token.INT    &amp;&amp;</span>
+<span class="pc bpc" id="L124" title="1 of 2 branches missed.">                                 fields.get(1).getToken() != Token.UINT   &amp;&amp;</span>
+<span class="fc bfc" id="L125" title="All 2 branches covered.">                                 fields.get(1).getToken() != Token.FLOAT  &amp;&amp;</span>
+<span class="pc bpc" id="L126" title="1 of 2 branches missed.">                                 fields.get(1).getToken() != Token.DOUBLE)) {</span>
+<span class="nc" id="L127">                                complain();</span>
+                            }
+<span class="fc bfc" id="L129" title="All 2 branches covered.">                            if (fields.get(2).getToken() == Token.X) {</span>
+<span class="fc" id="L130">                                xIndex = vPropertiesNumber;</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">                            }else if (fields.get(2).getToken() == Token.Y) {</span>
+<span class="fc" id="L132">                                yIndex = vPropertiesNumber;</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">                            }else if (fields.get(2).getToken() == Token.Z) {</span>
+<span class="fc" id="L134">                                zIndex = vPropertiesNumber;</span>
+                            }
+<span class="pc bpc" id="L136" title="1 of 2 branches missed.">                        } else if (inFaceElt) {</span>
+<span class="pc bpc" id="L137" title="1 of 2 branches missed.">                            if (fields.size() != 5 ||</span>
+<span class="pc bpc" id="L138" title="1 of 2 branches missed.">                                fields.get(1).getToken()  != Token.LIST   &amp;&amp;</span>
+<span class="nc bnc" id="L139" title="All 2 branches missed.">                                (fields.get(2).getToken() != Token.CHAR   &amp;&amp;</span>
+<span class="nc bnc" id="L140" title="All 2 branches missed.">                                 fields.get(2).getToken() != Token.UCHAR  &amp;&amp;</span>
+<span class="nc bnc" id="L141" title="All 2 branches missed.">                                 fields.get(2).getToken() != Token.SHORT  &amp;&amp;</span>
+<span class="nc bnc" id="L142" title="All 2 branches missed.">                                 fields.get(2).getToken() != Token.USHORT &amp;&amp;</span>
+<span class="nc bnc" id="L143" title="All 2 branches missed.">                                 fields.get(2).getToken() != Token.INT    &amp;&amp;</span>
+<span class="pc bnc" id="L144" title="All 2 branches missed.">                                 fields.get(2).getToken() != Token.UINT) ||</span>
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">                                (fields.get(3).getToken() != Token.CHAR   &amp;&amp;</span>
+<span class="pc bpc" id="L146" title="1 of 2 branches missed.">                                 fields.get(3).getToken() != Token.UCHAR  &amp;&amp;</span>
+<span class="pc bpc" id="L147" title="1 of 2 branches missed.">                                 fields.get(3).getToken() != Token.SHORT  &amp;&amp;</span>
+<span class="pc bpc" id="L148" title="1 of 2 branches missed.">                                 fields.get(3).getToken() != Token.USHORT &amp;&amp;</span>
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">                                 fields.get(3).getToken() != Token.INT    &amp;&amp;</span>
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">                                 fields.get(3).getToken() != Token.UINT) ||</span>
+<span class="pc bpc" id="L151" title="1 of 2 branches missed.">                                 fields.get(4).getToken() != Token.VERTEX_INDICES) {</span>
+<span class="nc" id="L152">                                complain();</span>
+                            }
+                        } else {
+<span class="nc" id="L155">                            complain();</span>
+                        }
+<span class="nc" id="L157">                        break;</span>
+                    case END_HEADER:
+<span class="fc" id="L159">                        inVertexElt = false;</span>
+<span class="fc" id="L160">                        inFaceElt   = false;</span>
+<span class="fc" id="L161">                        parsing     = false;</span>
+<span class="fc" id="L162">                        break;</span>
+                    default:
+<span class="nc" id="L164">                        throw new ParseException(&quot;unable to parse line: &quot; + line, 0);</span>
+                }
+            }
+<span class="fc" id="L167">            ++vPropertiesNumber;</span>
+
+            // parse vertices
+<span class="fc" id="L170">            vertices = new Cartesian3D[nbVertices];</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">            for (int i = 0; i &lt; nbVertices; ++i) {</span>
+<span class="fc" id="L172">                fields = parseNextLine();</span>
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">                if (fields.size() != vPropertiesNumber ||</span>
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">                    fields.get(xIndex).getToken() != Token.UNKNOWN ||</span>
+<span class="pc bpc" id="L175" title="1 of 2 branches missed.">                    fields.get(yIndex).getToken() != Token.UNKNOWN ||</span>
+<span class="pc bpc" id="L176" title="1 of 2 branches missed.">                    fields.get(zIndex).getToken() != Token.UNKNOWN) {</span>
+<span class="nc" id="L177">                    complain();</span>
+                }
+<span class="fc" id="L179">                vertices[i] = new Cartesian3D(Double.parseDouble(fields.get(xIndex).getValue()),</span>
+<span class="fc" id="L180">                                           Double.parseDouble(fields.get(yIndex).getValue()),</span>
+<span class="fc" id="L181">                                           Double.parseDouble(fields.get(zIndex).getValue()));</span>
+            }
+
+            // parse faces
+<span class="fc" id="L185">            faces = new int[nbFaces][];</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">            for (int i = 0; i &lt; nbFaces; ++i) {</span>
+<span class="fc" id="L187">                fields = parseNextLine();</span>
+<span class="pc bpc" id="L188" title="1 of 2 branches missed.">                if (fields.isEmpty() ||</span>
+<span class="pc bpc" id="L189" title="1 of 2 branches missed.">                    fields.size() != (Integer.parseInt(fields.get(0).getValue()) + 1)) {</span>
+<span class="nc" id="L190">                    complain();</span>
+                }
+<span class="fc" id="L192">                faces[i] = new int[fields.size() - 1];</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">                for (int j = 0; j &lt; faces[i].length; ++j) {</span>
+<span class="fc" id="L194">                    faces[i][j] = Integer.parseInt(fields.get(j + 1).getValue());</span>
+                }
+            }
+
+<span class="nc" id="L198">        } catch (NumberFormatException nfe) {</span>
+<span class="nc" id="L199">            complain();</span>
+<span class="fc" id="L200">        }</span>
+<span class="fc" id="L201">    }</span>
+
+    /** Complain about a bad line.
+     * @exception ParseException always thrown
+     */
+    private void complain() throws ParseException {
+<span class="nc" id="L207">        throw new ParseException(&quot;unable to parse line: &quot; + line, 0);</span>
+    }
+
+    /** Parse next line.
+     * @return parsed fields
+     * @exception IOException if stream cannot be read
+     * @exception ParseException if the line does not contain the expected number of fields
+     */
+    private List&lt;Field&gt; parseNextLine()
+        throws IOException, ParseException {
+<span class="fc" id="L217">        final List&lt;Field&gt; fields = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L218">        line = br.readLine();</span>
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">        if (line == null) {</span>
+<span class="nc" id="L220">            throw new EOFException();</span>
+        }
+<span class="fc" id="L222">        final StringTokenizer tokenizer = new StringTokenizer(line);</span>
+<span class="fc bfc" id="L223" title="All 2 branches covered.">        while (tokenizer.hasMoreTokens()) {</span>
+<span class="fc" id="L224">            fields.add(new Field(tokenizer.nextToken()));</span>
+        }
+<span class="fc" id="L226">        return fields;</span>
+    }
+
+    /** Get the parsed vertices.
+     * @return parsed vertices
+     */
+    public List&lt;Cartesian3D&gt; getVertices() {
+<span class="fc" id="L233">        return Arrays.asList(vertices);</span>
+    }
+
+    /** Get the parsed faces.
+     * @return parsed faces
+     */
+    public List&lt;int[]&gt; getFaces() {
+<span class="fc" id="L240">        return Arrays.asList(faces);</span>
+    }
+
+    /** Tokens from PLY files. */
+<span class="fc" id="L244">    private static enum Token {</span>
+<span class="fc" id="L245">        PLY, FORMAT, ASCII, BINARY_BIG_ENDIAN, BINARY_LITTLE_ENDIAN,</span>
+<span class="fc" id="L246">        COMMENT, ELEMENT, VERTEX, FACE, PROPERTY, LIST, OBJ_INFO,</span>
+<span class="fc" id="L247">        CHAR, UCHAR, SHORT, USHORT, INT, UINT, FLOAT, DOUBLE,</span>
+<span class="fc" id="L248">        X, Y, Z, VERTEX_INDICES, END_HEADER, UNKNOWN;</span>
+    }
+
+    /** Parsed line fields. */
+    private static class Field {
+
+        /** Token. */
+        private final Token token;
+
+        /** Value. */
+        private final String value;
+
+        /** Simple constructor.
+         * @param value field value
+         */
+<span class="fc" id="L263">        public Field(final String value) {</span>
+<span class="fc" id="L264">            Token parsedToken = null;</span>
+            try {
+<span class="fc" id="L266">                parsedToken = Token.valueOf(value.toUpperCase());</span>
+<span class="fc" id="L267">            } catch (IllegalArgumentException iae) {</span>
+<span class="fc" id="L268">                parsedToken = Token.UNKNOWN;</span>
+<span class="fc" id="L269">            }</span>
+<span class="fc" id="L270">            this.token = parsedToken;</span>
+<span class="fc" id="L271">            this.value = value;</span>
+<span class="fc" id="L272">        }</span>
+
+        /** Get the recognized token.
+         * @return recognized token
+         */
+        public Token getToken() {
+<span class="fc" id="L278">            return token;</span>
+        }
+
+        /** Get the field value.
+         * @return field value
+         */
+        public String getValue() {
+<span class="fc" id="L285">            return value;</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

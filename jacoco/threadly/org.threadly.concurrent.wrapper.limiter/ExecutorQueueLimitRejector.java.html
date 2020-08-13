@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ExecutorQueueLimitRejector.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">ExecutorQueueLimitRejector.java</span></div><h1>ExecutorQueueLimitRejector.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.threadly.concurrent.AbstractSubmitterExecutor;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * A simple way to limit any {@link Executor} so that queues are managed.  In addition this queue 
+ * is tracked completely independent of the {@link Executor}'s actual queue, so these can be 
+ * distributed in code to limit queues differently to different parts of the system, while letting 
+ * them all back the same {@link Executor}.
+ * &lt;p&gt;
+ * Once the limit has been reached, if additional tasks are supplied a 
+ * {@link RejectedExecutionException} will be thrown.  This is the threadly equivalent of 
+ * supplying a limited sized blocking queue to a java.util.concurrent thread pool.
+ * &lt;p&gt;
+ * See {@link SubmitterSchedulerQueueLimitRejector}, {@link SchedulerServiceQueueLimitRejector} 
+ * and {@link PrioritySchedulerServiceQueueLimitRejector} as other possible implementations.
+ *  
+ * @since 4.6.0 (since 4.3.0 at org.threadly.concurrent.limiter)
+ */
+public class ExecutorQueueLimitRejector extends AbstractSubmitterExecutor {
+  protected final Executor parentExecutor;
+  protected final RejectedExecutionHandler rejectedExecutionHandler;
+  protected final AtomicInteger queuedTaskCount;
+  private volatile int queuedTaskLimit;
+  
+  /**
+   * Constructs a new {@link ExecutorQueueLimitRejector} with the provided scheduler and limit.
+   * 
+   * @param parentExecutor Executor to execute tasks on to
+   * @param queuedTaskLimit Maximum number of queued tasks before executions should be rejected
+   */
+  public ExecutorQueueLimitRejector(Executor parentExecutor, int queuedTaskLimit) {
+<span class="fc" id="L39">    this(parentExecutor, queuedTaskLimit, null);</span>
+<span class="fc" id="L40">  }</span>
+  
+  /**
+   * Constructs a new {@link ExecutorQueueLimitRejector} with the provided scheduler and limit.
+   * 
+   * @since 4.8.0
+   * @param parentExecutor Executor to execute tasks on to
+   * @param queuedTaskLimit Maximum number of queued tasks before executions should be rejected
+   * @param rejectedExecutionHandler Handler to accept tasks which could not be executed due to queue size
+   */
+  public ExecutorQueueLimitRejector(Executor parentExecutor, int queuedTaskLimit, 
+<span class="fc" id="L51">                                    RejectedExecutionHandler rejectedExecutionHandler) {</span>
+<span class="fc" id="L52">    ArgumentVerifier.assertNotNull(parentExecutor, &quot;parentExecutor&quot;);</span>
+<span class="fc" id="L53">    ArgumentVerifier.assertGreaterThanZero(queuedTaskLimit, &quot;queuedTaskLimit&quot;);</span>
+    
+<span class="fc" id="L55">    this.parentExecutor = parentExecutor;</span>
+<span class="pc bpc" id="L56" title="1 of 2 branches missed.">    if (rejectedExecutionHandler == null) {</span>
+<span class="fc" id="L57">      rejectedExecutionHandler = RejectedExecutionHandler.THROW_REJECTED_EXECUTION_EXCEPTION;</span>
+    }
+<span class="fc" id="L59">    this.rejectedExecutionHandler = rejectedExecutionHandler;</span>
+<span class="fc" id="L60">    this.queuedTaskCount = new AtomicInteger();</span>
+<span class="fc" id="L61">    this.queuedTaskLimit = queuedTaskLimit;</span>
+<span class="fc" id="L62">  }</span>
+  
+  /**
+   * Invoked to check how many tasks are currently being tracked as queued by this limiter.
+   * 
+   * @return Number of tracked tasks waiting for execution to start
+   */
+  public int getQueuedTaskCount() {
+<span class="fc" id="L70">    return queuedTaskCount.get();</span>
+  }
+  
+  /**
+   * Invoked to check the currently set queue limit.
+   * 
+   * @return Maximum number of tasks allowed to queue in the parent executor
+   */
+  public int getQueueLimit() {
+<span class="fc" id="L79">    return queuedTaskLimit;</span>
+  }
+  
+  /**
+   * Invoked to change the set limit.  Negative and zero limits are allowed, but they will cause 
+   * all executions to be rejected.  If set below the current queue size, those tasks will still 
+   * remain queued for execution.
+   * 
+   * @param newLimit New limit to avoid executions 
+   */
+  public void setQueueLimit(int newLimit) {
+<span class="fc" id="L90">    this.queuedTaskLimit = newLimit;</span>
+<span class="fc" id="L91">  }</span>
+
+  @Override
+  protected void doExecute(Runnable task) {
+    while (true) {
+<span class="fc" id="L96">      int casValue = queuedTaskCount.get();</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">      if (casValue &gt;= queuedTaskLimit) {</span>
+<span class="nc" id="L98">        rejectedExecutionHandler.handleRejectedTask(task);</span>
+<span class="nc" id="L99">        return; // in case handler did not throw exception</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">      } else if (queuedTaskCount.compareAndSet(casValue, casValue + 1)) {</span>
+        try {
+<span class="fc" id="L102">          parentExecutor.execute(new DecrementingRunnable(task, queuedTaskCount));</span>
+<span class="fc" id="L103">        } catch (RejectedExecutionException e) {</span>
+<span class="fc" id="L104">          queuedTaskCount.decrementAndGet();</span>
+<span class="fc" id="L105">          throw e;</span>
+<span class="fc" id="L106">        }</span>
+        break;
+      } // else loop and retry
+<span class="nc" id="L109">    }</span>
+<span class="fc" id="L110">  }</span>
+  
+  /**
+   * This runnable decrements a provided AtomicInteger at the START of execution.
+   * 
+   * @since 4.3.0
+   */
+  protected static class DecrementingRunnable implements Runnable, RunnableContainer {
+    private final Runnable task;
+    private final AtomicInteger queuedTaskCount;
+    
+<span class="fc" id="L121">    public DecrementingRunnable(Runnable task, AtomicInteger queuedTaskCount) {</span>
+<span class="fc" id="L122">      this.task = task;</span>
+<span class="fc" id="L123">      this.queuedTaskCount = queuedTaskCount;</span>
+<span class="fc" id="L124">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L128">      return task;</span>
+    }
+
+    @Override
+    public void run() {
+<span class="fc" id="L133">      queuedTaskCount.decrementAndGet();</span>
+<span class="fc" id="L134">      task.run();</span>
+<span class="fc" id="L135">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

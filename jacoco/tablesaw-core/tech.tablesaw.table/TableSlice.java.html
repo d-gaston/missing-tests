@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TableSlice.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.table</a> &gt; <span class="el_source">TableSlice.java</span></div><h1>TableSlice.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.table;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.PrimitiveIterator;
+import java.util.stream.IntStream;
+import javax.annotation.Nullable;
+import tech.tablesaw.aggregate.NumericAggregateFunction;
+import tech.tablesaw.api.NumericColumn;
+import tech.tablesaw.api.Row;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.sorting.Sort;
+import tech.tablesaw.sorting.SortUtils;
+import tech.tablesaw.sorting.comparators.IntComparatorChain;
+
+/**
+ * A TableSlice is a facade around a Relation that acts as a filter. Requests for data are forwarded
+ * to the underlying table. A TableSlice can be sorted independently of the underlying table.
+ *
+ * &lt;p&gt;A TableSlice is only good until the structure of the underlying table changes.
+ */
+public class TableSlice extends Relation {
+
+  private final Table table;
+  private String name;
+  @Nullable private Selection selection;
+<span class="fc" id="L48">  @Nullable private int[] sortOrder = null;</span>
+
+  /**
+   * Returns a new View constructed from the given table, containing only the rows represented by
+   * the bitmap
+   */
+<span class="fc" id="L54">  public TableSlice(Table table, Selection rowSelection) {</span>
+<span class="fc" id="L55">    this.name = table.name();</span>
+<span class="fc" id="L56">    this.selection = rowSelection;</span>
+<span class="fc" id="L57">    this.table = table;</span>
+<span class="fc" id="L58">  }</span>
+
+  /**
+   * Returns a new view constructed from the given table. The view can be sorted independently of
+   * the table.
+   */
+<span class="fc" id="L64">  public TableSlice(Table table) {</span>
+<span class="fc" id="L65">    this.name = table.name();</span>
+<span class="fc" id="L66">    this.selection = null;</span>
+<span class="fc" id="L67">    this.table = table;</span>
+<span class="fc" id="L68">  }</span>
+
+  @Override
+  public Column&lt;?&gt; column(int columnIndex) {
+<span class="fc" id="L72">    Column&lt;?&gt; col = table.column(columnIndex);</span>
+<span class="fc bfc" id="L73" title="All 2 branches covered.">    if (isSorted()) {</span>
+<span class="fc" id="L74">      return col.subset(sortOrder);</span>
+<span class="fc bfc" id="L75" title="All 2 branches covered.">    } else if (hasSelection()) {</span>
+<span class="fc" id="L76">      return col.where(selection);</span>
+    }
+<span class="fc" id="L78">    return col;</span>
+  }
+
+  @Override
+  public Column&lt;?&gt; column(String columnName) {
+<span class="fc" id="L83">    return column(table.columnIndex(columnName));</span>
+  }
+
+  @Override
+  public int columnCount() {
+<span class="fc" id="L88">    return table.columnCount();</span>
+  }
+
+  @Override
+  public int rowCount() {
+<span class="fc bfc" id="L93" title="All 2 branches covered.">    if (hasSelection()) {</span>
+<span class="fc" id="L94">      return selection.size();</span>
+    }
+<span class="fc" id="L96">    return table.rowCount();</span>
+  }
+
+  @Override
+  public List&lt;Column&lt;?&gt;&gt; columns() {
+<span class="fc" id="L101">    List&lt;Column&lt;?&gt;&gt; columns = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L102" title="All 2 branches covered.">    for (int i = 0; i &lt; columnCount(); i++) {</span>
+<span class="fc" id="L103">      columns.add(column(i));</span>
+    }
+<span class="fc" id="L105">    return columns;</span>
+  }
+
+  @Override
+  public int columnIndex(Column&lt;?&gt; column) {
+<span class="fc" id="L110">    return table.columnIndex(column);</span>
+  }
+
+  @Override
+  public Object get(int r, int c) {
+<span class="fc" id="L115">    return table.get(mappedRowNumber(r), c);</span>
+  }
+
+  @Override
+  public String name() {
+<span class="fc" id="L120">    return name;</span>
+  }
+
+  public Table getTable() {
+<span class="fc" id="L124">    return table;</span>
+  }
+
+  /** Clears all rows from this View, leaving the structure in place */
+  @Override
+  public void clear() {
+<span class="fc" id="L130">    sortOrder = null;</span>
+<span class="fc" id="L131">    selection = Selection.with();</span>
+<span class="fc" id="L132">  }</span>
+
+  /** Removes the sort from this View. */
+  public void removeSort() {
+<span class="fc" id="L136">    this.sortOrder = null;</span>
+<span class="fc" id="L137">  }</span>
+
+  /**
+   * Removes the selection from this view, leaving it with the same number of rows as the underlying
+   * source table.
+   */
+  public void removeSelection() {
+<span class="fc" id="L144">    this.selection = null;</span>
+<span class="fc" id="L145">  }</span>
+
+  @Override
+  public List&lt;String&gt; columnNames() {
+<span class="fc" id="L149">    return table.columnNames();</span>
+  }
+
+  @Override
+  public TableSlice addColumns(Column&lt;?&gt;... column) {
+<span class="fc" id="L154">    throw new UnsupportedOperationException(</span>
+        &quot;Class TableSlice does not support the addColumns operation&quot;);
+  }
+
+  @Override
+  public TableSlice removeColumns(Column&lt;?&gt;... columns) {
+<span class="fc" id="L160">    throw new UnsupportedOperationException(</span>
+        &quot;Class TableSlice does not support the removeColumns operation&quot;);
+  }
+
+  @Override
+  public Table first(int nRows) {
+<span class="fc" id="L166">    int count = 0;</span>
+<span class="fc" id="L167">    PrimitiveIterator.OfInt it = sourceRowNumberIterator();</span>
+<span class="fc" id="L168">    Table copy = table.emptyCopy();</span>
+<span class="fc bfc" id="L169" title="All 4 branches covered.">    while (it.hasNext() &amp;&amp; count &lt; nRows) {</span>
+<span class="fc" id="L170">      int row = it.nextInt();</span>
+<span class="fc" id="L171">      copy.addRow(table.row(row));</span>
+<span class="fc" id="L172">      count++;</span>
+<span class="fc" id="L173">    }</span>
+<span class="fc" id="L174">    return copy;</span>
+  }
+
+  @Override
+  public TableSlice setName(String name) {
+<span class="fc" id="L179">    this.name = name;</span>
+<span class="fc" id="L180">    return this;</span>
+  }
+
+  public Table asTable() {
+<span class="fc" id="L184">    Table table = Table.create(this.name());</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">    for (Column&lt;?&gt; column : this.columns()) {</span>
+<span class="fc" id="L186">      table.addColumns(column);</span>
+<span class="fc" id="L187">    }</span>
+<span class="fc" id="L188">    return table;</span>
+  }
+
+  /**
+   * IntIterator of source table row numbers that are present in this view. This can be used to in
+   * combination with the source table to iterate over the cells of a column in a sorted order
+   * without copying the column.
+   *
+   * @return an int iterator of row numbers in the source table that are present in this view.
+   */
+  protected PrimitiveIterator.OfInt sourceRowNumberIterator() {
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    if (this.isSorted()) {</span>
+<span class="fc" id="L200">      return Arrays.stream(sortOrder).iterator();</span>
+<span class="fc bfc" id="L201" title="All 2 branches covered.">    } else if (this.hasSelection()) {</span>
+<span class="fc" id="L202">      return selection.iterator();</span>
+    }
+<span class="fc" id="L204">    return Selection.withRange(0, table.rowCount()).iterator();</span>
+  }
+
+  /**
+   * Returns the result of applying the given function to the specified column
+   *
+   * @param numberColumnName The name of a numeric column in this table
+   * @param function A numeric reduce function
+   * @return the function result
+   * @throws IllegalArgumentException if numberColumnName doesn't name a numeric column in this
+   *     table
+   */
+  public double reduce(String numberColumnName, NumericAggregateFunction function) {
+<span class="fc" id="L217">    NumericColumn&lt;?&gt; column = table.numberColumn(numberColumnName);</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">    if (hasSelection()) {</span>
+<span class="fc" id="L219">      return function.summarize(column.where(selection));</span>
+    }
+<span class="fc" id="L221">    return function.summarize(column);</span>
+  }
+
+  /**
+   * Iterate over the underlying rows in the source table. If you set one of the rows while
+   * iterating it will change the row in the source table.
+   */
+  @Override
+  public Iterator&lt;Row&gt; iterator() {
+
+<span class="fc" id="L231">    return new Iterator&lt;Row&gt;() {</span>
+
+<span class="fc" id="L233">      private final Row row = new Row(TableSlice.this);</span>
+
+      @Override
+      public Row next() {
+<span class="fc" id="L237">        return row.next();</span>
+      }
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L242">        return row.hasNext();</span>
+      }
+    };
+  }
+
+  private boolean hasSelection() {
+<span class="fc bfc" id="L248" title="All 2 branches covered.">    return selection != null;</span>
+  }
+
+  private boolean isSorted() {
+<span class="fc bfc" id="L252" title="All 2 branches covered.">    return sortOrder != null;</span>
+  }
+
+  /**
+   * Maps the view row number to the row number on the underlying source table.
+   *
+   * @param rowNumber the row number in the view.
+   * @return the matching row number in the underlying table.
+   */
+  public int mappedRowNumber(int rowNumber) {
+<span class="fc bfc" id="L262" title="All 2 branches covered.">    if (isSorted()) {</span>
+<span class="fc" id="L263">      return sortOrder[rowNumber];</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    } else if (hasSelection()) {</span>
+<span class="fc" id="L265">      return selection.get(rowNumber);</span>
+    }
+<span class="fc" id="L267">    return rowNumber;</span>
+  }
+
+  /**
+   * Sort this view in place without modifying or copying the underlying source table. Unlike {@link
+   * Table#sortOn(Sort)} which returns a copy of the table, this method sorts the view in place.
+   *
+   * @param key to sort on.
+   */
+  public void sortOn(Sort key) {
+<span class="pc bpc" id="L277" title="1 of 2 branches missed.">    Preconditions.checkArgument(!key.isEmpty());</span>
+<span class="fc bfc" id="L278" title="All 2 branches covered.">    if (key.size() == 1) {</span>
+<span class="fc" id="L279">      IntComparator comparator = SortUtils.getComparator(table, key);</span>
+<span class="fc" id="L280">      this.sortOrder = sortOn(comparator);</span>
+<span class="fc" id="L281">    } else {</span>
+<span class="fc" id="L282">      IntComparatorChain chain = SortUtils.getChain(table, key);</span>
+<span class="fc" id="L283">      this.sortOrder = sortOn(chain);</span>
+    }
+<span class="fc" id="L285">  }</span>
+
+  /** Returns an array of integers representing the source table indexes in sorted order. */
+  private int[] sortOn(IntComparator rowComparator) {
+    int[] newRows;
+<span class="fc bfc" id="L290" title="All 2 branches covered.">    if (hasSelection()) {</span>
+<span class="fc" id="L291">      newRows = this.selection.toArray();</span>
+    } else {
+<span class="fc" id="L293">      newRows = IntStream.range(0, table.rowCount()).toArray();</span>
+    }
+<span class="fc" id="L295">    IntArrays.parallelQuickSort(newRows, rowComparator);</span>
+<span class="fc" id="L296">    return newRows;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MultiFormatReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing</a> &gt; <span class="el_source">MultiFormatReader.java</span></div><h1>MultiFormatReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing;
+
+import com.google.zxing.aztec.AztecReader;
+import com.google.zxing.datamatrix.DataMatrixReader;
+import com.google.zxing.maxicode.MaxiCodeReader;
+import com.google.zxing.oned.MultiFormatOneDReader;
+import com.google.zxing.pdf417.PDF417Reader;
+import com.google.zxing.qrcode.QRCodeReader;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
+
+/**
+ * MultiFormatReader is a convenience class and the main entry point into the library for most uses.
+ * By default it attempts to decode all barcode formats that the library supports. Optionally, you
+ * can provide a hints object to request different behavior, for example only decoding QR codes.
+ *
+ * @author Sean Owen
+ * @author dswitkin@google.com (Daniel Switkin)
+ */
+<span class="fc" id="L38">public final class MultiFormatReader implements Reader {</span>
+
+<span class="fc" id="L40">  private static final Reader[] EMPTY_READER_ARRAY = new Reader[0];</span>
+
+  private Map&lt;DecodeHintType,?&gt; hints;
+  private Reader[] readers;
+
+  /**
+   * This version of decode honors the intent of Reader.decode(BinaryBitmap) in that it
+   * passes null as a hint to the decoders. However, that makes it inefficient to call repeatedly.
+   * Use setHints() followed by decodeWithState() for continuous scan applications.
+   *
+   * @param image The pixel data to decode
+   * @return The contents of the image
+   * @throws NotFoundException Any errors which occurred
+   */
+  @Override
+  public Result decode(BinaryBitmap image) throws NotFoundException {
+<span class="fc" id="L56">    setHints(null);</span>
+<span class="fc" id="L57">    return decodeInternal(image);</span>
+  }
+
+  /**
+   * Decode an image using the hints provided. Does not honor existing state.
+   *
+   * @param image The pixel data to decode
+   * @param hints The hints to use, clearing the previous state.
+   * @return The contents of the image
+   * @throws NotFoundException Any errors which occurred
+   */
+  @Override
+  public Result decode(BinaryBitmap image, Map&lt;DecodeHintType,?&gt; hints) throws NotFoundException {
+<span class="fc" id="L70">    setHints(hints);</span>
+<span class="fc" id="L71">    return decodeInternal(image);</span>
+  }
+
+  /**
+   * Decode an image using the state set up by calling setHints() previously. Continuous scan
+   * clients will get a &lt;b&gt;large&lt;/b&gt; speed increase by using this instead of decode().
+   *
+   * @param image The pixel data to decode
+   * @return The contents of the image
+   * @throws NotFoundException Any errors which occurred
+   */
+  public Result decodeWithState(BinaryBitmap image) throws NotFoundException {
+    // Make sure to set up the default state so we don't crash
+<span class="nc bnc" id="L84" title="All 2 branches missed.">    if (readers == null) {</span>
+<span class="nc" id="L85">      setHints(null);</span>
+    }
+<span class="nc" id="L87">    return decodeInternal(image);</span>
+  }
+
+  /**
+   * This method adds state to the MultiFormatReader. By setting the hints once, subsequent calls
+   * to decodeWithState(image) can reuse the same set of readers without reallocating memory. This
+   * is important for performance in continuous scan clients.
+   *
+   * @param hints The set of hints to use for subsequent calls to decode(image)
+   */
+  public void setHints(Map&lt;DecodeHintType,?&gt; hints) {
+<span class="fc" id="L98">    this.hints = hints;</span>
+
+<span class="fc bfc" id="L100" title="All 4 branches covered.">    boolean tryHarder = hints != null &amp;&amp; hints.containsKey(DecodeHintType.TRY_HARDER);</span>
+    @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc bfc" id="L102" title="All 2 branches covered.">    Collection&lt;BarcodeFormat&gt; formats =</span>
+<span class="fc" id="L103">        hints == null ? null : (Collection&lt;BarcodeFormat&gt;) hints.get(DecodeHintType.POSSIBLE_FORMATS);</span>
+<span class="fc" id="L104">    Collection&lt;Reader&gt; readers = new ArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L105" title="1 of 2 branches missed.">    if (formats != null) {</span>
+<span class="nc" id="L106">      boolean addOneDReader =</span>
+<span class="nc bnc" id="L107" title="All 2 branches missed.">          formats.contains(BarcodeFormat.UPC_A) ||</span>
+<span class="nc bnc" id="L108" title="All 2 branches missed.">          formats.contains(BarcodeFormat.UPC_E) ||</span>
+<span class="nc bnc" id="L109" title="All 2 branches missed.">          formats.contains(BarcodeFormat.EAN_13) ||</span>
+<span class="nc bnc" id="L110" title="All 2 branches missed.">          formats.contains(BarcodeFormat.EAN_8) ||</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">          formats.contains(BarcodeFormat.CODABAR) ||</span>
+<span class="nc bnc" id="L112" title="All 2 branches missed.">          formats.contains(BarcodeFormat.CODE_39) ||</span>
+<span class="nc bnc" id="L113" title="All 2 branches missed.">          formats.contains(BarcodeFormat.CODE_93) ||</span>
+<span class="nc bnc" id="L114" title="All 2 branches missed.">          formats.contains(BarcodeFormat.CODE_128) ||</span>
+<span class="nc bnc" id="L115" title="All 2 branches missed.">          formats.contains(BarcodeFormat.ITF) ||</span>
+<span class="nc bnc" id="L116" title="All 2 branches missed.">          formats.contains(BarcodeFormat.RSS_14) ||</span>
+<span class="nc bnc" id="L117" title="All 2 branches missed.">          formats.contains(BarcodeFormat.RSS_EXPANDED);</span>
+      // Put 1D readers upfront in &quot;normal&quot; mode
+<span class="nc bnc" id="L119" title="All 4 branches missed.">      if (addOneDReader &amp;&amp; !tryHarder) {</span>
+<span class="nc" id="L120">        readers.add(new MultiFormatOneDReader(hints));</span>
+      }
+<span class="nc bnc" id="L122" title="All 2 branches missed.">      if (formats.contains(BarcodeFormat.QR_CODE)) {</span>
+<span class="nc" id="L123">        readers.add(new QRCodeReader());</span>
+      }
+<span class="nc bnc" id="L125" title="All 2 branches missed.">      if (formats.contains(BarcodeFormat.DATA_MATRIX)) {</span>
+<span class="nc" id="L126">        readers.add(new DataMatrixReader());</span>
+      }
+<span class="nc bnc" id="L128" title="All 2 branches missed.">      if (formats.contains(BarcodeFormat.AZTEC)) {</span>
+<span class="nc" id="L129">        readers.add(new AztecReader());</span>
+      }
+<span class="nc bnc" id="L131" title="All 2 branches missed.">      if (formats.contains(BarcodeFormat.PDF_417)) {</span>
+<span class="nc" id="L132">         readers.add(new PDF417Reader());</span>
+      }
+<span class="nc bnc" id="L134" title="All 2 branches missed.">      if (formats.contains(BarcodeFormat.MAXICODE)) {</span>
+<span class="nc" id="L135">         readers.add(new MaxiCodeReader());</span>
+      }
+      // At end in &quot;try harder&quot; mode
+<span class="nc bnc" id="L138" title="All 4 branches missed.">      if (addOneDReader &amp;&amp; tryHarder) {</span>
+<span class="nc" id="L139">        readers.add(new MultiFormatOneDReader(hints));</span>
+      }
+    }
+<span class="pc bpc" id="L142" title="1 of 2 branches missed.">    if (readers.isEmpty()) {</span>
+<span class="fc bfc" id="L143" title="All 2 branches covered.">      if (!tryHarder) {</span>
+<span class="fc" id="L144">        readers.add(new MultiFormatOneDReader(hints));</span>
+      }
+
+<span class="fc" id="L147">      readers.add(new QRCodeReader());</span>
+<span class="fc" id="L148">      readers.add(new DataMatrixReader());</span>
+<span class="fc" id="L149">      readers.add(new AztecReader());</span>
+<span class="fc" id="L150">      readers.add(new PDF417Reader());</span>
+<span class="fc" id="L151">      readers.add(new MaxiCodeReader());</span>
+
+<span class="fc bfc" id="L153" title="All 2 branches covered.">      if (tryHarder) {</span>
+<span class="fc" id="L154">        readers.add(new MultiFormatOneDReader(hints));</span>
+      }
+    }
+<span class="fc" id="L157">    this.readers = readers.toArray(EMPTY_READER_ARRAY);</span>
+<span class="fc" id="L158">  }</span>
+
+  @Override
+  public void reset() {
+<span class="nc bnc" id="L162" title="All 2 branches missed.">    if (readers != null) {</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">      for (Reader reader : readers) {</span>
+<span class="nc" id="L164">        reader.reset();</span>
+      }
+    }
+<span class="nc" id="L167">  }</span>
+
+  private Result decodeInternal(BinaryBitmap image) throws NotFoundException {
+<span class="pc bpc" id="L170" title="1 of 2 branches missed.">    if (readers != null) {</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">      for (Reader reader : readers) {</span>
+        try {
+<span class="fc" id="L173">          return reader.decode(image, hints);</span>
+<span class="fc" id="L174">        } catch (ReaderException re) {</span>
+          // continue
+        }
+      }
+    }
+<span class="fc" id="L179">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

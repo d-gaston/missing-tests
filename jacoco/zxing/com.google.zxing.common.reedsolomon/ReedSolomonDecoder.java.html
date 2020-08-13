@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ReedSolomonDecoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common.reedsolomon</a> &gt; <span class="el_source">ReedSolomonDecoder.java</span></div><h1>ReedSolomonDecoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common.reedsolomon;
+
+/**
+ * &lt;p&gt;Implements Reed-Solomon decoding, as the name implies.&lt;/p&gt;
+ *
+ * &lt;p&gt;The algorithm will not be explained here, but the following references were helpful
+ * in creating this implementation:&lt;/p&gt;
+ *
+ * &lt;ul&gt;
+ * &lt;li&gt;Bruce Maggs.
+ * &lt;a href=&quot;http://www.cs.cmu.edu/afs/cs.cmu.edu/project/pscico-guyb/realworld/www/rs_decode.ps&quot;&gt;
+ * &quot;Decoding Reed-Solomon Codes&quot;&lt;/a&gt; (see discussion of Forney's Formula)&lt;/li&gt;
+ * &lt;li&gt;J.I. Hall. &lt;a href=&quot;www.mth.msu.edu/~jhall/classes/codenotes/GRS.pdf&quot;&gt;
+ * &quot;Chapter 5. Generalized Reed-Solomon Codes&quot;&lt;/a&gt;
+ * (see discussion of Euclidean algorithm)&lt;/li&gt;
+ * &lt;/ul&gt;
+ *
+ * &lt;p&gt;Much credit is due to William Rucklidge since portions of this code are an indirect
+ * port of his C++ Reed-Solomon implementation.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ * @author William Rucklidge
+ * @author sanfordsquires
+ */
+public final class ReedSolomonDecoder {
+
+  private final GenericGF field;
+
+<span class="fc" id="L45">  public ReedSolomonDecoder(GenericGF field) {</span>
+<span class="fc" id="L46">    this.field = field;</span>
+<span class="fc" id="L47">  }</span>
+
+  /**
+   * &lt;p&gt;Decodes given set of received codewords, which include both data and error-correction
+   * codewords. Really, this means it uses Reed-Solomon to detect and correct errors, in-place,
+   * in the input.&lt;/p&gt;
+   *
+   * @param received data and error-correction codewords
+   * @param twoS number of error-correction codewords available
+   * @throws ReedSolomonException if decoding fails for any reason
+   */
+  public void decode(int[] received, int twoS) throws ReedSolomonException {
+<span class="fc" id="L59">    GenericGFPoly poly = new GenericGFPoly(field, received);</span>
+<span class="fc" id="L60">    int[] syndromeCoefficients = new int[twoS];</span>
+<span class="fc" id="L61">    boolean noError = true;</span>
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    for (int i = 0; i &lt; twoS; i++) {</span>
+<span class="fc" id="L63">      int eval = poly.evaluateAt(field.exp(i + field.getGeneratorBase()));</span>
+<span class="fc" id="L64">      syndromeCoefficients[syndromeCoefficients.length - 1 - i] = eval;</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">      if (eval != 0) {</span>
+<span class="fc" id="L66">        noError = false;</span>
+      }
+    }
+<span class="fc bfc" id="L69" title="All 2 branches covered.">    if (noError) {</span>
+<span class="fc" id="L70">      return;</span>
+    }
+<span class="fc" id="L72">    GenericGFPoly syndrome = new GenericGFPoly(field, syndromeCoefficients);</span>
+<span class="fc" id="L73">    GenericGFPoly[] sigmaOmega =</span>
+<span class="fc" id="L74">        runEuclideanAlgorithm(field.buildMonomial(twoS, 1), syndrome, twoS);</span>
+<span class="fc" id="L75">    GenericGFPoly sigma = sigmaOmega[0];</span>
+<span class="fc" id="L76">    GenericGFPoly omega = sigmaOmega[1];</span>
+<span class="fc" id="L77">    int[] errorLocations = findErrorLocations(sigma);</span>
+<span class="fc" id="L78">    int[] errorMagnitudes = findErrorMagnitudes(omega, errorLocations);</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">    for (int i = 0; i &lt; errorLocations.length; i++) {</span>
+<span class="fc" id="L80">      int position = received.length - 1 - field.log(errorLocations[i]);</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">      if (position &lt; 0) {</span>
+<span class="fc" id="L82">        throw new ReedSolomonException(&quot;Bad error location&quot;);</span>
+      }
+<span class="fc" id="L84">      received[position] = GenericGF.addOrSubtract(received[position], errorMagnitudes[i]);</span>
+    }
+<span class="fc" id="L86">  }</span>
+
+  private GenericGFPoly[] runEuclideanAlgorithm(GenericGFPoly a, GenericGFPoly b, int R)
+      throws ReedSolomonException {
+    // Assume a's degree is &gt;= b's
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">    if (a.getDegree() &lt; b.getDegree()) {</span>
+<span class="nc" id="L92">      GenericGFPoly temp = a;</span>
+<span class="nc" id="L93">      a = b;</span>
+<span class="nc" id="L94">      b = temp;</span>
+    }
+
+<span class="fc" id="L97">    GenericGFPoly rLast = a;</span>
+<span class="fc" id="L98">    GenericGFPoly r = b;</span>
+<span class="fc" id="L99">    GenericGFPoly tLast = field.getZero();</span>
+<span class="fc" id="L100">    GenericGFPoly t = field.getOne();</span>
+
+    // Run Euclidean algorithm until r's degree is less than R/2
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    while (r.getDegree() &gt;= R / 2) {</span>
+<span class="fc" id="L104">      GenericGFPoly rLastLast = rLast;</span>
+<span class="fc" id="L105">      GenericGFPoly tLastLast = tLast;</span>
+<span class="fc" id="L106">      rLast = r;</span>
+<span class="fc" id="L107">      tLast = t;</span>
+
+      // Divide rLastLast by rLast, with quotient in q and remainder in r
+<span class="pc bpc" id="L110" title="1 of 2 branches missed.">      if (rLast.isZero()) {</span>
+        // Oops, Euclidean algorithm already terminated?
+<span class="nc" id="L112">        throw new ReedSolomonException(&quot;r_{i-1} was zero&quot;);</span>
+      }
+<span class="fc" id="L114">      r = rLastLast;</span>
+<span class="fc" id="L115">      GenericGFPoly q = field.getZero();</span>
+<span class="fc" id="L116">      int denominatorLeadingTerm = rLast.getCoefficient(rLast.getDegree());</span>
+<span class="fc" id="L117">      int dltInverse = field.inverse(denominatorLeadingTerm);</span>
+<span class="pc bpc" id="L118" title="1 of 4 branches missed.">      while (r.getDegree() &gt;= rLast.getDegree() &amp;&amp; !r.isZero()) {</span>
+<span class="fc" id="L119">        int degreeDiff = r.getDegree() - rLast.getDegree();</span>
+<span class="fc" id="L120">        int scale = field.multiply(r.getCoefficient(r.getDegree()), dltInverse);</span>
+<span class="fc" id="L121">        q = q.addOrSubtract(field.buildMonomial(degreeDiff, scale));</span>
+<span class="fc" id="L122">        r = r.addOrSubtract(rLast.multiplyByMonomial(degreeDiff, scale));</span>
+<span class="fc" id="L123">      }</span>
+
+<span class="fc" id="L125">      t = q.multiply(tLast).addOrSubtract(tLastLast);</span>
+
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">      if (r.getDegree() &gt;= rLast.getDegree()) {</span>
+<span class="nc" id="L128">        throw new IllegalStateException(&quot;Division algorithm failed to reduce polynomial?&quot;);</span>
+      }
+<span class="fc" id="L130">    }</span>
+
+<span class="fc" id="L132">    int sigmaTildeAtZero = t.getCoefficient(0);</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    if (sigmaTildeAtZero == 0) {</span>
+<span class="fc" id="L134">      throw new ReedSolomonException(&quot;sigmaTilde(0) was zero&quot;);</span>
+    }
+
+<span class="fc" id="L137">    int inverse = field.inverse(sigmaTildeAtZero);</span>
+<span class="fc" id="L138">    GenericGFPoly sigma = t.multiply(inverse);</span>
+<span class="fc" id="L139">    GenericGFPoly omega = r.multiply(inverse);</span>
+<span class="fc" id="L140">    return new GenericGFPoly[]{sigma, omega};</span>
+  }
+
+  private int[] findErrorLocations(GenericGFPoly errorLocator) throws ReedSolomonException {
+    // This is a direct application of Chien's search
+<span class="fc" id="L145">    int numErrors = errorLocator.getDegree();</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    if (numErrors == 1) { // shortcut</span>
+<span class="fc" id="L147">      return new int[] { errorLocator.getCoefficient(1) };</span>
+    }
+<span class="fc" id="L149">    int[] result = new int[numErrors];</span>
+<span class="fc" id="L150">    int e = 0;</span>
+<span class="fc bfc" id="L151" title="All 4 branches covered.">    for (int i = 1; i &lt; field.getSize() &amp;&amp; e &lt; numErrors; i++) {</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">      if (errorLocator.evaluateAt(i) == 0) {</span>
+<span class="fc" id="L153">        result[e] = field.inverse(i);</span>
+<span class="fc" id="L154">        e++;</span>
+      }
+    }
+<span class="fc bfc" id="L157" title="All 2 branches covered.">    if (e != numErrors) {</span>
+<span class="fc" id="L158">      throw new ReedSolomonException(&quot;Error locator degree does not match number of roots&quot;);</span>
+    }
+<span class="fc" id="L160">    return result;</span>
+  }
+
+  private int[] findErrorMagnitudes(GenericGFPoly errorEvaluator, int[] errorLocations) {
+    // This is directly applying Forney's Formula
+<span class="fc" id="L165">    int s = errorLocations.length;</span>
+<span class="fc" id="L166">    int[] result = new int[s];</span>
+<span class="fc bfc" id="L167" title="All 2 branches covered.">    for (int i = 0; i &lt; s; i++) {</span>
+<span class="fc" id="L168">      int xiInverse = field.inverse(errorLocations[i]);</span>
+<span class="fc" id="L169">      int denominator = 1;</span>
+<span class="fc bfc" id="L170" title="All 2 branches covered.">      for (int j = 0; j &lt; s; j++) {</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">        if (i != j) {</span>
+          //denominator = field.multiply(denominator,
+          //    GenericGF.addOrSubtract(1, field.multiply(errorLocations[j], xiInverse)));
+          // Above should work but fails on some Apple and Linux JDKs due to a Hotspot bug.
+          // Below is a funny-looking workaround from Steven Parkes
+<span class="fc" id="L176">          int term = field.multiply(errorLocations[j], xiInverse);</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">          int termPlus1 = (term &amp; 0x1) == 0 ? term | 1 : term &amp; ~1;</span>
+<span class="fc" id="L178">          denominator = field.multiply(denominator, termPlus1);</span>
+        }
+      }
+<span class="fc" id="L181">      result[i] = field.multiply(errorEvaluator.evaluateAt(xiInverse),</span>
+<span class="fc" id="L182">          field.inverse(denominator));</span>
+<span class="fc bfc" id="L183" title="All 2 branches covered.">      if (field.getGeneratorBase() != 0) {</span>
+<span class="fc" id="L184">        result[i] = field.multiply(result[i], xiInverse);</span>
+      }
+    }
+<span class="fc" id="L187">    return result;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

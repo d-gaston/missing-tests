@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Decoder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.decoder</a> &gt; <span class="el_source">Decoder.java</span></div><h1>Decoder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.decoder;
+
+import com.google.zxing.ChecksumException;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.DecoderResult;
+import com.google.zxing.common.reedsolomon.GenericGF;
+import com.google.zxing.common.reedsolomon.ReedSolomonDecoder;
+import com.google.zxing.common.reedsolomon.ReedSolomonException;
+
+import java.util.Map;
+
+/**
+ * &lt;p&gt;The main class which implements QR Code decoding -- as opposed to locating and extracting
+ * the QR Code from an image.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+public final class Decoder {
+
+  private final ReedSolomonDecoder rsDecoder;
+
+<span class="fc" id="L40">  public Decoder() {</span>
+<span class="fc" id="L41">    rsDecoder = new ReedSolomonDecoder(GenericGF.QR_CODE_FIELD_256);</span>
+<span class="fc" id="L42">  }</span>
+
+  public DecoderResult decode(boolean[][] image) throws ChecksumException, FormatException {
+<span class="nc" id="L45">    return decode(image, null);</span>
+  }
+
+  /**
+   * &lt;p&gt;Convenience method that can decode a QR Code represented as a 2D array of booleans.
+   * &quot;true&quot; is taken to mean a black module.&lt;/p&gt;
+   *
+   * @param image booleans representing white/black QR Code modules
+   * @param hints decoding hints that should be used to influence decoding
+   * @return text and bytes encoded within the QR Code
+   * @throws FormatException if the QR Code cannot be decoded
+   * @throws ChecksumException if error correction fails
+   */
+  public DecoderResult decode(boolean[][] image, Map&lt;DecodeHintType,?&gt; hints)
+      throws ChecksumException, FormatException {
+<span class="nc" id="L60">    return decode(BitMatrix.parse(image), hints);</span>
+  }
+
+  public DecoderResult decode(BitMatrix bits) throws ChecksumException, FormatException {
+<span class="nc" id="L64">    return decode(bits, null);</span>
+  }
+
+  /**
+   * &lt;p&gt;Decodes a QR Code represented as a {@link BitMatrix}. A 1 or &quot;true&quot; is taken to mean a black module.&lt;/p&gt;
+   *
+   * @param bits booleans representing white/black QR Code modules
+   * @param hints decoding hints that should be used to influence decoding
+   * @return text and bytes encoded within the QR Code
+   * @throws FormatException if the QR Code cannot be decoded
+   * @throws ChecksumException if error correction fails
+   */
+  public DecoderResult decode(BitMatrix bits, Map&lt;DecodeHintType,?&gt; hints)
+      throws FormatException, ChecksumException {
+
+    // Construct a parser and read version, error-correction level
+<span class="fc" id="L80">    BitMatrixParser parser = new BitMatrixParser(bits);</span>
+<span class="fc" id="L81">    FormatException fe = null;</span>
+<span class="fc" id="L82">    ChecksumException ce = null;</span>
+    try {
+<span class="fc" id="L84">      return decode(parser, hints);</span>
+<span class="fc" id="L85">    } catch (FormatException e) {</span>
+<span class="fc" id="L86">      fe = e;</span>
+<span class="fc" id="L87">    } catch (ChecksumException e) {</span>
+<span class="fc" id="L88">      ce = e;</span>
+<span class="fc" id="L89">    }</span>
+
+    try {
+
+      // Revert the bit matrix
+<span class="fc" id="L94">      parser.remask();</span>
+
+      // Will be attempting a mirrored reading of the version and format info.
+<span class="fc" id="L97">      parser.setMirror(true);</span>
+
+      // Preemptively read the version.
+<span class="fc" id="L100">      parser.readVersion();</span>
+
+      // Preemptively read the format information.
+<span class="fc" id="L103">      parser.readFormatInformation();</span>
+
+      /*
+       * Since we're here, this means we have successfully detected some kind
+       * of version and format information when mirrored. This is a good sign,
+       * that the QR code may be mirrored, and we should try once more with a
+       * mirrored content.
+       */
+      // Prepare for a mirrored reading.
+<span class="fc" id="L112">      parser.mirror();</span>
+
+<span class="nc" id="L114">      DecoderResult result = decode(parser, hints);</span>
+
+      // Success! Notify the caller that the code was mirrored.
+<span class="nc" id="L117">      result.setOther(new QRCodeDecoderMetaData(true));</span>
+
+<span class="nc" id="L119">      return result;</span>
+
+<span class="fc" id="L121">    } catch (FormatException | ChecksumException e) {</span>
+      // Throw the exception from the original reading
+<span class="fc bfc" id="L123" title="All 2 branches covered.">      if (fe != null) {</span>
+<span class="fc" id="L124">        throw fe;</span>
+      }
+<span class="fc" id="L126">      throw ce; // If fe is null, this can't be</span>
+    }
+  }
+
+  private DecoderResult decode(BitMatrixParser parser, Map&lt;DecodeHintType,?&gt; hints)
+      throws FormatException, ChecksumException {
+<span class="fc" id="L132">    Version version = parser.readVersion();</span>
+<span class="fc" id="L133">    ErrorCorrectionLevel ecLevel = parser.readFormatInformation().getErrorCorrectionLevel();</span>
+
+    // Read codewords
+<span class="fc" id="L136">    byte[] codewords = parser.readCodewords();</span>
+    // Separate into data blocks
+<span class="fc" id="L138">    DataBlock[] dataBlocks = DataBlock.getDataBlocks(codewords, version, ecLevel);</span>
+
+    // Count total number of data bytes
+<span class="fc" id="L141">    int totalBytes = 0;</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">    for (DataBlock dataBlock : dataBlocks) {</span>
+<span class="fc" id="L143">      totalBytes += dataBlock.getNumDataCodewords();</span>
+    }
+<span class="fc" id="L145">    byte[] resultBytes = new byte[totalBytes];</span>
+<span class="fc" id="L146">    int resultOffset = 0;</span>
+
+    // Error-correct and copy data blocks together into a stream of bytes
+<span class="fc bfc" id="L149" title="All 2 branches covered.">    for (DataBlock dataBlock : dataBlocks) {</span>
+<span class="fc" id="L150">      byte[] codewordBytes = dataBlock.getCodewords();</span>
+<span class="fc" id="L151">      int numDataCodewords = dataBlock.getNumDataCodewords();</span>
+<span class="fc" id="L152">      correctErrors(codewordBytes, numDataCodewords);</span>
+<span class="fc bfc" id="L153" title="All 2 branches covered.">      for (int i = 0; i &lt; numDataCodewords; i++) {</span>
+<span class="fc" id="L154">        resultBytes[resultOffset++] = codewordBytes[i];</span>
+      }
+    }
+
+    // Decode the contents of that stream of bytes
+<span class="fc" id="L159">    return DecodedBitStreamParser.decode(resultBytes, version, ecLevel, hints);</span>
+  }
+
+  /**
+   * &lt;p&gt;Given data and error-correction codewords received, possibly corrupted by errors, attempts to
+   * correct the errors in-place using Reed-Solomon error correction.&lt;/p&gt;
+   *
+   * @param codewordBytes data and error correction codewords
+   * @param numDataCodewords number of codewords that are data bytes
+   * @throws ChecksumException if error correction fails
+   */
+  private void correctErrors(byte[] codewordBytes, int numDataCodewords) throws ChecksumException {
+<span class="fc" id="L171">    int numCodewords = codewordBytes.length;</span>
+    // First read into an array of ints
+<span class="fc" id="L173">    int[] codewordsInts = new int[numCodewords];</span>
+<span class="fc bfc" id="L174" title="All 2 branches covered.">    for (int i = 0; i &lt; numCodewords; i++) {</span>
+<span class="fc" id="L175">      codewordsInts[i] = codewordBytes[i] &amp; 0xFF;</span>
+    }
+    try {
+<span class="fc" id="L178">      rsDecoder.decode(codewordsInts, codewordBytes.length - numDataCodewords);</span>
+<span class="fc" id="L179">    } catch (ReedSolomonException ignored) {</span>
+<span class="fc" id="L180">      throw ChecksumException.getChecksumInstance();</span>
+<span class="fc" id="L181">    }</span>
+    // Copy back into array of bytes -- only need to worry about the bytes that were data
+    // We don't care about errors in the error-correction codewords
+<span class="fc bfc" id="L184" title="All 2 branches covered.">    for (int i = 0; i &lt; numDataCodewords; i++) {</span>
+<span class="fc" id="L185">      codewordBytes[i] = (byte) codewordsInts[i];</span>
+    }
+<span class="fc" id="L187">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

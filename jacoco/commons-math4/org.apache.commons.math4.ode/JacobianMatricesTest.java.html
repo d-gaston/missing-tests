@@ -1,0 +1,630 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>JacobianMatricesTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ode</a> &gt; <span class="el_source">JacobianMatricesTest.java</span></div><h1>JacobianMatricesTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ode;
+
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.MaxCountExceededException;
+import org.apache.commons.math4.exception.NoBracketingException;
+import org.apache.commons.math4.exception.NumberIsTooSmallException;
+import org.apache.commons.math4.ode.AbstractIntegrator;
+import org.apache.commons.math4.ode.AbstractParameterizable;
+import org.apache.commons.math4.ode.ExpandableStatefulODE;
+import org.apache.commons.math4.ode.FirstOrderDifferentialEquations;
+import org.apache.commons.math4.ode.FirstOrderIntegrator;
+import org.apache.commons.math4.ode.JacobianMatrices;
+import org.apache.commons.math4.ode.MainStateJacobianProvider;
+import org.apache.commons.math4.ode.ParameterJacobianProvider;
+import org.apache.commons.math4.ode.ParameterizedODE;
+import org.apache.commons.math4.ode.UnknownParameterException;
+import org.apache.commons.math4.ode.JacobianMatrices.MismatchedEquations;
+import org.apache.commons.math4.ode.nonstiff.DormandPrince54Integrator;
+import org.apache.commons.math4.stat.descriptive.SummaryStatistics;
+import org.apache.commons.math4.util.FastMath;
+import org.junit.Assert;
+import org.junit.Test;
+
+<span class="fc" id="L41">public class JacobianMatricesTest {</span>
+
+    @Test
+    public void testLowAccuracyExternalDifferentiation()
+        throws NumberIsTooSmallException, DimensionMismatchException,
+               MaxCountExceededException, NoBracketingException {
+        // this test does not really test JacobianMatrices,
+        // it only shows that WITHOUT this class, attempting to recover
+        // the jacobians from external differentiation on simple integration
+        // results with low accuracy gives very poor results. In fact,
+        // the curves dy/dp = g(b) when b varies from 2.88 to 3.08 are
+        // essentially noise.
+        // This test is taken from Hairer, Norsett and Wanner book
+        // Solving Ordinary Differential Equations I (Nonstiff problems),
+        // the curves dy/dp = g(b) are in figure 6.5
+<span class="fc" id="L56">        FirstOrderIntegrator integ =</span>
+            new DormandPrince54Integrator(1.0e-8, 100.0, new double[] { 1.0e-4, 1.0e-4 }, new double[] { 1.0e-4, 1.0e-4 });
+<span class="fc" id="L58">        double hP = 1.0e-12;</span>
+<span class="fc" id="L59">        SummaryStatistics residualsP0 = new SummaryStatistics();</span>
+<span class="fc" id="L60">        SummaryStatistics residualsP1 = new SummaryStatistics();</span>
+<span class="fc bfc" id="L61" title="All 2 branches covered.">        for (double b = 2.88; b &lt; 3.08; b += 0.001) {</span>
+<span class="fc" id="L62">            Brusselator brusselator = new Brusselator(b);</span>
+<span class="fc" id="L63">            double[] y = { 1.3, b };</span>
+<span class="fc" id="L64">            integ.integrate(brusselator, 0, y, 20.0, y);</span>
+<span class="fc" id="L65">            double[] yP = { 1.3, b + hP };</span>
+<span class="fc" id="L66">            integ.integrate(brusselator, 0, yP, 20.0, yP);</span>
+<span class="fc" id="L67">            residualsP0.addValue((yP[0] - y[0]) / hP - brusselator.dYdP0());</span>
+<span class="fc" id="L68">            residualsP1.addValue((yP[1] - y[1]) / hP - brusselator.dYdP1());</span>
+        }
+<span class="pc bpc" id="L70" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP0.getMax() - residualsP0.getMin()) &gt; 500);</span>
+<span class="pc bpc" id="L71" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP0.getStandardDeviation() &gt; 30);</span>
+<span class="pc bpc" id="L72" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP1.getMax() - residualsP1.getMin()) &gt; 700);</span>
+<span class="pc bpc" id="L73" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP1.getStandardDeviation() &gt; 40);</span>
+<span class="fc" id="L74">    }</span>
+
+    @Test
+    public void testHighAccuracyExternalDifferentiation()
+        throws NumberIsTooSmallException, DimensionMismatchException,
+               MaxCountExceededException, NoBracketingException, UnknownParameterException {
+<span class="fc" id="L80">        FirstOrderIntegrator integ =</span>
+            new DormandPrince54Integrator(1.0e-8, 100.0, new double[] { 1.0e-10, 1.0e-10 }, new double[] { 1.0e-10, 1.0e-10 });
+<span class="fc" id="L82">        double hP = 1.0e-12;</span>
+<span class="fc" id="L83">        SummaryStatistics residualsP0 = new SummaryStatistics();</span>
+<span class="fc" id="L84">        SummaryStatistics residualsP1 = new SummaryStatistics();</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">        for (double b = 2.88; b &lt; 3.08; b += 0.001) {</span>
+<span class="fc" id="L86">            ParamBrusselator brusselator = new ParamBrusselator(b);</span>
+<span class="fc" id="L87">            double[] y = { 1.3, b };</span>
+<span class="fc" id="L88">            integ.integrate(brusselator, 0, y, 20.0, y);</span>
+<span class="fc" id="L89">            double[] yP = { 1.3, b + hP };</span>
+<span class="fc" id="L90">            brusselator.setParameter(&quot;b&quot;, b + hP);</span>
+<span class="fc" id="L91">            integ.integrate(brusselator, 0, yP, 20.0, yP);</span>
+<span class="fc" id="L92">            residualsP0.addValue((yP[0] - y[0]) / hP - brusselator.dYdP0());</span>
+<span class="fc" id="L93">            residualsP1.addValue((yP[1] - y[1]) / hP - brusselator.dYdP1());</span>
+        }
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP0.getMax() - residualsP0.getMin()) &gt; 0.02);</span>
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP0.getMax() - residualsP0.getMin()) &lt; 0.03);</span>
+<span class="pc bpc" id="L97" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP0.getStandardDeviation() &gt; 0.003);</span>
+<span class="pc bpc" id="L98" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP0.getStandardDeviation() &lt; 0.004);</span>
+<span class="pc bpc" id="L99" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP1.getMax() - residualsP1.getMin()) &gt; 0.04);</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP1.getMax() - residualsP1.getMin()) &lt; 0.05);</span>
+<span class="pc bpc" id="L101" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP1.getStandardDeviation() &gt; 0.007);</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP1.getStandardDeviation() &lt; 0.008);</span>
+<span class="fc" id="L103">    }</span>
+
+    @Test
+    public void testWrongParameterName() {
+<span class="fc" id="L107">        final String name = &quot;an-unknown-parameter&quot;;</span>
+        try {
+<span class="fc" id="L109">            ParamBrusselator brusselator = new ParamBrusselator(2.9);</span>
+<span class="nc" id="L110">            brusselator.setParameter(name, 3.0);</span>
+<span class="nc" id="L111">            Assert.fail(&quot;an exception should have been thrown&quot;);</span>
+<span class="fc" id="L112">        } catch (UnknownParameterException upe) {</span>
+<span class="fc" id="L113">            Assert.assertTrue(upe.getMessage().contains(name));</span>
+<span class="fc" id="L114">            Assert.assertEquals(name, upe.getName());</span>
+<span class="nc" id="L115">        }</span>
+<span class="fc" id="L116">    }</span>
+
+    @Test
+    public void testInternalDifferentiation()
+                    throws NumberIsTooSmallException, DimensionMismatchException,
+                    MaxCountExceededException, NoBracketingException,
+                    UnknownParameterException, MismatchedEquations {
+<span class="fc" id="L123">        AbstractIntegrator integ =</span>
+                        new DormandPrince54Integrator(1.0e-8, 100.0, new double[] { 1.0e-4, 1.0e-4 }, new double[] { 1.0e-4, 1.0e-4 });
+<span class="fc" id="L125">        double hP = 1.0e-12;</span>
+<span class="fc" id="L126">        double hY = 1.0e-12;</span>
+<span class="fc" id="L127">        SummaryStatistics residualsP0 = new SummaryStatistics();</span>
+<span class="fc" id="L128">        SummaryStatistics residualsP1 = new SummaryStatistics();</span>
+<span class="fc bfc" id="L129" title="All 2 branches covered.">        for (double b = 2.88; b &lt; 3.08; b += 0.001) {</span>
+<span class="fc" id="L130">                ParamBrusselator brusselator = new ParamBrusselator(b);</span>
+<span class="fc" id="L131">                brusselator.setParameter(ParamBrusselator.B, b);</span>
+<span class="fc" id="L132">            double[] z = { 1.3, b };</span>
+<span class="fc" id="L133">            double[][] dZdZ0 = new double[2][2];</span>
+<span class="fc" id="L134">            double[]   dZdP  = new double[2];</span>
+
+<span class="fc" id="L136">            JacobianMatrices jacob = new JacobianMatrices(brusselator, new double[] { hY, hY }, ParamBrusselator.B);</span>
+<span class="fc" id="L137">            jacob.setParameterizedODE(brusselator);</span>
+<span class="fc" id="L138">            jacob.setParameterStep(ParamBrusselator.B, hP);</span>
+<span class="fc" id="L139">            jacob.setInitialParameterJacobian(ParamBrusselator.B, new double[] { 0.0, 1.0 });</span>
+
+<span class="fc" id="L141">            ExpandableStatefulODE efode = new ExpandableStatefulODE(brusselator);</span>
+<span class="fc" id="L142">            efode.setTime(0);</span>
+<span class="fc" id="L143">            efode.setPrimaryState(z);</span>
+<span class="fc" id="L144">            jacob.registerVariationalEquations(efode);</span>
+
+<span class="fc" id="L146">            integ.setMaxEvaluations(5000);</span>
+<span class="fc" id="L147">            integ.integrate(efode, 20.0);</span>
+<span class="fc" id="L148">            jacob.getCurrentMainSetJacobian(dZdZ0);</span>
+<span class="fc" id="L149">            jacob.getCurrentParameterJacobian(ParamBrusselator.B, dZdP);</span>
+//            Assert.assertEquals(5000, integ.getMaxEvaluations());
+//            Assert.assertTrue(integ.getEvaluations() &gt; 1500);
+//            Assert.assertTrue(integ.getEvaluations() &lt; 2100);
+//            Assert.assertEquals(4 * integ.getEvaluations(), integ.getEvaluations());
+<span class="fc" id="L154">            residualsP0.addValue(dZdP[0] - brusselator.dYdP0());</span>
+<span class="fc" id="L155">            residualsP1.addValue(dZdP[1] - brusselator.dYdP1());</span>
+        }
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP0.getMax() - residualsP0.getMin()) &lt; 0.02);</span>
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP0.getStandardDeviation() &lt; 0.003);</span>
+<span class="pc bpc" id="L159" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP1.getMax() - residualsP1.getMin()) &lt; 0.05);</span>
+<span class="pc bpc" id="L160" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP1.getStandardDeviation() &lt; 0.01);</span>
+<span class="fc" id="L161">    }</span>
+
+    @Test
+    public void testAnalyticalDifferentiation()
+        throws MaxCountExceededException, DimensionMismatchException,
+               NumberIsTooSmallException, NoBracketingException,
+               UnknownParameterException, MismatchedEquations {
+<span class="fc" id="L168">        AbstractIntegrator integ =</span>
+            new DormandPrince54Integrator(1.0e-8, 100.0, new double[] { 1.0e-4, 1.0e-4 }, new double[] { 1.0e-4, 1.0e-4 });
+<span class="fc" id="L170">        SummaryStatistics residualsP0 = new SummaryStatistics();</span>
+<span class="fc" id="L171">        SummaryStatistics residualsP1 = new SummaryStatistics();</span>
+<span class="fc bfc" id="L172" title="All 2 branches covered.">        for (double b = 2.88; b &lt; 3.08; b += 0.001) {</span>
+<span class="fc" id="L173">            Brusselator brusselator = new Brusselator(b);</span>
+<span class="fc" id="L174">            double[] z = { 1.3, b };</span>
+<span class="fc" id="L175">            double[][] dZdZ0 = new double[2][2];</span>
+<span class="fc" id="L176">            double[]   dZdP  = new double[2];</span>
+
+<span class="fc" id="L178">            JacobianMatrices jacob = new JacobianMatrices(brusselator, Brusselator.B);</span>
+<span class="fc" id="L179">            jacob.addParameterJacobianProvider(brusselator);</span>
+<span class="fc" id="L180">            jacob.setInitialParameterJacobian(Brusselator.B, new double[] { 0.0, 1.0 });</span>
+
+<span class="fc" id="L182">            ExpandableStatefulODE efode = new ExpandableStatefulODE(brusselator);</span>
+<span class="fc" id="L183">            efode.setTime(0);</span>
+<span class="fc" id="L184">            efode.setPrimaryState(z);</span>
+<span class="fc" id="L185">            jacob.registerVariationalEquations(efode);</span>
+
+<span class="fc" id="L187">            integ.setMaxEvaluations(5000);</span>
+<span class="fc" id="L188">            integ.integrate(efode, 20.0);</span>
+<span class="fc" id="L189">            jacob.getCurrentMainSetJacobian(dZdZ0);</span>
+<span class="fc" id="L190">            jacob.getCurrentParameterJacobian(Brusselator.B, dZdP);</span>
+//            Assert.assertEquals(5000, integ.getMaxEvaluations());
+//            Assert.assertTrue(integ.getEvaluations() &gt; 350);
+//            Assert.assertTrue(integ.getEvaluations() &lt; 510);
+<span class="fc" id="L194">            residualsP0.addValue(dZdP[0] - brusselator.dYdP0());</span>
+<span class="fc" id="L195">            residualsP1.addValue(dZdP[1] - brusselator.dYdP1());</span>
+        }
+<span class="pc bpc" id="L197" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP0.getMax() - residualsP0.getMin()) &lt; 0.014);</span>
+<span class="pc bpc" id="L198" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP0.getStandardDeviation() &lt; 0.003);</span>
+<span class="pc bpc" id="L199" title="1 of 2 branches missed.">        Assert.assertTrue((residualsP1.getMax() - residualsP1.getMin()) &lt; 0.05);</span>
+<span class="pc bpc" id="L200" title="1 of 2 branches missed.">        Assert.assertTrue(residualsP1.getStandardDeviation() &lt; 0.01);</span>
+<span class="fc" id="L201">    }</span>
+
+    @Test
+    public void testFinalResult()
+        throws MaxCountExceededException, DimensionMismatchException,
+               NumberIsTooSmallException, NoBracketingException,
+               UnknownParameterException, MismatchedEquations {
+
+<span class="fc" id="L209">        AbstractIntegrator integ =</span>
+            new DormandPrince54Integrator(1.0e-8, 100.0, new double[] { 1.0e-10, 1.0e-10 }, new double[] { 1.0e-10, 1.0e-10 });
+<span class="fc" id="L211">        double[] y = new double[] { 0.0, 1.0 };</span>
+<span class="fc" id="L212">        Circle circle = new Circle(y, 1.0, 1.0, 0.1);</span>
+
+<span class="fc" id="L214">        JacobianMatrices jacob = new JacobianMatrices(circle, Circle.CX, Circle.CY, Circle.OMEGA);</span>
+<span class="fc" id="L215">        jacob.addParameterJacobianProvider(circle);</span>
+<span class="fc" id="L216">        jacob.setInitialMainStateJacobian(circle.exactDyDy0(0));</span>
+<span class="fc" id="L217">        jacob.setInitialParameterJacobian(Circle.CX, circle.exactDyDcx(0));</span>
+<span class="fc" id="L218">        jacob.setInitialParameterJacobian(Circle.CY, circle.exactDyDcy(0));</span>
+<span class="fc" id="L219">        jacob.setInitialParameterJacobian(Circle.OMEGA, circle.exactDyDom(0));</span>
+
+<span class="fc" id="L221">        ExpandableStatefulODE efode = new ExpandableStatefulODE(circle);</span>
+<span class="fc" id="L222">        efode.setTime(0);</span>
+<span class="fc" id="L223">        efode.setPrimaryState(y);</span>
+<span class="fc" id="L224">        jacob.registerVariationalEquations(efode);</span>
+
+<span class="fc" id="L226">        integ.setMaxEvaluations(5000);</span>
+
+<span class="fc" id="L228">        double t = 18 * FastMath.PI;</span>
+<span class="fc" id="L229">        integ.integrate(efode, t);</span>
+<span class="fc" id="L230">        y = efode.getPrimaryState();</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">        for (int i = 0; i &lt; y.length; ++i) {</span>
+<span class="fc" id="L232">            Assert.assertEquals(circle.exactY(t)[i], y[i], 1.0e-9);</span>
+        }
+
+<span class="fc" id="L235">        double[][] dydy0 = new double[2][2];</span>
+<span class="fc" id="L236">        jacob.getCurrentMainSetJacobian(dydy0);</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">        for (int i = 0; i &lt; dydy0.length; ++i) {</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">            for (int j = 0; j &lt; dydy0[i].length; ++j) {</span>
+<span class="fc" id="L239">                Assert.assertEquals(circle.exactDyDy0(t)[i][j], dydy0[i][j], 1.0e-9);</span>
+            }
+        }
+<span class="fc" id="L242">        double[] dydcx = new double[2];</span>
+<span class="fc" id="L243">        jacob.getCurrentParameterJacobian(Circle.CX, dydcx);</span>
+<span class="fc bfc" id="L244" title="All 2 branches covered.">        for (int i = 0; i &lt; dydcx.length; ++i) {</span>
+<span class="fc" id="L245">            Assert.assertEquals(circle.exactDyDcx(t)[i], dydcx[i], 1.0e-7);</span>
+        }
+<span class="fc" id="L247">        double[] dydcy = new double[2];</span>
+<span class="fc" id="L248">        jacob.getCurrentParameterJacobian(Circle.CY, dydcy);</span>
+<span class="fc bfc" id="L249" title="All 2 branches covered.">        for (int i = 0; i &lt; dydcy.length; ++i) {</span>
+<span class="fc" id="L250">            Assert.assertEquals(circle.exactDyDcy(t)[i], dydcy[i], 1.0e-7);</span>
+        }
+<span class="fc" id="L252">        double[] dydom = new double[2];</span>
+<span class="fc" id="L253">        jacob.getCurrentParameterJacobian(Circle.OMEGA, dydom);</span>
+<span class="fc bfc" id="L254" title="All 2 branches covered.">        for (int i = 0; i &lt; dydom.length; ++i) {</span>
+<span class="fc" id="L255">            Assert.assertEquals(circle.exactDyDom(t)[i], dydom[i], 1.0e-7);</span>
+        }
+<span class="fc" id="L257">    }</span>
+
+    @Test
+    public void testParameterizable()
+        throws MaxCountExceededException, DimensionMismatchException,
+               NumberIsTooSmallException, NoBracketingException,
+               UnknownParameterException, MismatchedEquations {
+
+<span class="fc" id="L265">        AbstractIntegrator integ =</span>
+            new DormandPrince54Integrator(1.0e-8, 100.0, new double[] { 1.0e-10, 1.0e-10 }, new double[] { 1.0e-10, 1.0e-10 });
+<span class="fc" id="L267">        double[] y = new double[] { 0.0, 1.0 };</span>
+<span class="fc" id="L268">        ParameterizedCircle pcircle = new ParameterizedCircle(y, 1.0, 1.0, 0.1);</span>
+
+<span class="fc" id="L270">        double hP = 1.0e-12;</span>
+<span class="fc" id="L271">        double hY = 1.0e-12;</span>
+
+<span class="fc" id="L273">        JacobianMatrices jacob = new JacobianMatrices(pcircle, new double[] { hY, hY },</span>
+                                                      ParameterizedCircle.CX, ParameterizedCircle.CY,
+                                                      ParameterizedCircle.OMEGA);
+<span class="fc" id="L276">        jacob.setParameterizedODE(pcircle);</span>
+<span class="fc" id="L277">        jacob.setParameterStep(ParameterizedCircle.CX,    hP);</span>
+<span class="fc" id="L278">        jacob.setParameterStep(ParameterizedCircle.CY,    hP);</span>
+<span class="fc" id="L279">        jacob.setParameterStep(ParameterizedCircle.OMEGA, hP);</span>
+<span class="fc" id="L280">        jacob.setInitialMainStateJacobian(pcircle.exactDyDy0(0));</span>
+<span class="fc" id="L281">        jacob.setInitialParameterJacobian(ParameterizedCircle.CX, pcircle.exactDyDcx(0));</span>
+<span class="fc" id="L282">        jacob.setInitialParameterJacobian(ParameterizedCircle.CY, pcircle.exactDyDcy(0));</span>
+<span class="fc" id="L283">        jacob.setInitialParameterJacobian(ParameterizedCircle.OMEGA, pcircle.exactDyDom(0));</span>
+
+<span class="fc" id="L285">        ExpandableStatefulODE efode = new ExpandableStatefulODE(pcircle);</span>
+<span class="fc" id="L286">        efode.setTime(0);</span>
+<span class="fc" id="L287">        efode.setPrimaryState(y);</span>
+<span class="fc" id="L288">        jacob.registerVariationalEquations(efode);</span>
+
+<span class="fc" id="L290">        integ.setMaxEvaluations(50000);</span>
+
+<span class="fc" id="L292">        double t = 18 * FastMath.PI;</span>
+<span class="fc" id="L293">        integ.integrate(efode, t);</span>
+<span class="fc" id="L294">        y = efode.getPrimaryState();</span>
+<span class="fc bfc" id="L295" title="All 2 branches covered.">        for (int i = 0; i &lt; y.length; ++i) {</span>
+<span class="fc" id="L296">            Assert.assertEquals(pcircle.exactY(t)[i], y[i], 1.0e-9);</span>
+        }
+
+<span class="fc" id="L299">        double[][] dydy0 = new double[2][2];</span>
+<span class="fc" id="L300">        jacob.getCurrentMainSetJacobian(dydy0);</span>
+<span class="fc bfc" id="L301" title="All 2 branches covered.">        for (int i = 0; i &lt; dydy0.length; ++i) {</span>
+<span class="fc bfc" id="L302" title="All 2 branches covered.">            for (int j = 0; j &lt; dydy0[i].length; ++j) {</span>
+<span class="fc" id="L303">                Assert.assertEquals(pcircle.exactDyDy0(t)[i][j], dydy0[i][j], 5.0e-4);</span>
+            }
+        }
+
+<span class="fc" id="L307">        double[] dydp0 = new double[2];</span>
+<span class="fc" id="L308">        jacob.getCurrentParameterJacobian(ParameterizedCircle.CX, dydp0);</span>
+<span class="fc bfc" id="L309" title="All 2 branches covered.">        for (int i = 0; i &lt; dydp0.length; ++i) {</span>
+<span class="fc" id="L310">            Assert.assertEquals(pcircle.exactDyDcx(t)[i], dydp0[i], 5.0e-4);</span>
+        }
+
+<span class="fc" id="L313">        double[] dydp1 = new double[2];</span>
+<span class="fc" id="L314">        jacob.getCurrentParameterJacobian(ParameterizedCircle.OMEGA, dydp1);</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">        for (int i = 0; i &lt; dydp1.length; ++i) {</span>
+<span class="fc" id="L316">            Assert.assertEquals(pcircle.exactDyDom(t)[i], dydp1[i], 1.0e-2);</span>
+        }
+<span class="fc" id="L318">    }</span>
+
+    private static class Brusselator extends AbstractParameterizable
+        implements MainStateJacobianProvider, ParameterJacobianProvider {
+
+        public static final String B = &quot;b&quot;;
+
+        private double b;
+
+        public Brusselator(double b) {
+<span class="fc" id="L328">            super(B);</span>
+<span class="fc" id="L329">            this.b = b;</span>
+<span class="fc" id="L330">        }</span>
+
+        @Override
+        public int getDimension() {
+<span class="fc" id="L334">            return 2;</span>
+        }
+
+        @Override
+        public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L339">            double prod = y[0] * y[0] * y[1];</span>
+<span class="fc" id="L340">            yDot[0] = 1 + prod - (b + 1) * y[0];</span>
+<span class="fc" id="L341">            yDot[1] = b * y[0] - prod;</span>
+<span class="fc" id="L342">        }</span>
+
+        @Override
+        public void computeMainStateJacobian(double t, double[] y, double[] yDot,
+                                             double[][] dFdY) {
+<span class="fc" id="L347">            double p = 2 * y[0] * y[1];</span>
+<span class="fc" id="L348">            double y02 = y[0] * y[0];</span>
+<span class="fc" id="L349">            dFdY[0][0] = p - (1 + b);</span>
+<span class="fc" id="L350">            dFdY[0][1] = y02;</span>
+<span class="fc" id="L351">            dFdY[1][0] = b - p;</span>
+<span class="fc" id="L352">            dFdY[1][1] = -y02;</span>
+<span class="fc" id="L353">        }</span>
+
+        @Override
+        public void computeParameterJacobian(double t, double[] y, double[] yDot,
+                                             String paramName, double[] dFdP) {
+<span class="pc bpc" id="L358" title="1 of 2 branches missed.">            if (isSupported(paramName)) {</span>
+<span class="fc" id="L359">                dFdP[0] = -y[0];</span>
+<span class="fc" id="L360">                dFdP[1] = y[0];</span>
+            } else {
+<span class="nc" id="L362">                dFdP[0] = 0;</span>
+<span class="nc" id="L363">                dFdP[1] = 0;</span>
+            }
+<span class="fc" id="L365">        }</span>
+
+        public double dYdP0() {
+<span class="fc" id="L368">            return -1088.232716447743 + (1050.775747149553 + (-339.012934631828 + 36.52917025056327 * b) * b) * b;</span>
+        }
+
+        public double dYdP1() {
+<span class="fc" id="L372">            return 1502.824469929139 + (-1438.6974831849952 + (460.959476642384 - 49.43847385647082 * b) * b) * b;</span>
+        }
+
+    }
+
+    private static class ParamBrusselator extends AbstractParameterizable
+        implements FirstOrderDifferentialEquations, ParameterizedODE {
+
+        public static final String B = &quot;b&quot;;
+
+        private double b;
+
+        public ParamBrusselator(double b) {
+<span class="fc" id="L385">            super(B);</span>
+<span class="fc" id="L386">            this.b = b;</span>
+<span class="fc" id="L387">        }</span>
+
+        @Override
+        public int getDimension() {
+<span class="fc" id="L391">            return 2;</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public double getParameter(final String name)
+            throws UnknownParameterException {
+<span class="fc" id="L398">            complainIfNotSupported(name);</span>
+<span class="fc" id="L399">            return b;</span>
+        }
+
+        /** {@inheritDoc} */
+        @Override
+        public void setParameter(final String name, final double value)
+            throws UnknownParameterException {
+<span class="fc" id="L406">            complainIfNotSupported(name);</span>
+<span class="fc" id="L407">            b = value;</span>
+<span class="fc" id="L408">        }</span>
+
+        @Override
+        public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L412">            double prod = y[0] * y[0] * y[1];</span>
+<span class="fc" id="L413">            yDot[0] = 1 + prod - (b + 1) * y[0];</span>
+<span class="fc" id="L414">            yDot[1] = b * y[0] - prod;</span>
+<span class="fc" id="L415">        }</span>
+
+        public double dYdP0() {
+<span class="fc" id="L418">            return -1088.232716447743 + (1050.775747149553 + (-339.012934631828 + 36.52917025056327 * b) * b) * b;</span>
+        }
+
+        public double dYdP1() {
+<span class="fc" id="L422">            return 1502.824469929139 + (-1438.6974831849952 + (460.959476642384 - 49.43847385647082 * b) * b) * b;</span>
+        }
+
+    }
+
+    /** ODE representing a point moving on a circle with provided center and angular rate. */
+    private static class Circle extends AbstractParameterizable
+        implements MainStateJacobianProvider, ParameterJacobianProvider {
+
+        public static final String CX = &quot;cx&quot;;
+        public static final String CY = &quot;cy&quot;;
+        public static final String OMEGA = &quot;omega&quot;;
+
+        private final double[] y0;
+        private double cx;
+        private double cy;
+        private double omega;
+
+        public Circle(double[] y0, double cx, double cy, double omega) {
+<span class="fc" id="L441">            super(CX,CY,OMEGA);</span>
+<span class="fc" id="L442">            this.y0    = y0.clone();</span>
+<span class="fc" id="L443">            this.cx    = cx;</span>
+<span class="fc" id="L444">            this.cy    = cy;</span>
+<span class="fc" id="L445">            this.omega = omega;</span>
+<span class="fc" id="L446">        }</span>
+
+        @Override
+        public int getDimension() {
+<span class="fc" id="L450">            return 2;</span>
+        }
+
+        @Override
+        public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L455">            yDot[0] = omega * (cy - y[1]);</span>
+<span class="fc" id="L456">            yDot[1] = omega * (y[0] - cx);</span>
+<span class="fc" id="L457">        }</span>
+
+        @Override
+        public void computeMainStateJacobian(double t, double[] y,
+                                             double[] yDot, double[][] dFdY) {
+<span class="fc" id="L462">            dFdY[0][0] = 0;</span>
+<span class="fc" id="L463">            dFdY[0][1] = -omega;</span>
+<span class="fc" id="L464">            dFdY[1][0] = omega;</span>
+<span class="fc" id="L465">            dFdY[1][1] = 0;</span>
+<span class="fc" id="L466">        }</span>
+
+        @Override
+        public void computeParameterJacobian(double t, double[] y, double[] yDot,
+                                             String paramName, double[] dFdP)
+            throws UnknownParameterException {
+<span class="fc" id="L472">            complainIfNotSupported(paramName);</span>
+<span class="fc bfc" id="L473" title="All 2 branches covered.">            if (paramName.equals(CX)) {</span>
+<span class="fc" id="L474">                dFdP[0] = 0;</span>
+<span class="fc" id="L475">                dFdP[1] = -omega;</span>
+<span class="fc bfc" id="L476" title="All 2 branches covered.">            } else if (paramName.equals(CY)) {</span>
+<span class="fc" id="L477">                dFdP[0] = omega;</span>
+<span class="fc" id="L478">                dFdP[1] = 0;</span>
+            }  else {
+<span class="fc" id="L480">                dFdP[0] = cy - y[1];</span>
+<span class="fc" id="L481">                dFdP[1] = y[0] - cx;</span>
+            }
+<span class="fc" id="L483">        }</span>
+
+        public double[] exactY(double t) {
+<span class="fc" id="L486">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L487">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L488">            double dx0 = y0[0] - cx;</span>
+<span class="fc" id="L489">            double dy0 = y0[1] - cy;</span>
+<span class="fc" id="L490">            return new double[] {</span>
+                cx + cos * dx0 - sin * dy0,
+                cy + sin * dx0 + cos * dy0
+            };
+        }
+
+        public double[][] exactDyDy0(double t) {
+<span class="fc" id="L497">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L498">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L499">            return new double[][] {</span>
+                { cos, -sin },
+                { sin,  cos }
+            };
+        }
+
+        public double[] exactDyDcx(double t) {
+<span class="fc" id="L506">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L507">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L508">            return new double[] {1 - cos, -sin};</span>
+        }
+
+        public double[] exactDyDcy(double t) {
+<span class="fc" id="L512">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L513">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L514">            return new double[] {sin, 1 - cos};</span>
+        }
+
+        public double[] exactDyDom(double t) {
+<span class="fc" id="L518">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L519">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L520">            double dx0 = y0[0] - cx;</span>
+<span class="fc" id="L521">            double dy0 = y0[1] - cy;</span>
+<span class="fc" id="L522">            return new double[] { -t * (sin * dx0 + cos * dy0) , t * (cos * dx0 - sin * dy0) };</span>
+        }
+
+    }
+
+    /** ODE representing a point moving on a circle with provided center and angular rate. */
+    private static class ParameterizedCircle extends AbstractParameterizable
+        implements FirstOrderDifferentialEquations, ParameterizedODE {
+
+        public static final String CX = &quot;cx&quot;;
+        public static final String CY = &quot;cy&quot;;
+        public static final String OMEGA = &quot;omega&quot;;
+
+        private final double[] y0;
+        private double cx;
+        private double cy;
+        private double omega;
+
+        public ParameterizedCircle(double[] y0, double cx, double cy, double omega) {
+<span class="fc" id="L541">            super(CX,CY,OMEGA);</span>
+<span class="fc" id="L542">            this.y0    = y0.clone();</span>
+<span class="fc" id="L543">            this.cx    = cx;</span>
+<span class="fc" id="L544">            this.cy    = cy;</span>
+<span class="fc" id="L545">            this.omega = omega;</span>
+<span class="fc" id="L546">        }</span>
+
+        @Override
+        public int getDimension() {
+<span class="fc" id="L550">            return 2;</span>
+        }
+
+        @Override
+        public void computeDerivatives(double t, double[] y, double[] yDot) {
+<span class="fc" id="L555">            yDot[0] = omega * (cy - y[1]);</span>
+<span class="fc" id="L556">            yDot[1] = omega * (y[0] - cx);</span>
+<span class="fc" id="L557">        }</span>
+
+        @Override
+        public double getParameter(final String name)
+            throws UnknownParameterException {
+<span class="fc bfc" id="L562" title="All 2 branches covered.">            if (name.equals(CX)) {</span>
+<span class="fc" id="L563">                return cx;</span>
+<span class="fc bfc" id="L564" title="All 2 branches covered.">            } else if (name.equals(CY)) {</span>
+<span class="fc" id="L565">                    return cy;</span>
+<span class="pc bpc" id="L566" title="1 of 2 branches missed.">            } else if (name.equals(OMEGA)) {</span>
+<span class="fc" id="L567">                return omega;</span>
+            } else {
+<span class="nc" id="L569">                throw new UnknownParameterException(name);</span>
+            }
+        }
+
+        @Override
+        public void setParameter(final String name, final double value)
+            throws UnknownParameterException {
+<span class="fc bfc" id="L576" title="All 2 branches covered.">            if (name.equals(CX)) {</span>
+<span class="fc" id="L577">                cx = value;</span>
+<span class="fc bfc" id="L578" title="All 2 branches covered.">            } else if (name.equals(CY)) {</span>
+<span class="fc" id="L579">                cy = value;</span>
+<span class="pc bpc" id="L580" title="1 of 2 branches missed.">            } else if (name.equals(OMEGA)) {</span>
+<span class="fc" id="L581">                omega = value;</span>
+            } else {
+<span class="nc" id="L583">                throw new UnknownParameterException(name);</span>
+            }
+<span class="fc" id="L585">        }</span>
+
+        public double[] exactY(double t) {
+<span class="fc" id="L588">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L589">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L590">            double dx0 = y0[0] - cx;</span>
+<span class="fc" id="L591">            double dy0 = y0[1] - cy;</span>
+<span class="fc" id="L592">            return new double[] {</span>
+                cx + cos * dx0 - sin * dy0,
+                cy + sin * dx0 + cos * dy0
+            };
+        }
+
+        public double[][] exactDyDy0(double t) {
+<span class="fc" id="L599">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L600">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L601">            return new double[][] {</span>
+                { cos, -sin },
+                { sin,  cos }
+            };
+        }
+
+        public double[] exactDyDcx(double t) {
+<span class="fc" id="L608">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L609">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L610">            return new double[] {1 - cos, -sin};</span>
+        }
+
+        public double[] exactDyDcy(double t) {
+<span class="fc" id="L614">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L615">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L616">            return new double[] {sin, 1 - cos};</span>
+        }
+
+        public double[] exactDyDom(double t) {
+<span class="fc" id="L620">            double cos = FastMath.cos(omega * t);</span>
+<span class="fc" id="L621">            double sin = FastMath.sin(omega * t);</span>
+<span class="fc" id="L622">            double dx0 = y0[0] - cx;</span>
+<span class="fc" id="L623">            double dy0 = y0[1] - cy;</span>
+<span class="fc" id="L624">            return new double[] { -t * (sin * dx0 + cos * dy0) , t * (cos * dx0 - sin * dy0) };</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

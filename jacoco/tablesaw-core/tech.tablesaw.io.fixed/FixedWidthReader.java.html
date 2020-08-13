@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FixedWidthReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.io.fixed</a> &gt; <span class="el_source">FixedWidthReader.java</span></div><h1>FixedWidthReader.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.io.fixed;
+
+import com.google.common.io.CharStreams;
+import com.univocity.parsers.common.AbstractParser;
+import com.univocity.parsers.fixed.FixedWidthFormat;
+import com.univocity.parsers.fixed.FixedWidthParser;
+import com.univocity.parsers.fixed.FixedWidthParserSettings;
+import java.io.IOException;
+import java.io.Reader;
+import javax.annotation.concurrent.Immutable;
+import org.apache.commons.math3.util.Pair;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.io.DataReader;
+import tech.tablesaw.io.FileReader;
+import tech.tablesaw.io.ReaderRegistry;
+import tech.tablesaw.io.Source;
+
+@Immutable
+public class FixedWidthReader extends FileReader implements DataReader&lt;FixedWidthReadOptions&gt; {
+
+<span class="fc" id="L36">  private static final FixedWidthReader INSTANCE = new FixedWidthReader();</span>
+
+  static {
+<span class="fc" id="L39">    register(Table.defaultReaderRegistry);</span>
+<span class="fc" id="L40">  }</span>
+
+  public static void register(ReaderRegistry registry) {
+<span class="fc" id="L43">    registry.registerOptions(FixedWidthReadOptions.class, INSTANCE);</span>
+<span class="fc" id="L44">  }</span>
+
+  /** Constructs a FixedWidthReader */
+  public FixedWidthReader() {
+<span class="fc" id="L48">    super();</span>
+<span class="fc" id="L49">  }</span>
+
+  /**
+   * Determines column types if not provided by the user Reads all input into memory unless File was
+   * provided
+   */
+  private Pair&lt;Reader, ColumnType[]&gt; getReaderAndColumnTypes(FixedWidthReadOptions options)
+      throws IOException {
+<span class="fc" id="L57">    ColumnType[] types = options.columnTypes();</span>
+<span class="fc" id="L58">    byte[] bytesCache = null;</span>
+
+<span class="fc bfc" id="L60" title="All 2 branches covered.">    if (types == null) {</span>
+<span class="fc" id="L61">      Reader reader = options.source().createReader(bytesCache);</span>
+<span class="pc bpc" id="L62" title="1 of 2 branches missed.">      if (options.source().file() == null) {</span>
+<span class="fc" id="L63">        bytesCache = CharStreams.toString(reader).getBytes();</span>
+        // create a new reader since we just exhausted the existing one
+<span class="fc" id="L65">        reader = options.source().createReader(bytesCache);</span>
+      }
+<span class="fc" id="L67">      types = detectColumnTypes(reader, options);</span>
+    }
+
+<span class="fc" id="L70">    return Pair.create(options.source().createReader(bytesCache), types);</span>
+  }
+
+  public Table read(FixedWidthReadOptions options) throws IOException {
+<span class="fc" id="L74">    return read(options, false);</span>
+  }
+
+  private Table read(FixedWidthReadOptions options, boolean headerOnly) throws IOException {
+<span class="fc" id="L78">    Pair&lt;Reader, ColumnType[]&gt; pair = getReaderAndColumnTypes(options);</span>
+<span class="fc" id="L79">    Reader reader = pair.getKey();</span>
+<span class="fc" id="L80">    ColumnType[] types = pair.getValue();</span>
+
+<span class="fc" id="L82">    FixedWidthParser parser = fixedWidthParser(options);</span>
+
+    try {
+<span class="fc" id="L85">      return parseRows(options, headerOnly, reader, types, parser);</span>
+    } finally {
+<span class="fc bfc" id="L87" title="All 2 branches covered.">      if (options.source().reader() == null) {</span>
+        // if we get a reader back from options it means the client opened it, so let the client
+        // close it
+        // if it's null, we close it here.
+<span class="fc" id="L91">        parser.stopParsing();</span>
+<span class="fc" id="L92">        reader.close();</span>
+      }
+    }
+  }
+
+  /**
+   * Returns a string representation of the column types in file {@code fixed widthFilename}, as
+   * determined by the type-detection algorithm
+   *
+   * &lt;p&gt;This method is intended to help analysts quickly fix any erroneous types, by printing out
+   * the types in a format such that they can be edited to correct any mistakes, and used in an
+   * array literal
+   *
+   * &lt;p&gt;For example:
+   *
+   * &lt;p&gt;LOCAL_DATE, // 0 date SHORT, // 1 approval STRING, // 2 who
+   *
+   * &lt;p&gt;Note that the types are array separated, and that the index position and the column name are
+   * printed such that they would be interpreted as comments if you paste the output into an array:
+   *
+   * &lt;p&gt;
+   *
+   * @throws IOException if file cannot be read
+   */
+  public String printColumnTypes(FixedWidthReadOptions options) throws IOException {
+
+<span class="nc" id="L118">    Table structure = read(options, true).structure();</span>
+
+<span class="nc" id="L120">    return getTypeString(structure);</span>
+  }
+
+  /**
+   * Estimates and returns the type for each column in the delimited text file {@code file}
+   *
+   * &lt;p&gt;The type is determined by checking a sample of the data in the file. Because only a sample
+   * of the data is checked, the types may be incorrect. If that is the case a Parse Exception will
+   * be thrown.
+   *
+   * &lt;p&gt;The method {@code printColumnTypes()} can be used to print a list of the detected columns
+   * that can be corrected and used to explicitly specify the correct column types.
+   */
+  public ColumnType[] detectColumnTypes(Reader reader, FixedWidthReadOptions options) {
+
+<span class="fc" id="L135">    boolean header = options.header();</span>
+<span class="pc bpc" id="L136" title="1 of 2 branches missed.">    int linesToSkip = header ? 1 : 0;</span>
+
+<span class="fc" id="L138">    AbstractParser&lt;?&gt; parser = fixedWidthParser(options);</span>
+
+    try {
+<span class="fc" id="L141">      return getColumnTypes(reader, options, linesToSkip, parser);</span>
+    } finally {
+<span class="fc" id="L143">      parser.stopParsing();</span>
+      // we don't close the reader since we didn't create it
+    }
+  }
+
+  private FixedWidthParser fixedWidthParser(FixedWidthReadOptions options) {
+<span class="fc" id="L149">    FixedWidthParserSettings settings = new FixedWidthParserSettings();</span>
+
+<span class="pc bpc" id="L151" title="1 of 2 branches missed.">    if (options.columnSpecs() != null) {</span>
+<span class="fc" id="L152">      settings = new FixedWidthParserSettings(options.columnSpecs());</span>
+    }
+<span class="fc" id="L154">    settings.setFormat(fixedWidthFormat(options));</span>
+<span class="fc" id="L155">    settings.setMaxCharsPerColumn(options.maxNumberOfColumns());</span>
+<span class="fc bfc" id="L156" title="All 2 branches covered.">    if (options.skipTrailingCharsUntilNewline()) {</span>
+<span class="fc" id="L157">      settings.setSkipTrailingCharsUntilNewline(options.skipTrailingCharsUntilNewline());</span>
+    }
+<span class="pc bpc" id="L159" title="1 of 2 branches missed.">    if (options.maxNumberOfColumns() != null) {</span>
+<span class="fc" id="L160">      settings.setMaxColumns(options.maxNumberOfColumns());</span>
+    }
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">    if (options.recordEndsOnNewline()) {</span>
+<span class="nc" id="L163">      settings.setRecordEndsOnNewline(true);</span>
+    }
+<span class="fc" id="L165">    return new FixedWidthParser(settings);</span>
+  }
+
+  private FixedWidthFormat fixedWidthFormat(FixedWidthReadOptions options) {
+<span class="fc" id="L169">    FixedWidthFormat format = new FixedWidthFormat();</span>
+<span class="pc bpc" id="L170" title="1 of 2 branches missed.">    if (options.padding() != ' ') {</span>
+<span class="fc" id="L171">      format.setPadding(options.padding());</span>
+    }
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">    if (options.lookupWildcard() != '?') {</span>
+<span class="nc" id="L174">      format.setLookupWildcard(options.lookupWildcard());</span>
+    }
+<span class="pc bpc" id="L176" title="1 of 2 branches missed.">    if (options.lineEnding() != null) {</span>
+<span class="fc" id="L177">      format.setLineSeparator(options.lineEnding());</span>
+    }
+<span class="fc" id="L179">    return format;</span>
+  }
+
+  @Override
+  public Table read(Source source) throws IOException {
+<span class="nc" id="L184">    return read(FixedWidthReadOptions.builder(source).build());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

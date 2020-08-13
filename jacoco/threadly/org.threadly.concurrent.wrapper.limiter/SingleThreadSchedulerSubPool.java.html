@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SingleThreadSchedulerSubPool.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">SingleThreadSchedulerSubPool.java</span></div><h1>SingleThreadSchedulerSubPool.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import org.threadly.concurrent.AbstractPriorityScheduler;
+import org.threadly.concurrent.ReschedulingOperation;
+import org.threadly.concurrent.SchedulerService;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * This sub-pool is a special type of limiter.  It is able to have expanded semantics than the pool 
+ * it delegates to.  For example this pool provides {@link TaskPriority} capabilities even though 
+ * the pool it runs on top of does not necessarily provide that.  In addition most status's returned 
+ * do not consider the parent pools state (for example {@link #getActiveTaskCount()} does not 
+ * reflect the active tasks in the parent pool).
+ * &lt;p&gt;
+ * Most importantly difference in this &quot;sub-pool&quot; vs &quot;limiter&quot; is the way task execution order is 
+ * maintained in the delegate pool.  In a limiter tasks will need to queue individually against the 
+ * other tasks the delegate pool needs to execute.  In this implementation the sub-pool basically 
+ * gets CPU time and it will attempt to execute everything it needs to.  It will not return the 
+ * thread to the delegate pool until there is nothing left to process.
+ * &lt;p&gt;
+ * There are two big reasons you might want to use this sub pool over a limiter.  As long as the 
+ * above details are not problematic, this is a much more efficient implementation.  Providing 
+ * better load characteristics for submitting tasks, as well reducing the burden on the delegate 
+ * pool.  In addition if you need limiter + priority capabilities, this is your only option.
+ * 
+ * @since 5.7
+ */
+public class SingleThreadSchedulerSubPool extends AbstractPriorityScheduler {
+  private final SchedulerService delegateScheduler;
+  private final NoThreadScheduler noThreadScheduler;
+  private final TickTask tickTask;
+  
+  /**
+   * Construct a new single threaded sub-pool.
+   * 
+   * @param delegateScheduler Scheduler to gain CPU time for task execution
+   */
+  public SingleThreadSchedulerSubPool(SchedulerService delegateScheduler) {
+<span class="fc" id="L41">    this(delegateScheduler, TaskPriority.High, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS);</span>
+<span class="fc" id="L42">  }</span>
+  
+  /**
+   * 
+   * Construct a new single threaded sub-pool with default task priority behaviors.
+   * 
+   * @param delegateScheduler Scheduler to gain CPU time for task execution
+   * @param defaultPriority Default priority for tasks submitted to this pool
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  public SingleThreadSchedulerSubPool(SchedulerService delegateScheduler, 
+                                      TaskPriority defaultPriority, long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L54">    super(defaultPriority);</span>
+    
+<span class="fc" id="L56">    this.delegateScheduler = delegateScheduler;</span>
+<span class="fc" id="L57">    this.noThreadScheduler = new NoThreadScheduler(defaultPriority, maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L58">    this.tickTask = new TickTask(delegateScheduler);</span>
+<span class="fc" id="L59">  }</span>
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay,
+                                     TaskPriority priority) {
+<span class="fc" id="L64">    noThreadScheduler.scheduleWithFixedDelay(task, initialDelay, recurringDelay, priority);</span>
+<span class="fc" id="L65">    delegateScheduler.scheduleWithFixedDelay(() -&gt; tickTask.signalToRunImmediately(true), </span>
+                                             initialDelay, recurringDelay);
+<span class="fc" id="L67">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period,
+                                  TaskPriority priority) {
+<span class="fc" id="L72">    noThreadScheduler.scheduleAtFixedRate(task, initialDelay, period, priority);</span>
+<span class="fc" id="L73">    delegateScheduler.scheduleAtFixedRate(() -&gt; tickTask.signalToRunImmediately(true), </span>
+                                          initialDelay, period);
+<span class="fc" id="L75">  }</span>
+
+  @Override
+  public int getActiveTaskCount() {
+<span class="fc" id="L79">    return noThreadScheduler.getActiveTaskCount();</span>
+  }
+
+  @Override
+  public boolean isShutdown() {
+<span class="nc" id="L84">    return delegateScheduler.isShutdown();</span>
+  }
+
+  @Override
+  protected QueueManager getQueueManager() {
+<span class="fc" id="L89">    return noThreadScheduler.getQueueManager();</span>
+  }
+  
+  protected void executeTasks() {
+<span class="fc" id="L93">    noThreadScheduler.tick(ExceptionUtils::handleException);</span>
+<span class="fc" id="L94">  }</span>
+
+  @Override
+  protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L98">    OneTimeTaskWrapper result = noThreadScheduler.doSchedule(task, delayInMillis, priority);</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    if (delayInMillis &gt; 0) {</span>
+<span class="fc" id="L100">      delegateScheduler.schedule(() -&gt; tickTask.signalToRunImmediately(true), delayInMillis);</span>
+    } else {
+<span class="fc" id="L102">      tickTask.signalToRun();</span>
+    }
+<span class="fc" id="L104">    return result;</span>
+  }
+  
+  /**
+   * Operation that should be signaled to run when there is something to execute on the 
+   * NoThreadScheduler.  This will ensure that the scheduler is ticked in a single threaded manner.
+   */
+  private class TickTask extends ReschedulingOperation {
+<span class="fc" id="L112">    protected TickTask(SubmitterScheduler delegateScheduler) {</span>
+<span class="fc" id="L113">      super(delegateScheduler, 0);</span>
+<span class="fc" id="L114">    }</span>
+
+    @Override
+    protected void run() {
+<span class="fc" id="L118">      executeTasks();</span>
+<span class="fc" id="L119">    }</span>
+  }
+  
+  /**
+   * Extending class to gain visibility into protected functions from outside of the source package.
+   */
+  private static class NoThreadScheduler extends org.threadly.concurrent.NoThreadScheduler {
+    public NoThreadScheduler(TaskPriority defaultPriority, long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L127">      super(defaultPriority, maxWaitForLowPriorityInMs);</span>
+<span class="fc" id="L128">    }</span>
+
+    @Override
+    protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L132">      return super.doSchedule(task, delayInMillis, priority);</span>
+    }
+    
+    @Override
+    protected QueueManager getQueueManager() {
+<span class="fc" id="L137">      return super.getQueueManager();</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

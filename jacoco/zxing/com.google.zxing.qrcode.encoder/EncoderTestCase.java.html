@@ -1,0 +1,754 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>EncoderTestCase.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.encoder</a> &gt; <span class="el_source">EncoderTestCase.java</span></div><h1>EncoderTestCase.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.encoder;
+
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.WriterException;
+import com.google.zxing.common.BitArray;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
+import com.google.zxing.qrcode.decoder.Mode;
+import com.google.zxing.qrcode.decoder.Version;
+
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.io.UnsupportedEncodingException;
+import java.util.EnumMap;
+import java.util.Map;
+
+/**
+ * @author satorux@google.com (Satoru Takabayashi) - creator
+ * @author mysen@google.com (Chris Mysen) - ported from C++
+ */
+<span class="fc" id="L37">public final class EncoderTestCase extends Assert {</span>
+
+  @Test
+  public void testGetAlphanumericCode() {
+    // The first ten code points are numbers.
+<span class="fc bfc" id="L42" title="All 2 branches covered.">    for (int i = 0; i &lt; 10; ++i) {</span>
+<span class="fc" id="L43">      assertEquals(i, Encoder.getAlphanumericCode('0' + i));</span>
+    }
+
+    // The next 26 code points are capital alphabet letters.
+<span class="fc bfc" id="L47" title="All 2 branches covered.">    for (int i = 10; i &lt; 36; ++i) {</span>
+<span class="fc" id="L48">      assertEquals(i, Encoder.getAlphanumericCode('A' + i - 10));</span>
+    }
+
+    // Others are symbol letters
+<span class="fc" id="L52">    assertEquals(36, Encoder.getAlphanumericCode(' '));</span>
+<span class="fc" id="L53">    assertEquals(37, Encoder.getAlphanumericCode('$'));</span>
+<span class="fc" id="L54">    assertEquals(38, Encoder.getAlphanumericCode('%'));</span>
+<span class="fc" id="L55">    assertEquals(39, Encoder.getAlphanumericCode('*'));</span>
+<span class="fc" id="L56">    assertEquals(40, Encoder.getAlphanumericCode('+'));</span>
+<span class="fc" id="L57">    assertEquals(41, Encoder.getAlphanumericCode('-'));</span>
+<span class="fc" id="L58">    assertEquals(42, Encoder.getAlphanumericCode('.'));</span>
+<span class="fc" id="L59">    assertEquals(43, Encoder.getAlphanumericCode('/'));</span>
+<span class="fc" id="L60">    assertEquals(44, Encoder.getAlphanumericCode(':'));</span>
+
+    // Should return -1 for other letters;
+<span class="fc" id="L63">    assertEquals(-1, Encoder.getAlphanumericCode('a'));</span>
+<span class="fc" id="L64">    assertEquals(-1, Encoder.getAlphanumericCode('#'));</span>
+<span class="fc" id="L65">    assertEquals(-1, Encoder.getAlphanumericCode('\0'));</span>
+<span class="fc" id="L66">  }</span>
+
+  @Test
+  public void testChooseMode() throws WriterException {
+    // Numeric mode.
+<span class="fc" id="L71">    assertSame(Mode.NUMERIC, Encoder.chooseMode(&quot;0&quot;));</span>
+<span class="fc" id="L72">    assertSame(Mode.NUMERIC, Encoder.chooseMode(&quot;0123456789&quot;));</span>
+    // Alphanumeric mode.
+<span class="fc" id="L74">    assertSame(Mode.ALPHANUMERIC, Encoder.chooseMode(&quot;A&quot;));</span>
+<span class="fc" id="L75">    assertSame(Mode.ALPHANUMERIC,</span>
+<span class="fc" id="L76">               Encoder.chooseMode(&quot;0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:&quot;));</span>
+    // 8-bit byte mode.
+<span class="fc" id="L78">    assertSame(Mode.BYTE, Encoder.chooseMode(&quot;a&quot;));</span>
+<span class="fc" id="L79">    assertSame(Mode.BYTE, Encoder.chooseMode(&quot;#&quot;));</span>
+<span class="fc" id="L80">    assertSame(Mode.BYTE, Encoder.chooseMode(&quot;&quot;));</span>
+    // Kanji mode.  We used to use MODE_KANJI for these, but we stopped
+    // doing that as we cannot distinguish Shift_JIS from other encodings
+    // from data bytes alone.  See also comments in qrcode_encoder.h.
+
+    // AIUE in Hiragana in Shift_JIS
+<span class="fc" id="L86">    assertSame(Mode.BYTE,</span>
+<span class="fc" id="L87">               Encoder.chooseMode(shiftJISString(bytes(0x8, 0xa, 0x8, 0xa, 0x8, 0xa, 0x8, 0xa6))));</span>
+
+    // Nihon in Kanji in Shift_JIS.
+<span class="fc" id="L90">    assertSame(Mode.BYTE, Encoder.chooseMode(shiftJISString(bytes(0x9, 0xf, 0x9, 0x7b))));</span>
+
+    // Sou-Utsu-Byou in Kanji in Shift_JIS.
+<span class="fc" id="L93">    assertSame(Mode.BYTE, Encoder.chooseMode(shiftJISString(bytes(0xe, 0x4, 0x9, 0x5, 0x9, 0x61))));</span>
+<span class="fc" id="L94">  }</span>
+
+  @Test
+  public void testEncode() throws WriterException {
+<span class="fc" id="L98">    QRCode qrCode = Encoder.encode(&quot;ABCDEF&quot;, ErrorCorrectionLevel.H);</span>
+<span class="fc" id="L99">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: ALPHANUMERIC\n&quot; +
+          &quot; ecLevel: H\n&quot; +
+          &quot; version: 1\n&quot; +
+          &quot; maskPattern: 4\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 1 0 1 0 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 0 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 0 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 1 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 0 0 1 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 0 0 0 0 1 1 1 1 0 1 1 0 1 0 1 1 0 0 0 1 0\n&quot; +
+          &quot; 0 0 0 0 1 1 0 1 1 1 0 0 1 1 1 1 0 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 1 1 0 0 1 0 1 0 0 0 1 1 1 0 1 1\n&quot; +
+          &quot; 1 0 0 1 1 1 0 0 1 1 1 1 0 0 0 0 1 0 0 0 0\n&quot; +
+          &quot; 0 1 1 1 1 1 1 0 1 0 1 0 1 1 1 0 0 1 1 0 0\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 0 0 0 1 1 0 0 0 1 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 1 1 1 0 0 0 0 0 1 1 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 1 0 0 0 1 0 1 1 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 1 0 0 0 1 1 0 0 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 1 1 0 1 0 0 0 0 1 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 1 0 0 0 1 1 0 0 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 0 0 1 0 0 1 1 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 1 0 0 1 0 0 0 0 1 1 1\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L128">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L129">  }</span>
+  
+  @Test
+  public void testEncodeWithVersion() throws WriterException {
+<span class="fc" id="L133">    Map&lt;EncodeHintType, Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L134">    hints.put(EncodeHintType.QR_VERSION, 7);</span>
+<span class="fc" id="L135">    QRCode qrCode = Encoder.encode(&quot;ABCDEF&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L136">    assertTrue(qrCode.toString().contains(&quot; version: 7\n&quot;));</span>
+<span class="fc" id="L137">  }</span>
+  
+  @Test(expected = WriterException.class)
+  public void testEncodeWithVersionTooSmall() throws WriterException {
+<span class="fc" id="L141">    Map&lt;EncodeHintType, Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L142">    hints.put(EncodeHintType.QR_VERSION, 3);</span>
+<span class="nc" id="L143">    Encoder.encode(&quot;THISMESSAGEISTOOLONGFORAQRCODEVERSION3&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="nc" id="L144">  }</span>
+
+  @Test
+  public void testSimpleUTF8ECI() throws WriterException {
+<span class="fc" id="L148">    Map&lt;EncodeHintType,Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L149">    hints.put(EncodeHintType.CHARACTER_SET, &quot;UTF8&quot;);</span>
+<span class="fc" id="L150">    QRCode qrCode = Encoder.encode(&quot;hello&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L151">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: BYTE\n&quot; +
+          &quot; ecLevel: H\n&quot; +
+          &quot; version: 1\n&quot; +
+          &quot; maskPattern: 6\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 1 1 0 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 0 1 1 0 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 1 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 0 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 1 0 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 0 0 1 0 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 0 0 0 1 1 0 1 1 0 0 0 0 1 0 0 0 0 1 1 0 0\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 0 1 0 0 1 0 1 1 1 1 1\n&quot; +
+          &quot; 1 1 0 0 0 1 1 1 0 0 0 1 1 0 0 1 0 1 0 1 1\n&quot; +
+          &quot; 0 0 0 0 1 1 0 0 1 0 0 0 0 0 1 0 1 1 0 0 0\n&quot; +
+          &quot; 0 1 1 0 0 1 1 0 0 1 1 1 0 1 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 1 0 1 1 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 0 0 1 0 0 0 0 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 0 0 0 1 0 0 0 1 1 0 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 1 1 0 1 0 0 1 0 1 1 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 1 1 0 0 1 0 0 1 0 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 0 0 0 0 1 1 0 1 1 0 0 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 0 1 0 1 0 0 1 0 1 0 0\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L180">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L181">  }</span>
+
+  @Test
+  public void testEncodeKanjiMode() throws WriterException {
+<span class="fc" id="L185">    Map&lt;EncodeHintType,Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L186">    hints.put(EncodeHintType.CHARACTER_SET, &quot;Shift_JIS&quot;);</span>
+    // Nihon in Kanji
+<span class="fc" id="L188">    QRCode qrCode = Encoder.encode(&quot;\u65e5\u672c&quot;, ErrorCorrectionLevel.M, hints);</span>
+<span class="fc" id="L189">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: KANJI\n&quot; +
+          &quot; ecLevel: M\n&quot; +
+          &quot; version: 1\n&quot; +
+          &quot; maskPattern: 0\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 1 0 1 0 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 0 0 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 1 1 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 0 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 1 1 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 1 1 0 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 1 0 1 0 1 0 1 0 0 0 1 0 1 0 0 0 1 0 0 1 0\n&quot; +
+          &quot; 1 1 0 1 0 0 0 1 0 1 1 1 0 1 0 1 0 1 0 0 0\n&quot; +
+          &quot; 0 1 0 0 0 0 1 1 1 1 1 1 0 1 1 1 0 1 0 1 0\n&quot; +
+          &quot; 1 1 1 0 0 1 0 1 0 0 0 1 1 1 0 1 1 0 1 0 0\n&quot; +
+          &quot; 0 1 1 0 0 1 1 0 1 1 0 1 0 1 1 1 0 1 0 0 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 0 1 0 0 0 1 0 0 0 1 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 0 0 1 0 0 0 1 0 0 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 0 1 0 1 0 1 0 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 1 0 1 0 1 0 1 0 1 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 1 1 0 1 1 1 0 0 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 0 0 1 1 1 0 1 1 1 0 1 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 1 0 1 0 1 1 1 0 0 1 0 0\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L218">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L219">  }</span>
+
+  @Test
+  public void testEncodeShiftjisNumeric() throws WriterException {
+<span class="fc" id="L223">    Map&lt;EncodeHintType,Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L224">    hints.put(EncodeHintType.CHARACTER_SET, &quot;Shift_JIS&quot;);</span>
+<span class="fc" id="L225">    QRCode qrCode = Encoder.encode(&quot;0123&quot;, ErrorCorrectionLevel.M, hints);</span>
+<span class="fc" id="L226">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: NUMERIC\n&quot; +
+          &quot; ecLevel: M\n&quot; +
+          &quot; version: 1\n&quot; +
+          &quot; maskPattern: 2\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 1 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 0 0 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 0 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 1 1 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 0 1 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 0 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 1 1 1 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 1 0 1 1 1 1 1 0 0 1 1 0 1 0 1 1 1 1 1 0 0\n&quot; +
+          &quot; 1 1 0 0 0 1 0 0 1 0 1 0 1 0 0 1 0 0 1 0 0\n&quot; +
+          &quot; 0 1 1 0 1 1 1 1 0 1 1 1 0 1 0 0 1 1 0 1 1\n&quot; +
+          &quot; 1 0 1 1 0 1 0 1 0 0 1 0 0 0 0 1 1 0 1 0 0\n&quot; +
+          &quot; 0 0 1 0 0 1 1 1 0 0 0 1 0 1 0 0 1 0 1 0 0\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 0 1 1 1 1 0 0 1 0 0 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 1 0 1 0 1 1 0 0 0 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 1 1 1 1 0 0 1 0 1 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 1 0 1 0 0 1 0 0 1 0 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 1 0 1 0 0 1 0 0 1 0 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 0 1 0 1 0 0 1 1 1 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 0 1 0 0 0 0 1 1 0 1 1 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 1 0 1 0 1 0 0 1 1 1 0 0\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L255">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L256">  }</span>
+
+  @Test
+  public void testEncodeGS1WithStringTypeHint() throws WriterException {
+<span class="fc" id="L260">    Map&lt;EncodeHintType, Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L261">    hints.put(EncodeHintType.GS1_FORMAT, &quot;true&quot;);</span>
+<span class="fc" id="L262">    QRCode qrCode = Encoder.encode(&quot;100001%11171218&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L263">    verifyGS1EncodedData(qrCode);</span>
+<span class="fc" id="L264">  }</span>
+
+  @Test
+  public void testEncodeGS1WithBooleanTypeHint() throws WriterException {
+<span class="fc" id="L268">    Map&lt;EncodeHintType, Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L269">    hints.put(EncodeHintType.GS1_FORMAT, true);</span>
+<span class="fc" id="L270">    QRCode qrCode = Encoder.encode(&quot;100001%11171218&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L271">    verifyGS1EncodedData(qrCode);</span>
+<span class="fc" id="L272">  }</span>
+
+  @Test
+  public void testDoesNotEncodeGS1WhenBooleanTypeHintExplicitlyFalse() throws WriterException {
+<span class="fc" id="L276">    Map&lt;EncodeHintType, Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L277">    hints.put(EncodeHintType.GS1_FORMAT, false);</span>
+<span class="fc" id="L278">    QRCode qrCode = Encoder.encode(&quot;ABCDEF&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L279">    verifyNotGS1EncodedData(qrCode);</span>
+<span class="fc" id="L280">  }</span>
+
+  @Test
+  public void testDoesNotEncodeGS1WhenStringTypeHintExplicitlyFalse() throws WriterException {
+<span class="fc" id="L284">    Map&lt;EncodeHintType, Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L285">    hints.put(EncodeHintType.GS1_FORMAT, &quot;false&quot;);</span>
+<span class="fc" id="L286">    QRCode qrCode = Encoder.encode(&quot;ABCDEF&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L287">    verifyNotGS1EncodedData(qrCode);</span>
+<span class="fc" id="L288">  }</span>
+
+  @Test
+  public void testGS1ModeHeaderWithECI() throws WriterException {
+<span class="fc" id="L292">    Map&lt;EncodeHintType,Object&gt; hints = new EnumMap&lt;&gt;(EncodeHintType.class);</span>
+<span class="fc" id="L293">    hints.put(EncodeHintType.CHARACTER_SET, &quot;UTF8&quot;);</span>
+<span class="fc" id="L294">    hints.put(EncodeHintType.GS1_FORMAT, true);</span>
+<span class="fc" id="L295">    QRCode qrCode = Encoder.encode(&quot;hello&quot;, ErrorCorrectionLevel.H, hints);</span>
+<span class="fc" id="L296">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: BYTE\n&quot; +
+          &quot; ecLevel: H\n&quot; +
+          &quot; version: 1\n&quot; +
+          &quot; maskPattern: 5\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 1 0 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 1 0 0 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 1 0 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 1 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 1 0 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 1 1 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 0 1 1 1 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 0 0 0 0 0 1 1 0 0 1 1 0 0 0 1 0 1 0 1 0 1\n&quot; +
+          &quot; 0 1 0 1 1 0 0 1 0 1 1 1 1 1 1 0 1 1 1 0 1\n&quot; +
+          &quot; 0 1 0 1 1 1 1 0 1 1 0 0 0 1 0 1 0 1 1 0 0\n&quot; +
+          &quot; 1 1 1 1 0 1 0 1 0 0 1 0 1 0 0 1 1 1 1 0 0\n&quot; +
+          &quot; 1 0 0 1 0 0 1 1 0 1 1 0 1 0 1 0 0 1 0 0 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 1 1 1 0 1 0 1 0 0 1 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 1 1 0 0 1 0 0 0 1 1 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 0 0 0 1 0 1 1 1 0 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 0 1 0 1 0 1 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 0 1 1 1 0 1 1 1 1 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 1 0 0 1 0 0 1 0 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 0 0 0 1 1 0 0 1 1 1 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 1 1 1 0 1 1 0 1 0 0 1 0\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L325">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L326">  }</span>
+
+  @Test
+  public void testAppendModeInfo() {
+<span class="fc" id="L330">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L331">    Encoder.appendModeInfo(Mode.NUMERIC, bits);</span>
+<span class="fc" id="L332">    assertEquals(&quot; ...X&quot;, bits.toString());</span>
+<span class="fc" id="L333">  }</span>
+
+  @Test
+  public void testAppendLengthInfo() throws WriterException {
+<span class="fc" id="L337">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L338">    Encoder.appendLengthInfo(1,  // 1 letter (1/1).</span>
+<span class="fc" id="L339">                             Version.getVersionForNumber(1),</span>
+                             Mode.NUMERIC,
+                             bits);
+<span class="fc" id="L342">    assertEquals(&quot; ........ .X&quot;, bits.toString());  // 10 bits.</span>
+<span class="fc" id="L343">    bits = new BitArray();</span>
+<span class="fc" id="L344">    Encoder.appendLengthInfo(2,  // 2 letters (2/1).</span>
+<span class="fc" id="L345">                             Version.getVersionForNumber(10),</span>
+                             Mode.ALPHANUMERIC,
+                             bits);
+<span class="fc" id="L348">    assertEquals(&quot; ........ .X.&quot;, bits.toString());  // 11 bits.</span>
+<span class="fc" id="L349">    bits = new BitArray();</span>
+<span class="fc" id="L350">    Encoder.appendLengthInfo(255,  // 255 letter (255/1).</span>
+<span class="fc" id="L351">                             Version.getVersionForNumber(27),</span>
+                             Mode.BYTE,
+                             bits);
+<span class="fc" id="L354">    assertEquals(&quot; ........ XXXXXXXX&quot;, bits.toString());  // 16 bits.</span>
+<span class="fc" id="L355">    bits = new BitArray();</span>
+<span class="fc" id="L356">    Encoder.appendLengthInfo(512,  // 512 letters (1024/2).</span>
+<span class="fc" id="L357">                             Version.getVersionForNumber(40),</span>
+                             Mode.KANJI,
+                             bits);
+<span class="fc" id="L360">    assertEquals(&quot; ..X..... ....&quot;, bits.toString());  // 12 bits.</span>
+<span class="fc" id="L361">  }</span>
+
+  @Test
+  public void testAppendBytes() throws WriterException {
+    // Should use appendNumericBytes.
+    // 1 = 01 = 0001 in 4 bits.
+<span class="fc" id="L367">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L368">    Encoder.appendBytes(&quot;1&quot;, Mode.NUMERIC, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+<span class="fc" id="L369">    assertEquals(&quot; ...X&quot; , bits.toString());</span>
+    // Should use appendAlphanumericBytes.
+    // A = 10 = 0xa = 001010 in 6 bits
+<span class="fc" id="L372">    bits = new BitArray();</span>
+<span class="fc" id="L373">    Encoder.appendBytes(&quot;A&quot;, Mode.ALPHANUMERIC, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+<span class="fc" id="L374">    assertEquals(&quot; ..X.X.&quot; , bits.toString());</span>
+    // Lower letters such as 'a' cannot be encoded in MODE_ALPHANUMERIC.
+    try {
+<span class="nc" id="L377">      Encoder.appendBytes(&quot;a&quot;, Mode.ALPHANUMERIC, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+<span class="fc" id="L378">    } catch (WriterException we) {</span>
+      // good
+<span class="nc" id="L380">    }</span>
+    // Should use append8BitBytes.
+    // 0x61, 0x62, 0x63
+<span class="fc" id="L383">    bits = new BitArray();</span>
+<span class="fc" id="L384">    Encoder.appendBytes(&quot;abc&quot;, Mode.BYTE, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+<span class="fc" id="L385">    assertEquals(&quot; .XX....X .XX...X. .XX...XX&quot;, bits.toString());</span>
+    // Anything can be encoded in QRCode.MODE_8BIT_BYTE.
+<span class="fc" id="L387">    Encoder.appendBytes(&quot;\0&quot;, Mode.BYTE, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+    // Should use appendKanjiBytes.
+    // 0x93, 0x5f
+<span class="fc" id="L390">    bits = new BitArray();</span>
+<span class="fc" id="L391">    Encoder.appendBytes(shiftJISString(bytes(0x93, 0x5f)), Mode.KANJI, bits,</span>
+        Encoder.DEFAULT_BYTE_MODE_ENCODING);
+<span class="fc" id="L393">    assertEquals(&quot; .XX.XX.. XXXXX&quot;, bits.toString());</span>
+<span class="fc" id="L394">  }</span>
+
+  @Test
+  public void testTerminateBits() throws WriterException {
+<span class="fc" id="L398">    BitArray v = new BitArray();</span>
+<span class="fc" id="L399">    Encoder.terminateBits(0, v);</span>
+<span class="fc" id="L400">    assertEquals(&quot;&quot;, v.toString());</span>
+<span class="fc" id="L401">    v = new BitArray();</span>
+<span class="fc" id="L402">    Encoder.terminateBits(1, v);</span>
+<span class="fc" id="L403">    assertEquals(&quot; ........&quot;, v.toString());</span>
+<span class="fc" id="L404">    v = new BitArray();</span>
+<span class="fc" id="L405">    v.appendBits(0, 3);  // Append 000</span>
+<span class="fc" id="L406">    Encoder.terminateBits(1, v);</span>
+<span class="fc" id="L407">    assertEquals(&quot; ........&quot;, v.toString());</span>
+<span class="fc" id="L408">    v = new BitArray();</span>
+<span class="fc" id="L409">    v.appendBits(0, 5);  // Append 00000</span>
+<span class="fc" id="L410">    Encoder.terminateBits(1, v);</span>
+<span class="fc" id="L411">    assertEquals(&quot; ........&quot;, v.toString());</span>
+<span class="fc" id="L412">    v = new BitArray();</span>
+<span class="fc" id="L413">    v.appendBits(0, 8);  // Append 00000000</span>
+<span class="fc" id="L414">    Encoder.terminateBits(1, v);</span>
+<span class="fc" id="L415">    assertEquals(&quot; ........&quot;, v.toString());</span>
+<span class="fc" id="L416">    v = new BitArray();</span>
+<span class="fc" id="L417">    Encoder.terminateBits(2, v);</span>
+<span class="fc" id="L418">    assertEquals(&quot; ........ XXX.XX..&quot;, v.toString());</span>
+<span class="fc" id="L419">    v = new BitArray();</span>
+<span class="fc" id="L420">    v.appendBits(0, 1);  // Append 0</span>
+<span class="fc" id="L421">    Encoder.terminateBits(3, v);</span>
+<span class="fc" id="L422">    assertEquals(&quot; ........ XXX.XX.. ...X...X&quot;, v.toString());</span>
+<span class="fc" id="L423">  }</span>
+
+  @Test
+  public void testGetNumDataBytesAndNumECBytesForBlockID() throws WriterException {
+<span class="fc" id="L427">    int[] numDataBytes = new int[1];</span>
+<span class="fc" id="L428">    int[] numEcBytes = new int[1];</span>
+    // Version 1-H.
+<span class="fc" id="L430">    Encoder.getNumDataBytesAndNumECBytesForBlockID(26, 9, 1, 0, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L431">    assertEquals(9, numDataBytes[0]);</span>
+<span class="fc" id="L432">    assertEquals(17, numEcBytes[0]);</span>
+
+    // Version 3-H.  2 blocks.
+<span class="fc" id="L435">    Encoder.getNumDataBytesAndNumECBytesForBlockID(70, 26, 2, 0, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L436">    assertEquals(13, numDataBytes[0]);</span>
+<span class="fc" id="L437">    assertEquals(22, numEcBytes[0]);</span>
+<span class="fc" id="L438">    Encoder.getNumDataBytesAndNumECBytesForBlockID(70, 26, 2, 1, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L439">    assertEquals(13, numDataBytes[0]);</span>
+<span class="fc" id="L440">    assertEquals(22, numEcBytes[0]);</span>
+
+    // Version 7-H. (4 + 1) blocks.
+<span class="fc" id="L443">    Encoder.getNumDataBytesAndNumECBytesForBlockID(196, 66, 5, 0, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L444">    assertEquals(13, numDataBytes[0]);</span>
+<span class="fc" id="L445">    assertEquals(26, numEcBytes[0]);</span>
+<span class="fc" id="L446">    Encoder.getNumDataBytesAndNumECBytesForBlockID(196, 66, 5, 4, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L447">    assertEquals(14, numDataBytes[0]);</span>
+<span class="fc" id="L448">    assertEquals(26, numEcBytes[0]);</span>
+
+    // Version 40-H. (20 + 61) blocks.
+<span class="fc" id="L451">    Encoder.getNumDataBytesAndNumECBytesForBlockID(3706, 1276, 81, 0, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L452">    assertEquals(15, numDataBytes[0]);</span>
+<span class="fc" id="L453">    assertEquals(30, numEcBytes[0]);</span>
+<span class="fc" id="L454">    Encoder.getNumDataBytesAndNumECBytesForBlockID(3706, 1276, 81, 20, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L455">    assertEquals(16, numDataBytes[0]);</span>
+<span class="fc" id="L456">    assertEquals(30, numEcBytes[0]);</span>
+<span class="fc" id="L457">    Encoder.getNumDataBytesAndNumECBytesForBlockID(3706, 1276, 81, 80, numDataBytes, numEcBytes);</span>
+<span class="fc" id="L458">    assertEquals(16, numDataBytes[0]);</span>
+<span class="fc" id="L459">    assertEquals(30, numEcBytes[0]);</span>
+<span class="fc" id="L460">  }</span>
+
+  @Test
+  public void testInterleaveWithECBytes() throws WriterException {
+<span class="fc" id="L464">    byte[] dataBytes = bytes(32, 65, 205, 69, 41, 220, 46, 128, 236);</span>
+<span class="fc" id="L465">    BitArray in = new BitArray();</span>
+<span class="fc bfc" id="L466" title="All 2 branches covered.">    for (byte dataByte: dataBytes) {</span>
+<span class="fc" id="L467">      in.appendBits(dataByte, 8);</span>
+    }
+<span class="fc" id="L469">    BitArray out = Encoder.interleaveWithECBytes(in, 26, 9, 1);</span>
+<span class="fc" id="L470">    byte[] expected = bytes(</span>
+        // Data bytes.
+        32, 65, 205, 69, 41, 220, 46, 128, 236,
+        // Error correction bytes.
+        42, 159, 74, 221, 244, 169, 239, 150, 138, 70,
+        237, 85, 224, 96, 74, 219, 61
+    );
+<span class="fc" id="L477">    assertEquals(expected.length, out.getSizeInBytes());</span>
+<span class="fc" id="L478">    byte[] outArray = new byte[expected.length];</span>
+<span class="fc" id="L479">    out.toBytes(0, outArray, 0, expected.length);</span>
+    // Can't use Arrays.equals(), because outArray may be longer than out.sizeInBytes()
+<span class="fc bfc" id="L481" title="All 2 branches covered.">    for (int x = 0; x &lt; expected.length; x++) {</span>
+<span class="fc" id="L482">      assertEquals(expected[x], outArray[x]);</span>
+    }
+    // Numbers are from http://www.swetake.com/qr/qr8.html
+<span class="fc" id="L485">    dataBytes = bytes(</span>
+        67, 70, 22, 38, 54, 70, 86, 102, 118, 134, 150, 166, 182,
+        198, 214, 230, 247, 7, 23, 39, 55, 71, 87, 103, 119, 135,
+        151, 166, 22, 38, 54, 70, 86, 102, 118, 134, 150, 166,
+        182, 198, 214, 230, 247, 7, 23, 39, 55, 71, 87, 103, 119,
+        135, 151, 160, 236, 17, 236, 17, 236, 17, 236,
+        17
+    );
+<span class="fc" id="L493">    in = new BitArray();</span>
+<span class="fc bfc" id="L494" title="All 2 branches covered.">    for (byte dataByte: dataBytes) {</span>
+<span class="fc" id="L495">      in.appendBits(dataByte, 8);</span>
+    }
+
+<span class="fc" id="L498">    out = Encoder.interleaveWithECBytes(in, 134, 62, 4);</span>
+<span class="fc" id="L499">    expected = bytes(</span>
+        // Data bytes.
+        67, 230, 54, 55, 70, 247, 70, 71, 22, 7, 86, 87, 38, 23, 102, 103, 54, 39,
+        118, 119, 70, 55, 134, 135, 86, 71, 150, 151, 102, 87, 166,
+        160, 118, 103, 182, 236, 134, 119, 198, 17, 150,
+        135, 214, 236, 166, 151, 230, 17, 182,
+        166, 247, 236, 198, 22, 7, 17, 214, 38, 23, 236, 39,
+        17,
+        // Error correction bytes.
+        175, 155, 245, 236, 80, 146, 56, 74, 155, 165,
+        133, 142, 64, 183, 132, 13, 178, 54, 132, 108, 45,
+        113, 53, 50, 214, 98, 193, 152, 233, 147, 50, 71, 65,
+        190, 82, 51, 209, 199, 171, 54, 12, 112, 57, 113, 155, 117,
+        211, 164, 117, 30, 158, 225, 31, 190, 242, 38,
+        140, 61, 179, 154, 214, 138, 147, 87, 27, 96, 77, 47,
+        187, 49, 156, 214
+    );
+<span class="fc" id="L516">    assertEquals(expected.length, out.getSizeInBytes());</span>
+<span class="fc" id="L517">    outArray = new byte[expected.length];</span>
+<span class="fc" id="L518">    out.toBytes(0, outArray, 0, expected.length);</span>
+<span class="fc bfc" id="L519" title="All 2 branches covered.">    for (int x = 0; x &lt; expected.length; x++) {</span>
+<span class="fc" id="L520">      assertEquals(expected[x], outArray[x]);</span>
+    }
+<span class="fc" id="L522">  }</span>
+
+  private static byte[] bytes(int... ints) {
+<span class="fc" id="L525">    byte[] bytes = new byte[ints.length];</span>
+<span class="fc bfc" id="L526" title="All 2 branches covered.">    for (int i = 0; i &lt; ints.length; i++) {</span>
+<span class="fc" id="L527">      bytes[i] = (byte) ints[i];</span>
+    }
+<span class="fc" id="L529">    return bytes;</span>
+  }
+
+  @Test
+  public void testAppendNumericBytes() {
+    // 1 = 01 = 0001 in 4 bits.
+<span class="fc" id="L535">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L536">    Encoder.appendNumericBytes(&quot;1&quot;, bits);</span>
+<span class="fc" id="L537">    assertEquals(&quot; ...X&quot; , bits.toString());</span>
+    // 12 = 0xc = 0001100 in 7 bits.
+<span class="fc" id="L539">    bits = new BitArray();</span>
+<span class="fc" id="L540">    Encoder.appendNumericBytes(&quot;12&quot;, bits);</span>
+<span class="fc" id="L541">    assertEquals(&quot; ...XX..&quot; , bits.toString());</span>
+    // 123 = 0x7b = 0001111011 in 10 bits.
+<span class="fc" id="L543">    bits = new BitArray();</span>
+<span class="fc" id="L544">    Encoder.appendNumericBytes(&quot;123&quot;, bits);</span>
+<span class="fc" id="L545">    assertEquals(&quot; ...XXXX. XX&quot; , bits.toString());</span>
+    // 1234 = &quot;123&quot; + &quot;4&quot; = 0001111011 + 0100
+<span class="fc" id="L547">    bits = new BitArray();</span>
+<span class="fc" id="L548">    Encoder.appendNumericBytes(&quot;1234&quot;, bits);</span>
+<span class="fc" id="L549">    assertEquals(&quot; ...XXXX. XX.X..&quot; , bits.toString());</span>
+    // Empty.
+<span class="fc" id="L551">    bits = new BitArray();</span>
+<span class="fc" id="L552">    Encoder.appendNumericBytes(&quot;&quot;, bits);</span>
+<span class="fc" id="L553">    assertEquals(&quot;&quot; , bits.toString());</span>
+<span class="fc" id="L554">  }</span>
+
+  @Test
+  public void testAppendAlphanumericBytes() throws WriterException {
+    // A = 10 = 0xa = 001010 in 6 bits
+<span class="fc" id="L559">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L560">    Encoder.appendAlphanumericBytes(&quot;A&quot;, bits);</span>
+<span class="fc" id="L561">    assertEquals(&quot; ..X.X.&quot; , bits.toString());</span>
+    // AB = 10 * 45 + 11 = 461 = 0x1cd = 00111001101 in 11 bits
+<span class="fc" id="L563">    bits = new BitArray();</span>
+<span class="fc" id="L564">    Encoder.appendAlphanumericBytes(&quot;AB&quot;, bits);</span>
+<span class="fc" id="L565">    assertEquals(&quot; ..XXX..X X.X&quot;, bits.toString());</span>
+    // ABC = &quot;AB&quot; + &quot;C&quot; = 00111001101 + 001100
+<span class="fc" id="L567">    bits = new BitArray();</span>
+<span class="fc" id="L568">    Encoder.appendAlphanumericBytes(&quot;ABC&quot;, bits);</span>
+<span class="fc" id="L569">    assertEquals(&quot; ..XXX..X X.X..XX. .&quot; , bits.toString());</span>
+    // Empty.
+<span class="fc" id="L571">    bits = new BitArray();</span>
+<span class="fc" id="L572">    Encoder.appendAlphanumericBytes(&quot;&quot;, bits);</span>
+<span class="fc" id="L573">    assertEquals(&quot;&quot; , bits.toString());</span>
+    // Invalid data.
+    try {
+<span class="nc" id="L576">      Encoder.appendAlphanumericBytes(&quot;abc&quot;, new BitArray());</span>
+<span class="fc" id="L577">    } catch (WriterException we) {</span>
+      // good
+<span class="nc" id="L579">    }</span>
+<span class="fc" id="L580">  }</span>
+
+  @Test
+  public void testAppend8BitBytes() throws WriterException {
+    // 0x61, 0x62, 0x63
+<span class="fc" id="L585">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L586">    Encoder.append8BitBytes(&quot;abc&quot;, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+<span class="fc" id="L587">    assertEquals(&quot; .XX....X .XX...X. .XX...XX&quot;, bits.toString());</span>
+    // Empty.
+<span class="fc" id="L589">    bits = new BitArray();</span>
+<span class="fc" id="L590">    Encoder.append8BitBytes(&quot;&quot;, bits, Encoder.DEFAULT_BYTE_MODE_ENCODING);</span>
+<span class="fc" id="L591">    assertEquals(&quot;&quot;, bits.toString());</span>
+<span class="fc" id="L592">  }</span>
+
+  // Numbers are from page 21 of JISX0510:2004
+  @Test
+  public void testAppendKanjiBytes() throws WriterException {
+<span class="fc" id="L597">    BitArray bits = new BitArray();</span>
+<span class="fc" id="L598">      Encoder.appendKanjiBytes(shiftJISString(bytes(0x93, 0x5f)), bits);</span>
+<span class="fc" id="L599">      assertEquals(&quot; .XX.XX.. XXXXX&quot;, bits.toString());</span>
+<span class="fc" id="L600">      Encoder.appendKanjiBytes(shiftJISString(bytes(0xe4, 0xaa)), bits);</span>
+<span class="fc" id="L601">      assertEquals(&quot; .XX.XX.. XXXXXXX. X.X.X.X. X.&quot;, bits.toString());</span>
+<span class="fc" id="L602">  }</span>
+
+  // Numbers are from http://www.swetake.com/qr/qr3.html and
+  // http://www.swetake.com/qr/qr9.html
+  @Test
+  public void testGenerateECBytes() {
+<span class="fc" id="L608">    byte[] dataBytes = bytes(32, 65, 205, 69, 41, 220, 46, 128, 236);</span>
+<span class="fc" id="L609">    byte[] ecBytes = Encoder.generateECBytes(dataBytes, 17);</span>
+<span class="fc" id="L610">    int[] expected = {</span>
+        42, 159, 74, 221, 244, 169, 239, 150, 138, 70, 237, 85, 224, 96, 74, 219, 61
+    };
+<span class="fc" id="L613">    assertEquals(expected.length, ecBytes.length);</span>
+<span class="fc bfc" id="L614" title="All 2 branches covered.">    for (int x = 0; x &lt; expected.length; x++) {</span>
+<span class="fc" id="L615">      assertEquals(expected[x], ecBytes[x] &amp; 0xFF);</span>
+    }
+<span class="fc" id="L617">    dataBytes = bytes(67, 70, 22, 38, 54, 70, 86, 102, 118, 134, 150, 166,  182, 198, 214);</span>
+<span class="fc" id="L618">    ecBytes = Encoder.generateECBytes(dataBytes, 18);</span>
+<span class="fc" id="L619">    expected = new int[] {</span>
+        175, 80, 155, 64, 178, 45, 214, 233, 65, 209, 12, 155, 117, 31, 140, 214, 27, 187
+    };
+<span class="fc" id="L622">    assertEquals(expected.length, ecBytes.length);</span>
+<span class="fc bfc" id="L623" title="All 2 branches covered.">    for (int x = 0; x &lt; expected.length; x++) {</span>
+<span class="fc" id="L624">      assertEquals(expected[x], ecBytes[x] &amp; 0xFF);</span>
+    }
+    // High-order zero coefficient case.
+<span class="fc" id="L627">    dataBytes = bytes(32, 49, 205, 69, 42, 20, 0, 236, 17);</span>
+<span class="fc" id="L628">    ecBytes = Encoder.generateECBytes(dataBytes, 17);</span>
+<span class="fc" id="L629">    expected = new int[] {</span>
+        0, 3, 130, 179, 194, 0, 55, 211, 110, 79, 98, 72, 170, 96, 211, 137, 213
+    };
+<span class="fc" id="L632">    assertEquals(expected.length, ecBytes.length);</span>
+<span class="fc bfc" id="L633" title="All 2 branches covered.">    for (int x = 0; x &lt; expected.length; x++) {</span>
+<span class="fc" id="L634">      assertEquals(expected[x], ecBytes[x] &amp; 0xFF);</span>
+    }
+<span class="fc" id="L636">  }</span>
+
+  @Test
+  public void testBugInBitVectorNumBytes() throws WriterException {
+    // There was a bug in BitVector.sizeInBytes() that caused it to return a
+    // smaller-by-one value (ex. 1465 instead of 1466) if the number of bits
+    // in the vector is not 8-bit aligned.  In QRCodeEncoder::InitQRCode(),
+    // BitVector::sizeInBytes() is used for finding the smallest QR Code
+    // version that can fit the given data.  Hence there were corner cases
+    // where we chose a wrong QR Code version that cannot fit the given
+    // data.  Note that the issue did not occur with MODE_8BIT_BYTE, as the
+    // bits in the bit vector are always 8-bit aligned.
+    //
+    // Before the bug was fixed, the following test didn't pass, because:
+    //
+    // - MODE_NUMERIC is chosen as all bytes in the data are '0'
+    // - The 3518-byte numeric data needs 1466 bytes
+    //   - 3518 / 3 * 10 + 7 = 11727 bits = 1465.875 bytes
+    //   - 3 numeric bytes are encoded in 10 bits, hence the first
+    //     3516 bytes are encoded in 3516 / 3 * 10 = 11720 bits.
+    //   - 2 numeric bytes can be encoded in 7 bits, hence the last
+    //     2 bytes are encoded in 7 bits.
+    // - The version 27 QR Code with the EC level L has 1468 bytes for data.
+    //   - 1828 - 360 = 1468
+    // - In InitQRCode(), 3 bytes are reserved for a header.  Hence 1465 bytes
+    //   (1468 -3) are left for data.
+    // - Because of the bug in BitVector::sizeInBytes(), InitQRCode() determines
+    //   the given data can fit in 1465 bytes, despite it needs 1466 bytes.
+    // - Hence QRCodeEncoder.encode() failed and returned false.
+    //   - To be precise, it needs 11727 + 4 (getMode info) + 14 (length info) =
+    //     11745 bits = 1468.125 bytes are needed (i.e. cannot fit in 1468
+    //     bytes).
+<span class="fc" id="L668">    StringBuilder builder = new StringBuilder(3518);</span>
+<span class="fc bfc" id="L669" title="All 2 branches covered.">    for (int x = 0; x &lt; 3518; x++) {</span>
+<span class="fc" id="L670">      builder.append('0');</span>
+    }
+<span class="fc" id="L672">    Encoder.encode(builder.toString(), ErrorCorrectionLevel.L);</span>
+<span class="fc" id="L673">  }</span>
+
+  private static void verifyGS1EncodedData(QRCode qrCode) {
+<span class="fc" id="L676">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: ALPHANUMERIC\n&quot; +
+          &quot; ecLevel: H\n&quot; +
+          &quot; version: 2\n&quot; +
+          &quot; maskPattern: 4\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 1 1 1 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 0 0 0 0 1 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 0 1 1 1 0 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 1 0 0 1 1 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 1 1 1 0 0 0 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 1 1 0 1 1 0 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 0 1 1 0 1 1 0 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 0 0 0 0 1 1 1 1 0 0 1 1 0 0 0 1 1 0 1 1 0 0 0 1 0\n&quot; +
+          &quot; 0 1 1 0 1 1 0 0 1 1 1 0 0 0 1 1 1 1 1 1 1 0 0 0 1\n&quot; +
+          &quot; 0 0 1 1 1 1 1 0 1 1 1 1 1 0 1 0 0 0 0 0 0 1 1 1 0\n&quot; +
+          &quot; 1 0 1 1 1 0 0 1 1 1 0 1 1 1 1 1 0 1 1 0 1 1 1 0 0\n&quot; +
+          &quot; 0 1 0 1 0 0 1 1 1 1 1 1 0 0 1 1 0 1 0 0 0 0 0 1 0\n&quot; +
+          &quot; 1 0 0 1 1 1 0 0 1 1 0 0 0 1 1 0 1 0 1 0 1 0 0 0 0\n&quot; +
+          &quot; 0 0 1 0 0 1 1 1 0 1 1 0 1 1 1 0 1 1 1 0 1 1 1 1 0\n&quot; +
+          &quot; 0 0 0 1 1 0 0 1 0 0 1 0 0 1 1 0 0 1 0 0 0 1 1 1 0\n&quot; +
+          &quot; 1 1 0 1 0 1 1 0 1 0 1 0 0 0 1 1 1 1 1 1 1 0 0 0 0\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 0 1 0 0 0 1 1 0 0 0 1 1 0 1 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 0 1 0 1 0 0 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 0 0 1 0 1 1 0 0 0 1 0 1 1 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 1 1 0 0 0 0 0 1 1 1 1 1 1 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 0 0 1 1 1 0 0 1 1 0 1 0 0 0\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 1 1 0 1 0 1 1 1 0 1 1 0 0 1 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 1 0 1 1 1 1 1 0 1 0 1 1 0 0 0\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 1 0 0 0 0 1 1 0 0 1 1 0 0 1 1\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L709">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L710">  }</span>
+
+  private static void verifyNotGS1EncodedData(QRCode qrCode) {
+<span class="fc" id="L713">    String expected =</span>
+      &quot;&lt;&lt;\n&quot; +
+          &quot; mode: ALPHANUMERIC\n&quot; +
+          &quot; ecLevel: H\n&quot; +
+          &quot; version: 1\n&quot; +
+          &quot; maskPattern: 4\n&quot; +
+          &quot; matrix:\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 1 0 1 0 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 0 0 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 0 1 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 1 0 0 1 0 1 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 0 0 1 1 0 1 0 0 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 0 1 0 1 0 1 1 1 1 1 1 1\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0\n&quot; +
+          &quot; 0 0 0 0 1 1 1 1 0 1 1 0 1 0 1 1 0 0 0 1 0\n&quot; +
+          &quot; 0 0 0 0 1 1 0 1 1 1 0 0 1 1 1 1 0 1 1 0 1\n&quot; +
+          &quot; 1 0 0 0 0 1 1 0 0 1 0 1 0 0 0 1 1 1 0 1 1\n&quot; +
+          &quot; 1 0 0 1 1 1 0 0 1 1 1 1 0 0 0 0 1 0 0 0 0\n&quot; +
+          &quot; 0 1 1 1 1 1 1 0 1 0 1 0 1 1 1 0 0 1 1 0 0\n&quot; +
+          &quot; 0 0 0 0 0 0 0 0 1 1 0 0 0 1 1 0 0 0 1 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 1 1 1 1 0 0 0 0 0 1 1 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 1 1 0 1 0 0 0 1 0 1 1 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 1 0 0 1 0 0 0 1 1 0 0 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 0 1 1 0 1 0 0 0 0 1 1 1\n&quot; +
+          &quot; 1 0 1 1 1 0 1 0 0 1 0 1 0 0 0 1 1 0 0 0 0\n&quot; +
+          &quot; 1 0 0 0 0 0 1 0 0 1 0 0 1 0 0 1 1 0 0 0 1\n&quot; +
+          &quot; 1 1 1 1 1 1 1 0 0 0 1 0 0 1 0 0 0 0 1 1 1\n&quot; +
+          &quot;&gt;&gt;\n&quot;;
+<span class="fc" id="L742">    assertEquals(expected, qrCode.toString());</span>
+<span class="fc" id="L743">  }</span>
+
+  private static String shiftJISString(byte[] bytes) throws WriterException {
+    try {
+<span class="fc" id="L747">      return new String(bytes, &quot;Shift_JIS&quot;);</span>
+<span class="nc" id="L748">    } catch (UnsupportedEncodingException uee) {</span>
+<span class="nc" id="L749">      throw new WriterException(uee.toString());</span>
+    }
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

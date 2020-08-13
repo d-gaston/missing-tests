@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DecodedBitStreamParser.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.decoder</a> &gt; <span class="el_source">DecodedBitStreamParser.java</span></div><h1>DecodedBitStreamParser.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.decoder;
+
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.common.BitSource;
+import com.google.zxing.common.CharacterSetECI;
+import com.google.zxing.common.DecoderResult;
+import com.google.zxing.common.StringUtils;
+
+import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * &lt;p&gt;QR Codes can encode text as bits in one of several modes, and can use multiple modes
+ * in one QR Code. This class decodes the bits back into text.&lt;/p&gt;
+ *
+ * &lt;p&gt;See ISO 18004:2006, 6.4.3 - 6.4.7&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+final class DecodedBitStreamParser {
+
+  /**
+   * See ISO 18004:2006, 6.4.4 Table 5
+   */
+<span class="fc" id="L45">  private static final char[] ALPHANUMERIC_CHARS =</span>
+<span class="fc" id="L46">      &quot;0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:&quot;.toCharArray();</span>
+  private static final int GB2312_SUBSET = 1;
+
+  private DecodedBitStreamParser() {
+  }
+
+  static DecoderResult decode(byte[] bytes,
+                              Version version,
+                              ErrorCorrectionLevel ecLevel,
+                              Map&lt;DecodeHintType,?&gt; hints) throws FormatException {
+<span class="fc" id="L56">    BitSource bits = new BitSource(bytes);</span>
+<span class="fc" id="L57">    StringBuilder result = new StringBuilder(50);</span>
+<span class="fc" id="L58">    List&lt;byte[]&gt; byteSegments = new ArrayList&lt;&gt;(1);</span>
+<span class="fc" id="L59">    int symbolSequence = -1;</span>
+<span class="fc" id="L60">    int parityData = -1;</span>
+
+    try {
+<span class="fc" id="L63">      CharacterSetECI currentCharacterSetECI = null;</span>
+<span class="fc" id="L64">      boolean fc1InEffect = false;</span>
+      Mode mode;
+      do {
+        // While still another segment to read...
+<span class="fc bfc" id="L68" title="All 2 branches covered.">        if (bits.available() &lt; 4) {</span>
+          // OK, assume we're done. Really, a TERMINATOR mode should have been recorded here
+<span class="fc" id="L70">          mode = Mode.TERMINATOR;</span>
+        } else {
+<span class="fc" id="L72">          mode = Mode.forBits(bits.readBits(4)); // mode is encoded by 4 bits</span>
+        }
+<span class="pc bpc" id="L74" title="2 of 6 branches missed.">        switch (mode) {</span>
+          case TERMINATOR:
+<span class="fc" id="L76">            break;</span>
+          case FNC1_FIRST_POSITION:
+          case FNC1_SECOND_POSITION:
+            // We do little with FNC1 except alter the parsed result a bit according to the spec
+<span class="nc" id="L80">            fc1InEffect = true;</span>
+<span class="nc" id="L81">            break;</span>
+          case STRUCTURED_APPEND:
+<span class="nc bnc" id="L83" title="All 2 branches missed.">            if (bits.available() &lt; 16) {</span>
+<span class="nc" id="L84">              throw FormatException.getFormatInstance();</span>
+            }
+            // sequence number and parity is added later to the result metadata
+            // Read next 8 bits (symbol sequence #) and 8 bits (parity data), then continue
+<span class="nc" id="L88">            symbolSequence = bits.readBits(8);</span>
+<span class="nc" id="L89">            parityData = bits.readBits(8);</span>
+<span class="nc" id="L90">            break;</span>
+          case ECI:
+            // Count doesn't apply to ECI
+<span class="fc" id="L93">            int value = parseECIValue(bits);</span>
+<span class="fc" id="L94">            currentCharacterSetECI = CharacterSetECI.getCharacterSetECIByValue(value);</span>
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">            if (currentCharacterSetECI == null) {</span>
+<span class="nc" id="L96">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          case HANZI:
+            // First handle Hanzi mode which does not start with character count
+            // Chinese mode contains a sub set indicator right after mode indicator
+<span class="fc" id="L102">            int subset = bits.readBits(4);</span>
+<span class="fc" id="L103">            int countHanzi = bits.readBits(mode.getCharacterCountBits(version));</span>
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">            if (subset == GB2312_SUBSET) {</span>
+<span class="fc" id="L105">              decodeHanziSegment(bits, result, countHanzi);</span>
+            }
+            break;
+          default:
+            // &quot;Normal&quot; QR code modes:
+            // How many characters will follow, encoded in this mode?
+<span class="fc" id="L111">            int count = bits.readBits(mode.getCharacterCountBits(version));</span>
+<span class="pc bpc" id="L112" title="1 of 5 branches missed.">            switch (mode) {</span>
+              case NUMERIC:
+<span class="fc" id="L114">                decodeNumericSegment(bits, result, count);</span>
+<span class="fc" id="L115">                break;</span>
+              case ALPHANUMERIC:
+<span class="fc" id="L117">                decodeAlphanumericSegment(bits, result, count, fc1InEffect);</span>
+<span class="fc" id="L118">                break;</span>
+              case BYTE:
+<span class="fc" id="L120">                decodeByteSegment(bits, result, count, currentCharacterSetECI, byteSegments, hints);</span>
+<span class="fc" id="L121">                break;</span>
+              case KANJI:
+<span class="fc" id="L123">                decodeKanjiSegment(bits, result, count);</span>
+<span class="fc" id="L124">                break;</span>
+              default:
+<span class="nc" id="L126">                throw FormatException.getFormatInstance();</span>
+            }
+            break;
+        }
+<span class="fc bfc" id="L130" title="All 2 branches covered.">      } while (mode != Mode.TERMINATOR);</span>
+<span class="nc" id="L131">    } catch (IllegalArgumentException iae) {</span>
+      // from readBits() calls
+<span class="nc" id="L133">      throw FormatException.getFormatInstance();</span>
+<span class="fc" id="L134">    }</span>
+
+<span class="fc" id="L136">    return new DecoderResult(bytes,</span>
+<span class="fc" id="L137">                             result.toString(),</span>
+<span class="fc bfc" id="L138" title="All 4 branches covered.">                             byteSegments.isEmpty() ? null : byteSegments,</span>
+<span class="fc" id="L139">                             ecLevel == null ? null : ecLevel.toString(),</span>
+                             symbolSequence,
+                             parityData);
+  }
+
+  /**
+   * See specification GBT 18284-2000
+   */
+  private static void decodeHanziSegment(BitSource bits,
+                                         StringBuilder result,
+                                         int count) throws FormatException {
+    // Don't crash trying to read more bits than we have available.
+<span class="pc bpc" id="L151" title="1 of 2 branches missed.">    if (count * 13 &gt; bits.available()) {</span>
+<span class="nc" id="L152">      throw FormatException.getFormatInstance();</span>
+    }
+
+    // Each character will require 2 bytes. Read the characters as 2-byte pairs
+    // and decode as GB2312 afterwards
+<span class="fc" id="L157">    byte[] buffer = new byte[2 * count];</span>
+<span class="fc" id="L158">    int offset = 0;</span>
+<span class="fc bfc" id="L159" title="All 2 branches covered.">    while (count &gt; 0) {</span>
+      // Each 13 bits encodes a 2-byte character
+<span class="fc" id="L161">      int twoBytes = bits.readBits(13);</span>
+<span class="fc" id="L162">      int assembledTwoBytes = ((twoBytes / 0x060) &lt;&lt; 8) | (twoBytes % 0x060);</span>
+<span class="fc bfc" id="L163" title="All 2 branches covered.">      if (assembledTwoBytes &lt; 0x00A00) {</span>
+        // In the 0xA1A1 to 0xAAFE range
+<span class="fc" id="L165">        assembledTwoBytes += 0x0A1A1;</span>
+      } else {
+        // In the 0xB0A1 to 0xFAFE range
+<span class="fc" id="L168">        assembledTwoBytes += 0x0A6A1;</span>
+      }
+<span class="fc" id="L170">      buffer[offset] = (byte) ((assembledTwoBytes &gt;&gt; 8) &amp; 0xFF);</span>
+<span class="fc" id="L171">      buffer[offset + 1] = (byte) (assembledTwoBytes &amp; 0xFF);</span>
+<span class="fc" id="L172">      offset += 2;</span>
+<span class="fc" id="L173">      count--;</span>
+<span class="fc" id="L174">    }</span>
+
+    try {
+<span class="fc" id="L177">      result.append(new String(buffer, StringUtils.GB2312));</span>
+<span class="nc" id="L178">    } catch (UnsupportedEncodingException ignored) {</span>
+<span class="nc" id="L179">      throw FormatException.getFormatInstance();</span>
+<span class="fc" id="L180">    }</span>
+<span class="fc" id="L181">  }</span>
+
+  private static void decodeKanjiSegment(BitSource bits,
+                                         StringBuilder result,
+                                         int count) throws FormatException {
+    // Don't crash trying to read more bits than we have available.
+<span class="pc bpc" id="L187" title="1 of 2 branches missed.">    if (count * 13 &gt; bits.available()) {</span>
+<span class="nc" id="L188">      throw FormatException.getFormatInstance();</span>
+    }
+
+    // Each character will require 2 bytes. Read the characters as 2-byte pairs
+    // and decode as Shift_JIS afterwards
+<span class="fc" id="L193">    byte[] buffer = new byte[2 * count];</span>
+<span class="fc" id="L194">    int offset = 0;</span>
+<span class="fc bfc" id="L195" title="All 2 branches covered.">    while (count &gt; 0) {</span>
+      // Each 13 bits encodes a 2-byte character
+<span class="fc" id="L197">      int twoBytes = bits.readBits(13);</span>
+<span class="fc" id="L198">      int assembledTwoBytes = ((twoBytes / 0x0C0) &lt;&lt; 8) | (twoBytes % 0x0C0);</span>
+<span class="pc bpc" id="L199" title="1 of 2 branches missed.">      if (assembledTwoBytes &lt; 0x01F00) {</span>
+        // In the 0x8140 to 0x9FFC range
+<span class="fc" id="L201">        assembledTwoBytes += 0x08140;</span>
+      } else {
+        // In the 0xE040 to 0xEBBF range
+<span class="nc" id="L204">        assembledTwoBytes += 0x0C140;</span>
+      }
+<span class="fc" id="L206">      buffer[offset] = (byte) (assembledTwoBytes &gt;&gt; 8);</span>
+<span class="fc" id="L207">      buffer[offset + 1] = (byte) assembledTwoBytes;</span>
+<span class="fc" id="L208">      offset += 2;</span>
+<span class="fc" id="L209">      count--;</span>
+<span class="fc" id="L210">    }</span>
+    // Shift_JIS may not be supported in some environments:
+    try {
+<span class="fc" id="L213">      result.append(new String(buffer, StringUtils.SHIFT_JIS));</span>
+<span class="nc" id="L214">    } catch (UnsupportedEncodingException ignored) {</span>
+<span class="nc" id="L215">      throw FormatException.getFormatInstance();</span>
+<span class="fc" id="L216">    }</span>
+<span class="fc" id="L217">  }</span>
+
+  private static void decodeByteSegment(BitSource bits,
+                                        StringBuilder result,
+                                        int count,
+                                        CharacterSetECI currentCharacterSetECI,
+                                        Collection&lt;byte[]&gt; byteSegments,
+                                        Map&lt;DecodeHintType,?&gt; hints) throws FormatException {
+    // Don't crash trying to read more bits than we have available.
+<span class="pc bpc" id="L226" title="1 of 2 branches missed.">    if (8 * count &gt; bits.available()) {</span>
+<span class="nc" id="L227">      throw FormatException.getFormatInstance();</span>
+    }
+
+<span class="fc" id="L230">    byte[] readBytes = new byte[count];</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">    for (int i = 0; i &lt; count; i++) {</span>
+<span class="fc" id="L232">      readBytes[i] = (byte) bits.readBits(8);</span>
+    }
+    String encoding;
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    if (currentCharacterSetECI == null) {</span>
+      // The spec isn't clear on this mode; see
+      // section 6.4.5: t does not say which encoding to assuming
+      // upon decoding. I have seen ISO-8859-1 used as well as
+      // Shift_JIS -- without anything like an ECI designator to
+      // give a hint.
+<span class="fc" id="L241">      encoding = StringUtils.guessEncoding(readBytes, hints);</span>
+    } else {
+<span class="fc" id="L243">      encoding = currentCharacterSetECI.name();</span>
+    }
+    try {
+<span class="fc" id="L246">      result.append(new String(readBytes, encoding));</span>
+<span class="nc" id="L247">    } catch (UnsupportedEncodingException ignored) {</span>
+<span class="nc" id="L248">      throw FormatException.getFormatInstance();</span>
+<span class="fc" id="L249">    }</span>
+<span class="fc" id="L250">    byteSegments.add(readBytes);</span>
+<span class="fc" id="L251">  }</span>
+
+  private static char toAlphaNumericChar(int value) throws FormatException {
+<span class="pc bpc" id="L254" title="1 of 2 branches missed.">    if (value &gt;= ALPHANUMERIC_CHARS.length) {</span>
+<span class="nc" id="L255">      throw FormatException.getFormatInstance();</span>
+    }
+<span class="fc" id="L257">    return ALPHANUMERIC_CHARS[value];</span>
+  }
+
+  private static void decodeAlphanumericSegment(BitSource bits,
+                                                StringBuilder result,
+                                                int count,
+                                                boolean fc1InEffect) throws FormatException {
+    // Read two characters at a time
+<span class="fc" id="L265">    int start = result.length();</span>
+<span class="fc bfc" id="L266" title="All 2 branches covered.">    while (count &gt; 1) {</span>
+<span class="pc bpc" id="L267" title="1 of 2 branches missed.">      if (bits.available() &lt; 11) {</span>
+<span class="nc" id="L268">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L270">      int nextTwoCharsBits = bits.readBits(11);</span>
+<span class="fc" id="L271">      result.append(toAlphaNumericChar(nextTwoCharsBits / 45));</span>
+<span class="fc" id="L272">      result.append(toAlphaNumericChar(nextTwoCharsBits % 45));</span>
+<span class="fc" id="L273">      count -= 2;</span>
+<span class="fc" id="L274">    }</span>
+<span class="fc bfc" id="L275" title="All 2 branches covered.">    if (count == 1) {</span>
+      // special case: one character left
+<span class="pc bpc" id="L277" title="1 of 2 branches missed.">      if (bits.available() &lt; 6) {</span>
+<span class="nc" id="L278">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L280">      result.append(toAlphaNumericChar(bits.readBits(6)));</span>
+    }
+    // See section 6.4.8.1, 6.4.8.2
+<span class="pc bpc" id="L283" title="1 of 2 branches missed.">    if (fc1InEffect) {</span>
+      // We need to massage the result a bit if in an FNC1 mode:
+<span class="nc bnc" id="L285" title="All 2 branches missed.">      for (int i = start; i &lt; result.length(); i++) {</span>
+<span class="nc bnc" id="L286" title="All 2 branches missed.">        if (result.charAt(i) == '%') {</span>
+<span class="nc bnc" id="L287" title="All 4 branches missed.">          if (i &lt; result.length() - 1 &amp;&amp; result.charAt(i + 1) == '%') {</span>
+            // %% is rendered as %
+<span class="nc" id="L289">            result.deleteCharAt(i + 1);</span>
+          } else {
+            // In alpha mode, % should be converted to FNC1 separator 0x1D
+<span class="nc" id="L292">            result.setCharAt(i, (char) 0x1D);</span>
+          }
+        }
+      }
+    }
+<span class="fc" id="L297">  }</span>
+
+  private static void decodeNumericSegment(BitSource bits,
+                                           StringBuilder result,
+                                           int count) throws FormatException {
+    // Read three digits at a time
+<span class="fc bfc" id="L303" title="All 2 branches covered.">    while (count &gt;= 3) {</span>
+      // Each 10 bits encodes three digits
+<span class="pc bpc" id="L305" title="1 of 2 branches missed.">      if (bits.available() &lt; 10) {</span>
+<span class="nc" id="L306">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L308">      int threeDigitsBits = bits.readBits(10);</span>
+<span class="pc bpc" id="L309" title="1 of 2 branches missed.">      if (threeDigitsBits &gt;= 1000) {</span>
+<span class="nc" id="L310">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L312">      result.append(toAlphaNumericChar(threeDigitsBits / 100));</span>
+<span class="fc" id="L313">      result.append(toAlphaNumericChar((threeDigitsBits / 10) % 10));</span>
+<span class="fc" id="L314">      result.append(toAlphaNumericChar(threeDigitsBits % 10));</span>
+<span class="fc" id="L315">      count -= 3;</span>
+<span class="fc" id="L316">    }</span>
+<span class="pc bpc" id="L317" title="1 of 2 branches missed.">    if (count == 2) {</span>
+      // Two digits left over to read, encoded in 7 bits
+<span class="nc bnc" id="L319" title="All 2 branches missed.">      if (bits.available() &lt; 7) {</span>
+<span class="nc" id="L320">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="nc" id="L322">      int twoDigitsBits = bits.readBits(7);</span>
+<span class="nc bnc" id="L323" title="All 2 branches missed.">      if (twoDigitsBits &gt;= 100) {</span>
+<span class="nc" id="L324">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="nc" id="L326">      result.append(toAlphaNumericChar(twoDigitsBits / 10));</span>
+<span class="nc" id="L327">      result.append(toAlphaNumericChar(twoDigitsBits % 10));</span>
+<span class="pc bfc" id="L328" title="All 2 branches covered.">    } else if (count == 1) {</span>
+      // One digit left over to read
+<span class="pc bpc" id="L330" title="1 of 2 branches missed.">      if (bits.available() &lt; 4) {</span>
+<span class="nc" id="L331">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L333">      int digitBits = bits.readBits(4);</span>
+<span class="pc bpc" id="L334" title="1 of 2 branches missed.">      if (digitBits &gt;= 10) {</span>
+<span class="nc" id="L335">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L337">      result.append(toAlphaNumericChar(digitBits));</span>
+    }
+<span class="fc" id="L339">  }</span>
+
+  private static int parseECIValue(BitSource bits) throws FormatException {
+<span class="fc" id="L342">    int firstByte = bits.readBits(8);</span>
+<span class="pc bpc" id="L343" title="1 of 2 branches missed.">    if ((firstByte &amp; 0x80) == 0) {</span>
+      // just one byte
+<span class="fc" id="L345">      return firstByte &amp; 0x7F;</span>
+    }
+<span class="nc bnc" id="L347" title="All 2 branches missed.">    if ((firstByte &amp; 0xC0) == 0x80) {</span>
+      // two bytes
+<span class="nc" id="L349">      int secondByte = bits.readBits(8);</span>
+<span class="nc" id="L350">      return ((firstByte &amp; 0x3F) &lt;&lt; 8) | secondByte;</span>
+    }
+<span class="nc bnc" id="L352" title="All 2 branches missed.">    if ((firstByte &amp; 0xE0) == 0xC0) {</span>
+      // three bytes
+<span class="nc" id="L354">      int secondThirdBytes = bits.readBits(16);</span>
+<span class="nc" id="L355">      return ((firstByte &amp; 0x1F) &lt;&lt; 16) | secondThirdBytes;</span>
+    }
+<span class="nc" id="L357">    throw FormatException.getFormatInstance();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

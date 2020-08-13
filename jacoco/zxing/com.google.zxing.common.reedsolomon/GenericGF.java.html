@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>GenericGF.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.common.reedsolomon</a> &gt; <span class="el_source">GenericGF.java</span></div><h1>GenericGF.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.common.reedsolomon;
+
+/**
+ * &lt;p&gt;This class contains utility methods for performing mathematical operations over
+ * the Galois Fields. Operations use a given primitive polynomial in calculations.&lt;/p&gt;
+ *
+ * &lt;p&gt;Throughout this package, elements of the GF are represented as an {@code int}
+ * for convenience and speed (but at the cost of memory).
+ * &lt;/p&gt;
+ *
+ * @author Sean Owen
+ * @author David Olivier
+ */
+public final class GenericGF {
+
+<span class="fc" id="L32">  public static final GenericGF AZTEC_DATA_12 = new GenericGF(0x1069, 4096, 1); // x^12 + x^6 + x^5 + x^3 + 1</span>
+<span class="fc" id="L33">  public static final GenericGF AZTEC_DATA_10 = new GenericGF(0x409, 1024, 1); // x^10 + x^3 + 1</span>
+<span class="fc" id="L34">  public static final GenericGF AZTEC_DATA_6 = new GenericGF(0x43, 64, 1); // x^6 + x + 1</span>
+<span class="fc" id="L35">  public static final GenericGF AZTEC_PARAM = new GenericGF(0x13, 16, 1); // x^4 + x + 1</span>
+<span class="fc" id="L36">  public static final GenericGF QR_CODE_FIELD_256 = new GenericGF(0x011D, 256, 0); // x^8 + x^4 + x^3 + x^2 + 1</span>
+<span class="fc" id="L37">  public static final GenericGF DATA_MATRIX_FIELD_256 = new GenericGF(0x012D, 256, 1); // x^8 + x^5 + x^3 + x^2 + 1</span>
+<span class="fc" id="L38">  public static final GenericGF AZTEC_DATA_8 = DATA_MATRIX_FIELD_256;</span>
+<span class="fc" id="L39">  public static final GenericGF MAXICODE_FIELD_64 = AZTEC_DATA_6;</span>
+
+  private final int[] expTable;
+  private final int[] logTable;
+  private final GenericGFPoly zero;
+  private final GenericGFPoly one;
+  private final int size;
+  private final int primitive;
+  private final int generatorBase;
+
+  /**
+   * Create a representation of GF(size) using the given primitive polynomial.
+   *
+   * @param primitive irreducible polynomial whose coefficients are represented by
+   *  the bits of an int, where the least-significant bit represents the constant
+   *  coefficient
+   * @param size the size of the field
+   * @param b the factor b in the generator polynomial can be 0- or 1-based
+   *  (g(x) = (x+a^b)(x+a^(b+1))...(x+a^(b+2t-1))).
+   *  In most cases it should be 1, but for QR code it is 0.
+   */
+<span class="fc" id="L60">  public GenericGF(int primitive, int size, int b) {</span>
+<span class="fc" id="L61">    this.primitive = primitive;</span>
+<span class="fc" id="L62">    this.size = size;</span>
+<span class="fc" id="L63">    this.generatorBase = b;</span>
+
+<span class="fc" id="L65">    expTable = new int[size];</span>
+<span class="fc" id="L66">    logTable = new int[size];</span>
+<span class="fc" id="L67">    int x = 1;</span>
+<span class="fc bfc" id="L68" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L69">      expTable[i] = x;</span>
+<span class="fc" id="L70">      x *= 2; // we're assuming the generator alpha is 2</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">      if (x &gt;= size) {</span>
+<span class="fc" id="L72">        x ^= primitive;</span>
+<span class="fc" id="L73">        x &amp;= size - 1;</span>
+      }
+    }
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    for (int i = 0; i &lt; size - 1; i++) {</span>
+<span class="fc" id="L77">      logTable[expTable[i]] = i;</span>
+    }
+    // logTable[0] == 0 but this should never be used
+<span class="fc" id="L80">    zero = new GenericGFPoly(this, new int[]{0});</span>
+<span class="fc" id="L81">    one = new GenericGFPoly(this, new int[]{1});</span>
+<span class="fc" id="L82">  }</span>
+
+  GenericGFPoly getZero() {
+<span class="fc" id="L85">    return zero;</span>
+  }
+
+  GenericGFPoly getOne() {
+<span class="fc" id="L89">    return one;</span>
+  }
+
+  /**
+   * @return the monomial representing coefficient * x^degree
+   */
+  GenericGFPoly buildMonomial(int degree, int coefficient) {
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">    if (degree &lt; 0) {</span>
+<span class="nc" id="L97">      throw new IllegalArgumentException();</span>
+    }
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    if (coefficient == 0) {</span>
+<span class="fc" id="L100">      return zero;</span>
+    }
+<span class="fc" id="L102">    int[] coefficients = new int[degree + 1];</span>
+<span class="fc" id="L103">    coefficients[0] = coefficient;</span>
+<span class="fc" id="L104">    return new GenericGFPoly(this, coefficients);</span>
+  }
+
+  /**
+   * Implements both addition and subtraction -- they are the same in GF(size).
+   *
+   * @return sum/difference of a and b
+   */
+  static int addOrSubtract(int a, int b) {
+<span class="fc" id="L113">    return a ^ b;</span>
+  }
+
+  /**
+   * @return 2 to the power of a in GF(size)
+   */
+  int exp(int a) {
+<span class="fc" id="L120">    return expTable[a];</span>
+  }
+
+  /**
+   * @return base 2 log of a in GF(size)
+   */
+  int log(int a) {
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">    if (a == 0) {</span>
+<span class="nc" id="L128">      throw new IllegalArgumentException();</span>
+    }
+<span class="fc" id="L130">    return logTable[a];</span>
+  }
+
+  /**
+   * @return multiplicative inverse of a
+   */
+  int inverse(int a) {
+<span class="pc bpc" id="L137" title="1 of 2 branches missed.">    if (a == 0) {</span>
+<span class="nc" id="L138">      throw new ArithmeticException();</span>
+    }
+<span class="fc" id="L140">    return expTable[size - logTable[a] - 1];</span>
+  }
+
+  /**
+   * @return product of a and b in GF(size)
+   */
+  int multiply(int a, int b) {
+<span class="fc bfc" id="L147" title="All 4 branches covered.">    if (a == 0 || b == 0) {</span>
+<span class="fc" id="L148">      return 0;</span>
+    }
+<span class="fc" id="L150">    return expTable[(logTable[a] + logTable[b]) % (size - 1)];</span>
+  }
+
+  public int getSize() {
+<span class="fc" id="L154">    return size;</span>
+  }
+
+  public int getGeneratorBase() {
+<span class="fc" id="L158">    return generatorBase;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="fc" id="L163">    return &quot;GF(0x&quot; + Integer.toHexString(primitive) + ',' + size + ')';</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

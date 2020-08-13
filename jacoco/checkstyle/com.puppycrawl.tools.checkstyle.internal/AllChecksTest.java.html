@@ -1,0 +1,576 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AllChecksTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.internal</a> &gt; <span class="el_source">AllChecksTest.java</span></div><h1>AllChecksTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.internal;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Properties;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.Assert;
+import org.junit.Test;
+
+import com.puppycrawl.tools.checkstyle.AbstractModuleTestSupport;
+import com.puppycrawl.tools.checkstyle.Checker;
+import com.puppycrawl.tools.checkstyle.DefaultConfiguration;
+import com.puppycrawl.tools.checkstyle.FileStatefulCheck;
+import com.puppycrawl.tools.checkstyle.GlobalStatefulCheck;
+import com.puppycrawl.tools.checkstyle.ModuleFactory;
+import com.puppycrawl.tools.checkstyle.StatelessCheck;
+import com.puppycrawl.tools.checkstyle.api.AbstractCheck;
+import com.puppycrawl.tools.checkstyle.api.CheckstyleException;
+import com.puppycrawl.tools.checkstyle.api.Configuration;
+import com.puppycrawl.tools.checkstyle.checks.imports.ImportControlCheck;
+import com.puppycrawl.tools.checkstyle.internal.utils.CheckUtil;
+import com.puppycrawl.tools.checkstyle.internal.utils.ConfigurationUtil;
+import com.puppycrawl.tools.checkstyle.internal.utils.TestUtil;
+import com.puppycrawl.tools.checkstyle.internal.utils.XdocUtil;
+import com.puppycrawl.tools.checkstyle.utils.CommonUtil;
+import com.puppycrawl.tools.checkstyle.utils.ModuleReflectionUtil;
+
+<span class="fc" id="L59">public class AllChecksTest extends AbstractModuleTestSupport {</span>
+
+<span class="fc" id="L61">    private static final Locale[] ALL_LOCALES = {</span>
+        Locale.GERMAN,
+        new Locale(&quot;es&quot;),
+        new Locale(&quot;fi&quot;),
+        Locale.FRENCH,
+        Locale.JAPANESE,
+        new Locale(&quot;pt&quot;),
+        new Locale(&quot;tr&quot;),
+        Locale.CHINESE,
+        Locale.ENGLISH,
+    };
+
+<span class="fc" id="L73">    private static final Map&lt;String, Set&lt;String&gt;&gt; CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE =</span>
+            new HashMap&lt;&gt;();
+<span class="fc" id="L75">    private static final Map&lt;String, Set&lt;String&gt;&gt; GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE =</span>
+            new HashMap&lt;&gt;();
+
+    static {
+        // checkstyle
+
+<span class="fc" id="L81">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NoWhitespaceBefore&quot;, Stream.of(</span>
+                // we use GenericWhitespace for this behavior
+<span class="fc" id="L83">                &quot;GENERIC_START&quot;, &quot;GENERIC_END&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L84">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;AbbreviationAsWordInName&quot;, Stream.of(</span>
+                // enum values should be uppercase, we use EnumValueNameCheck instead
+<span class="fc" id="L86">                &quot;ENUM_CONSTANT_DEF&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L87">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;FinalLocalVariable&quot;, Stream.of(</span>
+                // we prefer all parameters be effectively final as to not damage readability
+                // we use ParameterAssignmentCheck to enforce this
+<span class="fc" id="L90">                &quot;PARAMETER_DEF&quot;).collect(Collectors.toSet()));</span>
+        // we have no need to block these specific tokens
+<span class="fc" id="L92">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;IllegalToken&quot;,</span>
+<span class="fc" id="L93">                Stream.of(&quot;LITERAL_SUPER&quot;, &quot;LITERAL_ASSERT&quot;, &quot;ENUM_CONSTANT_DEF&quot;,</span>
+                        &quot;TYPE_PARAMETERS&quot;, &quot;TYPE_UPPER_BOUNDS&quot;, &quot;NUM_DOUBLE&quot;, &quot;LITERAL_SWITCH&quot;,
+                        &quot;ANNOTATIONS&quot;, &quot;LITERAL_SHORT&quot;, &quot;LITERAL_PROTECTED&quot;, &quot;FOR_CONDITION&quot;,
+                        &quot;FOR_INIT&quot;, &quot;LITERAL_LONG&quot;, &quot;MINUS&quot;, &quot;OBJBLOCK&quot;, &quot;LITERAL_NULL&quot;,
+                        &quot;ANNOTATION&quot;, &quot;LITERAL_TRUE&quot;, &quot;COMMENT_CONTENT&quot;, &quot;LITERAL_CHAR&quot;,
+                        &quot;PARAMETER_DEF&quot;, &quot;POST_DEC&quot;, &quot;ANNOTATION_FIELD_DEF&quot;, &quot;BLOCK_COMMENT_END&quot;,
+                        &quot;TYPE&quot;, &quot;LITERAL_INT&quot;, &quot;BSR&quot;, &quot;ENUM&quot;, &quot;ANNOTATION_MEMBER_VALUE_PAIR&quot;,
+                        &quot;TYPECAST&quot;, &quot;LITERAL_SYNCHRONIZED&quot;, &quot;PLUS_ASSIGN&quot;, &quot;DOT&quot;, &quot;LPAREN&quot;,
+                        &quot;LITERAL_IF&quot;, &quot;LITERAL_CATCH&quot;, &quot;BAND&quot;, &quot;INTERFACE_DEF&quot;, &quot;LOR&quot;, &quot;BNOT&quot;,
+                        &quot;METHOD_CALL&quot;, &quot;AT&quot;, &quot;ELLIPSIS&quot;, &quot;ARRAY_INIT&quot;, &quot;FOR_EACH_CLAUSE&quot;,
+                        &quot;LITERAL_THROWS&quot;, &quot;CHAR_LITERAL&quot;, &quot;CASE_GROUP&quot;, &quot;POST_INC&quot;, &quot;SEMI&quot;,
+                        &quot;LITERAL_FINALLY&quot;, &quot;ASSIGN&quot;, &quot;RESOURCE_SPECIFICATION&quot;, &quot;STATIC_IMPORT&quot;,
+                        &quot;GENERIC_START&quot;, &quot;IMPORT&quot;, &quot;SL&quot;, &quot;VARIABLE_DEF&quot;, &quot;LITERAL_DOUBLE&quot;,
+                        &quot;RCURLY&quot;, &quot;RESOURCE&quot;, &quot;SR&quot;, &quot;COMMA&quot;, &quot;BAND_ASSIGN&quot;, &quot;METHOD_DEF&quot;,
+                        &quot;LITERAL_VOID&quot;, &quot;NUM_LONG&quot;, &quot;LITERAL_TRANSIENT&quot;, &quot;LITERAL_THIS&quot;, &quot;LCURLY&quot;,
+                        &quot;MINUS_ASSIGN&quot;, &quot;TYPE_LOWER_BOUNDS&quot;, &quot;TYPE_ARGUMENT&quot;, &quot;LITERAL_CLASS&quot;,
+                        &quot;INSTANCE_INIT&quot;, &quot;DIV&quot;, &quot;STAR&quot;, &quot;UNARY_MINUS&quot;, &quot;FOR_ITERATOR&quot;, &quot;NOT_EQUAL&quot;,
+                        &quot;LE&quot;, &quot;LITERAL_INTERFACE&quot;, &quot;LITERAL_FLOAT&quot;, &quot;LITERAL_INSTANCEOF&quot;,
+                        &quot;BOR_ASSIGN&quot;, &quot;LT&quot;, &quot;SL_ASSIGN&quot;, &quot;ELIST&quot;, &quot;ANNOTATION_ARRAY_INIT&quot;,
+                        &quot;MODIFIERS&quot;, &quot;LITERAL_BREAK&quot;, &quot;EXTENDS_CLAUSE&quot;, &quot;TYPE_PARAMETER&quot;,
+                        &quot;LITERAL_DEFAULT&quot;, &quot;STATIC_INIT&quot;, &quot;BSR_ASSIGN&quot;, &quot;TYPE_EXTENSION_AND&quot;,
+                        &quot;BOR&quot;, &quot;LITERAL_PRIVATE&quot;, &quot;LITERAL_THROW&quot;, &quot;LITERAL_BYTE&quot;, &quot;BXOR&quot;,
+                        &quot;WILDCARD_TYPE&quot;, &quot;FINAL&quot;, &quot;PARAMETERS&quot;, &quot;RPAREN&quot;, &quot;SR_ASSIGN&quot;,
+                        &quot;UNARY_PLUS&quot;, &quot;EMPTY_STAT&quot;, &quot;LITERAL_STATIC&quot;, &quot;LITERAL_CONTINUE&quot;,
+                        &quot;STAR_ASSIGN&quot;, &quot;LAMBDA&quot;, &quot;RBRACK&quot;, &quot;BXOR_ASSIGN&quot;, &quot;CTOR_CALL&quot;,
+                        &quot;LITERAL_FALSE&quot;, &quot;DO_WHILE&quot;, &quot;LITERAL_PUBLIC&quot;, &quot;LITERAL_WHILE&quot;, &quot;PLUS&quot;,
+                        &quot;INC&quot;, &quot;CTOR_DEF&quot;, &quot;GENERIC_END&quot;, &quot;DIV_ASSIGN&quot;, &quot;SLIST&quot;, &quot;LNOT&quot;, &quot;LAND&quot;,
+                        &quot;LITERAL_ELSE&quot;, &quot;ABSTRACT&quot;, &quot;STRICTFP&quot;, &quot;QUESTION&quot;, &quot;LITERAL_NEW&quot;,
+                        &quot;LITERAL_RETURN&quot;, &quot;SINGLE_LINE_COMMENT&quot;, &quot;INDEX_OP&quot;, &quot;EXPR&quot;,
+                        &quot;BLOCK_COMMENT_BEGIN&quot;, &quot;PACKAGE_DEF&quot;, &quot;IMPLEMENTS_CLAUSE&quot;, &quot;NUM_FLOAT&quot;,
+                        &quot;LITERAL_DO&quot;, &quot;EOF&quot;, &quot;GE&quot;, &quot;RESOURCES&quot;, &quot;MOD&quot;, &quot;DEC&quot;, &quot;EQUAL&quot;,
+                        &quot;LITERAL_BOOLEAN&quot;, &quot;CLASS_DEF&quot;, &quot;COLON&quot;, &quot;LITERAL_TRY&quot;, &quot;ENUM_DEF&quot;, &quot;GT&quot;,
+                        &quot;NUM_INT&quot;, &quot;ANNOTATION_DEF&quot;, &quot;METHOD_REF&quot;, &quot;TYPE_ARGUMENTS&quot;,
+                        &quot;DOUBLE_COLON&quot;, &quot;IDENT&quot;, &quot;MOD_ASSIGN&quot;, &quot;LITERAL_FOR&quot;, &quot;SUPER_CTOR_CALL&quot;,
+<span class="fc" id="L127">                        &quot;STRING_LITERAL&quot;, &quot;ARRAY_DECLARATOR&quot;, &quot;LITERAL_CASE&quot;).collect(</span>
+<span class="fc" id="L128">                        Collectors.toSet()));</span>
+        // we have no need to block specific token text
+<span class="fc" id="L130">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;IllegalTokenText&quot;,</span>
+<span class="fc" id="L131">                Stream.of(&quot;NUM_DOUBLE&quot;, &quot;NUM_FLOAT&quot;, &quot;NUM_INT&quot;, &quot;NUM_LONG&quot;, &quot;IDENT&quot;,</span>
+                    &quot;COMMENT_CONTENT&quot;, &quot;STRING_LITERAL&quot;, &quot;CHAR_LITERAL&quot;)
+<span class="fc" id="L133">                    .collect(Collectors.toSet()));</span>
+        // we do not use this check as it is deprecated
+<span class="fc" id="L135">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;WriteTag&quot;,</span>
+<span class="fc" id="L136">                Stream.of(&quot;ENUM_CONSTANT_DEF&quot;, &quot;METHOD_DEF&quot;, &quot;CTOR_DEF&quot;, &quot;ANNOTATION_FIELD_DEF&quot;)</span>
+<span class="fc" id="L137">                        .collect(Collectors.toSet()));</span>
+        // state of the configuration when test was made until reason found in
+        // https://github.com/checkstyle/checkstyle/issues/3730
+<span class="fc" id="L140">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;AnnotationLocation&quot;,</span>
+<span class="fc" id="L141">                Stream.of(&quot;CLASS_DEF&quot;, &quot;CTOR_DEF&quot;, &quot;ENUM_DEF&quot;, &quot;INTERFACE_DEF&quot;,</span>
+<span class="fc" id="L142">                        &quot;METHOD_DEF&quot;, &quot;VARIABLE_DEF&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L143">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NoLineWrap&quot;, Stream.of(</span>
+                // method declaration could be long due to &quot;parameters/exceptions&quot;, it is ok to
+                // be not strict there
+                &quot;METHOD_DEF&quot;, &quot;CTOR_DEF&quot;,
+                // type declaration could be long due to &quot;extends/implements&quot;, it is ok to
+                // be not strict there
+                &quot;CLASS_DEF&quot;, &quot;ENUM_DEF&quot;, &quot;INTERFACE_DEF&quot;)
+<span class="fc" id="L150">                .collect(Collectors.toSet()));</span>
+<span class="fc" id="L151">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NoWhitespaceAfter&quot;, Stream.of(</span>
+                // whitespace after is preferred
+<span class="fc" id="L153">                &quot;TYPECAST&quot;, &quot;LITERAL_SYNCHRONIZED&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L154">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;SeparatorWrap&quot;, Stream.of(</span>
+                // needs context to decide what type of parentheses should be separated or not
+                // which this check does not provide
+<span class="fc" id="L157">                &quot;LPAREN&quot;, &quot;RPAREN&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L158">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NeedBraces&quot;, Stream.of(</span>
+                // we prefer no braces here as it looks unusual even though they help avoid sharing
+                // scope of variables
+<span class="fc" id="L161">                &quot;LITERAL_DEFAULT&quot;, &quot;LITERAL_CASE&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L162">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;FinalParameters&quot;, Stream.of(</span>
+                // we prefer these to be effectively final as to not damage readability
+<span class="fc" id="L164">                &quot;FOR_EACH_CLAUSE&quot;, &quot;LITERAL_CATCH&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L165">        CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;WhitespaceAround&quot;, Stream.of(</span>
+                // we prefer no spaces on one side or both for these tokens
+                &quot;ARRAY_INIT&quot;,
+                &quot;ELLIPSIS&quot;,
+                // these are covered by GenericWhitespaceCheck
+<span class="fc" id="L170">                &quot;WILDCARD_TYPE&quot;, &quot;GENERIC_END&quot;, &quot;GENERIC_START&quot;).collect(Collectors.toSet()));</span>
+
+        // google
+<span class="fc" id="L173">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;AnnotationLocation&quot;, Stream.of(</span>
+                // state of the configuration when test was made until reason found in
+                // https://github.com/checkstyle/checkstyle/issues/3730
+                &quot;ANNOTATION_DEF&quot;, &quot;ANNOTATION_FIELD_DEF&quot;, &quot;ENUM_CONSTANT_DEF&quot;, &quot;PACKAGE_DEF&quot;)
+<span class="fc" id="L177">                .collect(Collectors.toSet()));</span>
+<span class="fc" id="L178">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;AbbreviationAsWordInName&quot;, Stream.of(</span>
+                // enum values should be uppercase
+<span class="fc" id="L180">                &quot;ENUM_CONSTANT_DEF&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L181">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NoLineWrap&quot;, Stream.of(</span>
+                // method declaration could be long due to &quot;parameters/exceptions&quot;, it is ok to
+                // be not strict there
+                &quot;METHOD_DEF&quot;, &quot;CTOR_DEF&quot;, &quot;CLASS_DEF&quot;, &quot;ENUM_DEF&quot;, &quot;INTERFACE_DEF&quot;)
+<span class="fc" id="L185">                .collect(Collectors.toSet()));</span>
+<span class="fc" id="L186">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;SeparatorWrap&quot;, Stream.of(</span>
+                // location could be any to allow writing expressions for indexes evaluation
+                // on new line, see https://github.com/checkstyle/checkstyle/issues/3752
+                &quot;RBRACK&quot;,
+                // for some targets annotations can be used without wrapping, as described
+                // in https://google.github.io/styleguide/javaguide.html#s4.8.5-annotations
+                &quot;AT&quot;,
+                // location could be any to allow using for line separation in enum values,
+                // see https://github.com/checkstyle/checkstyle/issues/3752
+                &quot;SEMI&quot;,
+                // needs context to decide what type of parentheses should be separated or not
+                // which this check does not provide
+<span class="fc" id="L198">                &quot;LPAREN&quot;, &quot;RPAREN&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L199">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NeedBraces&quot;, Stream.of(</span>
+                // google doesn't require or prevent braces on these
+<span class="fc" id="L201">                &quot;LAMBDA&quot;, &quot;LITERAL_DEFAULT&quot;, &quot;LITERAL_CASE&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L202">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;EmptyBlock&quot;, Stream.of(</span>
+                // google doesn't specifically mention empty braces at the start of a case/default
+                &quot;LITERAL_DEFAULT&quot;, &quot;LITERAL_CASE&quot;,
+                // can be empty for special cases via '6.2 Caught exceptions: not ignored'
+                &quot;LITERAL_CATCH&quot;,
+                // specifically allowed via '5.2.4 Constant names'
+                &quot;ARRAY_INIT&quot;,
+                // state of the configuration when test was made until
+                // https://github.com/checkstyle/checkstyle/issues/4121
+                &quot;INSTANCE_INIT&quot;, &quot;LITERAL_DO&quot;, &quot;LITERAL_FOR&quot;, &quot;LITERAL_SYNCHRONIZED&quot;,
+<span class="fc" id="L212">                &quot;LITERAL_WHILE&quot;, &quot;STATIC_INIT&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L213">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;WhitespaceAround&quot;, Stream.of(</span>
+                //  allowed via '4.8.3 Arrays'
+                &quot;ARRAY_INIT&quot;,
+                //  '...' is almost same as '[]' by meaning
+                &quot;ELLIPSIS&quot;,
+                // google prefers no spaces on one side or both for these tokens
+                &quot;GENERIC_START&quot;, &quot;GENERIC_END&quot;, &quot;WILDCARD_TYPE&quot;)
+<span class="fc" id="L220">                .collect(Collectors.toSet()));</span>
+<span class="fc" id="L221">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;IllegalTokenText&quot;, Stream.of(</span>
+                // all other java tokens and text are allowed
+                &quot;NUM_DOUBLE&quot;, &quot;NUM_FLOAT&quot;, &quot;NUM_INT&quot;, &quot;NUM_LONG&quot;, &quot;IDENT&quot;,
+                &quot;COMMENT_CONTENT&quot;, &quot;STRING_LITERAL&quot;, &quot;CHAR_LITERAL&quot;)
+<span class="fc" id="L225">                .collect(Collectors.toSet()));</span>
+<span class="fc" id="L226">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;OperatorWrap&quot;, Stream.of(</span>
+                // specifically allowed via '4.5.1 Where to break' because the following are
+                // assignment operators and they are allowed to break before or after the symbol
+                &quot;DIV_ASSIGN&quot;, &quot;BOR_ASSIGN&quot;, &quot;SL_ASSIGN&quot;, &quot;ASSIGN&quot;, &quot;BSR_ASSIGN&quot;, &quot;BAND_ASSIGN&quot;,
+                &quot;PLUS_ASSIGN&quot;, &quot;MINUS_ASSIGN&quot;, &quot;SR_ASSIGN&quot;, &quot;STAR_ASSIGN&quot;, &quot;BXOR_ASSIGN&quot;,
+                &quot;MOD_ASSIGN&quot;,
+                // state of the configuration when test was made until
+                // https://github.com/checkstyle/checkstyle/issues/4122
+<span class="fc" id="L234">                &quot;COLON&quot;, &quot;TYPE_EXTENSION_AND&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L235">        GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE.put(&quot;NoWhitespaceBefore&quot;, Stream.of(</span>
+                // google uses GenericWhitespace for this behavior
+<span class="fc" id="L237">                &quot;GENERIC_START&quot;, &quot;GENERIC_END&quot;).collect(Collectors.toSet()));</span>
+<span class="fc" id="L238">    }</span>
+
+    @Override
+    protected String getPackageLocation() {
+<span class="fc" id="L242">        return &quot;com/puppycrawl/tools/checkstyle/internal/allchecks&quot;;</span>
+    }
+
+    @Test
+    public void testAllModulesWithDefaultConfiguration() throws Exception {
+<span class="fc" id="L247">        final String inputFilePath = getPath(&quot;InputAllChecksDefaultConfig.java&quot;);</span>
+<span class="fc" id="L248">        final String[] expected = CommonUtil.EMPTY_STRING_ARRAY;</span>
+
+<span class="fc bfc" id="L250" title="All 2 branches covered.">        for (Class&lt;?&gt; module : CheckUtil.getCheckstyleModules()) {</span>
+<span class="fc bfc" id="L251" title="All 2 branches covered.">            if (ModuleReflectionUtil.isRootModule(module)) {</span>
+<span class="fc" id="L252">                continue;</span>
+            }
+
+<span class="fc" id="L255">            final DefaultConfiguration moduleConfig = createModuleConfig(module);</span>
+            final Checker checker;
+<span class="fc bfc" id="L257" title="All 2 branches covered.">            if (module.equals(ImportControlCheck.class)) {</span>
+                // ImportControlCheck must have the import control configuration file to avoid
+                // violation.
+<span class="fc" id="L260">                moduleConfig.addAttribute(&quot;file&quot;, getPath(</span>
+                        &quot;InputAllChecksImportControl.xml&quot;));
+            }
+<span class="fc" id="L263">            checker = createChecker(moduleConfig);</span>
+<span class="fc" id="L264">            verify(checker, inputFilePath, expected);</span>
+<span class="fc" id="L265">        }</span>
+<span class="fc" id="L266">    }</span>
+
+    @Test
+    public void testDefaultTokensAreSubsetOfAcceptableTokens() throws Exception {
+<span class="fc bfc" id="L270" title="All 2 branches covered.">        for (Class&lt;?&gt; check : CheckUtil.getCheckstyleChecks()) {</span>
+<span class="pc bpc" id="L271" title="1 of 2 branches missed.">            if (AbstractCheck.class.isAssignableFrom(check)) {</span>
+<span class="fc" id="L272">                final AbstractCheck testedCheck = (AbstractCheck) check.getDeclaredConstructor()</span>
+<span class="fc" id="L273">                        .newInstance();</span>
+<span class="fc" id="L274">                final int[] defaultTokens = testedCheck.getDefaultTokens();</span>
+<span class="fc" id="L275">                final int[] acceptableTokens = testedCheck.getAcceptableTokens();</span>
+
+<span class="pc bpc" id="L277" title="1 of 2 branches missed.">                if (!isSubset(defaultTokens, acceptableTokens)) {</span>
+<span class="nc" id="L278">                    final String errorMessage = String.format(Locale.ROOT,</span>
+                            &quot;%s's default tokens must be a subset&quot;
+<span class="nc" id="L280">                            + &quot; of acceptable tokens.&quot;, check.getName());</span>
+<span class="nc" id="L281">                    Assert.fail(errorMessage);</span>
+                }
+            }
+<span class="fc" id="L284">        }</span>
+<span class="fc" id="L285">    }</span>
+
+    @Test
+    public void testRequiredTokensAreSubsetOfAcceptableTokens() throws Exception {
+<span class="fc bfc" id="L289" title="All 2 branches covered.">        for (Class&lt;?&gt; check : CheckUtil.getCheckstyleChecks()) {</span>
+<span class="pc bpc" id="L290" title="1 of 2 branches missed.">            if (AbstractCheck.class.isAssignableFrom(check)) {</span>
+<span class="fc" id="L291">                final AbstractCheck testedCheck = (AbstractCheck) check.getDeclaredConstructor()</span>
+<span class="fc" id="L292">                        .newInstance();</span>
+<span class="fc" id="L293">                final int[] requiredTokens = testedCheck.getRequiredTokens();</span>
+<span class="fc" id="L294">                final int[] acceptableTokens = testedCheck.getAcceptableTokens();</span>
+
+<span class="pc bpc" id="L296" title="1 of 2 branches missed.">                if (!isSubset(requiredTokens, acceptableTokens)) {</span>
+<span class="nc" id="L297">                    final String errorMessage = String.format(Locale.ROOT,</span>
+                            &quot;%s's required tokens must be a subset&quot;
+<span class="nc" id="L299">                            + &quot; of acceptable tokens.&quot;, check.getName());</span>
+<span class="nc" id="L300">                    Assert.fail(errorMessage);</span>
+                }
+            }
+<span class="fc" id="L303">        }</span>
+<span class="fc" id="L304">    }</span>
+
+    @Test
+    public void testRequiredTokensAreSubsetOfDefaultTokens() throws Exception {
+<span class="fc bfc" id="L308" title="All 2 branches covered.">        for (Class&lt;?&gt; check : CheckUtil.getCheckstyleChecks()) {</span>
+<span class="pc bpc" id="L309" title="1 of 2 branches missed.">            if (AbstractCheck.class.isAssignableFrom(check)) {</span>
+<span class="fc" id="L310">                final AbstractCheck testedCheck = (AbstractCheck) check.getDeclaredConstructor()</span>
+<span class="fc" id="L311">                        .newInstance();</span>
+<span class="fc" id="L312">                final int[] defaultTokens = testedCheck.getDefaultTokens();</span>
+<span class="fc" id="L313">                final int[] requiredTokens = testedCheck.getRequiredTokens();</span>
+
+<span class="pc bpc" id="L315" title="1 of 2 branches missed.">                if (!isSubset(requiredTokens, defaultTokens)) {</span>
+<span class="nc" id="L316">                    final String errorMessage = String.format(Locale.ROOT,</span>
+                            &quot;%s's required tokens must be a subset&quot;
+<span class="nc" id="L318">                            + &quot; of default tokens.&quot;, check.getName());</span>
+<span class="nc" id="L319">                    Assert.fail(errorMessage);</span>
+                }
+            }
+<span class="fc" id="L322">        }</span>
+<span class="fc" id="L323">    }</span>
+
+    @Test
+    public void testAllModulesHaveMultiThreadAnnotation() throws Exception {
+<span class="fc bfc" id="L327" title="All 2 branches covered.">        for (Class&lt;?&gt; module : CheckUtil.getCheckstyleModules()) {</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">            if (ModuleReflectionUtil.isRootModule(module)</span>
+<span class="fc bfc" id="L329" title="All 2 branches covered.">                    || ModuleReflectionUtil.isFilterModule(module)</span>
+<span class="fc bfc" id="L330" title="All 2 branches covered.">                    || ModuleReflectionUtil.isFileFilterModule(module)</span>
+<span class="fc bfc" id="L331" title="All 2 branches covered.">                    || ModuleReflectionUtil.isTreeWalkerFilterModule(module)) {</span>
+<span class="fc" id="L332">                continue;</span>
+            }
+
+<span class="fc" id="L335">            Assert.assertTrue(</span>
+<span class="fc" id="L336">                    &quot;module '&quot; + module.getSimpleName()</span>
+                            + &quot;' must contain a multi-thread annotation&quot;,
+<span class="fc bfc" id="L338" title="All 2 branches covered.">                    module.isAnnotationPresent(GlobalStatefulCheck.class)</span>
+<span class="fc bfc" id="L339" title="All 2 branches covered.">                            || module.isAnnotationPresent(FileStatefulCheck.class)</span>
+<span class="pc bpc" id="L340" title="1 of 2 branches missed.">                            || module.isAnnotationPresent(StatelessCheck.class));</span>
+<span class="fc" id="L341">        }</span>
+<span class="fc" id="L342">    }</span>
+
+    @Test
+    public void testAllModulesAreReferencedInConfigFile() throws Exception {
+<span class="fc" id="L346">        final Set&lt;String&gt; modulesReferencedInConfig = CheckUtil.getConfigCheckStyleModules();</span>
+<span class="fc" id="L347">        final Set&lt;String&gt; moduleNames = CheckUtil.getSimpleNames(CheckUtil.getCheckstyleModules());</span>
+
+<span class="pc bpc" id="L349" title="1 of 2 branches missed.">        moduleNames.stream().filter(check -&gt; !modulesReferencedInConfig.contains(check))</span>
+<span class="fc" id="L350">            .forEach(check -&gt; {</span>
+<span class="nc" id="L351">                final String errorMessage = String.format(Locale.ROOT,</span>
+                    &quot;%s is not referenced in checkstyle_checks.xml&quot;, check);
+<span class="nc" id="L353">                Assert.fail(errorMessage);</span>
+<span class="nc" id="L354">            });</span>
+<span class="fc" id="L355">    }</span>
+
+    @Test
+    public void testAllCheckTokensAreReferencedInCheckstyleConfigFile() throws Exception {
+<span class="fc" id="L359">        final Configuration configuration = ConfigurationUtil</span>
+<span class="fc" id="L360">                .loadConfiguration(&quot;config/checkstyle_checks.xml&quot;);</span>
+
+<span class="fc" id="L362">        validateAllCheckTokensAreReferencedInConfigFile(&quot;checkstyle&quot;, configuration,</span>
+                CHECKSTYLE_TOKENS_IN_CONFIG_TO_IGNORE);
+<span class="fc" id="L364">    }</span>
+
+    @Test
+    public void testAllCheckTokensAreReferencedInGoogleConfigFile() throws Exception {
+<span class="fc" id="L368">        final Configuration configuration = ConfigurationUtil</span>
+<span class="fc" id="L369">                .loadConfiguration(&quot;src/main/resources/google_checks.xml&quot;);</span>
+
+<span class="fc" id="L371">        validateAllCheckTokensAreReferencedInConfigFile(&quot;google&quot;, configuration,</span>
+                GOOGLE_TOKENS_IN_CONFIG_TO_IGNORE);
+<span class="fc" id="L373">    }</span>
+
+    private static void validateAllCheckTokensAreReferencedInConfigFile(String configName,
+            Configuration configuration, Map&lt;String, Set&lt;String&gt;&gt; tokensToIgnore) throws Exception {
+<span class="fc" id="L377">        final ModuleFactory moduleFactory = TestUtil.getPackageObjectFactory();</span>
+<span class="fc" id="L378">        final Set&lt;Configuration&gt; configChecks = ConfigurationUtil.getChecks(configuration);</span>
+
+<span class="fc" id="L380">        final Map&lt;String, Set&lt;String&gt;&gt; configCheckTokens = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L381">        final Map&lt;String, Set&lt;String&gt;&gt; checkTokens = new HashMap&lt;&gt;();</span>
+
+<span class="fc bfc" id="L383" title="All 2 branches covered.">        for (Configuration checkConfig : configChecks) {</span>
+<span class="fc" id="L384">            final String checkName = checkConfig.getName();</span>
+            final Object instance;
+
+            try {
+<span class="fc" id="L388">                instance = moduleFactory.createModule(checkName);</span>
+            }
+<span class="nc" id="L390">            catch (CheckstyleException ex) {</span>
+<span class="nc" id="L391">                throw new CheckstyleException(&quot;Couldn't find check: &quot; + checkName, ex);</span>
+<span class="fc" id="L392">            }</span>
+
+<span class="fc bfc" id="L394" title="All 2 branches covered.">            if (instance instanceof AbstractCheck) {</span>
+<span class="fc" id="L395">                final AbstractCheck check = (AbstractCheck) instance;</span>
+
+<span class="fc" id="L397">                Set&lt;String&gt; configTokens = configCheckTokens.get(checkName);</span>
+
+<span class="fc bfc" id="L399" title="All 2 branches covered.">                if (configTokens == null) {</span>
+<span class="fc" id="L400">                    configTokens = new HashSet&lt;&gt;();</span>
+
+<span class="fc" id="L402">                    configCheckTokens.put(checkName, configTokens);</span>
+
+                    // add all overridden tokens
+<span class="fc" id="L405">                    final Set&lt;String&gt; overrideTokens = tokensToIgnore.get(checkName);</span>
+
+<span class="fc bfc" id="L407" title="All 2 branches covered.">                    if (overrideTokens != null) {</span>
+<span class="fc" id="L408">                        configTokens.addAll(overrideTokens);</span>
+                    }
+
+<span class="fc" id="L411">                    configTokens.addAll(CheckUtil.getTokenNameSet(check.getRequiredTokens()));</span>
+<span class="fc" id="L412">                    checkTokens.put(checkName,</span>
+<span class="fc" id="L413">                            CheckUtil.getTokenNameSet(check.getAcceptableTokens()));</span>
+                }
+
+                try {
+<span class="fc" id="L417">                    configTokens.addAll(Arrays.asList(checkConfig.getAttribute(&quot;tokens&quot;).trim()</span>
+<span class="fc" id="L418">                            .split(&quot;,\\s*&quot;)));</span>
+                }
+<span class="fc" id="L420">                catch (CheckstyleException ex) {</span>
+                    // no tokens defined, so it is using default
+<span class="fc" id="L422">                    configTokens.addAll(CheckUtil.getTokenNameSet(check.getDefaultTokens()));</span>
+<span class="fc" id="L423">                }</span>
+            }
+<span class="fc" id="L425">        }</span>
+
+<span class="fc bfc" id="L427" title="All 2 branches covered.">        for (Entry&lt;String, Set&lt;String&gt;&gt; entry : checkTokens.entrySet()) {</span>
+<span class="fc" id="L428">            Assert.assertEquals(&quot;'&quot; + entry.getKey()</span>
+                    + &quot;' should have all acceptable tokens from check in &quot; + configName
+                    + &quot; config or specify an override to ignore the specific tokens&quot;,
+<span class="fc" id="L431">                    entry.getValue(), configCheckTokens.get(entry.getKey()));</span>
+<span class="fc" id="L432">        }</span>
+<span class="fc" id="L433">    }</span>
+
+    @Test
+    public void testAllCheckstyleModulesHaveXdocDocumentation() throws Exception {
+<span class="fc" id="L437">        final Set&lt;String&gt; checkstyleModulesNames = CheckUtil.getSimpleNames(CheckUtil</span>
+<span class="fc" id="L438">                .getCheckstyleModules());</span>
+<span class="fc" id="L439">        final Set&lt;String&gt; modulesNamesWhichHaveXdocs = XdocUtil.getModulesNamesWhichHaveXdoc();</span>
+
+        // these are documented on non-'config_' pages
+<span class="fc" id="L442">        checkstyleModulesNames.remove(&quot;TreeWalker&quot;);</span>
+<span class="fc" id="L443">        checkstyleModulesNames.remove(&quot;Checker&quot;);</span>
+
+<span class="fc" id="L445">        checkstyleModulesNames.stream()</span>
+<span class="pc bpc" id="L446" title="1 of 2 branches missed.">            .filter(moduleName -&gt; !modulesNamesWhichHaveXdocs.contains(moduleName))</span>
+<span class="fc" id="L447">            .forEach(moduleName -&gt; {</span>
+<span class="nc" id="L448">                final String missingModuleMessage = String.format(Locale.ROOT,</span>
+                    &quot;Module %s does not have xdoc documentation.&quot;,
+                    moduleName);
+<span class="nc" id="L451">                Assert.fail(missingModuleMessage);</span>
+<span class="nc" id="L452">            });</span>
+<span class="fc" id="L453">    }</span>
+
+    @Test
+    public void testAllCheckstyleModulesInCheckstyleConfig() throws Exception {
+<span class="fc" id="L457">        final Set&lt;String&gt; configChecks = CheckUtil.getConfigCheckStyleModules();</span>
+<span class="fc" id="L458">        final Set&lt;String&gt; moduleNames = CheckUtil.getSimpleNames(CheckUtil.getCheckstyleModules());</span>
+
+<span class="fc bfc" id="L460" title="All 2 branches covered.">        for (String moduleName : moduleNames) {</span>
+<span class="fc" id="L461">            Assert.assertTrue(&quot;checkstyle_checks.xml is missing module: &quot; + moduleName,</span>
+<span class="fc" id="L462">                    configChecks.contains(moduleName));</span>
+<span class="fc" id="L463">        }</span>
+<span class="fc" id="L464">    }</span>
+
+    @Test
+    public void testAllCheckstyleChecksHaveMessage() throws Exception {
+<span class="fc bfc" id="L468" title="All 2 branches covered.">        for (Class&lt;?&gt; module : CheckUtil.getCheckstyleChecks()) {</span>
+<span class="fc" id="L469">            final String name = module.getSimpleName();</span>
+
+<span class="fc" id="L471">            Assert.assertFalse(name</span>
+                    + &quot; should have at least one 'MSG_*' field for error messages&quot;, CheckUtil
+<span class="fc" id="L473">                    .getCheckMessages(module).isEmpty());</span>
+<span class="fc" id="L474">        }</span>
+<span class="fc" id="L475">    }</span>
+
+    @Test
+    public void testAllCheckstyleMessages() throws Exception {
+<span class="fc" id="L479">        final Map&lt;String, List&lt;String&gt;&gt; usedMessages = new TreeMap&lt;&gt;();</span>
+
+        // test validity of messages from modules
+<span class="fc bfc" id="L482" title="All 2 branches covered.">        for (Class&lt;?&gt; module : CheckUtil.getCheckstyleModules()) {</span>
+<span class="fc bfc" id="L483" title="All 2 branches covered.">            for (Field message : CheckUtil.getCheckMessages(module)) {</span>
+<span class="fc" id="L484">                Assert.assertEquals(module.getSimpleName() + &quot;.&quot; + message.getName()</span>
+                        + &quot; should be 'public static final'&quot;, Modifier.PUBLIC | Modifier.STATIC
+<span class="fc" id="L486">                        | Modifier.FINAL, message.getModifiers());</span>
+
+                // below is required for package/private classes
+<span class="pc bpc" id="L489" title="1 of 2 branches missed.">                if (!message.isAccessible()) {</span>
+<span class="fc" id="L490">                    message.setAccessible(true);</span>
+                }
+
+<span class="fc" id="L493">                verifyCheckstyleMessage(usedMessages, module, message);</span>
+<span class="fc" id="L494">            }</span>
+<span class="fc" id="L495">        }</span>
+
+        // test properties for messages not used by checks
+<span class="fc bfc" id="L498" title="All 2 branches covered.">        for (Entry&lt;String, List&lt;String&gt;&gt; entry : usedMessages.entrySet()) {</span>
+<span class="fc" id="L499">            final Properties pr = new Properties();</span>
+<span class="fc" id="L500">            pr.load(AllChecksTest.class.getResourceAsStream(</span>
+<span class="fc" id="L501">                    &quot;/&quot; + entry.getKey().replace('.', '/') + &quot;/messages.properties&quot;));</span>
+
+<span class="fc bfc" id="L503" title="All 2 branches covered.">            for (Object key : pr.keySet()) {</span>
+                // hidden exception messages
+<span class="fc bfc" id="L505" title="All 2 branches covered.">                if (&quot;translation.wrongLanguageCode&quot;.equals(key)) {</span>
+<span class="fc" id="L506">                    continue;</span>
+                }
+
+<span class="fc" id="L509">                Assert.assertTrue(&quot;property '&quot; + key + &quot;' isn't used by any check in package '&quot;</span>
+<span class="fc" id="L510">                        + entry.getKey() + &quot;'&quot;, entry.getValue().contains(key.toString()));</span>
+<span class="fc" id="L511">            }</span>
+<span class="fc" id="L512">        }</span>
+<span class="fc" id="L513">    }</span>
+
+    private static void verifyCheckstyleMessage(Map&lt;String, List&lt;String&gt;&gt; usedMessages,
+            Class&lt;?&gt; module, Field message) throws Exception {
+<span class="fc" id="L517">        final String messageString = message.get(null).toString();</span>
+<span class="fc" id="L518">        final String packageName = module.getPackage().getName();</span>
+<span class="fc" id="L519">        List&lt;String&gt; packageMessages = usedMessages.get(packageName);</span>
+
+<span class="fc bfc" id="L521" title="All 2 branches covered.">        if (packageMessages == null) {</span>
+<span class="fc" id="L522">            packageMessages = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L523">            usedMessages.put(packageName, packageMessages);</span>
+        }
+
+<span class="fc" id="L526">        packageMessages.add(messageString);</span>
+
+<span class="fc bfc" id="L528" title="All 2 branches covered.">        for (Locale locale : ALL_LOCALES) {</span>
+<span class="fc" id="L529">            String result = null;</span>
+
+            try {
+<span class="fc" id="L532">                result = CheckUtil.getCheckMessage(module, locale, messageString);</span>
+            }
+            // -@cs[IllegalCatch] There is no other way to deliver filename that was used
+<span class="nc" id="L535">            catch (Exception ex) {</span>
+<span class="nc" id="L536">                Assert.fail(module.getSimpleName() + &quot; with the message '&quot; + messageString</span>
+<span class="nc" id="L537">                        + &quot;' in locale '&quot; + locale.getLanguage() + &quot;' failed with: &quot;</span>
+<span class="nc" id="L538">                        + ex.getClass().getSimpleName() + &quot; - &quot; + ex.getMessage());</span>
+<span class="fc" id="L539">            }</span>
+
+<span class="fc" id="L541">            Assert.assertNotNull(</span>
+<span class="fc" id="L542">                    module.getSimpleName() + &quot; should have text for the message '&quot;</span>
+<span class="fc" id="L543">                            + messageString + &quot;' in locale &quot; + locale.getLanguage() + &quot;'&quot;,</span>
+                    result);
+<span class="fc" id="L545">            Assert.assertFalse(</span>
+<span class="fc" id="L546">                    module.getSimpleName() + &quot; should have non-empty text for the message '&quot;</span>
+<span class="fc" id="L547">                            + messageString + &quot;' in locale '&quot; + locale.getLanguage() + &quot;'&quot;,</span>
+<span class="fc" id="L548">                    result.trim().isEmpty());</span>
+<span class="fc" id="L549">            Assert.assertFalse(</span>
+<span class="fc" id="L550">                    module.getSimpleName() + &quot; should have non-TODO text for the message '&quot;</span>
+<span class="fc" id="L551">                            + messageString + &quot;' in locale &quot; + locale.getLanguage() + &quot;'&quot;,</span>
+<span class="fc bfc" id="L552" title="All 2 branches covered.">                    !&quot;todo.match&quot;.equals(messageString)</span>
+<span class="pc bpc" id="L553" title="1 of 2 branches missed.">                            &amp;&amp; result.trim().startsWith(&quot;TODO&quot;));</span>
+        }
+<span class="fc" id="L555">    }</span>
+
+    /**
+     * Checks that an array is a subset of other array.
+     * @param array to check whether it is a subset.
+     * @param arrayToCheckIn array to check in.
+     * @return {@code true} if all elements in {@code array} are in {@code arrayToCheckIn}.
+     */
+    private static boolean isSubset(int[] array, int... arrayToCheckIn) {
+<span class="fc" id="L564">        Arrays.sort(arrayToCheckIn);</span>
+<span class="fc" id="L565">        boolean result = true;</span>
+<span class="fc bfc" id="L566" title="All 2 branches covered.">        for (final int element : array) {</span>
+<span class="pc bpc" id="L567" title="1 of 2 branches missed.">            if (Arrays.binarySearch(arrayToCheckIn, element) &lt; 0) {</span>
+<span class="nc" id="L568">                result = false;</span>
+<span class="nc" id="L569">                break;</span>
+            }
+        }
+<span class="fc" id="L572">        return result;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

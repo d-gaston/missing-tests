@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PriorityStatisticManager.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.statistics</a> &gt; <span class="el_source">PriorityStatisticManager.java</span></div><h1>PriorityStatisticManager.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.statistics;
+
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
+
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.RunnableContainer;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.collections.ConcurrentArrayList;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.Clock;
+import org.threadly.util.Pair;
+import org.threadly.util.StatisticsUtils;
+
+/**
+ * This class primarily holds the structures used to store the statistics.  These can not be 
+ * maintained in the parent class since sub classes need to be able to access them.  This exists 
+ * primarily to reduce code duplication between priority stats trackers (since java can only 
+ * extend one class).  But it also is important as we don't want our the holding class to prevent 
+ * garbage collection due to held references.
+ * 
+ * @since 4.5.0
+ */
+class PriorityStatisticManager {
+  protected final int maxWindowSize;
+  protected final boolean accurateTime;
+  protected final LongAdder totalHighPriorityExecutions;
+  protected final LongAdder totalLowPriorityExecutions;
+  protected final LongAdder totalStarvablePriorityExecutions;
+  protected final ConcurrentHashMap&lt;Pair&lt;Thread, TaskStatWrapper&gt;, Long&gt; runningTasks;
+  protected final ConcurrentArrayList&lt;Long&gt; starvablePriorityRunDurations;
+  protected final ConcurrentArrayList&lt;Long&gt; lowPriorityRunDurations;
+  protected final ConcurrentArrayList&lt;Long&gt; highPriorityRunDurations;
+  protected final ConcurrentArrayList&lt;Long&gt; starvablePriorityExecutionDelay;
+  protected final ConcurrentArrayList&lt;Long&gt; lowPriorityExecutionDelay;
+  protected final ConcurrentArrayList&lt;Long&gt; highPriorityExecutionDelay;
+  
+<span class="fc" id="L43">  protected PriorityStatisticManager(int maxWindowSize, boolean accurateTime) {</span>
+<span class="fc" id="L44">    this.maxWindowSize = maxWindowSize;</span>
+<span class="fc" id="L45">    this.accurateTime = accurateTime;</span>
+<span class="fc" id="L46">    totalHighPriorityExecutions = new LongAdder();</span>
+<span class="fc" id="L47">    totalLowPriorityExecutions = new LongAdder();</span>
+<span class="fc" id="L48">    totalStarvablePriorityExecutions = new LongAdder();</span>
+<span class="fc" id="L49">    runningTasks = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="fc" id="L50">    starvablePriorityRunDurations = new ConcurrentArrayList&lt;&gt;(0, maxWindowSize);</span>
+<span class="fc" id="L51">    lowPriorityRunDurations = new ConcurrentArrayList&lt;&gt;(0, maxWindowSize);</span>
+<span class="fc" id="L52">    highPriorityRunDurations = new ConcurrentArrayList&lt;&gt;(0, maxWindowSize);</span>
+<span class="fc" id="L53">    starvablePriorityExecutionDelay = new ConcurrentArrayList&lt;&gt;(0, maxWindowSize);</span>
+<span class="fc" id="L54">    lowPriorityExecutionDelay = new ConcurrentArrayList&lt;&gt;(0, maxWindowSize);</span>
+<span class="fc" id="L55">    highPriorityExecutionDelay = new ConcurrentArrayList&lt;&gt;(0, maxWindowSize);</span>
+<span class="fc" id="L56">  }</span>
+  
+  /**
+   * Get raw collection for storing execution durations.
+   * 
+   * @param priority TaskPriority to look up against, can not be {@code null}
+   * @return Collection of execution duration statistics
+   */
+  ConcurrentArrayList&lt;Long&gt; getExecutionDurationSamplesInternal(TaskPriority priority) {
+<span class="pc bpc" id="L65" title="1 of 4 branches missed.">    switch (priority) {</span>
+      case High:
+<span class="fc" id="L67">        return highPriorityRunDurations;</span>
+      case Low:
+<span class="fc" id="L69">        return lowPriorityRunDurations;</span>
+      case Starvable:
+<span class="fc" id="L71">        return starvablePriorityRunDurations;</span>
+      default:
+<span class="nc" id="L73">        throw new UnsupportedOperationException();</span>
+    }
+  }
+  
+  /**
+   * Get raw collection for storing execution delays.
+   * 
+   * @param priority TaskPriority to look up against, can not be {@code null}
+   * @return Collection of execution delay statistics
+   */
+  ConcurrentArrayList&lt;Long&gt; getExecutionDelaySamplesInternal(TaskPriority priority) {
+<span class="pc bpc" id="L84" title="1 of 4 branches missed.">    switch (priority) {</span>
+      case High:
+<span class="fc" id="L86">        return highPriorityExecutionDelay;</span>
+      case Low:
+<span class="fc" id="L88">        return lowPriorityExecutionDelay;</span>
+      case Starvable:
+<span class="fc" id="L90">        return starvablePriorityExecutionDelay;</span>
+      default:
+<span class="nc" id="L92">        throw new UnsupportedOperationException();</span>
+    }
+  }
+  
+  /**
+   * Get the raw atomic for storing execution counts for a given priority.
+   * 
+   * @param priority TaskPriority to look up against, can not be {@code null}
+   * @return AtomicLong to track executions
+   */
+  protected LongAdder getExecutionCount(TaskPriority priority) {
+<span class="pc bpc" id="L103" title="1 of 4 branches missed.">    switch (priority) {</span>
+      case High:
+<span class="fc" id="L105">        return totalHighPriorityExecutions;</span>
+      case Low:
+<span class="fc" id="L107">        return totalLowPriorityExecutions;</span>
+      case Starvable:
+<span class="fc" id="L109">        return totalStarvablePriorityExecutions;</span>
+      default:
+<span class="nc" id="L111">        throw new UnsupportedOperationException();</span>
+    }
+  }
+
+  /**
+   * Called at the start of execution to track statistics around task execution.
+   * 
+   * @param taskPair Wrapper that is about to be executed
+   */
+  protected void trackTaskStart(Pair&lt;Thread, TaskStatWrapper&gt; taskPair) {
+<span class="fc" id="L121">    getExecutionCount(taskPair.getRight().priority).increment();</span>
+    
+<span class="fc" id="L123">    runningTasks.put(taskPair, Clock.accurateForwardProgressingMillis());</span>
+<span class="fc" id="L124">  }</span>
+  
+  /**
+   * Used to track how long tasks are tacking to complete.
+   * 
+   * @param taskPair wrapper for task that completed
+   */
+  protected void trackTaskFinish(Pair&lt;Thread, TaskStatWrapper&gt; taskPair) {
+<span class="fc bfc" id="L132" title="All 2 branches covered.">    long finishTime = accurateTime ? </span>
+<span class="fc" id="L133">                        Clock.accurateForwardProgressingMillis() : </span>
+<span class="fc" id="L134">                        Clock.lastKnownForwardProgressingMillis();</span>
+    
+<span class="fc" id="L136">    ConcurrentArrayList&lt;Long&gt; runDurations = getExecutionDurationSamplesInternal(taskPair.getRight().priority);</span>
+    
+<span class="fc" id="L138">    Long startTime = runningTasks.remove(taskPair);</span>
+    
+<span class="fc" id="L140">    synchronized (runDurations.getModificationLock()) {</span>
+<span class="fc" id="L141">      runDurations.add(finishTime - startTime);</span>
+<span class="fc" id="L142">      trimWindow(runDurations);</span>
+<span class="fc" id="L143">    }</span>
+<span class="fc" id="L144">  }</span>
+  
+  /**
+   * Reduces the list size to be within the max window size.
+   * &lt;p&gt;
+   * Should have the list synchronized/locked before calling.
+   * 
+   * @param list Collection to check size of and ensure is under max size
+   */
+  @SuppressWarnings(&quot;rawtypes&quot;)
+  protected void trimWindow(Deque window) {
+<span class="fc bfc" id="L155" title="All 2 branches covered.">    while (window.size() &gt; maxWindowSize) {</span>
+<span class="fc" id="L156">      window.removeFirst();</span>
+    }
+<span class="fc" id="L158">  }</span>
+
+  public List&lt;Long&gt; getExecutionDelaySamples() {
+<span class="fc" id="L161">    List&lt;Long&gt; resultList = new ArrayList&lt;&gt;(highPriorityExecutionDelay);</span>
+<span class="fc" id="L162">    resultList.addAll(lowPriorityExecutionDelay);</span>
+<span class="fc" id="L163">    resultList.addAll(starvablePriorityExecutionDelay);</span>
+    
+<span class="fc" id="L165">    return resultList;</span>
+  }
+  
+  public List&lt;Long&gt; getExecutionDelaySamples(TaskPriority priority) {
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L170">      return getExecutionDelaySamples();</span>
+    }
+
+<span class="fc" id="L173">    return new ArrayList&lt;&gt;(getExecutionDelaySamplesInternal(priority));</span>
+  }
+
+  public double getAverageExecutionDelay() {
+<span class="fc" id="L177">    List&lt;Long&gt; resultList = getExecutionDelaySamples();</span>
+    
+<span class="fc bfc" id="L179" title="All 2 branches covered.">    if (resultList.isEmpty()) {</span>
+<span class="fc" id="L180">      return -1;</span>
+    }
+<span class="fc" id="L182">    return StatisticsUtils.getAverage(resultList);</span>
+  }
+
+  public double getAverageExecutionDelay(TaskPriority priority) {
+<span class="fc bfc" id="L186" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L187">      return getAverageExecutionDelay();</span>
+    }
+<span class="fc" id="L189">    List&lt;Long&gt; stats = getExecutionDelaySamples(priority);</span>
+<span class="fc bfc" id="L190" title="All 2 branches covered.">    if (stats.isEmpty()) {</span>
+<span class="fc" id="L191">      return -1;</span>
+    }
+<span class="fc" id="L193">    return StatisticsUtils.getAverage(stats);</span>
+  }
+
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(double... percentiles) {
+<span class="fc" id="L197">    List&lt;Long&gt; samples = getExecutionDelaySamples();</span>
+<span class="fc bfc" id="L198" title="All 2 branches covered.">    if (samples.isEmpty()) {</span>
+<span class="fc" id="L199">      samples.add(0L);</span>
+    }
+<span class="fc" id="L201">    return StatisticsUtils.getPercentiles(samples, percentiles);</span>
+  }
+
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(TaskPriority priority, 
+                                                        double... percentiles) {
+<span class="nc" id="L206">    List&lt;Long&gt; samples = getExecutionDelaySamples(priority);</span>
+<span class="nc bnc" id="L207" title="All 2 branches missed.">    if (samples.isEmpty()) {</span>
+<span class="nc" id="L208">      samples.add(0L);</span>
+    }
+<span class="nc" id="L210">    return StatisticsUtils.getPercentiles(samples, percentiles);</span>
+  }
+
+  public List&lt;Long&gt; getExecutionDurationSamples() {
+<span class="fc" id="L214">    List&lt;Long&gt; resultList = new ArrayList&lt;&gt;(highPriorityRunDurations);</span>
+<span class="fc" id="L215">    resultList.addAll(lowPriorityRunDurations);</span>
+<span class="fc" id="L216">    resultList.addAll(starvablePriorityRunDurations);</span>
+    
+<span class="fc" id="L218">    return resultList;</span>
+  }
+
+  public List&lt;Long&gt; getExecutionDurationSamples(TaskPriority priority) {
+<span class="pc bpc" id="L222" title="1 of 2 branches missed.">    if (priority == null) {</span>
+<span class="nc" id="L223">      return getExecutionDurationSamples();</span>
+    }
+    
+<span class="fc" id="L226">    return new ArrayList&lt;&gt;(getExecutionDurationSamplesInternal(priority));</span>
+  }
+
+  public double getAverageExecutionDuration() {
+<span class="fc" id="L230">    List&lt;Long&gt; runDurations = getExecutionDurationSamples();</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">    if (runDurations.isEmpty()) {</span>
+<span class="fc" id="L232">      return -1;</span>
+    }
+<span class="fc" id="L234">    return StatisticsUtils.getAverage(runDurations);</span>
+  }
+
+  public double getAverageExecutionDuration(TaskPriority priority) {
+<span class="fc" id="L238">    List&lt;Long&gt; runDurations = getExecutionDurationSamples(priority);</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">    if (runDurations.isEmpty()) {</span>
+<span class="fc" id="L240">      return -1;</span>
+    }
+<span class="fc" id="L242">    return StatisticsUtils.getAverage(runDurations);</span>
+  }
+
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(double... percentiles) {
+<span class="fc" id="L246">    List&lt;Long&gt; samples = getExecutionDurationSamples();</span>
+<span class="fc bfc" id="L247" title="All 2 branches covered.">    if (samples.isEmpty()) {</span>
+<span class="fc" id="L248">      samples.add(0L);</span>
+    }
+<span class="fc" id="L250">    return StatisticsUtils.getPercentiles(samples, percentiles);</span>
+  }
+
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(TaskPriority priority, 
+                                                           double... percentiles) {
+<span class="fc" id="L255">    List&lt;Long&gt; samples = getExecutionDurationSamples(priority);</span>
+<span class="fc bfc" id="L256" title="All 2 branches covered.">    if (samples.isEmpty()) {</span>
+<span class="fc" id="L257">      samples.add(0L);</span>
+    }
+<span class="fc" id="L259">    return StatisticsUtils.getPercentiles(samples, percentiles);</span>
+  }
+
+  public List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; getLongRunningTasks(long durationLimitMillis) {
+<span class="fc" id="L263">    List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; result = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">    if (accurateTime) {</span>
+      // ensure clock is updated before loop
+<span class="fc" id="L266">      Clock.accurateForwardProgressingMillis();</span>
+    }
+<span class="fc bfc" id="L268" title="All 2 branches covered.">    for (Map.Entry&lt;Pair&lt;Thread, TaskStatWrapper&gt;, Long&gt; e : runningTasks.entrySet()) {</span>
+<span class="pc bpc" id="L269" title="1 of 2 branches missed.">      if (Clock.lastKnownForwardProgressingMillis() - e.getValue() &gt; durationLimitMillis) {</span>
+<span class="fc" id="L270">        Runnable task = e.getKey().getRight().task;</span>
+<span class="fc bfc" id="L271" title="All 2 branches covered.">        if (task instanceof ListenableFutureTask) {</span>
+<span class="fc" id="L272">          ListenableFutureTask&lt;?&gt; lft = (ListenableFutureTask&lt;?&gt;)task;</span>
+<span class="pc bpc" id="L273" title="1 of 2 branches missed.">          if (lft.getContainedCallable() instanceof RunnableCallableAdapter) {</span>
+<span class="fc" id="L274">            RunnableCallableAdapter&lt;?&gt; rca = (RunnableCallableAdapter&lt;?&gt;)lft.getContainedCallable();</span>
+<span class="fc" id="L275">            task = rca.getContainedRunnable();</span>
+          }
+        }
+<span class="fc" id="L278">        StackTraceElement[] stack = e.getKey().getLeft().getStackTrace();</span>
+        // verify still in collection after capturing stack
+<span class="pc bpc" id="L280" title="1 of 2 branches missed.">        if (runningTasks.containsKey(e.getKey())) {</span>
+<span class="fc" id="L281">          result.add(new Pair&lt;&gt;(task, stack));</span>
+        }
+      }
+<span class="fc" id="L284">    }</span>
+    
+<span class="fc" id="L286">    return result;</span>
+  }
+
+  public int getLongRunningTasksQty(long durationLimitMillis) {
+<span class="fc" id="L290">    int result = 0;</span>
+    
+<span class="fc bfc" id="L292" title="All 2 branches covered.">    long now = accurateTime ? </span>
+<span class="fc" id="L293">                 Clock.accurateForwardProgressingMillis() : </span>
+<span class="fc" id="L294">                 Clock.lastKnownForwardProgressingMillis();</span>
+<span class="fc" id="L295">    Iterator&lt;Long&gt; it = runningTasks.values().iterator();</span>
+<span class="fc bfc" id="L296" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L297">      Long startTime = it.next();</span>
+<span class="fc bfc" id="L298" title="All 2 branches covered.">      if (now - startTime &gt;= durationLimitMillis) {</span>
+<span class="fc" id="L299">        result++;</span>
+      }
+<span class="fc" id="L301">    }</span>
+    
+<span class="fc" id="L303">    return result;</span>
+  }
+  
+  public void resetCollectedStats() {
+<span class="fc bfc" id="L307" title="All 2 branches covered.">    for (TaskPriority p : TaskPriority.values()) {</span>
+<span class="fc" id="L308">      getExecutionDelaySamplesInternal(p).clear();</span>
+<span class="fc" id="L309">      getExecutionDurationSamplesInternal(p).clear();</span>
+    }
+<span class="fc" id="L311">  }</span>
+  
+  public long getTotalExecutionCount() {
+<span class="fc" id="L314">    long result = 0;</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">    for (TaskPriority p : TaskPriority.values()) {</span>
+<span class="fc" id="L316">      result += getExecutionCount(p).sum();</span>
+    }
+<span class="fc" id="L318">    return result;</span>
+  }
+
+  public long getTotalExecutionCount(TaskPriority priority) {
+<span class="fc bfc" id="L322" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L323">      return getTotalExecutionCount();</span>
+    }
+<span class="fc" id="L325">    return getExecutionCount(priority).sum();</span>
+  }
+  
+  /**
+   * Wrapper for {@link Runnable} for tracking statistics.
+   * 
+   * @since 4.5.0
+   */
+  protected static class TaskStatWrapper implements Runnable, RunnableContainer {
+    protected final PriorityStatisticManager statsManager;
+    protected final TaskPriority priority;
+    protected final Runnable task;
+    
+<span class="fc" id="L338">    public TaskStatWrapper(PriorityStatisticManager statsManager, TaskPriority priority, Runnable toRun) {</span>
+<span class="fc" id="L339">      this.statsManager = statsManager;</span>
+<span class="fc" id="L340">      this.priority = priority;</span>
+<span class="fc" id="L341">      this.task = toRun;</span>
+<span class="fc" id="L342">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L346">      Pair&lt;Thread, TaskStatWrapper&gt; taskPair = new Pair&lt;&gt;(Thread.currentThread(), this);</span>
+<span class="fc" id="L347">      statsManager.trackTaskStart(taskPair);</span>
+      try {
+<span class="fc" id="L349">        task.run();</span>
+      } finally {
+<span class="fc" id="L351">        statsManager.trackTaskFinish(taskPair);</span>
+      }
+<span class="fc" id="L353">    }</span>
+
+    @Override
+    public Runnable getContainedRunnable() {
+<span class="fc" id="L357">      return task;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

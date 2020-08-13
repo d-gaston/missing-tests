@@ -1,0 +1,343 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ListenerHelper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.event</a> &gt; <span class="el_source">ListenerHelper.java</span></div><h1>ListenerHelper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.event;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.Executor;
+
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.Pair;
+
+/**
+ * Class which assist with holding and calling to listeners of any interface.  In parallel designs 
+ * it is common to have things subscribe for actions to occur (to later be alerted once an action 
+ * occurs).  This class makes it easy to allow things to register as a listener.
+ * &lt;p&gt;
+ * For listener designs which do NOT need to provide arguments for their listeners, look at using 
+ * {@link RunnableListenerHelper}.  {@link RunnableListenerHelper} is more efficient and flexible 
+ * for listeners of that type.  It also has a cleaner and easier to use interface.
+ * 
+ * @since 2.2.0
+ * @param &lt;T&gt; Interface for listeners to implement and called into with
+ */
+public class ListenerHelper&lt;T&gt; {
+  protected final T proxyInstance;
+  protected final Object listenersLock;
+  protected List&lt;T&gt; inThreadListeners;
+  protected List&lt;Pair&lt;T, Executor&gt;&gt; executorListeners;
+  
+  /**
+   * Constructs a new {@link ListenerHelper} that will handle listeners with the provided 
+   * interface.  The provided class MUST be an interface.
+   * 
+   * @param listenerInterface Interface that listeners need to implement
+   */
+<span class="fc" id="L41">  public ListenerHelper(Class&lt;? super T&gt; listenerInterface) {</span>
+<span class="fc" id="L42">    ArgumentVerifier.assertNotNull(listenerInterface, &quot;listenerInterface&quot;);</span>
+<span class="fc bfc" id="L43" title="All 2 branches covered.">    if (! listenerInterface.isInterface()) {</span>
+<span class="fc" id="L44">      throw new IllegalArgumentException(&quot;listenerInterface must be an interface&quot;);</span>
+    }
+    
+<span class="fc" id="L47">    proxyInstance = makeProxyInstance(listenerInterface);</span>
+<span class="fc" id="L48">    listenersLock = new Object();</span>
+<span class="fc" id="L49">  }</span>
+  
+  /**
+   * Constructs an instance of the provided interface to be used as the proxy which will end up 
+   * calling the stored listeners.  This will only be invoked once during construction time.  This 
+   * is designed to allow extending classes to provide their own implementations for how listeners 
+   * are called.
+   * 
+   * @param listenerInterface Interface that listeners need to implement
+   * @return Instance of the interface which will call listeners
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  protected T makeProxyInstance(Class&lt;? super T&gt; listenerInterface) {
+<span class="fc" id="L62">    return (T) Proxy.newProxyInstance(listenerInterface.getClassLoader(), </span>
+                                      new Class&lt;?&gt;[] { listenerInterface }, 
+                                      new ListenerCaller());
+  }
+  
+  /**
+   * Return a collection of the currently subscribed listener instances.  This returned collection 
+   * can NOT be modified.
+   * 
+   * @return A non-null collection of currently subscribed listeners
+   */
+  public Collection&lt;T&gt; getSubscribedListeners() {
+<span class="fc" id="L74">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L75" title="All 4 branches covered.">      if (inThreadListeners == null &amp;&amp; executorListeners == null) {</span>
+<span class="fc" id="L76">        return Collections.emptyList();</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">      } else if (inThreadListeners == null) {</span>
+<span class="fc" id="L78">        return Collections.unmodifiableList(Pair.collectLeft(executorListeners));</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      } else if (executorListeners == null) {</span>
+<span class="fc" id="L80">        return Collections.unmodifiableList(inThreadListeners);</span>
+      } else {
+<span class="fc" id="L82">        List&lt;T&gt; listeners = Pair.collectLeft(executorListeners);</span>
+        // dependent on modifiable listeners, unit test verified
+<span class="fc" id="L84">        listeners.addAll(inThreadListeners);</span>
+<span class="fc" id="L85">        return Collections.unmodifiableList(listeners);</span>
+      }
+    }
+  }
+  
+  /**
+   * Calls to notify the subscribed listeners with the given call.  This returns an implementation 
+   * of the listener interface, you can then call to the function you wish to have called on the 
+   * listeners (of course providing the arguments you want the listeners to be called with).
+   * &lt;p&gt;
+   * Any calls off the returned instance will execute on all subscribed listeners.  If those 
+   * listeners were provided with an executor the execution for calling that listener will happen 
+   * on the provided executor.  If no executor was provided, the execution of the listener will 
+   * happen on the thread invoking this call.
+   * 
+   * @return Implementation of listener interface to have call subscribed listeners
+   */
+  public T call() {
+<span class="fc" id="L103">    return proxyInstance;</span>
+  }
+  
+  /**
+   * Adds a listener to be executed on the next {@link #call()} to this instance.  This is the same 
+   * as adding a listener and providing null for the {@link Executor}.
+   *  
+   * @param listener Listener to be called when {@link #call()} is invoked
+   */
+  public void addListener(T listener) {
+<span class="fc" id="L113">    addListener(listener, null);</span>
+<span class="fc" id="L114">  }</span>
+  
+  /**
+   * Adds a listener to be executed on the next {@link #call()} to this instance.  If an executor 
+   * is provided, on the next {@link #call()} a task will be put on the executor to call this 
+   * listener.  If none is provided, the listener will be executed on the thread that is invoking 
+   * the {@link #call()}.
+   * &lt;p&gt;
+   * If an {@link Executor} is provided, and that {@link Executor} is NOT single threaded, the 
+   * listener may be called concurrently.  You can ensure this wont happen by using the 
+   * {@link org.threadly.concurrent.wrapper.KeyDistributedExecutor} to get an executor from a 
+   * single key, or by using the {@link org.threadly.concurrent.wrapper.limiter.ExecutorLimiter} 
+   * with a limit of one, or an instance of the 
+   * {@link org.threadly.concurrent.SingleThreadScheduler}.
+   * 
+   * @param listener Listener to be called when {@link #call()} is invoked
+   * @param executor {@link Executor} to call listener on, or {@code null}
+   */
+  public void addListener(T listener, Executor executor) {
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    if (listener == null) {</span>
+<span class="fc" id="L134">      return;</span>
+    }
+    
+<span class="fc" id="L137">    boolean addingFromCallingThread = Thread.holdsLock(listenersLock);</span>
+<span class="fc" id="L138">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L139" title="All 2 branches covered.">      if (executor != null) {</span>
+<span class="pc bpc" id="L140" title="1 of 4 branches missed.">        if (addingFromCallingThread &amp;&amp; executorListeners != null) {</span>
+          // copy to prevent a ConcurrentModificationException
+<span class="fc" id="L142">          executorListeners = copyAndAdd(executorListeners, new Pair&lt;&gt;(listener, executor));</span>
+        } else {
+<span class="fc bfc" id="L144" title="All 2 branches covered.">          if (executorListeners == null) {</span>
+<span class="fc" id="L145">            executorListeners = Collections.singletonList(new Pair&lt;&gt;(listener, executor));</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">          } else if (executorListeners.size() == 1) {</span>
+<span class="fc" id="L147">            Pair&lt;T, Executor&gt; firstP = executorListeners.get(0);</span>
+<span class="fc" id="L148">            executorListeners = new ArrayList&lt;&gt;(4);</span>
+<span class="fc" id="L149">            executorListeners.add(firstP);</span>
+<span class="fc" id="L150">            executorListeners.add(new Pair&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L151">          } else {</span>
+<span class="fc" id="L152">            executorListeners.add(new Pair&lt;&gt;(listener, executor));</span>
+          }
+        }
+      } else {
+<span class="pc bpc" id="L156" title="1 of 4 branches missed.">        if (addingFromCallingThread &amp;&amp; inThreadListeners != null) {</span>
+          // copy to prevent a ConcurrentModificationException
+<span class="fc" id="L158">          inThreadListeners = copyAndAdd(inThreadListeners, listener);</span>
+        } else {
+<span class="fc bfc" id="L160" title="All 2 branches covered.">          if (inThreadListeners == null) {</span>
+<span class="fc" id="L161">            inThreadListeners = Collections.singletonList(listener);</span>
+<span class="fc bfc" id="L162" title="All 2 branches covered.">          } else if (inThreadListeners.size() == 1) {</span>
+<span class="fc" id="L163">            T firstListener = inThreadListeners.get(0);</span>
+<span class="fc" id="L164">            inThreadListeners = new ArrayList&lt;&gt;(4);</span>
+<span class="fc" id="L165">            inThreadListeners.add(firstListener);</span>
+<span class="fc" id="L166">            inThreadListeners.add(listener);</span>
+<span class="fc" id="L167">          } else {</span>
+<span class="fc" id="L168">            inThreadListeners.add(listener);</span>
+          }
+        }
+      }
+<span class="fc" id="L172">    }</span>
+<span class="fc" id="L173">  }</span>
+  
+  private static &lt;T&gt; List&lt;T&gt; copyAndAdd(List&lt;T&gt; sourceList, T item) {
+<span class="fc" id="L176">    List&lt;T&gt; result = new ArrayList&lt;&gt;(sourceList.size() + 1);</span>
+<span class="fc" id="L177">    result.addAll(sourceList);</span>
+<span class="fc" id="L178">    result.add(item);</span>
+<span class="fc" id="L179">    return result;</span>
+  }
+
+  /**
+   * Attempts to remove a listener waiting to be called.
+   * 
+   * @param listener listener instance to be removed
+   * @return {@code true} if the listener was removed
+   */
+  public boolean removeListener(T listener) {
+<span class="fc" id="L189">    boolean removingFromCallingThread = Thread.holdsLock(listenersLock);</span>
+<span class="fc" id="L190">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L191" title="All 2 branches covered.">      if (executorListeners != null) {</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">        if (executorListeners.size() == 1) {</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">          if (executorListeners.get(0).getLeft().equals(listener)) {</span>
+<span class="fc" id="L194">            executorListeners = null;</span>
+<span class="fc" id="L195">            return true;</span>
+          } else {
+<span class="fc" id="L197">            return false;</span>
+          }
+        }
+        
+<span class="fc" id="L201">        int i = 0;</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">        for (Pair&lt;T, Executor&gt; p : executorListeners) {</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">          if (p.getLeft().equals(listener)) {</span>
+<span class="pc bpc" id="L204" title="1 of 2 branches missed.">            if (removingFromCallingThread) {</span>
+<span class="fc" id="L205">              executorListeners = new ArrayList&lt;&gt;(executorListeners);</span>
+            }
+<span class="fc" id="L207">            executorListeners.remove(i);</span>
+<span class="fc" id="L208">            return true;</span>
+          } else {
+<span class="fc" id="L210">            i++;  // try next index if there is one</span>
+          }
+<span class="fc" id="L212">        }</span>
+      }
+<span class="fc bfc" id="L214" title="All 2 branches covered.">      if (inThreadListeners != null) {</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">        if (inThreadListeners.size() == 1) {</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">          if (inThreadListeners.get(0).equals(listener)) {</span>
+<span class="fc" id="L217">            inThreadListeners = null;</span>
+<span class="fc" id="L218">            return true;</span>
+          } else {
+<span class="fc" id="L220">            return false;</span>
+          }
+        }
+        
+<span class="fc" id="L224">        int i = 0;</span>
+<span class="fc bfc" id="L225" title="All 2 branches covered.">        for (T l : inThreadListeners) {</span>
+<span class="fc bfc" id="L226" title="All 2 branches covered.">          if (l.equals(listener)) {</span>
+<span class="pc bpc" id="L227" title="1 of 2 branches missed.">            if (removingFromCallingThread) {</span>
+<span class="fc" id="L228">              inThreadListeners = new ArrayList&lt;&gt;(inThreadListeners);</span>
+            }
+<span class="fc" id="L230">            inThreadListeners.remove(i);</span>
+<span class="fc" id="L231">            return true;</span>
+          } else {
+<span class="fc" id="L233">            i++;  // try next index if there is one</span>
+          }
+<span class="fc" id="L235">        }</span>
+      }
+      
+<span class="fc" id="L238">      return false;</span>
+    }
+  }
+  
+  /**
+   * Removes all listeners currently registered. 
+   */
+  public void clearListeners() {
+<span class="fc" id="L246">    synchronized (listenersLock) {</span>
+<span class="fc" id="L247">      executorListeners = null;</span>
+<span class="fc" id="L248">      inThreadListeners = null;</span>
+<span class="fc" id="L249">    }</span>
+<span class="fc" id="L250">  }</span>
+  
+  /**
+   * Returns how many listeners were added, and will be ran on the next {@link #call()} invocation.
+   * 
+   * @return number of listeners registered to be called
+   */
+  public int registeredListenerCount() {
+<span class="fc" id="L258">    synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L259" title="All 4 branches covered.">      return (executorListeners == null ? 0 : executorListeners.size()) + </span>
+<span class="fc" id="L260">               (inThreadListeners == null ? 0 : inThreadListeners.size());</span>
+    }
+  }
+  
+  /**
+   * Implementation of {@link InvocationHandler} that calls the provided listeners when the 
+   * invocation occurs.
+   * 
+   * @since 2.2.0
+   */
+<span class="fc" id="L270">  protected class ListenerCaller implements InvocationHandler {</span>
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) {
+<span class="fc" id="L273">      verifyValidMethod(method);</span>
+      
+<span class="fc" id="L275">      callListeners(method, args);</span>
+      
+      // always returns null
+<span class="fc" id="L278">      return null;</span>
+    }
+    
+    /**
+     * Verifies that the method can be a valid invocation on the interface.
+     * 
+     * @param method Method to check against for invocation
+     */
+    protected void verifyValidMethod(Method method) {
+<span class="pc bpc" id="L287" title="1 of 4 branches missed.">      if (! method.isDefault() &amp;&amp; ! method.getReturnType().equals(Void.TYPE)) {</span>
+<span class="fc" id="L288">        throw new RuntimeException(&quot;Can only call listeners with a void return type&quot;);</span>
+      }
+<span class="fc" id="L290">    }</span>
+    
+    /**
+     * Calls all registered listeners for a given method with the given arguments.
+     * 
+     * @param method Method to invoke
+     * @param args Arguments to provide to each listener's invocation
+     */
+    protected void callListeners(final Method method, final Object[] args) {
+<span class="fc" id="L299">      synchronized (listenersLock) {</span>
+<span class="fc bfc" id="L300" title="All 2 branches covered.">        if (executorListeners != null) {</span>
+<span class="fc" id="L301">          List&lt;Pair&lt;T, Executor&gt;&gt; listeners = executorListeners;</span>
+          // only list types will be able to efficiently retrieve by index, avoid iterator creation
+<span class="fc bfc" id="L303" title="All 2 branches covered.">          for (int i = 0; i &lt; listeners.size(); i++) {</span>
+<span class="fc" id="L304">            Pair&lt;T, Executor&gt; listener = listeners.get(i);</span>
+<span class="fc" id="L305">            listener.getRight().execute(new Runnable() {</span>
+              @Override
+              public void run() {
+<span class="fc" id="L308">                callListener(listener.getLeft(), method, args);</span>
+<span class="fc" id="L309">              }</span>
+            });
+          }
+        }
+<span class="fc bfc" id="L313" title="All 2 branches covered.">        if (inThreadListeners != null) {</span>
+<span class="fc" id="L314">          List&lt;T&gt; listeners = inThreadListeners;</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">          for (int i = 0; i &lt; listeners.size(); i++) {</span>
+<span class="fc" id="L316">            callListener(listeners.get(i), method, args);</span>
+          }
+        }
+<span class="fc" id="L319">      }</span>
+<span class="fc" id="L320">    }</span>
+    
+    /**
+     * Calls an individual listener, and handles any exceptions which may have resulted.
+     * 
+     * @param listener Listener instance to invoke
+     * @param method Method to invoke
+     * @param args Arguments to provide to listeners invocation
+     */
+    protected void callListener(T listener, Method method, Object[] args) {
+      try {
+<span class="fc" id="L331">        method.invoke(listener, args);</span>
+<span class="nc" id="L332">      } catch (IllegalAccessException e) {</span>
+        /* should not be possible since only interfaces are allowed, and 
+         * all functions in interfaces are public
+         */
+<span class="nc" id="L336">        ExceptionUtils.handleException(e);</span>
+<span class="fc" id="L337">      } catch (InvocationTargetException e) {</span>
+<span class="fc" id="L338">        ExceptionUtils.handleException(e.getCause());</span>
+<span class="pc" id="L339">      }</span>
+<span class="fc" id="L340">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

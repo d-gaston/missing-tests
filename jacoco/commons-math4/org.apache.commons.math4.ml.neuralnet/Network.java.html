@@ -1,0 +1,503 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Network.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ml.neuralnet</a> &gt; <span class="el_source">Network.java</span></div><h1>Network.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ml.neuralnet;
+
+import java.io.Serializable;
+import java.io.ObjectInputStream;
+import java.util.NoSuchElementException;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Comparator;
+import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.MathIllegalStateException;
+
+/**
+ * Neural network, composed of {@link Neuron} instances and the links
+ * between them.
+ *
+ * Although updating a neuron's state is thread-safe, modifying the
+ * network's topology (adding or removing links) is not.
+ *
+ * @since 3.3
+ */
+public class Network
+    implements Iterable&lt;Neuron&gt;,
+               Serializable {
+    /** Serializable. */
+    private static final long serialVersionUID = 20130207L;
+    /** Neurons. */
+<span class="fc" id="L53">    private final ConcurrentHashMap&lt;Long, Neuron&gt; neuronMap</span>
+        = new ConcurrentHashMap&lt;&gt;();
+    /** Next available neuron identifier. */
+    private final AtomicLong nextId;
+    /** Neuron's features set size. */
+    private final int featureSize;
+    /** Links. */
+<span class="fc" id="L60">    private final ConcurrentHashMap&lt;Long, Set&lt;Long&gt;&gt; linkMap</span>
+        = new ConcurrentHashMap&lt;&gt;();
+
+    /**
+     * Comparator that prescribes an order of the neurons according
+     * to the increasing order of their identifier.
+     */
+<span class="fc" id="L67">    public static class NeuronIdentifierComparator</span>
+        implements Comparator&lt;Neuron&gt;,
+                   Serializable {
+        /** Version identifier. */
+        private static final long serialVersionUID = 20130207L;
+
+        /** {@inheritDoc} */
+        @Override
+        public int compare(Neuron a,
+                           Neuron b) {
+<span class="fc" id="L77">            final long aId = a.getIdentifier();</span>
+<span class="fc" id="L78">            final long bId = b.getIdentifier();</span>
+<span class="pc bpc" id="L79" title="2 of 4 branches missed.">            return aId &lt; bId ? -1 :</span>
+                aId &gt; bId ? 1 : 0;
+        }
+    }
+
+    /**
+     * Constructor with restricted access, solely used for deserialization.
+     *
+     * @param nextId Next available identifier.
+     * @param featureSize Number of features.
+     * @param neuronList Neurons.
+     * @param neighbourIdList Links associated to each of the neurons in
+     * {@code neuronList}.
+     * @throws MathIllegalStateException if an inconsistency is detected
+     * (which probably means that the serialized form has been corrupted).
+     */
+    Network(long nextId,
+            int featureSize,
+            Neuron[] neuronList,
+<span class="fc" id="L98">            long[][] neighbourIdList) {</span>
+<span class="fc" id="L99">        final int numNeurons = neuronList.length;</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">        if (numNeurons != neighbourIdList.length) {</span>
+<span class="nc" id="L101">            throw new MathIllegalStateException();</span>
+        }
+
+<span class="fc bfc" id="L104" title="All 2 branches covered.">        for (int i = 0; i &lt; numNeurons; i++) {</span>
+<span class="fc" id="L105">            final Neuron n = neuronList[i];</span>
+<span class="fc" id="L106">            final long id = n.getIdentifier();</span>
+<span class="pc bpc" id="L107" title="1 of 2 branches missed.">            if (id &gt;= nextId) {</span>
+<span class="nc" id="L108">                throw new MathIllegalStateException();</span>
+            }
+<span class="fc" id="L110">            neuronMap.put(id, n);</span>
+<span class="fc" id="L111">            linkMap.put(id, new HashSet&lt;Long&gt;());</span>
+        }
+
+<span class="fc bfc" id="L114" title="All 2 branches covered.">        for (int i = 0; i &lt; numNeurons; i++) {</span>
+<span class="fc" id="L115">            final long aId = neuronList[i].getIdentifier();</span>
+<span class="fc" id="L116">            final Set&lt;Long&gt; aLinks = linkMap.get(aId);</span>
+<span class="fc bfc" id="L117" title="All 2 branches covered.">            for (Long bId : neighbourIdList[i]) {</span>
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">                if (neuronMap.get(bId) == null) {</span>
+<span class="nc" id="L119">                    throw new MathIllegalStateException();</span>
+                }
+<span class="fc" id="L121">                addLinkToLinkSet(aLinks, bId);</span>
+            }
+        }
+
+<span class="fc" id="L125">        this.nextId = new AtomicLong(nextId);</span>
+<span class="fc" id="L126">        this.featureSize = featureSize;</span>
+<span class="fc" id="L127">    }</span>
+
+    /**
+     * @param initialIdentifier Identifier for the first neuron that
+     * will be added to this network.
+     * @param featureSize Size of the neuron's features.
+     */
+    public Network(long initialIdentifier,
+<span class="fc" id="L135">                   int featureSize) {</span>
+<span class="fc" id="L136">        nextId = new AtomicLong(initialIdentifier);</span>
+<span class="fc" id="L137">        this.featureSize = featureSize;</span>
+<span class="fc" id="L138">    }</span>
+
+    /**
+     * Performs a deep copy of this instance.
+     * Upon return, the copied and original instances will be independent:
+     * Updating one will not affect the other.
+     *
+     * @return a new instance with the same state as this instance.
+     * @since 3.6
+     */
+    public synchronized Network copy() {
+<span class="fc" id="L149">        final Network copy = new Network(nextId.get(),</span>
+                                         featureSize);
+
+
+<span class="fc bfc" id="L153" title="All 2 branches covered.">        for (Map.Entry&lt;Long, Neuron&gt; e : neuronMap.entrySet()) {</span>
+<span class="fc" id="L154">            copy.neuronMap.put(e.getKey(), e.getValue().copy());</span>
+<span class="fc" id="L155">        }</span>
+
+<span class="fc bfc" id="L157" title="All 2 branches covered.">        for (Map.Entry&lt;Long, Set&lt;Long&gt;&gt; e : linkMap.entrySet()) {</span>
+<span class="fc" id="L158">            copy.linkMap.put(e.getKey(), new HashSet&lt;&gt;(e.getValue()));</span>
+<span class="fc" id="L159">        }</span>
+
+<span class="fc" id="L161">        return copy;</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Iterator&lt;Neuron&gt; iterator() {
+<span class="fc" id="L169">        return neuronMap.values().iterator();</span>
+    }
+
+    /**
+     * Creates a list of the neurons, sorted in a custom order.
+     *
+     * @param comparator {@link Comparator} used for sorting the neurons.
+     * @return a list of neurons, sorted in the order prescribed by the
+     * given {@code comparator}.
+     * @see NeuronIdentifierComparator
+     */
+    public Collection&lt;Neuron&gt; getNeurons(Comparator&lt;Neuron&gt; comparator) {
+<span class="fc" id="L181">        final List&lt;Neuron&gt; neurons = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L182">        neurons.addAll(neuronMap.values());</span>
+
+<span class="fc" id="L184">        Collections.sort(neurons, comparator);</span>
+
+<span class="fc" id="L186">        return neurons;</span>
+    }
+
+    /**
+     * Creates a neuron and assigns it a unique identifier.
+     *
+     * @param features Initial values for the neuron's features.
+     * @return the neuron's identifier.
+     * @throws DimensionMismatchException if the length of {@code features}
+     * is different from the expected size (as set by the
+     * {@link #Network(long,int) constructor}).
+     */
+    public long createNeuron(double[] features) {
+<span class="pc bpc" id="L199" title="1 of 2 branches missed.">        if (features.length != featureSize) {</span>
+<span class="nc" id="L200">            throw new DimensionMismatchException(features.length, featureSize);</span>
+        }
+
+<span class="fc" id="L203">        final long id = createNextId();</span>
+<span class="fc" id="L204">        neuronMap.put(id, new Neuron(id, features));</span>
+<span class="fc" id="L205">        linkMap.put(id, new HashSet&lt;Long&gt;());</span>
+<span class="fc" id="L206">        return id;</span>
+    }
+
+    /**
+     * Deletes a neuron.
+     * Links from all neighbours to the removed neuron will also be
+     * {@link #deleteLink(Neuron,Neuron) deleted}.
+     *
+     * @param neuron Neuron to be removed from this network.
+     * @throws NoSuchElementException if {@code n} does not belong to
+     * this network.
+     */
+    public void deleteNeuron(Neuron neuron) {
+<span class="fc" id="L219">        final Collection&lt;Neuron&gt; neighbours = getNeighbours(neuron);</span>
+
+        // Delete links to from neighbours.
+<span class="fc bfc" id="L222" title="All 2 branches covered.">        for (Neuron n : neighbours) {</span>
+<span class="fc" id="L223">            deleteLink(n, neuron);</span>
+<span class="fc" id="L224">        }</span>
+
+        // Remove neuron.
+<span class="fc" id="L227">        neuronMap.remove(neuron.getIdentifier());</span>
+<span class="fc" id="L228">    }</span>
+
+    /**
+     * Gets the size of the neurons' features set.
+     *
+     * @return the size of the features set.
+     */
+    public int getFeaturesSize() {
+<span class="fc" id="L236">        return featureSize;</span>
+    }
+
+    /**
+     * Adds a link from neuron {@code a} to neuron {@code b}.
+     * Note: the link is not bi-directional; if a bi-directional link is
+     * required, an additional call must be made with {@code a} and
+     * {@code b} exchanged in the argument list.
+     *
+     * @param a Neuron.
+     * @param b Neuron.
+     * @throws NoSuchElementException if the neurons do not exist in the
+     * network.
+     */
+    public void addLink(Neuron a,
+                        Neuron b) {
+<span class="fc" id="L252">        final long aId = a.getIdentifier();</span>
+<span class="fc" id="L253">        final long bId = b.getIdentifier();</span>
+
+        // Check that the neurons belong to this network.
+<span class="pc bpc" id="L256" title="1 of 2 branches missed.">        if (a != getNeuron(aId)) {</span>
+<span class="nc" id="L257">            throw new NoSuchElementException(Long.toString(aId));</span>
+        }
+<span class="pc bpc" id="L259" title="1 of 2 branches missed.">        if (b != getNeuron(bId)) {</span>
+<span class="nc" id="L260">            throw new NoSuchElementException(Long.toString(bId));</span>
+        }
+
+        // Add link from &quot;a&quot; to &quot;b&quot;.
+<span class="fc" id="L264">        addLinkToLinkSet(linkMap.get(aId), bId);</span>
+<span class="fc" id="L265">    }</span>
+
+    /**
+     * Adds a link to neuron {@code id} in given {@code linkSet}.
+     * Note: no check verifies that the identifier indeed belongs
+     * to this network.
+     *
+     * @param linkSet Neuron identifier.
+     * @param id Neuron identifier.
+     */
+    private void addLinkToLinkSet(Set&lt;Long&gt; linkSet,
+                                  long id) {
+<span class="fc" id="L277">        linkSet.add(id);</span>
+<span class="fc" id="L278">    }</span>
+
+    /**
+     * Deletes the link between neurons {@code a} and {@code b}.
+     *
+     * @param a Neuron.
+     * @param b Neuron.
+     * @throws NoSuchElementException if the neurons do not exist in the
+     * network.
+     */
+    public void deleteLink(Neuron a,
+                           Neuron b) {
+<span class="fc" id="L290">        final long aId = a.getIdentifier();</span>
+<span class="fc" id="L291">        final long bId = b.getIdentifier();</span>
+
+        // Check that the neurons belong to this network.
+<span class="pc bpc" id="L294" title="1 of 2 branches missed.">        if (a != getNeuron(aId)) {</span>
+<span class="nc" id="L295">            throw new NoSuchElementException(Long.toString(aId));</span>
+        }
+<span class="pc bpc" id="L297" title="1 of 2 branches missed.">        if (b != getNeuron(bId)) {</span>
+<span class="nc" id="L298">            throw new NoSuchElementException(Long.toString(bId));</span>
+        }
+
+        // Delete link from &quot;a&quot; to &quot;b&quot;.
+<span class="fc" id="L302">        deleteLinkFromLinkSet(linkMap.get(aId), bId);</span>
+<span class="fc" id="L303">    }</span>
+
+    /**
+     * Deletes a link to neuron {@code id} in given {@code linkSet}.
+     * Note: no check verifies that the identifier indeed belongs
+     * to this network.
+     *
+     * @param linkSet Neuron identifier.
+     * @param id Neuron identifier.
+     */
+    private void deleteLinkFromLinkSet(Set&lt;Long&gt; linkSet,
+                                       long id) {
+<span class="fc" id="L315">        linkSet.remove(id);</span>
+<span class="fc" id="L316">    }</span>
+
+    /**
+     * Retrieves the neuron with the given (unique) {@code id}.
+     *
+     * @param id Identifier.
+     * @return the neuron associated with the given {@code id}.
+     * @throws NoSuchElementException if the neuron does not exist in the
+     * network.
+     */
+    public Neuron getNeuron(long id) {
+<span class="fc" id="L327">        final Neuron n = neuronMap.get(id);</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">        if (n == null) {</span>
+<span class="fc" id="L329">            throw new NoSuchElementException(Long.toString(id));</span>
+        }
+<span class="fc" id="L331">        return n;</span>
+    }
+
+    /**
+     * Retrieves the neurons in the neighbourhood of any neuron in the
+     * {@code neurons} list.
+     * @param neurons Neurons for which to retrieve the neighbours.
+     * @return the list of neighbours.
+     * @see #getNeighbours(Iterable,Iterable)
+     */
+    public Collection&lt;Neuron&gt; getNeighbours(Iterable&lt;Neuron&gt; neurons) {
+<span class="nc" id="L342">        return getNeighbours(neurons, null);</span>
+    }
+
+    /**
+     * Retrieves the neurons in the neighbourhood of any neuron in the
+     * {@code neurons} list.
+     * The {@code exclude} list allows to retrieve the &quot;concentric&quot;
+     * neighbourhoods by removing the neurons that belong to the inner
+     * &quot;circles&quot;.
+     *
+     * @param neurons Neurons for which to retrieve the neighbours.
+     * @param exclude Neurons to exclude from the returned list.
+     * Can be {@code null}.
+     * @return the list of neighbours.
+     */
+    public Collection&lt;Neuron&gt; getNeighbours(Iterable&lt;Neuron&gt; neurons,
+                                            Iterable&lt;Neuron&gt; exclude) {
+<span class="fc" id="L359">        final Set&lt;Long&gt; idList = new HashSet&lt;&gt;();</span>
+
+<span class="fc bfc" id="L361" title="All 2 branches covered.">        for (Neuron n : neurons) {</span>
+<span class="fc" id="L362">            idList.addAll(linkMap.get(n.getIdentifier()));</span>
+<span class="fc" id="L363">        }</span>
+<span class="pc bpc" id="L364" title="1 of 2 branches missed.">        if (exclude != null) {</span>
+<span class="fc bfc" id="L365" title="All 2 branches covered.">            for (Neuron n : exclude) {</span>
+<span class="fc" id="L366">                idList.remove(n.getIdentifier());</span>
+<span class="fc" id="L367">            }</span>
+        }
+
+<span class="fc" id="L370">        final List&lt;Neuron&gt; neuronList = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L371" title="All 2 branches covered.">        for (Long id : idList) {</span>
+<span class="fc" id="L372">            neuronList.add(getNeuron(id));</span>
+<span class="fc" id="L373">        }</span>
+
+<span class="fc" id="L375">        return neuronList;</span>
+    }
+
+    /**
+     * Retrieves the neighbours of the given neuron.
+     *
+     * @param neuron Neuron for which to retrieve the neighbours.
+     * @return the list of neighbours.
+     * @see #getNeighbours(Neuron,Iterable)
+     */
+    public Collection&lt;Neuron&gt; getNeighbours(Neuron neuron) {
+<span class="fc" id="L386">        return getNeighbours(neuron, null);</span>
+    }
+
+    /**
+     * Retrieves the neighbours of the given neuron.
+     *
+     * @param neuron Neuron for which to retrieve the neighbours.
+     * @param exclude Neurons to exclude from the returned list.
+     * Can be {@code null}.
+     * @return the list of neighbours.
+     */
+    public Collection&lt;Neuron&gt; getNeighbours(Neuron neuron,
+                                            Iterable&lt;Neuron&gt; exclude) {
+<span class="fc" id="L399">        final Set&lt;Long&gt; idList = linkMap.get(neuron.getIdentifier());</span>
+<span class="fc bfc" id="L400" title="All 2 branches covered.">        if (exclude != null) {</span>
+<span class="fc bfc" id="L401" title="All 2 branches covered.">            for (Neuron n : exclude) {</span>
+<span class="fc" id="L402">                idList.remove(n.getIdentifier());</span>
+<span class="fc" id="L403">            }</span>
+        }
+
+<span class="fc" id="L406">        final List&lt;Neuron&gt; neuronList = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L407" title="All 2 branches covered.">        for (Long id : idList) {</span>
+<span class="fc" id="L408">            neuronList.add(getNeuron(id));</span>
+<span class="fc" id="L409">        }</span>
+
+<span class="fc" id="L411">        return neuronList;</span>
+    }
+
+    /**
+     * Creates a neuron identifier.
+     *
+     * @return a value that will serve as a unique identifier.
+     */
+    private Long createNextId() {
+<span class="fc" id="L420">        return nextId.getAndIncrement();</span>
+    }
+
+    /**
+     * Prevents proxy bypass.
+     *
+     * @param in Input stream.
+     */
+    private void readObject(ObjectInputStream in) {
+<span class="nc" id="L429">        throw new IllegalStateException();</span>
+    }
+
+    /**
+     * Custom serialization.
+     *
+     * @return the proxy instance that will be actually serialized.
+     */
+    private Object writeReplace() {
+<span class="fc" id="L438">        final Neuron[] neuronList = neuronMap.values().toArray(new Neuron[0]);</span>
+<span class="fc" id="L439">        final long[][] neighbourIdList = new long[neuronList.length][];</span>
+
+<span class="fc bfc" id="L441" title="All 2 branches covered.">        for (int i = 0; i &lt; neuronList.length; i++) {</span>
+<span class="fc" id="L442">            final Collection&lt;Neuron&gt; neighbours = getNeighbours(neuronList[i]);</span>
+<span class="fc" id="L443">            final long[] neighboursId = new long[neighbours.size()];</span>
+<span class="fc" id="L444">            int count = 0;</span>
+<span class="fc bfc" id="L445" title="All 2 branches covered.">            for (Neuron n : neighbours) {</span>
+<span class="fc" id="L446">                neighboursId[count] = n.getIdentifier();</span>
+<span class="fc" id="L447">                ++count;</span>
+<span class="fc" id="L448">            }</span>
+<span class="fc" id="L449">            neighbourIdList[i] = neighboursId;</span>
+        }
+
+<span class="fc" id="L452">        return new SerializationProxy(nextId.get(),</span>
+                                      featureSize,
+                                      neuronList,
+                                      neighbourIdList);
+    }
+
+    /**
+     * Serialization.
+     */
+    private static class SerializationProxy implements Serializable {
+        /** Serializable. */
+        private static final long serialVersionUID = 20130207L;
+        /** Next identifier. */
+        private final long nextId;
+        /** Number of features. */
+        private final int featureSize;
+        /** Neurons. */
+        private final Neuron[] neuronList;
+        /** Links. */
+        private final long[][] neighbourIdList;
+
+        /**
+         * @param nextId Next available identifier.
+         * @param featureSize Number of features.
+         * @param neuronList Neurons.
+         * @param neighbourIdList Links associated to each of the neurons in
+         * {@code neuronList}.
+         */
+        SerializationProxy(long nextId,
+                           int featureSize,
+                           Neuron[] neuronList,
+<span class="fc" id="L483">                           long[][] neighbourIdList) {</span>
+<span class="fc" id="L484">            this.nextId = nextId;</span>
+<span class="fc" id="L485">            this.featureSize = featureSize;</span>
+<span class="fc" id="L486">            this.neuronList = neuronList;</span>
+<span class="fc" id="L487">            this.neighbourIdList = neighbourIdList;</span>
+<span class="fc" id="L488">        }</span>
+
+        /**
+         * Custom serialization.
+         *
+         * @return the {@link Network} for which this instance is the proxy.
+         */
+        private Object readResolve() {
+<span class="fc" id="L496">            return new Network(nextId,</span>
+                               featureSize,
+                               neuronList,
+                               neighbourIdList);
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

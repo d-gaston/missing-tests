@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BaseRuleFactoryTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.analysis.integration.gauss</a> &gt; <span class="el_source">BaseRuleFactoryTest.java</span></div><h1>BaseRuleFactoryTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.analysis.integration.gauss;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.apache.commons.math4.analysis.integration.gauss.BaseRuleFactory;
+import org.apache.commons.math4.util.Pair;
+import org.junit.Test;
+import org.junit.Assert;
+
+/**
+ * Test for {@link BaseRuleFactory}.
+ *
+ */
+<span class="fc" id="L38">public class BaseRuleFactoryTest {</span>
+    /**
+     * Tests that a given rule rule will be computed and added once to the cache
+     * whatever the number of times this rule is called concurrently.
+     */
+    @Test
+        public void testConcurrentCreation() throws InterruptedException,
+                                                    ExecutionException {
+        // Number of times the same rule will be called.
+<span class="fc" id="L47">        final int numTasks = 20;</span>
+
+<span class="fc" id="L49">        final ThreadPoolExecutor exec</span>
+            = new ThreadPoolExecutor(3, numTasks, 1, TimeUnit.SECONDS,
+                                     new ArrayBlockingQueue&lt;Runnable&gt;(2));
+
+<span class="fc" id="L53">        final List&lt;Future&lt;Pair&lt;double[], double[]&gt;&gt;&gt; results</span>
+            = new ArrayList&lt;&gt;();
+<span class="fc bfc" id="L55" title="All 2 branches covered.">        for (int i = 0; i &lt; numTasks; i++) {</span>
+<span class="fc" id="L56">            results.add(exec.submit(new RuleBuilder()));</span>
+        }
+
+        // Ensure that all computations have completed.
+<span class="fc bfc" id="L60" title="All 2 branches covered.">        for (Future&lt;Pair&lt;double[], double[]&gt;&gt; f : results) {</span>
+<span class="fc" id="L61">            f.get();</span>
+<span class="fc" id="L62">        }</span>
+
+        // Assertion would fail if &quot;getRuleInternal&quot; were not &quot;synchronized&quot;.
+<span class="fc" id="L65">        final int n = RuleBuilder.getNumberOfCalls();</span>
+<span class="fc" id="L66">        Assert.assertEquals(&quot;Rule computation was called &quot; + n + &quot; times&quot;, 1, n);</span>
+<span class="fc" id="L67">    }</span>
+}
+
+<span class="fc" id="L70">class RuleBuilder implements Callable&lt;Pair&lt;double[], double[]&gt;&gt; {</span>
+<span class="fc" id="L71">    private static final DummyRuleFactory factory = new DummyRuleFactory();</span>
+
+    @Override
+    public Pair&lt;double[], double[]&gt; call() {
+<span class="fc" id="L75">        final int dummy = 2; // Always request the same rule.</span>
+<span class="fc" id="L76">        return factory.getRule(dummy);</span>
+    }
+
+    public static int getNumberOfCalls() {
+<span class="fc" id="L80">        return factory.getNumberOfCalls();</span>
+    }
+}
+
+<span class="fc" id="L84">class DummyRuleFactory extends BaseRuleFactory&lt;Double&gt; {</span>
+    /** Rule computations counter. */
+<span class="fc" id="L86">    private static AtomicInteger nCalls = new AtomicInteger();</span>
+
+    @Override
+    protected Pair&lt;Double[], Double[]&gt; computeRule(int order) {
+        // Tracks whether this computation has been called more than once.
+<span class="fc" id="L91">        nCalls.getAndIncrement();</span>
+
+        try {
+            // Sleep to simulate computation time.
+<span class="fc" id="L95">            Thread.sleep(20);</span>
+<span class="nc" id="L96">        } catch (InterruptedException e) {</span>
+<span class="nc" id="L97">            Assert.fail(&quot;Unexpected interruption&quot;);</span>
+<span class="fc" id="L98">        }</span>
+
+         // Dummy rule (but contents must exist).
+<span class="fc" id="L101">        final Double[] p = new Double[order];</span>
+<span class="fc" id="L102">        final Double[] w = new Double[order];</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">        for (int i = 0; i &lt; order; i++) {</span>
+<span class="fc" id="L104">            p[i] = new Double(i);</span>
+<span class="fc" id="L105">            w[i] = new Double(i);</span>
+        }
+<span class="fc" id="L107">        return new Pair&lt;&gt;(p, w);</span>
+    }
+
+    public int getNumberOfCalls() {
+<span class="fc" id="L111">        return nCalls.get();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

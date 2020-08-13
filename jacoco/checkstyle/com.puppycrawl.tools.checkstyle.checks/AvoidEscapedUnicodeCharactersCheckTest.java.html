@@ -1,0 +1,444 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AvoidEscapedUnicodeCharactersCheckTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.checks</a> &gt; <span class="el_source">AvoidEscapedUnicodeCharactersCheckTest.java</span></div><h1>AvoidEscapedUnicodeCharactersCheckTest.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.checks;
+
+import static com.puppycrawl.tools.checkstyle.checks.AvoidEscapedUnicodeCharactersCheck.MSG_KEY;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
+
+import org.junit.Test;
+import org.powermock.reflect.Whitebox;
+
+import com.puppycrawl.tools.checkstyle.AbstractModuleTestSupport;
+import com.puppycrawl.tools.checkstyle.DefaultConfiguration;
+import com.puppycrawl.tools.checkstyle.api.TokenTypes;
+import com.puppycrawl.tools.checkstyle.internal.utils.TestUtil;
+
+<span class="fc" id="L42">public class AvoidEscapedUnicodeCharactersCheckTest extends AbstractModuleTestSupport {</span>
+
+    // C0 (ASCII and derivatives)
+    // https://en.wiktionary.org/wiki/Appendix:Control_characters#C0_.28ASCII_and_derivatives.29
+<span class="fc" id="L46">    private static final int[] C0_CONTROL_CHARACTER_INDICES = {</span>
+        0x0000,
+        0x0001,
+        0x0002,
+        0x0003,
+        0x0004,
+        0x0005,
+        0x0006,
+        0x0007,
+        0x0008,
+        0x0009,
+        0x000a,
+        0x000b,
+        0x000c,
+        0x000d,
+        0x000e,
+        0x000f,
+        0x0010,
+        0x0011,
+        0x0012,
+        0x0013,
+        0x0014,
+        0x0015,
+        0x0016,
+        0x0017,
+        0x0018,
+        0x0019,
+        0x001a,
+        0x001b,
+        0x001c,
+        0x001d,
+        0x001e,
+        0x001f,
+    };
+
+    // C1 set
+    // https://en.wiktionary.org/wiki/Appendix:Control_characters#C1_set
+<span class="fc" id="L83">    private static final int[] C1_CONTROL_CHARACTER_INDICES = {</span>
+        0x0080,
+        0x0081,
+        0x0082,
+        0x0083,
+        0x0084,
+        0x0085,
+        0x0086,
+        0x0087,
+        0x0088,
+        0x0089,
+        0x008a,
+        0x008b,
+        0x008c,
+        0x008d,
+        0x008e,
+        0x008f,
+        0x0090,
+        0x0091,
+        0x0092,
+        0x0093,
+        0x0094,
+        0x0095,
+        0x0096,
+        0x0097,
+        0x0098,
+        0x0099,
+        0x009a,
+        0x009b,
+        0x009c,
+        0x009d,
+        0x009e,
+        0x009f,
+    };
+
+    // Other control characters which do not occur in the C0 or C1 sets
+    // https://en.wiktionary.org/wiki/Appendix:Control_characters#Unicode_control_characters
+<span class="fc" id="L120">    private static final int[] OTHER_CONTROL_CHARACTER_INDICES = {</span>
+        0x00ad,
+        0x034f,
+        0x070f,
+        0x180e,
+        0x200b,
+        0x200c,
+        0x200d,
+        0x200e,
+        0x200f,
+        0x202a,
+        0x202b,
+        0x202c,
+        0x202d,
+        0x202e,
+        0x2060,
+        0x2061,
+        0x2062,
+        0x2063,
+        0x2064,
+        0x206a,
+        0x206b,
+        0x206c,
+        0x206d,
+        0x206e,
+        0x206f,
+        0xfeff,
+        0xfff9,
+        0xfffa,
+        0xfffb,
+    };
+
+    @Override
+    protected String getPackageLocation() {
+<span class="fc" id="L154">        return &quot;com/puppycrawl/tools/checkstyle/checks/avoidescapedunicodecharacters&quot;;</span>
+    }
+
+    @Test
+    public void testGetRequiredTokens() {
+<span class="fc" id="L159">        final AvoidEscapedUnicodeCharactersCheck checkObj =</span>
+            new AvoidEscapedUnicodeCharactersCheck();
+<span class="fc" id="L161">        final int[] expected = {</span>
+            TokenTypes.STRING_LITERAL,
+            TokenTypes.CHAR_LITERAL,
+        };
+<span class="fc" id="L165">        assertArrayEquals(&quot;Required tokens differ from expected&quot;,</span>
+<span class="fc" id="L166">                expected, checkObj.getRequiredTokens());</span>
+<span class="fc" id="L167">    }</span>
+
+    @Test
+    public void testDefault() throws Exception {
+<span class="fc" id="L171">        final DefaultConfiguration checkConfig =</span>
+<span class="fc" id="L172">                createModuleConfig(AvoidEscapedUnicodeCharactersCheck.class);</span>
+<span class="fc" id="L173">        final String[] expected = {</span>
+<span class="fc" id="L174">            &quot;7: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L175">            &quot;9: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L176">            &quot;11: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L177">            &quot;15: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L178">            &quot;16: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L179">            &quot;20: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L180">            &quot;24: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L181">            &quot;25: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L182">            &quot;27: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L183">            &quot;31: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L184">            &quot;32: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L185">            &quot;33: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L186">            &quot;34: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L187">            &quot;42: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L188">            &quot;59: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L189">            &quot;60: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L190">            &quot;61: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L191">            &quot;62: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L192">            &quot;72: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L193">            &quot;73: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L194">            &quot;74: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L195">            &quot;75: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L196">            &quot;76: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L197">            &quot;77: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L198">            &quot;79: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L199">            &quot;82: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L200">            &quot;86: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L201">            &quot;87: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L202">            &quot;88: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L203">            &quot;89: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L204">            &quot;92: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L205">            &quot;93: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L206">            &quot;94: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L207">            &quot;98: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L208">            &quot;104: &quot; + getCheckMessage(MSG_KEY),</span>
+        };
+<span class="fc" id="L210">        verify(checkConfig, getPath(&quot;InputAvoidEscapedUnicodeCharacters.java&quot;), expected);</span>
+<span class="fc" id="L211">    }</span>
+
+    @Test
+    public void testAllowEscapesForControlCharacterSet() throws Exception {
+<span class="fc" id="L215">        final DefaultConfiguration checkConfig =</span>
+<span class="fc" id="L216">                createModuleConfig(AvoidEscapedUnicodeCharactersCheck.class);</span>
+<span class="fc" id="L217">        checkConfig.addAttribute(&quot;allowEscapesForControlCharacters&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L218">        final String[] expected = {</span>
+<span class="fc" id="L219">            &quot;7: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L220">            &quot;9: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L221">            &quot;11: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L222">            &quot;15: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L223">            &quot;16: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L224">            &quot;24: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L225">            &quot;25: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L226">            &quot;31: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L227">            &quot;32: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L228">            &quot;33: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L229">            &quot;34: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L230">            &quot;42: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L231">            &quot;59: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L232">            &quot;60: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L233">            &quot;61: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L234">            &quot;62: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L235">            &quot;73: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L236">            &quot;74: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L237">            &quot;75: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L238">            &quot;76: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L239">            &quot;77: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L240">            &quot;79: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L241">            &quot;82: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L242">            &quot;86: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L243">            &quot;87: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L244">            &quot;88: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L245">            &quot;89: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L246">            &quot;92: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L247">            &quot;94: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L248">            &quot;98: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L249">            &quot;104: &quot; + getCheckMessage(MSG_KEY),</span>
+        };
+<span class="fc" id="L251">        verify(checkConfig, getPath(&quot;InputAvoidEscapedUnicodeCharacters.java&quot;), expected);</span>
+<span class="fc" id="L252">    }</span>
+
+    @Test
+    public void testAllowByTailComment() throws Exception {
+<span class="fc" id="L256">        final DefaultConfiguration checkConfig =</span>
+<span class="fc" id="L257">                createModuleConfig(AvoidEscapedUnicodeCharactersCheck.class);</span>
+<span class="fc" id="L258">        checkConfig.addAttribute(&quot;allowByTailComment&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L259">        final String[] expected = {</span>
+<span class="fc" id="L260">            &quot;7: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L261">            &quot;15: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L262">            &quot;24: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L263">            &quot;31: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L264">            &quot;33: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L265">            &quot;34: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L266">            &quot;59: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L267">            &quot;60: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L268">            &quot;61: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L269">            &quot;62: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L270">            &quot;73: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L271">            &quot;74: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L272">            &quot;75: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L273">            &quot;76: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L274">            &quot;77: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L275">            &quot;79: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L276">            &quot;82: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L277">            &quot;92: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L278">            &quot;98: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L279">            &quot;104: &quot; + getCheckMessage(MSG_KEY),</span>
+        };
+<span class="fc" id="L281">        verify(checkConfig, getPath(&quot;InputAvoidEscapedUnicodeCharacters.java&quot;), expected);</span>
+<span class="fc" id="L282">    }</span>
+
+    @Test
+    public void testAllowAllCharactersEscaped() throws Exception {
+<span class="fc" id="L286">        final DefaultConfiguration checkConfig =</span>
+<span class="fc" id="L287">                createModuleConfig(AvoidEscapedUnicodeCharactersCheck.class);</span>
+<span class="fc" id="L288">        checkConfig.addAttribute(&quot;allowIfAllCharactersEscaped&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L289">        final String[] expected = {</span>
+<span class="fc" id="L290">            &quot;7: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L291">            &quot;9: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L292">            &quot;11: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L293">            &quot;15: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L294">            &quot;16: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L295">            &quot;31: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L296">            &quot;32: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L297">            &quot;33: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L298">            &quot;42: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L299">            &quot;86: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L300">            &quot;87: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L301">            &quot;88: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L302">            &quot;89: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L303">            &quot;98: &quot; + getCheckMessage(MSG_KEY),</span>
+        };
+<span class="fc" id="L305">        verify(checkConfig, getPath(&quot;InputAvoidEscapedUnicodeCharacters.java&quot;), expected);</span>
+<span class="fc" id="L306">    }</span>
+
+    @Test
+    public void allowNonPrintableEscapes() throws Exception {
+<span class="fc" id="L310">        final DefaultConfiguration checkConfig =</span>
+<span class="fc" id="L311">                createModuleConfig(AvoidEscapedUnicodeCharactersCheck.class);</span>
+<span class="fc" id="L312">        checkConfig.addAttribute(&quot;allowNonPrintableEscapes&quot;, &quot;true&quot;);</span>
+<span class="fc" id="L313">        final String[] expected = {</span>
+<span class="fc" id="L314">            &quot;7: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L315">            &quot;9: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L316">            &quot;11: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L317">            &quot;15: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L318">            &quot;16: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L319">            &quot;24: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L320">            &quot;25: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L321">            &quot;31: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L322">            &quot;32: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L323">            &quot;33: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L324">            &quot;34: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L325">            &quot;42: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L326">            &quot;86: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L327">            &quot;87: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L328">            &quot;88: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L329">            &quot;89: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L330">            &quot;93: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L331">            &quot;94: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L332">            &quot;98: &quot; + getCheckMessage(MSG_KEY),</span>
+<span class="fc" id="L333">            &quot;104: &quot; + getCheckMessage(MSG_KEY),</span>
+        };
+<span class="fc" id="L335">        verify(checkConfig, getPath(&quot;InputAvoidEscapedUnicodeCharacters.java&quot;), expected);</span>
+<span class="fc" id="L336">    }</span>
+
+    @Test
+    public void testGetAcceptableTokens() {
+<span class="fc" id="L340">        final AvoidEscapedUnicodeCharactersCheck check = new AvoidEscapedUnicodeCharactersCheck();</span>
+<span class="fc" id="L341">        final int[] actual = check.getAcceptableTokens();</span>
+<span class="fc" id="L342">        final int[] expected = {TokenTypes.STRING_LITERAL, TokenTypes.CHAR_LITERAL };</span>
+<span class="fc" id="L343">        assertArrayEquals(&quot;Acceptable tokens differ from expected&quot;,</span>
+                expected, actual);
+<span class="fc" id="L345">    }</span>
+
+    @Test
+    public void testAllowEscapesForControlCharacterSetForAllCharacters() throws Exception {
+<span class="fc" id="L349">        final DefaultConfiguration checkConfig =</span>
+<span class="fc" id="L350">                createModuleConfig(AvoidEscapedUnicodeCharactersCheck.class);</span>
+<span class="fc" id="L351">        checkConfig.addAttribute(&quot;allowEscapesForControlCharacters&quot;, &quot;true&quot;);</span>
+
+<span class="fc" id="L353">        final int indexOfStartLineInInputFile = 6;</span>
+<span class="fc" id="L354">        final String message = getCheckMessage(MSG_KEY);</span>
+<span class="fc" id="L355">        final String[] expected = IntStream.rangeClosed(0, 0xffff)</span>
+<span class="fc" id="L356">                .parallel()</span>
+<span class="fc bfc" id="L357" title="All 2 branches covered.">                .filter(val -&gt; !isControlCharacter(val))</span>
+<span class="fc" id="L358">                .mapToObj(msg -&gt; indexOfStartLineInInputFile + msg + &quot;: &quot; + message)</span>
+<span class="fc" id="L359">                .toArray(String[]::new);</span>
+<span class="fc" id="L360">        verify(checkConfig,</span>
+<span class="fc" id="L361">                getPath(&quot;InputAvoidEscapedUnicodeCharactersAllEscapedUnicodeCharacters.java&quot;),</span>
+                expected);
+<span class="fc" id="L363">    }</span>
+
+    /**
+     * Method countMatches is used only inside isOnlyUnicodeValidChars method, and when
+     * pitest mutates 316:13 countMatches++ to countMatches-- it makes no difference for
+     * isOnlyUnicodeValidChars method as it applies countMatches to both cases in comparison.
+     * It is possible to kill mutation in countMatches method by changing code in
+     * isOnlyUnicodeValidChars, but it creates new uncoverable mutations and makes code harder
+     * to understand.
+     *
+     * @throws Exception when code tested throws some exception
+     */
+    @Test
+    public void testCountMatches() throws Exception {
+<span class="fc" id="L377">        final Method countMatches = Whitebox.getMethod(AvoidEscapedUnicodeCharactersCheck.class,</span>
+                &quot;countMatches&quot;, Pattern.class, String.class);
+<span class="fc" id="L379">        final AvoidEscapedUnicodeCharactersCheck check = new AvoidEscapedUnicodeCharactersCheck();</span>
+<span class="fc" id="L380">        final int actual = (int) countMatches.invoke(check,</span>
+<span class="fc" id="L381">                Pattern.compile(&quot;\\\\u[a-fA-F0-9]{4}&quot;), &quot;\\u1234&quot;);</span>
+<span class="fc" id="L382">        assertEquals(&quot;Unexpected matches count&quot;, 1, actual);</span>
+<span class="fc" id="L383">    }</span>
+
+    /**
+     * Testing, that all elements in the constant NON_PRINTABLE_CHARS are sorted.
+     * This is very convenient for the sake of maintainability.
+     *
+     * @throws Exception when code tested throws some exception
+     */
+    @Test
+    public void testNonPrintableCharsAreSorted() throws Exception {
+        // Getting Field Value via Reflection, because the field is private
+<span class="fc" id="L394">        final Field field = TestUtil.getClassDeclaredField(</span>
+                AvoidEscapedUnicodeCharactersCheck.class, &quot;NON_PRINTABLE_CHARS&quot;);
+<span class="fc" id="L396">        field.setAccessible(true);</span>
+<span class="fc" id="L397">        String expression = ((Pattern) field.get(null)).pattern();</span>
+
+        // Replacing expressions like &quot;\\u000[bB]&quot; with &quot;\\u000B&quot;
+<span class="fc" id="L400">        final String[] charExpressions = {&quot;Aa&quot;, &quot;Bb&quot;, &quot;Cc&quot;, &quot;Dd&quot;, &quot;Ee&quot;, &quot;Ff&quot;};</span>
+<span class="fc bfc" id="L401" title="All 2 branches covered.">        for (String charExpression : charExpressions) {</span>
+<span class="fc" id="L402">            final String regex = &quot;\\[[&quot; + charExpression + &quot;]{2}]&quot;;</span>
+<span class="fc" id="L403">            expression = expression.replaceAll(regex, charExpression.substring(0, 1));</span>
+        }
+
+        // Replacing duplications like &quot;\\uF{3}9&quot; with &quot;\\uFFF9&quot;
+<span class="fc bfc" id="L407" title="All 2 branches covered.">        for (int i = 4; i &gt; 1; i--) {</span>
+<span class="fc" id="L408">            final String regex = &quot;([A-F])\\{&quot; + i + &quot;}&quot;;</span>
+<span class="fc" id="L409">            String replacement = &quot;$1$1{&quot; + (i - 1) + &quot;}&quot;;</span>
+<span class="fc bfc" id="L410" title="All 2 branches covered.">            if (i == 2) {</span>
+<span class="fc" id="L411">                replacement = &quot;$1$1&quot;;</span>
+            }
+<span class="fc" id="L413">            expression = expression.replaceAll(regex, replacement);</span>
+        }
+
+        // Verifying character order
+<span class="fc" id="L417">        final String[] expressionParts = expression.split(&quot;\\|&quot;);</span>
+<span class="fc" id="L418">        final Pattern unicodeCharPattern = Pattern.compile(&quot;^\\\\\\\\u[0-9A-F]{4}$&quot;);</span>
+<span class="fc" id="L419">        String lastChar = null;</span>
+<span class="fc bfc" id="L420" title="All 2 branches covered.">        for (int i = 0; i &lt; expressionParts.length; i++) {</span>
+<span class="fc" id="L421">            final String currentChar = expressionParts[i];</span>
+<span class="fc" id="L422">            final Matcher matcher = unicodeCharPattern.matcher(currentChar);</span>
+<span class="pc bpc" id="L423" title="1 of 2 branches missed.">            if (!matcher.matches()) {</span>
+<span class="nc" id="L424">                final String message = &quot;Character '&quot; + currentChar + &quot;' (at position &quot; + i</span>
+                        + &quot;) doesn't match the pattern&quot;;
+<span class="nc" id="L426">                assertTrue(message, matcher.matches());</span>
+            }
+<span class="fc bfc" id="L428" title="All 2 branches covered.">            if (lastChar != null) {</span>
+<span class="fc" id="L429">                final String message = &quot;Character '&quot; + lastChar + &quot;' should be after '&quot;</span>
+                        + currentChar + &quot;', position: &quot; + i;
+<span class="pc bpc" id="L431" title="1 of 2 branches missed.">                assertTrue(message, lastChar.compareTo(currentChar) &lt; 0);</span>
+            }
+<span class="fc" id="L433">            lastChar = currentChar;</span>
+        }
+<span class="fc" id="L435">    }</span>
+
+    private static boolean isControlCharacter(final int character) {
+<span class="fc bfc" id="L438" title="All 2 branches covered.">        return Arrays.binarySearch(C0_CONTROL_CHARACTER_INDICES, character) &gt;= 0</span>
+<span class="fc bfc" id="L439" title="All 2 branches covered.">                || Arrays.binarySearch(C1_CONTROL_CHARACTER_INDICES, character) &gt;= 0</span>
+<span class="fc bfc" id="L440" title="All 2 branches covered.">                || Arrays.binarySearch(OTHER_CONTROL_CHARACTER_INDICES, character) &gt;= 0;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

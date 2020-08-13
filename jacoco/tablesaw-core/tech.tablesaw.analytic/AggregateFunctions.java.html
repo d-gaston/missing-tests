@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AggregateFunctions.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.analytic</a> &gt; <span class="el_source">AggregateFunctions.java</span></div><h1>AggregateFunctions.java</h1><pre class="source lang-java linenums">package tech.tablesaw.analytic;
+
+import java.util.ArrayDeque;
+import java.util.function.Function;
+import tech.tablesaw.analytic.WindowFrame.WindowGrowthType;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.columns.numbers.DoubleColumnType;
+
+/**
+ * Analytic Aggregate functions.
+ *
+ * &lt;p&gt;Analytic Aggregate functions require different implementations compared to regular aggregate
+ * functions because they are called once per row and must return a value for every row in the
+ * table.
+ *
+ * &lt;p&gt;Consider calculating the SUM over a table with a window definition of ROWS BETWEEN UNBOUNDED
+ * PRECEDING AND CURRENT ROW. If a regular aggregate function was used it would be called once for
+ * each row and since each window contains O(n) rows for a total running time of O(n^2). Clearly you
+ * can use a more efficient algorithm that keeps a running sum as rows are added to the window and
+ * runs in O(n). This class allows for those more efficient algorithms to be used.
+ *
+ * &lt;p&gt;If at least one side of the window is unbounded the window is considered an append window.
+ * With a bit of tweaking windows UNBOUNDED FOLLOWING windows can be converted to UNBOUNDED
+ * PRECEDING windows so they are append only and can use a more efficient algorithm similar to the
+ * one explained above.
+ *
+ * &lt;p&gt;Sliding windows are windows where both sides of the window are following, preceding or current
+ * row. Analytic aggregate algorithms for sliding windows are generally implemented with a {@link
+ * java.util.Deque} so that elements can be added or removed from either side of the window as it
+ * slides.
+ *
+ * &lt;p&gt;This class creates two implementations per analytic aggregate function. One for append windows
+ * and one for sliding windows.
+ */
+<span class="fc" id="L35">enum AggregateFunctions implements FunctionMetaData {</span>
+<span class="fc" id="L36">  SUM(new Sum&lt;&gt;(), ColumnType.DOUBLE, AggregateFunctions::isNumericColumn),</span>
+<span class="fc" id="L37">  MAX(new Max&lt;&gt;(), ColumnType.DOUBLE, AggregateFunctions::isNumericColumn),</span>
+<span class="fc" id="L38">  MIN(new Min&lt;&gt;(), ColumnType.DOUBLE, AggregateFunctions::isNumericColumn),</span>
+<span class="fc" id="L39">  MEAN(new Mean&lt;&gt;(), ColumnType.DOUBLE, AggregateFunctions::isNumericColumn),</span>
+<span class="fc" id="L40">  COUNT(new Count&lt;&gt;(), ColumnType.INTEGER, t -&gt; true);</span>
+
+  private final WindowDependentAggregateFunction&lt;?&gt; implementation;
+  private final ColumnType outputColumnType;
+  private final Function&lt;ColumnType, Boolean&gt; isCompatibleColumnTestFunc;
+
+  AggregateFunctions(
+      WindowDependentAggregateFunction&lt;?&gt; implementation,
+      ColumnType outputColumnType,
+<span class="fc" id="L49">      Function&lt;ColumnType, Boolean&gt; isCompatibleColumnTestFunc) {</span>
+<span class="fc" id="L50">    this.implementation = implementation;</span>
+<span class="fc" id="L51">    this.outputColumnType = outputColumnType;</span>
+<span class="fc" id="L52">    this.isCompatibleColumnTestFunc = isCompatibleColumnTestFunc;</span>
+<span class="fc" id="L53">  }</span>
+
+  /** Get the right implementation for that window definition. */
+  AggregateFunction&lt;?, ? extends Number&gt; getImplementation(WindowGrowthType growthType) {
+<span class="fc" id="L57">    return this.implementation.functionFor(growthType);</span>
+  }
+
+  @Override
+  public String functionName() {
+<span class="fc" id="L62">    return name();</span>
+  }
+
+  @Override
+  public ColumnType returnType() {
+<span class="fc" id="L67">    return outputColumnType;</span>
+  }
+
+  @Override
+  public boolean isCompatibleColumn(ColumnType type) {
+<span class="fc" id="L72">    return isCompatibleColumnTestFunc.apply(type);</span>
+  }
+
+  private static boolean isNumericColumn(ColumnType type) {
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    return type.equals(ColumnType.DOUBLE)</span>
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">        || type.equals(ColumnType.FLOAT)</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">        || type.equals(ColumnType.INTEGER)</span>
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">        || type.equals(ColumnType.SHORT)</span>
+<span class="pc bpc" id="L80" title="1 of 2 branches missed.">        || type.equals(ColumnType.LONG);</span>
+  }
+
+  private abstract static class WindowDependentAggregateFunction&lt;T&gt; {
+
+    /** Sub classes of append windows should never call removeLeft. */
+<span class="fc" id="L86">    abstract static class AppendAggregateFunction&lt;T, R&gt; implements AggregateFunction&lt;T, R&gt; {</span>
+      @Override
+      public final void removeLeftMost() {
+<span class="nc" id="L89">        throw new UnsupportedOperationException(</span>
+            &quot;Implementers of append aggregate functions should never call removeLeftMost&quot;);
+      }
+    }
+
+    abstract AppendAggregateFunction&lt;T, ? extends Number&gt; functionForAppendWindows();
+
+    abstract AggregateFunction&lt;T, ? extends Number&gt; functionForSlidingWindows();
+
+    AggregateFunction&lt;T, ? extends Number&gt; functionFor(WindowGrowthType growthType) {
+<span class="pc bpc" id="L99" title="1 of 3 branches missed.">      switch (growthType) {</span>
+        case FIXED:
+        case FIXED_LEFT:
+        case FIXED_RIGHT:
+<span class="fc" id="L103">          return functionForAppendWindows();</span>
+        case SLIDING:
+<span class="fc" id="L105">          return functionForSlidingWindows();</span>
+      }
+<span class="nc" id="L107">      throw new RuntimeException(&quot;Unexpected growthType: &quot; + growthType);</span>
+    }
+  }
+
+<span class="fc" id="L111">  static class Sum&lt;T extends Number&gt; extends WindowDependentAggregateFunction&lt;T&gt; {</span>
+    @Override
+    AppendAggregateFunction&lt;T, Double&gt; functionForAppendWindows() {
+<span class="fc" id="L114">      return new AppendAggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L115">        private double sum = DoubleColumnType.missingValueIndicator();</span>
+
+        @Override
+        public Double getValue() {
+<span class="fc" id="L119">          return sum;</span>
+        }
+
+        @Override
+<span class="fc" id="L123">        public void addRightMostMissing() {}</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc bfc" id="L127" title="All 2 branches covered.">          if (DoubleColumnType.valueIsMissing(sum)) {</span>
+<span class="fc" id="L128">            this.sum = 0.0;</span>
+          }
+<span class="fc" id="L130">          this.sum += newValue.doubleValue();</span>
+<span class="fc" id="L131">        }</span>
+      };
+    }
+
+    @Override
+    AggregateFunction&lt;T, Double&gt; functionForSlidingWindows() {
+<span class="fc" id="L137">      return new AggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L138">        private final ArrayDeque&lt;Double&gt; queue = new ArrayDeque&lt;&gt;();</span>
+<span class="fc" id="L139">        private Double sum = 0.0;</span>
+<span class="fc" id="L140">        private int missingCount = 0;</span>
+
+        @Override
+        public void removeLeftMost() {
+<span class="fc" id="L144">          Double removed = queue.remove();</span>
+<span class="fc bfc" id="L145" title="All 2 branches covered.">          if (DoubleColumnType.valueIsMissing(removed)) {</span>
+<span class="fc" id="L146">            missingCount--;</span>
+          } else {
+<span class="fc" id="L148">            this.sum -= removed;</span>
+          }
+<span class="fc" id="L150">        }</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc" id="L154">          Double doubleValue = newValue.doubleValue();</span>
+<span class="fc" id="L155">          this.sum += doubleValue;</span>
+<span class="fc" id="L156">          queue.add(doubleValue);</span>
+<span class="fc" id="L157">        }</span>
+
+        @Override
+        public void addRightMostMissing() {
+<span class="fc" id="L161">          queue.add(DoubleColumnType.missingValueIndicator());</span>
+<span class="fc" id="L162">          missingCount++;</span>
+<span class="fc" id="L163">        }</span>
+
+        @Override
+        public Double getValue() {
+<span class="fc bfc" id="L167" title="All 4 branches covered.">          if (queue.size() == 0 || missingCount == queue.size()) {</span>
+<span class="fc" id="L168">            return DoubleColumnType.missingValueIndicator();</span>
+          }
+<span class="fc" id="L170">          return sum;</span>
+        }
+      };
+    }
+  }
+
+<span class="fc" id="L176">  static class Max&lt;T extends Number&gt; extends WindowDependentAggregateFunction&lt;T&gt; {</span>
+
+    @Override
+    AppendAggregateFunction&lt;T, Double&gt; functionForAppendWindows() {
+<span class="fc" id="L180">      return new AppendAggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L181">        private Double max = DoubleColumnType.missingValueIndicator();</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc bfc" id="L185" title="All 2 branches covered.">          if (DoubleColumnType.valueIsMissing(max)) {</span>
+<span class="fc" id="L186">            max = newValue.doubleValue();</span>
+<span class="fc" id="L187">            return;</span>
+          }
+<span class="fc" id="L189">          this.max = Math.max(max, newValue.doubleValue());</span>
+<span class="fc" id="L190">        }</span>
+
+        @Override
+<span class="fc" id="L193">        public void addRightMostMissing() {}</span>
+
+        @Override
+        public Double getValue() {
+<span class="fc" id="L197">          return max;</span>
+        }
+      };
+    }
+
+    @Override
+    AggregateFunction&lt;T, Double&gt; functionForSlidingWindows() {
+<span class="fc" id="L204">      return new AggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L205">        private final ArrayDeque&lt;Double&gt; queue = new ArrayDeque&lt;&gt;();</span>
+
+        @Override
+        public void removeLeftMost() {
+<span class="fc" id="L209">          queue.remove();</span>
+<span class="fc" id="L210">        }</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc" id="L214">          queue.add(newValue.doubleValue());</span>
+<span class="fc" id="L215">        }</span>
+
+        @Override
+        public void addRightMostMissing() {
+<span class="fc" id="L219">          queue.add(DoubleColumnType.missingValueIndicator());</span>
+<span class="fc" id="L220">        }</span>
+
+        @Override
+        public Double getValue() {
+          // This could be faster, but probably does not matter in practice because sliding windows
+          // will be small.
+<span class="fc" id="L226">          return queue.stream()</span>
+<span class="fc bfc" id="L227" title="All 2 branches covered.">              .filter(d -&gt; !DoubleColumnType.valueIsMissing(d))</span>
+<span class="fc" id="L228">              .mapToDouble(Number::doubleValue)</span>
+<span class="fc" id="L229">              .max()</span>
+<span class="fc" id="L230">              .orElse(DoubleColumnType.missingValueIndicator());</span>
+        }
+      };
+    }
+  }
+
+<span class="fc" id="L236">  static class Min&lt;T extends Number&gt; extends WindowDependentAggregateFunction&lt;T&gt; {</span>
+    @Override
+    AppendAggregateFunction&lt;T, Double&gt; functionForAppendWindows() {
+<span class="fc" id="L239">      return new AppendAggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L240">        private Double min = DoubleColumnType.missingValueIndicator();</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc bfc" id="L244" title="All 2 branches covered.">          if (DoubleColumnType.valueIsMissing(min)) {</span>
+<span class="fc" id="L245">            min = newValue.doubleValue();</span>
+<span class="fc" id="L246">            return;</span>
+          }
+<span class="fc" id="L248">          this.min = Math.min(min, newValue.doubleValue());</span>
+<span class="fc" id="L249">        }</span>
+
+        @Override
+<span class="fc" id="L252">        public void addRightMostMissing() {}</span>
+
+        @Override
+        public Double getValue() {
+<span class="fc" id="L256">          return min;</span>
+        }
+      };
+    }
+
+    @Override
+    AggregateFunction&lt;T, Double&gt; functionForSlidingWindows() {
+<span class="fc" id="L263">      return new AggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L264">        private final ArrayDeque&lt;Double&gt; queue = new ArrayDeque&lt;&gt;();</span>
+
+        @Override
+        public void removeLeftMost() {
+<span class="fc" id="L268">          queue.remove();</span>
+<span class="fc" id="L269">        }</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc" id="L273">          queue.add(newValue.doubleValue());</span>
+<span class="fc" id="L274">        }</span>
+
+        @Override
+        public void addRightMostMissing() {
+<span class="fc" id="L278">          queue.add(DoubleColumnType.missingValueIndicator());</span>
+<span class="fc" id="L279">        }</span>
+
+        @Override
+        public Double getValue() {
+          // This could be faster, but probably does not matter in practice because sliding windows
+          // will be small.
+<span class="fc" id="L285">          return queue.stream()</span>
+<span class="fc bfc" id="L286" title="All 2 branches covered.">              .filter(d -&gt; !DoubleColumnType.valueIsMissing(d))</span>
+<span class="fc" id="L287">              .mapToDouble(Number::doubleValue)</span>
+<span class="fc" id="L288">              .min()</span>
+<span class="fc" id="L289">              .orElse(DoubleColumnType.missingValueIndicator());</span>
+        }
+      };
+    }
+  }
+
+<span class="fc" id="L295">  static class Mean&lt;T extends Number&gt; extends WindowDependentAggregateFunction&lt;T&gt; {</span>
+
+    @Override
+    AppendAggregateFunction&lt;T, Double&gt; functionForAppendWindows() {
+<span class="fc" id="L299">      return new AppendAggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L300">        private double sum = DoubleColumnType.missingValueIndicator();</span>
+<span class="fc" id="L301">        private double count = 0;</span>
+
+        @Override
+        public Double getValue() {
+<span class="fc bfc" id="L305" title="All 2 branches covered.">          if (count == 0) {</span>
+<span class="fc" id="L306">            return DoubleColumnType.missingValueIndicator();</span>
+          }
+<span class="fc" id="L308">          return sum / count;</span>
+        }
+
+        @Override
+<span class="fc" id="L312">        public void addRightMostMissing() {}</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc bfc" id="L316" title="All 2 branches covered.">          if (DoubleColumnType.valueIsMissing(sum)) {</span>
+<span class="fc" id="L317">            this.sum = 0.0;</span>
+          }
+<span class="fc" id="L319">          this.sum += newValue.doubleValue();</span>
+<span class="fc" id="L320">          count++;</span>
+<span class="fc" id="L321">        }</span>
+      };
+    }
+
+    @Override
+    AggregateFunction&lt;T, Double&gt; functionForSlidingWindows() {
+<span class="fc" id="L327">      return new AggregateFunction&lt;T, Double&gt;() {</span>
+<span class="fc" id="L328">        private final ArrayDeque&lt;Double&gt; queue = new ArrayDeque&lt;&gt;();</span>
+<span class="fc" id="L329">        private Double sum = 0.0;</span>
+<span class="fc" id="L330">        private int missingCount = 0;</span>
+
+        @Override
+        public void removeLeftMost() {
+<span class="fc" id="L334">          Double removed = queue.remove();</span>
+<span class="fc bfc" id="L335" title="All 2 branches covered.">          if (DoubleColumnType.valueIsMissing(removed)) {</span>
+<span class="fc" id="L336">            missingCount--;</span>
+          } else {
+<span class="fc" id="L338">            this.sum -= removed;</span>
+          }
+<span class="fc" id="L340">        }</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc" id="L344">          Double doubleValue = newValue.doubleValue();</span>
+<span class="fc" id="L345">          this.sum += doubleValue;</span>
+<span class="fc" id="L346">          queue.add(doubleValue);</span>
+<span class="fc" id="L347">        }</span>
+
+        @Override
+        public void addRightMostMissing() {
+<span class="fc" id="L351">          queue.add(DoubleColumnType.missingValueIndicator());</span>
+<span class="fc" id="L352">          missingCount++;</span>
+<span class="fc" id="L353">        }</span>
+
+        @Override
+        public Double getValue() {
+<span class="fc bfc" id="L357" title="All 2 branches covered.">          if (queue.size() - missingCount == 0) {</span>
+<span class="fc" id="L358">            return DoubleColumnType.missingValueIndicator();</span>
+          }
+<span class="fc" id="L360">          return sum / (queue.size() - missingCount);</span>
+        }
+      };
+    }
+  }
+
+<span class="fc" id="L366">  static class Count&lt;T&gt; extends WindowDependentAggregateFunction&lt;T&gt; {</span>
+
+    @Override
+    AppendAggregateFunction&lt;T, Integer&gt; functionForAppendWindows() {
+<span class="fc" id="L370">      return new AppendAggregateFunction&lt;T, Integer&gt;() {</span>
+<span class="fc" id="L371">        private int count = 0;</span>
+
+        @Override
+        public Integer getValue() {
+<span class="fc" id="L375">          return count;</span>
+        }
+
+        @Override
+<span class="fc" id="L379">        public void addRightMostMissing() {}</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc" id="L383">          count++;</span>
+<span class="fc" id="L384">        }</span>
+      };
+    }
+
+    @Override
+    AggregateFunction&lt;T, Integer&gt; functionForSlidingWindows() {
+<span class="fc" id="L390">      return new AggregateFunction&lt;T, Integer&gt;() {</span>
+        // Deque contains a boolean that when true indicates that the value in that position of the
+        // window is missing.
+<span class="fc" id="L393">        private final ArrayDeque&lt;Boolean&gt; queue = new ArrayDeque&lt;&gt;();</span>
+<span class="fc" id="L394">        private int missingCount = 0;</span>
+
+        @Override
+        public void removeLeftMost() {
+<span class="fc" id="L398">          Boolean removedMissingValue = queue.remove();</span>
+<span class="fc bfc" id="L399" title="All 2 branches covered.">          if (removedMissingValue) {</span>
+<span class="fc" id="L400">            missingCount--;</span>
+          }
+<span class="fc" id="L402">        }</span>
+
+        @Override
+        public void addRightMost(T newValue) {
+<span class="fc" id="L406">          queue.add(false);</span>
+<span class="fc" id="L407">        }</span>
+
+        @Override
+        public void addRightMostMissing() {
+<span class="fc" id="L411">          queue.add(true);</span>
+<span class="fc" id="L412">          missingCount++;</span>
+<span class="fc" id="L413">        }</span>
+
+        @Override
+        public Integer getValue() {
+<span class="fc" id="L417">          return queue.size() - missingCount;</span>
+        }
+      };
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

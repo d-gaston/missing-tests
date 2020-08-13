@@ -1,0 +1,939 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ListenableFutureInterfaceTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">ListenableFutureInterfaceTest.java</span></div><h1>ListenableFutureInterfaceTest.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import static org.junit.Assert.*;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.CentralThreadlyPool;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.SingleThreadScheduler;
+import org.threadly.concurrent.future.ListenableFuture.ListenerOptimizationStrategy;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.test.concurrent.TestableScheduler;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.StringUtils;
+import org.threadly.util.SuppressedStackRuntimeException;
+import org.threadly.util.TestExceptionHandler;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L25">public abstract class ListenableFutureInterfaceTest extends ThreadlyTester {</span>
+  protected abstract ListenableFutureFactory makeListenableFutureFactory();
+  
+  @Test
+  public void addCallbackAlreadyDoneFutureTest() {
+<span class="fc" id="L30">    String result = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L31">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(result);</span>
+    
+<span class="fc" id="L33">    TestFutureCallback tfc = new TestFutureCallback();</span>
+<span class="fc" id="L34">    lf.addCallback(tfc);</span>
+    
+<span class="fc" id="L36">    assertEquals(1, tfc.getCallCount());</span>
+<span class="pc bpc" id="L37" title="1 of 2 branches missed.">    assertTrue(result == tfc.getLastResult());</span>
+<span class="fc" id="L38">  }</span>
+  
+  @Test
+  public void addCallbackExecutionExceptionAlreadyDoneTest() {
+<span class="fc" id="L42">    Exception failure = new Exception();</span>
+<span class="fc" id="L43">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+    
+<span class="fc" id="L45">    TestFutureCallback tfc = new TestFutureCallback();</span>
+<span class="fc" id="L46">    lf.addCallback(tfc);</span>
+    
+<span class="fc" id="L48">    assertEquals(1, tfc.getCallCount());</span>
+<span class="pc bpc" id="L49" title="1 of 2 branches missed.">    assertTrue(failure == tfc.getLastFailure());</span>
+<span class="fc" id="L50">  }</span>
+  
+  @Test
+  public void addListenerAlreadyCanceledTest() {
+<span class="fc" id="L54">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+    
+<span class="fc" id="L56">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L57">    lf.addListener(tr);</span>
+    
+<span class="fc" id="L59">    assertTrue(tr.ranOnce());</span>
+<span class="fc" id="L60">  }</span>
+  
+  @Test
+  public void mapAlreadyDoneTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L64">    String sourceObject = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L65">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(sourceObject);</span>
+<span class="fc" id="L66">    String translatedObject = StringUtils.makeRandomString(10);</span>
+<span class="fc" id="L67">    ListenableFuture&lt;String&gt; mappedLF = lf.map((s) -&gt; {</span>
+<span class="pc bpc" id="L68" title="1 of 2 branches missed.">      if (s == sourceObject) {</span>
+<span class="fc" id="L69">        return translatedObject;</span>
+      } else {
+        // test failure
+<span class="nc" id="L72">        return null;</span>
+      }
+    });
+    
+<span class="fc" id="L76">    assertTrue(mappedLF.isDone());</span>
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">    assertTrue(translatedObject == mappedLF.get());</span>
+<span class="fc" id="L78">  }</span>
+  
+  @Test
+  public void mapAlreadyDoneExecutionExceptionTest() throws InterruptedException {
+<span class="fc" id="L82">    Exception failure = new Exception();</span>
+<span class="fc" id="L83">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+<span class="fc" id="L84">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L85">    ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; {</span>
+<span class="nc" id="L86">      mapperRan.set(true);</span>
+<span class="nc" id="L87">      return null;</span>
+    });
+
+<span class="fc" id="L90">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L91">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L92">  }</span>
+  
+  @Test
+  public void mapAlreadyCanceledTest() {
+<span class="fc" id="L96">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+<span class="fc" id="L97">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L98">    ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; {</span>
+<span class="nc" id="L99">      mapperRan.set(true);</span>
+<span class="nc" id="L100">      return null;</span>
+    });
+
+<span class="fc" id="L103">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L104">    assertTrue(mappedLF.isCancelled());</span>
+<span class="fc" id="L105">  }</span>
+  
+  @Test
+  public void mapAlreadyDoneMapperThrowExceptionTest() throws InterruptedException {
+<span class="fc" id="L109">    TestExceptionHandler teh = new TestExceptionHandler();</span>
+<span class="fc" id="L110">    ExceptionUtils.setDefaultExceptionHandler(teh);</span>
+<span class="fc" id="L111">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L112">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L113">    ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; { throw failure; });</span>
+
+<span class="fc" id="L115">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L116">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L117">    assertEquals(1, teh.getCallCount());</span>
+<span class="fc" id="L118">  }</span>
+  
+  @Test
+  public void mapWithExecutorAlreadyDoneTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L122">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L123">    String sourceObject = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L124">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(sourceObject);</span>
+<span class="fc" id="L125">    String translatedObject = StringUtils.makeRandomString(10);</span>
+<span class="fc" id="L126">    ListenableFuture&lt;String&gt; mappedLF = lf.map((s) -&gt; {</span>
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">      if (s == sourceObject) {</span>
+<span class="fc" id="L128">        return translatedObject;</span>
+      } else {
+        // test failure
+<span class="nc" id="L131">        return null;</span>
+      }
+    }, scheduler);
+    
+<span class="fc" id="L135">    assertEquals(1, scheduler.tick());</span>
+    
+<span class="fc" id="L137">    assertTrue(mappedLF.isDone());</span>
+<span class="pc bpc" id="L138" title="1 of 2 branches missed.">    assertTrue(translatedObject == mappedLF.get());</span>
+<span class="fc" id="L139">  }</span>
+  
+  @Test
+  public void mapWithExecutorAlreadyDoneExecutionExceptionTest() throws InterruptedException {
+<span class="fc" id="L143">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L144">    Exception failure = new Exception();</span>
+<span class="fc" id="L145">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+<span class="fc" id="L146">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L147">    ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; {</span>
+<span class="nc" id="L148">      mapperRan.set(true);</span>
+<span class="nc" id="L149">      return null;</span>
+    }, scheduler);
+    
+<span class="fc" id="L152">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L154">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L155">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L156">  }</span>
+  
+  @Test
+  public void mapWithExecutorAlreadyCanceledTest() {
+<span class="fc" id="L160">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L161">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+<span class="fc" id="L162">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L163">    ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; {</span>
+<span class="nc" id="L164">      mapperRan.set(true);</span>
+<span class="nc" id="L165">      return null;</span>
+    }, scheduler);
+    
+<span class="fc" id="L168">    assertEquals(0, scheduler.tick());</span>
+
+<span class="fc" id="L170">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L171">    assertTrue(mappedLF.isCancelled());</span>
+<span class="fc" id="L172">  }</span>
+  
+  @Test
+  public void mapWithExecutorAlreadyDoneMapperThrowExceptionTest() throws InterruptedException {
+<span class="fc" id="L176">    TestExceptionHandler teh = new TestExceptionHandler();</span>
+<span class="fc" id="L177">    ExceptionUtils.setDefaultExceptionHandler(teh);</span>
+<span class="fc" id="L178">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L179">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L180">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L181">    ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; { throw failure; }, scheduler);</span>
+  
+<span class="fc" id="L183">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L185">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L186">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L187">    assertEquals(1, teh.getCallCount());</span>
+<span class="fc" id="L188">  }</span>
+  
+  @Test
+  public void cancelWhileMappedFunctionRunningInterruptTest() {
+<span class="fc" id="L192">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L194">      AtomicBoolean started = new AtomicBoolean();</span>
+<span class="fc" id="L195">      AtomicBoolean interrupted = new AtomicBoolean();</span>
+<span class="fc" id="L196">      ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L197">      ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; {</span>
+<span class="fc" id="L198">        started.set(true);</span>
+        try {
+<span class="nc" id="L200">          Thread.sleep(10_000);</span>
+<span class="fc" id="L201">        } catch (InterruptedException e) {</span>
+<span class="fc" id="L202">          interrupted.set(true);</span>
+<span class="nc" id="L203">        }</span>
+<span class="fc" id="L204">        return null;</span>
+      }, sts);
+      
+<span class="fc" id="L207">      new TestCondition(() -&gt; started.get()).blockTillTrue();</span>
+<span class="fc" id="L208">      assertTrue(mappedLF.cancel(true));</span>
+<span class="fc" id="L209">      new TestCondition(() -&gt; interrupted.get()).blockTillTrue();</span>
+    } finally {
+<span class="fc" id="L211">      sts.shutdownNow();</span>
+    }
+<span class="fc" id="L213">  }</span>
+  
+  @Test
+  public void cancelWhileMappedFunctionRunningNoInterruptTest() {
+<span class="fc" id="L217">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L219">      AtomicBoolean started = new AtomicBoolean();</span>
+<span class="fc" id="L220">      AtomicBoolean completed = new AtomicBoolean();</span>
+<span class="fc" id="L221">      ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L222">      ListenableFuture&lt;Void&gt; mappedLF = lf.map((o) -&gt; {</span>
+<span class="fc" id="L223">        started.set(true);</span>
+        try {
+<span class="fc" id="L225">          Thread.sleep(DELAY_TIME * 10);</span>
+<span class="fc" id="L226">          completed.set(true);</span>
+<span class="nc" id="L227">        } catch (InterruptedException e) {</span>
+          // should not occur, if it does completed will never set
+<span class="fc" id="L229">        }</span>
+<span class="fc" id="L230">        return null;</span>
+      }, sts);
+      
+<span class="fc" id="L233">      new TestCondition(() -&gt; started.get()).blockTillTrue();</span>
+<span class="fc" id="L234">      assertFalse(mappedLF.cancel(false));</span>
+<span class="fc" id="L235">      new TestCondition(() -&gt; completed.get()).blockTillTrue();</span>
+    } finally {
+<span class="fc" id="L237">      sts.shutdownNow();</span>
+    }
+<span class="fc" id="L239">  }</span>
+  
+  @Test
+  public void throwMapAlreadyDoneTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L243">    String sourceObject = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L244">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(sourceObject);</span>
+<span class="fc" id="L245">    String translatedObject = StringUtils.makeRandomString(10);</span>
+<span class="fc" id="L246">    ListenableFuture&lt;String&gt; mappedLF = lf.throwMap((s) -&gt; {</span>
+<span class="pc bpc" id="L247" title="1 of 2 branches missed.">      if (s == sourceObject) {</span>
+<span class="fc" id="L248">        return translatedObject;</span>
+      } else {
+        // test failure
+<span class="nc" id="L251">        return null;</span>
+      }
+    });
+    
+<span class="fc" id="L255">    assertTrue(mappedLF.isDone());</span>
+<span class="pc bpc" id="L256" title="1 of 2 branches missed.">    assertTrue(translatedObject == mappedLF.get());</span>
+<span class="fc" id="L257">  }</span>
+  
+  @Test
+  public void throwMapAlreadyDoneExecutionExceptionTest() throws InterruptedException {
+<span class="fc" id="L261">    Exception failure = new Exception();</span>
+<span class="fc" id="L262">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+<span class="fc" id="L263">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L264">    ListenableFuture&lt;Void&gt; mappedLF = lf.throwMap((o) -&gt; {</span>
+<span class="nc" id="L265">      mapperRan.set(true);</span>
+<span class="nc" id="L266">      return null;</span>
+    });
+
+<span class="fc" id="L269">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L270">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L271">  }</span>
+  
+  @Test
+  public void throwMapAlreadyCanceledTest() {
+<span class="fc" id="L275">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+<span class="fc" id="L276">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L277">    ListenableFuture&lt;Void&gt; mappedLF = lf.throwMap((o) -&gt; {</span>
+<span class="nc" id="L278">      mapperRan.set(true);</span>
+<span class="nc" id="L279">      return null;</span>
+    });
+
+<span class="fc" id="L282">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L283">    assertTrue(mappedLF.isCancelled());</span>
+<span class="fc" id="L284">  }</span>
+  
+  @Test
+  public void throwMapAlreadyDoneMapperThrowExceptionTest() throws InterruptedException {
+<span class="fc" id="L288">    TestExceptionHandler teh = new TestExceptionHandler();</span>
+<span class="fc" id="L289">    ExceptionUtils.setDefaultExceptionHandler(teh);</span>
+<span class="fc" id="L290">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L291">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L292">    ListenableFuture&lt;Void&gt; mappedLF = lf.throwMap((o) -&gt; { throw failure; });</span>
+
+<span class="fc" id="L294">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L295">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L296">    assertEquals(0, teh.getCallCount());</span>
+<span class="fc" id="L297">  }</span>
+  
+  @Test
+  public void throwMapWithExecutorAlreadyDoneTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L301">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L302">    String sourceObject = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L303">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(sourceObject);</span>
+<span class="fc" id="L304">    String translatedObject = StringUtils.makeRandomString(10);</span>
+<span class="fc" id="L305">    ListenableFuture&lt;String&gt; mappedLF = lf.throwMap((s) -&gt; {</span>
+<span class="pc bpc" id="L306" title="1 of 2 branches missed.">      if (s == sourceObject) {</span>
+<span class="fc" id="L307">        return translatedObject;</span>
+      } else {
+        // test failure
+<span class="nc" id="L310">        return null;</span>
+      }
+    }, scheduler);
+    
+<span class="fc" id="L314">    assertEquals(1, scheduler.tick());</span>
+    
+<span class="fc" id="L316">    assertTrue(mappedLF.isDone());</span>
+<span class="pc bpc" id="L317" title="1 of 2 branches missed.">    assertTrue(translatedObject == mappedLF.get());</span>
+<span class="fc" id="L318">  }</span>
+  
+  @Test
+  public void throwMapWithExecutorAlreadyDoneExecutionExceptionTest() throws InterruptedException {
+<span class="fc" id="L322">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L323">    Exception failure = new Exception();</span>
+<span class="fc" id="L324">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+<span class="fc" id="L325">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L326">    ListenableFuture&lt;Void&gt; mappedLF = lf.throwMap((o) -&gt; {</span>
+<span class="nc" id="L327">      mapperRan.set(true);</span>
+<span class="nc" id="L328">      return null;</span>
+    }, scheduler);
+    
+<span class="fc" id="L331">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L333">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L334">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L335">  }</span>
+  
+  @Test
+  public void throwMapWithExecutorAlreadyCanceledTest() {
+<span class="fc" id="L339">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L340">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+<span class="fc" id="L341">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L342">    ListenableFuture&lt;Void&gt; mappedLF = lf.throwMap((o) -&gt; {</span>
+<span class="nc" id="L343">      mapperRan.set(true);</span>
+<span class="nc" id="L344">      return null;</span>
+    }, scheduler);
+    
+<span class="fc" id="L347">    assertEquals(0, scheduler.tick());</span>
+
+<span class="fc" id="L349">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L350">    assertTrue(mappedLF.isCancelled());</span>
+<span class="fc" id="L351">  }</span>
+  
+  @Test
+  public void throwMapWithExecutorAlreadyDoneMapperThrowExceptionTest() throws InterruptedException {
+<span class="fc" id="L355">    TestExceptionHandler teh = new TestExceptionHandler();</span>
+<span class="fc" id="L356">    ExceptionUtils.setDefaultExceptionHandler(teh);</span>
+<span class="fc" id="L357">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L358">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L359">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L360">    ListenableFuture&lt;Void&gt; mappedLF = lf.throwMap((o) -&gt; { throw failure; }, scheduler);</span>
+  
+<span class="fc" id="L362">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L364">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L365">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L366">    assertEquals(0, teh.getCallCount());</span>
+<span class="fc" id="L367">  }</span>
+  
+  @Test
+  public void flatMapAlreadyDoneTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L371">    String sourceObject = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L372">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(sourceObject);</span>
+<span class="fc" id="L373">    String translatedObject = StringUtils.makeRandomString(10);</span>
+<span class="fc" id="L374">    ListenableFuture&lt;String&gt; mappedLF = lf.flatMap((s) -&gt; {</span>
+<span class="pc bpc" id="L375" title="1 of 2 branches missed.">      if (s == sourceObject) {</span>
+<span class="fc" id="L376">        return FutureUtils.immediateResultFuture(translatedObject);</span>
+      } else {
+        // test failure
+<span class="nc" id="L379">        return FutureUtils.immediateResultFuture(null);</span>
+      }
+    });
+    
+<span class="fc" id="L383">    assertTrue(mappedLF.isDone());</span>
+<span class="pc bpc" id="L384" title="1 of 2 branches missed.">    assertTrue(translatedObject == mappedLF.get());</span>
+<span class="fc" id="L385">  }</span>
+  
+  @Test
+  public void flatMapAlreadyDoneExecutionExceptionTest() throws InterruptedException {
+<span class="fc" id="L389">    Exception failure = new Exception();</span>
+<span class="fc" id="L390">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+<span class="fc" id="L391">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L392">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; {</span>
+<span class="nc" id="L393">      mapperRan.set(true);</span>
+<span class="nc" id="L394">      return FutureUtils.immediateResultFuture(null);</span>
+    });
+
+<span class="fc" id="L397">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L398">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L399">  }</span>
+  
+  @Test
+  public void flatMapAlreadyCanceledTest() {
+<span class="fc" id="L403">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+<span class="fc" id="L404">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L405">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; {</span>
+<span class="nc" id="L406">      mapperRan.set(true);</span>
+<span class="nc" id="L407">      return FutureUtils.immediateResultFuture(null);</span>
+    });
+
+<span class="fc" id="L410">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L411">    assertTrue(mappedLF.isCancelled());</span>
+<span class="fc" id="L412">  }</span>
+  
+  @Test
+  public void flatMapAlreadyDoneMapperThrowExceptionTest() throws InterruptedException {
+<span class="fc" id="L416">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L417">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L418">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; { throw failure; });</span>
+
+<span class="fc" id="L420">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L421">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L422">  }</span>
+  
+  @Test
+  public void flatMapAlreadyDoneMapperReturnFailedFutureTest() throws InterruptedException {
+<span class="fc" id="L426">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L427">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L428">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; FutureUtils.immediateFailureFuture(failure));</span>
+
+<span class="fc" id="L430">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L431">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L432">  }</span>
+  
+  @Test
+  public void cancelWhileFlatMappedMapFunctionRunningInterruptTest() {
+<span class="fc" id="L436">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L438">      AtomicBoolean started = new AtomicBoolean();</span>
+<span class="fc" id="L439">      AtomicBoolean interrupted = new AtomicBoolean();</span>
+<span class="fc" id="L440">      ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L441">      ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; {</span>
+<span class="fc" id="L442">        started.set(true);</span>
+        try {
+<span class="nc" id="L444">          Thread.sleep(10_000);</span>
+<span class="fc" id="L445">        } catch (InterruptedException e) {</span>
+<span class="fc" id="L446">          interrupted.set(true);</span>
+<span class="nc" id="L447">        }</span>
+<span class="fc" id="L448">        return FutureUtils.immediateResultFuture(null);</span>
+      }, sts);
+      
+<span class="fc" id="L451">      new TestCondition(() -&gt; started.get()).blockTillTrue();</span>
+<span class="fc" id="L452">      assertTrue(mappedLF.cancel(true));</span>
+<span class="fc" id="L453">      new TestCondition(() -&gt; interrupted.get()).blockTillTrue();</span>
+    } finally {
+<span class="fc" id="L455">      sts.shutdownNow();</span>
+    }
+<span class="fc" id="L457">  }</span>
+  
+  @Test
+  public void cancelWhileFlatMappedMapFunctionRunningNoInterruptTest() {
+<span class="fc" id="L461">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L463">      AtomicBoolean started = new AtomicBoolean();</span>
+<span class="fc" id="L464">      AtomicBoolean completed = new AtomicBoolean();</span>
+<span class="fc" id="L465">      ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L466">      ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; {</span>
+<span class="fc" id="L467">        started.set(true);</span>
+        try {
+<span class="fc" id="L469">          Thread.sleep(DELAY_TIME * 10);</span>
+<span class="fc" id="L470">          completed.set(true);</span>
+<span class="nc" id="L471">        } catch (InterruptedException e) {</span>
+          // should not occur, if it does completed will never set
+<span class="fc" id="L473">        }</span>
+<span class="fc" id="L474">        return FutureUtils.immediateResultFuture(null);</span>
+      }, sts);
+      
+<span class="fc" id="L477">      new TestCondition(() -&gt; started.get()).blockTillTrue();</span>
+<span class="fc" id="L478">      assertFalse(mappedLF.cancel(false));</span>
+<span class="fc" id="L479">      new TestCondition(() -&gt; completed.get()).blockTillTrue();</span>
+    } finally {
+<span class="fc" id="L481">      sts.shutdownNow();</span>
+    }
+<span class="fc" id="L483">  }</span>
+  
+  @Test
+  public void cancelFlatMappedCompletedFutureTest() {
+<span class="fc" id="L487">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+    try {
+<span class="fc" id="L489">      ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L490">      ListenableFuture&lt;Void&gt; scheduledFuture = sts.submitScheduled(DoNothingRunnable.instance(), null, 10_000);</span>
+<span class="fc" id="L491">      ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; scheduledFuture);</span>
+      
+<span class="fc" id="L493">      assertTrue(mappedLF.cancel(false)); // no interrupt needed, delegate future not started</span>
+<span class="fc" id="L494">      assertTrue(scheduledFuture.isCancelled());</span>
+    } finally {
+<span class="fc" id="L496">      sts.shutdownNow();</span>
+    }
+<span class="fc" id="L498">  }</span>
+  
+  @Test
+  public void flatMapWithExecutorAlreadyDoneTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L502">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L503">    String sourceObject = StringUtils.makeRandomString(5);</span>
+<span class="fc" id="L504">    ListenableFuture&lt;String&gt; lf = makeListenableFutureFactory().makeWithResult(sourceObject);</span>
+<span class="fc" id="L505">    String translatedObject = StringUtils.makeRandomString(10);</span>
+<span class="fc" id="L506">    ListenableFuture&lt;String&gt; mappedLF = lf.flatMap((s) -&gt; {</span>
+<span class="pc bpc" id="L507" title="1 of 2 branches missed.">      if (s == sourceObject) {</span>
+<span class="fc" id="L508">        return FutureUtils.immediateResultFuture(translatedObject);</span>
+      } else {
+        // test failure
+<span class="nc" id="L511">        return FutureUtils.immediateResultFuture(null);</span>
+      }
+    }, scheduler);
+    
+<span class="fc" id="L515">    assertEquals(1, scheduler.tick());</span>
+    
+<span class="fc" id="L517">    assertTrue(mappedLF.isDone());</span>
+<span class="pc bpc" id="L518" title="1 of 2 branches missed.">    assertTrue(translatedObject == mappedLF.get());</span>
+<span class="fc" id="L519">  }</span>
+  
+  @Test
+  public void flatMapWithExecutorAlreadyDoneExecutionExceptionTest() throws InterruptedException {
+<span class="fc" id="L523">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L524">    Exception failure = new Exception();</span>
+<span class="fc" id="L525">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(failure);</span>
+<span class="fc" id="L526">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L527">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; {</span>
+<span class="nc" id="L528">      mapperRan.set(true);</span>
+<span class="nc" id="L529">      return FutureUtils.immediateResultFuture(null);</span>
+    }, scheduler);
+    
+<span class="fc" id="L532">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L534">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L535">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L536">  }</span>
+  
+  @Test
+  public void flatMapWithExecutorAlreadyCanceledTest() {
+<span class="fc" id="L540">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L541">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeCanceled();</span>
+<span class="fc" id="L542">    AtomicBoolean mapperRan = new AtomicBoolean(false);</span>
+<span class="fc" id="L543">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; {</span>
+<span class="nc" id="L544">      mapperRan.set(true);</span>
+<span class="nc" id="L545">      return FutureUtils.immediateResultFuture(null);</span>
+    }, scheduler);
+    
+<span class="fc" id="L548">    assertEquals(0, scheduler.tick());</span>
+
+<span class="fc" id="L550">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L551">    assertTrue(mappedLF.isCancelled());</span>
+<span class="fc" id="L552">  }</span>
+  
+  @Test
+  public void flatMapWithExecutorAlreadyDoneMapperThrowExceptionTest() throws InterruptedException {
+<span class="fc" id="L556">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L557">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L558">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L559">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; { throw failure; }, scheduler);</span>
+  
+<span class="fc" id="L561">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L563">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L564">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L565">  }</span>
+  
+  @Test
+  public void flatMapWithExecutorAlreadyDoneMapperReturnFailedFutureTest() throws InterruptedException {
+<span class="fc" id="L569">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L570">    RuntimeException failure = new SuppressedStackRuntimeException();</span>
+<span class="fc" id="L571">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L572">    ListenableFuture&lt;Void&gt; mappedLF = lf.flatMap((o) -&gt; FutureUtils.immediateFailureFuture(failure), scheduler);</span>
+  
+<span class="fc" id="L574">    assertEquals(1, scheduler.tick());</span>
+
+<span class="fc" id="L576">    assertTrue(mappedLF.isDone());</span>
+<span class="fc" id="L577">    verifyFutureFailure(mappedLF, failure);</span>
+<span class="fc" id="L578">  }</span>
+  
+  @Test
+  public void mapFailureIgnoredTest() {
+<span class="fc" id="L582">    ListenableFuture&lt;Object&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L583">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L584">    ListenableFuture&lt;Object&gt; finalLF = lf.mapFailure(Throwable.class, </span>
+<span class="nc" id="L585">                                                     (t) -&gt; { mapped.set(true); return new Object(); });</span>
+    
+<span class="fc" id="L587">    assertFalse(mapped.get());</span>
+<span class="pc bpc" id="L588" title="1 of 2 branches missed.">    assertTrue(lf == finalLF);</span>
+<span class="fc" id="L589">  }</span>
+  
+  @Test
+  public void mapFailureIgnoredFailureTypeTest() {
+<span class="fc" id="L593">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L594">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L595">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(RuntimeException.class, </span>
+<span class="nc" id="L596">                                                (t) -&gt; { mapped.set(true); return null; });</span>
+    
+<span class="fc" id="L598">    assertFalse(mapped.get());</span>
+<span class="pc bpc" id="L599" title="1 of 2 branches missed.">    assertTrue(lf == finalLF);</span>
+<span class="fc" id="L600">  }</span>
+  
+  @Test
+  public void mapFailureIntoExceptionTest() throws InterruptedException {
+<span class="fc" id="L604">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L605">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L606">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L607">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(Exception.class, </span>
+<span class="fc" id="L608">                                                (t) -&gt; { mapped.set(true); throw finalException; });</span>
+
+<span class="fc" id="L610">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L611" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L612">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L613">  }</span>
+  
+  @Test
+  public void mapFailureIntoExceptionNullClassTest() throws InterruptedException {
+<span class="fc" id="L617">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L618">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L619">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L620">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(null, </span>
+<span class="fc" id="L621">                                                (t) -&gt; { mapped.set(true); throw finalException; });</span>
+
+<span class="fc" id="L623">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L624" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L625">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L626">  }</span>
+  
+  private static void verifyFailureConditionFuture(ListenableFuture&lt;?&gt; finalLF, 
+                                                   Exception expectedFailure) throws InterruptedException {
+<span class="fc" id="L630">    assertTrue(finalLF.isDone());</span>
+    try {
+<span class="nc" id="L632">      finalLF.get();</span>
+<span class="nc" id="L633">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L634">    } catch (ExecutionException expected) {</span>
+<span class="pc bpc" id="L635" title="1 of 2 branches missed.">      assertTrue(expected.getCause() == expectedFailure);</span>
+<span class="nc" id="L636">    }</span>
+<span class="fc" id="L637">  }</span>
+  
+  @Test
+  public void mapFailureIntoResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L641">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L642">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L643">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(Exception.class, </span>
+<span class="fc" id="L644">                                                (t) -&gt; { mapped.set(true); return null; });</span>
+
+<span class="fc" id="L646">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L647">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L648" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L649">    assertNull(finalLF.get());</span>
+<span class="fc" id="L650">  }</span>
+  
+  @Test
+  public void mapFailureIntoResultNullClassTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L654">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L655">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L656">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(null, (t) -&gt; { mapped.set(true); return null; });</span>
+
+<span class="fc" id="L658">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L659">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L660" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L661">    assertNull(finalLF.get());</span>
+<span class="fc" id="L662">  }</span>
+  
+  @Test
+  public void flatMapFailureIgnoredTest() {
+<span class="fc" id="L666">    ListenableFuture&lt;Object&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L667">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L668">    ListenableFuture&lt;Object&gt; finalLF = </span>
+<span class="fc" id="L669">        lf.flatMapFailure(Throwable.class, </span>
+<span class="nc" id="L670">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateResultFuture(new Object()); });</span>
+    
+<span class="fc" id="L672">    assertFalse(mapped.get());</span>
+<span class="pc bpc" id="L673" title="1 of 2 branches missed.">    assertTrue(lf == finalLF);</span>
+<span class="fc" id="L674">  }</span>
+  
+  @Test
+  public void flatMapFailureIgnoredFailureTypeTest() {
+<span class="fc" id="L678">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L679">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L680">    ListenableFuture&lt;?&gt; finalLF = </span>
+<span class="fc" id="L681">        lf.flatMapFailure(RuntimeException.class, </span>
+<span class="nc" id="L682">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateResultFuture(null); });</span>
+    
+<span class="fc" id="L684">    assertFalse(mapped.get());</span>
+<span class="pc bpc" id="L685" title="1 of 2 branches missed.">    assertTrue(lf == finalLF);</span>
+<span class="fc" id="L686">  }</span>
+  
+  @Test
+  public void flatMapFailureIntoThrownExceptionTest() throws InterruptedException {
+<span class="fc" id="L690">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L691">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L692">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L693">    ListenableFuture&lt;?&gt; finalLF = lf.flatMapFailure(Exception.class, </span>
+<span class="fc" id="L694">                                                    (t) -&gt; { mapped.set(true); throw finalException; });</span>
+
+<span class="fc" id="L696">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L697" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L698">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L699">  }</span>
+  
+  @Test
+  public void flatMapFailureIntoReturnedExceptionTest() throws InterruptedException {
+<span class="fc" id="L703">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L704">    ListenableFuture&lt;Object&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L705">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L706">    ListenableFuture&lt;Object&gt; finalLF = </span>
+<span class="fc" id="L707">        lf.flatMapFailure(Exception.class, </span>
+<span class="fc" id="L708">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateFailureFuture(finalException); });</span>
+
+<span class="fc" id="L710">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L711" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L712">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L713">  }</span>
+  
+  @Test
+  public void flatMapFailureIntoResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L717">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L718">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L719">    ListenableFuture&lt;?&gt; finalLF = </span>
+<span class="fc" id="L720">        lf.flatMapFailure(Exception.class, </span>
+<span class="fc" id="L721">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateResultFuture(null); });</span>
+
+<span class="fc" id="L723">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L724">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L725" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L726">    assertNull(finalLF.get());</span>
+<span class="fc" id="L727">  }</span>
+  
+  @Test
+  public void mapFailureWithExecutorIgnoredTest() {
+<span class="fc" id="L731">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L732">    ListenableFuture&lt;Object&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L733">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L734">    ListenableFuture&lt;Object&gt; finalLF = lf.mapFailure(Throwable.class, </span>
+<span class="nc" id="L735">                                                     (t) -&gt; { mapped.set(true); return new Object(); }, </span>
+                                                     scheduler);
+
+<span class="pc bpc" id="L738" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L739">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L740">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L741">    assertFalse(mapped.get());</span>
+<span class="fc" id="L742">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L743">  }</span>
+  
+  @Test
+  public void mapFailureWithExecutorIgnoredFailureTypeTest() {
+<span class="fc" id="L747">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L748">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L749">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L750">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(RuntimeException.class, </span>
+<span class="nc" id="L751">                                                (t) -&gt; { mapped.set(true); return null; }, </span>
+                                                scheduler);
+
+<span class="pc bpc" id="L754" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L755">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L756">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L757">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L758">    assertFalse(mapped.get());</span>
+<span class="fc" id="L759">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L760">  }</span>
+  
+  @Test
+  public void mapFailureWithExecutorIntoExceptionTest() throws InterruptedException {
+<span class="fc" id="L764">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L765">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L766">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L767">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L768">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(Exception.class, </span>
+<span class="fc" id="L769">                                                (t) -&gt; { mapped.set(true); throw finalException; }, </span>
+                                                scheduler);
+
+<span class="fc" id="L772">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L773">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L774">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L775">    assertTrue(mapped.get());</span>
+<span class="pc bpc" id="L776" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L777">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L778">  }</span>
+  
+  @Test
+  public void mapFailureWithExecutorIntoResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L782">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L783">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L784">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L785">    ListenableFuture&lt;?&gt; finalLF = lf.mapFailure(Exception.class, </span>
+<span class="fc" id="L786">                                                (t) -&gt; { mapped.set(true); return null; }, </span>
+                                                scheduler);
+
+<span class="pc bpc" id="L789" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L790">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L791">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L792">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L793">    assertTrue(mapped.get());</span>
+<span class="fc" id="L794">    assertNull(finalLF.get());</span>
+<span class="fc" id="L795">  }</span>
+  
+  @Test
+  public void flatMapFailureWithExecutorIgnoredTest() {
+<span class="fc" id="L799">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L800">    ListenableFuture&lt;Object&gt; lf = makeListenableFutureFactory().makeWithResult(null);</span>
+<span class="fc" id="L801">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L802">    ListenableFuture&lt;Object&gt; finalLF = </span>
+<span class="fc" id="L803">        lf.flatMapFailure(Throwable.class, </span>
+<span class="nc" id="L804">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateResultFuture(new Object()); }, </span>
+                          scheduler);
+
+<span class="pc bpc" id="L807" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L808">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L809">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L810">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L811">    assertFalse(mapped.get());</span>
+<span class="fc" id="L812">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L813">  }</span>
+  
+  @Test
+  public void flatMapFailureWithExecutorIgnoredFailureTypeTest() {
+<span class="fc" id="L817">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L818">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L819">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L820">    ListenableFuture&lt;?&gt; finalLF = </span>
+<span class="fc" id="L821">        lf.flatMapFailure(RuntimeException.class, </span>
+<span class="nc" id="L822">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateResultFuture(null); }, </span>
+                          scheduler);
+
+<span class="pc bpc" id="L825" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L826">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L827">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L828">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L829">    assertFalse(mapped.get());</span>
+<span class="fc" id="L830">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L831">  }</span>
+  
+  @Test
+  public void flatMapFailureWithExecutorIntoThrownExceptionTest() throws InterruptedException {
+<span class="fc" id="L835">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L836">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L837">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L838">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L839">    ListenableFuture&lt;?&gt; finalLF = lf.flatMapFailure(Exception.class, </span>
+<span class="fc" id="L840">                                                    (t) -&gt; { mapped.set(true); throw finalException; }, </span>
+                                                    scheduler);
+
+<span class="pc bpc" id="L843" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L844">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L845">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L846">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L847">    assertTrue(mapped.get());</span>
+<span class="fc" id="L848">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L849">  }</span>
+  
+  @Test
+  public void flatMapFailureWithExecutorIntoReturnedExceptionTest() throws InterruptedException {
+<span class="fc" id="L853">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L854">    RuntimeException finalException = new RuntimeException();</span>
+<span class="fc" id="L855">    ListenableFuture&lt;Object&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L856">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L857">    ListenableFuture&lt;Object&gt; finalLF = </span>
+<span class="fc" id="L858">        lf.flatMapFailure(Exception.class, </span>
+<span class="fc" id="L859">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateFailureFuture(finalException); }, </span>
+                          scheduler);
+
+<span class="pc bpc" id="L862" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L863">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L864">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L865">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L866">    assertTrue(mapped.get());</span>
+<span class="fc" id="L867">    verifyFailureConditionFuture(finalLF, finalException);</span>
+<span class="fc" id="L868">  }</span>
+  
+  @Test
+  public void flatMapFailureWithExecutorIntoResultTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L872">    TestableScheduler scheduler = new TestableScheduler();</span>
+<span class="fc" id="L873">    ListenableFuture&lt;?&gt; lf = makeListenableFutureFactory().makeWithFailure(new Exception());</span>
+<span class="fc" id="L874">    AtomicBoolean mapped = new AtomicBoolean(false);</span>
+<span class="fc" id="L875">    ListenableFuture&lt;?&gt; finalLF = </span>
+<span class="fc" id="L876">        lf.flatMapFailure(Exception.class, </span>
+<span class="fc" id="L877">                          (t) -&gt; { mapped.set(true); return FutureUtils.immediateResultFuture(null); }, </span>
+                          scheduler);
+
+<span class="pc bpc" id="L880" title="1 of 2 branches missed.">    assertTrue(finalLF != lf);</span>
+<span class="fc" id="L881">    assertFalse(finalLF.isDone());</span>
+<span class="fc" id="L882">    assertEquals(1, scheduler.tick());</span>
+<span class="fc" id="L883">    assertTrue(finalLF.isDone());</span>
+<span class="fc" id="L884">    assertTrue(mapped.get());</span>
+<span class="fc" id="L885">    assertNull(finalLF.get());</span>
+<span class="fc" id="L886">  }</span>
+
+  @Test
+  public void optimizeDoneListenerExecutorTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L890">    optimizeDoneListenerExecutorTest(makeListenableFutureFactory().makeWithResult(null));</span>
+<span class="fc" id="L891">  }</span>
+
+  @Test
+  public void dontOptimizeDoneListenerExecutorTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L895">    dontOptimizeDoneListenerExecutorTest(makeListenableFutureFactory().makeWithResult(null));</span>
+<span class="fc" id="L896">  }</span>
+  
+  public static void optimizeDoneListenerExecutorTest(ListenableFuture&lt;?&gt; lf) throws InterruptedException, TimeoutException {
+<span class="fc" id="L899">    AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L900">    Thread t = Thread.currentThread();</span>
+    
+<span class="pc bpc" id="L902" title="1 of 2 branches missed.">    lf.addListener(() -&gt; {av.assertTrue(Thread.currentThread() == t) ; av.signalComplete();}, </span>
+<span class="fc" id="L903">                   CentralThreadlyPool.computationPool(), </span>
+                   ListenerOptimizationStrategy.SingleThreadIfExecutorMatchOrDone);
+    
+<span class="fc" id="L906">    av.waitForTest();</span>
+<span class="fc" id="L907">  }</span>
+  
+  public static void dontOptimizeDoneListenerExecutorTest(ListenableFuture&lt;?&gt; lf) throws InterruptedException, TimeoutException {
+<span class="fc" id="L910">    AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L911">    Thread t = Thread.currentThread();</span>
+<span class="fc" id="L912">    Runnable threadTester = </span>
+<span class="pc bpc" id="L913" title="1 of 2 branches missed.">        () -&gt; {av.assertFalse(Thread.currentThread() == t) ; av.signalComplete();};</span>
+
+<span class="fc" id="L915">    lf.addListener(threadTester, CentralThreadlyPool.computationPool(), null);</span>
+<span class="fc" id="L916">    lf.addListener(threadTester, CentralThreadlyPool.computationPool(), </span>
+                   ListenerOptimizationStrategy.None);
+<span class="fc" id="L918">    lf.addListener(threadTester, CentralThreadlyPool.computationPool(), </span>
+                   ListenerOptimizationStrategy.SingleThreadIfExecutorMatch);
+    
+<span class="fc" id="L921">    av.waitForTest(10_000, 3);</span>
+<span class="fc" id="L922">  }</span>
+  
+  private static void verifyFutureFailure(ListenableFuture&lt;?&gt; f, Exception failure) throws InterruptedException {
+    try {
+<span class="nc" id="L926">      f.get();</span>
+<span class="nc" id="L927">      fail(&quot;Exception should have thrown&quot;);</span>
+<span class="fc" id="L928">    } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L929" title="1 of 2 branches missed.">      assertTrue(failure == e.getCause());</span>
+<span class="nc" id="L930">    }</span>
+<span class="fc" id="L931">  }</span>
+  
+  protected interface ListenableFutureFactory {
+    public ListenableFuture&lt;?&gt; makeCanceled();
+    public ListenableFuture&lt;Object&gt; makeWithFailure(Exception e);
+    public &lt;T&gt; ListenableFuture&lt;T&gt; makeWithResult(T result);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>WindowSlider.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.analytic</a> &gt; <span class="el_source">WindowSlider.java</span></div><h1>WindowSlider.java</h1><pre class="source lang-java linenums">package tech.tablesaw.analytic;
+
+import java.util.function.Function;
+import tech.tablesaw.analytic.WindowFrame.WindowGrowthType;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.table.TableSlice;
+
+/**
+ * Execute the aggregate function once for every row in the slice.
+ *
+ * &lt;p&gt;Any window with a Fixed end (UNBOUNDED FOLLOWING) is converted (&quot;mirrored&quot;) into the
+ * equivalent UNBOUNDED PRECEDING widow so that it is an append window and a faster algorithm can be
+ * used.
+ */
+class WindowSlider {
+  private final boolean mirrored;
+  private final WindowGrowthType windowGrowthType;
+  private final int initialLeftBound;
+  private final int initialRightBound;
+
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  private final AggregateFunction function;
+
+  private final TableSlice slice;
+  private final Column&lt;?&gt; sourceColumn;
+
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  private final Column destinationColumn;
+
+  WindowSlider(
+      WindowFrame windowFrame,
+      AggregateFunctions func,
+      TableSlice slice,
+      Column&lt;?&gt; sourceColumn,
+<span class="fc" id="L35">      Column&lt;?&gt; destinationColumn) {</span>
+<span class="fc" id="L36">    this.slice = slice;</span>
+<span class="fc" id="L37">    this.destinationColumn = destinationColumn;</span>
+<span class="fc" id="L38">    this.sourceColumn = sourceColumn;</span>
+<span class="fc" id="L39">    this.function = func.getImplementation(windowFrame.windowGrowthType());</span>
+
+    // Convert UNBOUNDED FOLLOWING to an equivalent UNBOUNDED PRECEDING window.
+<span class="fc bfc" id="L42" title="All 2 branches covered.">    if (windowFrame.windowGrowthType() == WindowGrowthType.FIXED_RIGHT) {</span>
+<span class="fc" id="L43">      this.windowGrowthType = WindowGrowthType.FIXED_LEFT;</span>
+<span class="fc" id="L44">      this.mirrored = true;</span>
+<span class="fc" id="L45">      this.initialLeftBound = windowFrame.getInitialRightBound() * -1;</span>
+<span class="fc" id="L46">      this.initialRightBound = windowFrame.getInitialLeftBound() * -1;</span>
+    } else {
+<span class="fc" id="L48">      this.mirrored = false;</span>
+<span class="fc" id="L49">      this.initialLeftBound = windowFrame.getInitialLeftBound();</span>
+<span class="fc" id="L50">      this.initialRightBound = windowFrame.getInitialRightBound();</span>
+<span class="fc" id="L51">      this.windowGrowthType = windowFrame.windowGrowthType();</span>
+    }
+<span class="fc" id="L53">  }</span>
+
+  /** Slide the window over the slice calculating an aggregate value for every row in the slice. */
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  void execute() {
+<span class="fc" id="L58">    initWindow();</span>
+    // Initial window bounds can be outside the current slice. This allows for windows like 20
+    // PRECEDING 10 PRECEDING
+    // to slide into the slice. Rows outside the slide will be ignored.
+<span class="fc" id="L62">    int leftBound = getInitialLeftBound() - 1;</span>
+<span class="fc" id="L63">    int rightBound = getInitialRightBound();</span>
+<span class="fc bfc" id="L64" title="All 2 branches covered.">    for (int i = 0; i &lt; slice.rowCount(); i++) {</span>
+<span class="fc" id="L65">      this.set(i, function.getValue());</span>
+
+      // Slide the left side of the window if applicable for the window definition.
+<span class="fc" id="L68">      int newLeftBound = slideLeftStrategy().apply(leftBound);</span>
+<span class="fc bfc" id="L69" title="All 4 branches covered.">      if (newLeftBound &gt; leftBound &amp;&amp; isRowNumberInSlice(newLeftBound)) {</span>
+        // If the left side of the window changed remove the left most value from the aggregate
+        // function.
+<span class="fc" id="L72">        function.removeLeftMost();</span>
+      }
+<span class="fc" id="L74">      leftBound = newLeftBound;</span>
+
+      // Slide the right side of the window if applicable for the window definition.
+<span class="fc" id="L77">      int newRightBound = slideRightStrategy().apply(rightBound);</span>
+<span class="fc bfc" id="L78" title="All 4 branches covered.">      if (newRightBound &gt; rightBound &amp;&amp; isRowNumberInSlice(newRightBound)) {</span>
+        // If the right side of the window changed add the next value to the aggregate function.
+<span class="fc bfc" id="L80" title="All 2 branches covered.">        if (isMissing(newRightBound)) {</span>
+<span class="fc" id="L81">          function.addRightMostMissing();</span>
+        } else {
+<span class="fc" id="L83">          function.addRightMost(get(newRightBound));</span>
+        }
+      }
+<span class="fc" id="L86">      rightBound = newRightBound;</span>
+    }
+<span class="fc" id="L88">  }</span>
+
+  /**
+   * Returns the mirrored index about the center of the window. Used to convert UNBOUNDED FOLLOWING
+   * windows to UNBOUNDED PRECEDING windows.
+   */
+  int mirror(int rowNumber) {
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    if (this.mirrored) {</span>
+<span class="fc" id="L96">      return slice.rowCount() - rowNumber - 1;</span>
+    }
+<span class="fc" id="L98">    return rowNumber;</span>
+  }
+
+  /**
+   * Adds initial values to the aggregate function for the first window. E.G. ROWS BETWEEN CURRENT
+   * ROW AND 3 FOLLOWING would add the first four rows in the slice to the function.
+   */
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  private void initWindow() {
+<span class="fc" id="L107">    int leftBound = Math.max(getInitialLeftBound(), 0);</span>
+<span class="fc" id="L108">    int rightBound = Math.min(getInitialRightBound(), slice.rowCount() - 1);</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    for (int i = leftBound; i &lt;= rightBound; i++) {</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">      if (isMissing(i)) {</span>
+<span class="fc" id="L111">        function.addRightMostMissing();</span>
+      } else {
+<span class="fc" id="L113">        function.addRightMost(get(i));</span>
+      }
+    }
+<span class="fc" id="L116">  }</span>
+
+  /** Set the value in the destination column that corresponds to the row in the view. */
+  @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+  private void set(int rowNumberInSlice, Object value) {
+<span class="fc" id="L121">    destinationColumn.set(slice.mappedRowNumber(mirror(rowNumberInSlice)), value);</span>
+<span class="fc" id="L122">  }</span>
+
+  /** Get a value from the source column that corresponds to the row in the view. */
+  private Object get(int rowNumberInSlice) {
+<span class="fc" id="L126">    return sourceColumn.get(slice.mappedRowNumber(mirror(rowNumberInSlice)));</span>
+  }
+
+  /**
+   * Determine if the value in the source column that corresponds to the row in the view is missing.
+   */
+  private boolean isMissing(int rowNumberInSlice) {
+<span class="fc" id="L133">    return sourceColumn.isMissing(slice.mappedRowNumber(mirror(rowNumberInSlice)));</span>
+  }
+
+  /** Returns true of the rowNumber exists in the slice. */
+  private boolean isRowNumberInSlice(int rowNumber) {
+<span class="fc bfc" id="L138" title="All 4 branches covered.">    return rowNumber &gt;= 0 &amp;&amp; rowNumber &lt; slice.rowCount();</span>
+  }
+
+  private Function&lt;Integer, Integer&gt; slideLeftStrategy() {
+<span class="pc bpc" id="L142" title="1 of 3 branches missed.">    switch (this.windowGrowthType) {</span>
+      case FIXED:
+      case FIXED_LEFT:
+<span class="fc" id="L145">        return i -&gt; i;</span>
+      case SLIDING:
+<span class="fc" id="L147">        return i -&gt; i + 1;</span>
+    }
+<span class="nc" id="L149">    throw new RuntimeException(&quot;Unexpected growthType: &quot; + this.windowGrowthType);</span>
+  }
+
+  private Function&lt;Integer, Integer&gt; slideRightStrategy() {
+<span class="pc bpc" id="L153" title="1 of 3 branches missed.">    switch (this.windowGrowthType) {</span>
+      case FIXED:
+<span class="fc" id="L155">        return i -&gt; i;</span>
+      case FIXED_LEFT:
+      case SLIDING:
+<span class="fc" id="L158">        return i -&gt; i + 1;</span>
+    }
+<span class="nc" id="L160">    throw new RuntimeException(&quot;Unexpected growthType: &quot; + this.windowGrowthType);</span>
+  }
+
+  private int getInitialLeftBound() {
+    // is zero for FIXED and FIXED_LEFT windows.
+<span class="fc" id="L165">    return this.initialLeftBound;</span>
+  }
+
+  private int getInitialRightBound() {
+<span class="pc bpc" id="L169" title="1 of 3 branches missed.">    switch (this.windowGrowthType) {</span>
+      case FIXED:
+<span class="fc" id="L171">        return slice.rowCount() - 1;</span>
+      case FIXED_LEFT:
+      case SLIDING:
+<span class="fc" id="L174">        return this.initialRightBound;</span>
+    }
+<span class="nc" id="L176">    throw new RuntimeException(&quot;Unexpected growthType: &quot; + this.windowGrowthType);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

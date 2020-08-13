@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CancelDebuggingListenableFuture.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.future</a> &gt; <span class="el_source">CancelDebuggingListenableFuture.java</span></div><h1>CancelDebuggingListenableFuture.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.future;
+
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.SuppressedStackRuntimeException;
+
+/**
+ * Wrapper for a {@link ListenableFuture} to provide enhanced features for debugging the state at 
+ * which at which it was canceled.  When a cancel request comes in this class will attempt to 
+ * record the stack trace of the delegateFuture.  If it then cancels, and is able to get a stack 
+ * trace from the processing thread at time of cancellation, then any requests to {@link #get()} 
+ * that result in a {@link CancellationException}, the exception will have a cause of 
+ * {@link FutureProcessingStack} with the previous stack trace included.
+ *
+ * @since 5.28
+ * @param &lt;T&gt; Type of result provided by this ListenableFuture
+ */
+public class CancelDebuggingListenableFuture&lt;T&gt; implements ListenableFuture&lt;T&gt; {
+  private final ListenableFuture&lt;T&gt; delegateFuture;
+  private StackTraceElement[] cancelStack;
+  
+  /**
+   * Construct a new {@link CancelDebuggingListenableFuture} by wrapping the provided future.
+   * 
+   * @param delegateFuture A non-null future to wrap
+   */
+<span class="fc" id="L33">  public CancelDebuggingListenableFuture(ListenableFuture&lt;T&gt; delegateFuture) {</span>
+<span class="fc" id="L34">    ArgumentVerifier.assertNotNull(delegateFuture, &quot;delegateFuture&quot;);</span>
+    
+<span class="fc" id="L36">    this.delegateFuture = delegateFuture;</span>
+<span class="fc" id="L37">    cancelStack = null;</span>
+<span class="fc" id="L38">  }</span>
+
+  @Override
+  public boolean cancel(boolean interrupt) {
+<span class="fc" id="L42">    StackTraceElement[] cancelStack = </span>
+<span class="fc" id="L43">        delegateFuture.getRunningStackTrace();  // must get stack BEFORE cancel</span>
+<span class="pc bpc" id="L44" title="1 of 2 branches missed.">    if (delegateFuture.cancel(interrupt)) {</span>
+<span class="fc" id="L45">      this.cancelStack = cancelStack;</span>
+<span class="fc" id="L46">      return true;</span>
+    } else {
+<span class="nc" id="L48">      return false;</span>
+    }
+  }
+
+  @Override
+  public T get() throws InterruptedException, ExecutionException {
+    try {
+<span class="nc" id="L55">      return delegateFuture.get();</span>
+<span class="fc" id="L56">    } catch (CancellationException e) {</span>
+<span class="fc" id="L57">      prepareCancellationException(e);</span>
+<span class="fc" id="L58">      throw e;</span>
+    }
+  }
+
+  @Override
+  public T get(long arg0, TimeUnit arg1) throws InterruptedException, ExecutionException,
+                                                TimeoutException {
+    try {
+<span class="nc" id="L66">      return delegateFuture.get(arg0, arg1);</span>
+<span class="nc" id="L67">    } catch (CancellationException e) {</span>
+<span class="nc" id="L68">      prepareCancellationException(e);</span>
+<span class="nc" id="L69">      throw e;</span>
+    }
+  }
+  
+  private void prepareCancellationException(CancellationException e) {
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    if (cancelStack != null) {</span>
+<span class="fc" id="L75">      Throwable rootCause = ExceptionUtils.getRootCause(e);</span>
+<span class="fc" id="L76">      rootCause.initCause(new FutureProcessingStack(cancelStack));</span>
+    }
+<span class="fc" id="L78">  }</span>
+
+  @Override
+  public boolean isCancelled() {
+<span class="nc" id="L82">    return delegateFuture.isCancelled();</span>
+  }
+
+  @Override
+  public boolean isDone() {
+<span class="nc" id="L87">    return delegateFuture.isDone();</span>
+  }
+
+  @Override
+  public void addListener(Runnable listener, Executor executor,
+                          ListenerOptimizationStrategy optimizeExecution) {
+<span class="nc" id="L93">    delegateFuture.addListener(listener, executor, optimizeExecution);</span>
+<span class="nc" id="L94">  }</span>
+
+  @Override
+  public StackTraceElement[] getRunningStackTrace() {
+<span class="nc" id="L98">    return delegateFuture.getRunningStackTrace();</span>
+  }
+  
+  /**
+   * Throwable that is not thrown, but instead added as a cause to indicate the processing stack 
+   * trace at the time of cancellation.
+   */
+  public static class FutureProcessingStack extends SuppressedStackRuntimeException {
+    private static final long serialVersionUID = 5326874345871027481L;
+
+<span class="fc" id="L108">    protected FutureProcessingStack(StackTraceElement[] cancelStack) {</span>
+<span class="fc" id="L109">      this.setStackTrace(cancelStack);</span>
+<span class="fc" id="L110">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

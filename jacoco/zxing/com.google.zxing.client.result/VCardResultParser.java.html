@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>VCardResultParser.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.client.result</a> &gt; <span class="el_source">VCardResultParser.java</span></div><h1>VCardResultParser.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.client.result;
+
+import com.google.zxing.Result;
+
+import java.io.ByteArrayOutputStream;
+import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Parses contact information formatted according to the VCard (2.1) format. This is not a complete
+ * implementation but should parse information as commonly encoded in 2D barcodes.
+ *
+ * @author Sean Owen
+ */
+<span class="fc" id="L37">public final class VCardResultParser extends ResultParser {</span>
+
+<span class="fc" id="L39">  private static final Pattern BEGIN_VCARD = Pattern.compile(&quot;BEGIN:VCARD&quot;, Pattern.CASE_INSENSITIVE);</span>
+<span class="fc" id="L40">  private static final Pattern VCARD_LIKE_DATE = Pattern.compile(&quot;\\d{4}-?\\d{2}-?\\d{2}&quot;);</span>
+<span class="fc" id="L41">  private static final Pattern CR_LF_SPACE_TAB = Pattern.compile(&quot;\r\n[ \t]&quot;);</span>
+<span class="fc" id="L42">  private static final Pattern NEWLINE_ESCAPE = Pattern.compile(&quot;\\\\[nN]&quot;);</span>
+<span class="fc" id="L43">  private static final Pattern VCARD_ESCAPES = Pattern.compile(&quot;\\\\([,;\\\\])&quot;);</span>
+<span class="fc" id="L44">  private static final Pattern EQUALS = Pattern.compile(&quot;=&quot;);</span>
+<span class="fc" id="L45">  private static final Pattern SEMICOLON = Pattern.compile(&quot;;&quot;);</span>
+<span class="fc" id="L46">  private static final Pattern UNESCAPED_SEMICOLONS = Pattern.compile(&quot;(?&lt;!\\\\);+&quot;);</span>
+<span class="fc" id="L47">  private static final Pattern COMMA = Pattern.compile(&quot;,&quot;);</span>
+<span class="fc" id="L48">  private static final Pattern SEMICOLON_OR_COMMA = Pattern.compile(&quot;[;,]&quot;);</span>
+
+  @Override
+  public AddressBookParsedResult parse(Result result) {
+    // Although we should insist on the raw text ending with &quot;END:VCARD&quot;, there's no reason
+    // to throw out everything else we parsed just because this was omitted. In fact, Eclair
+    // is doing just that, and we can't parse its contacts without this leniency.
+<span class="fc" id="L55">    String rawText = getMassagedText(result);</span>
+<span class="fc" id="L56">    Matcher m = BEGIN_VCARD.matcher(rawText);</span>
+<span class="pc bpc" id="L57" title="1 of 4 branches missed.">    if (!m.find() || m.start() != 0) {</span>
+<span class="fc" id="L58">      return null;</span>
+    }
+<span class="fc" id="L60">    List&lt;List&lt;String&gt;&gt; names = matchVCardPrefixedField(&quot;FN&quot;, rawText, true, false);</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">    if (names == null) {</span>
+      // If no display names found, look for regular name fields and format them
+<span class="fc" id="L63">      names = matchVCardPrefixedField(&quot;N&quot;, rawText, true, false);</span>
+<span class="fc" id="L64">      formatNames(names);</span>
+    }
+<span class="fc" id="L66">    List&lt;String&gt; nicknameString = matchSingleVCardPrefixedField(&quot;NICKNAME&quot;, rawText, true, false);</span>
+<span class="pc bpc" id="L67" title="1 of 2 branches missed.">    String[] nicknames = nicknameString == null ? null : COMMA.split(nicknameString.get(0));</span>
+<span class="fc" id="L68">    List&lt;List&lt;String&gt;&gt; phoneNumbers = matchVCardPrefixedField(&quot;TEL&quot;, rawText, true, false);</span>
+<span class="fc" id="L69">    List&lt;List&lt;String&gt;&gt; emails = matchVCardPrefixedField(&quot;EMAIL&quot;, rawText, true, false);</span>
+<span class="fc" id="L70">    List&lt;String&gt; note = matchSingleVCardPrefixedField(&quot;NOTE&quot;, rawText, false, false);</span>
+<span class="fc" id="L71">    List&lt;List&lt;String&gt;&gt; addresses = matchVCardPrefixedField(&quot;ADR&quot;, rawText, true, true);</span>
+<span class="fc" id="L72">    List&lt;String&gt; org = matchSingleVCardPrefixedField(&quot;ORG&quot;, rawText, true, true);</span>
+<span class="fc" id="L73">    List&lt;String&gt; birthday = matchSingleVCardPrefixedField(&quot;BDAY&quot;, rawText, true, false);</span>
+<span class="pc bpc" id="L74" title="3 of 4 branches missed.">    if (birthday != null &amp;&amp; !isLikeVCardDate(birthday.get(0))) {</span>
+<span class="nc" id="L75">      birthday = null;</span>
+    }
+<span class="fc" id="L77">    List&lt;String&gt; title = matchSingleVCardPrefixedField(&quot;TITLE&quot;, rawText, true, false);</span>
+<span class="fc" id="L78">    List&lt;List&lt;String&gt;&gt; urls = matchVCardPrefixedField(&quot;URL&quot;, rawText, true, false);</span>
+<span class="fc" id="L79">    List&lt;String&gt; instantMessenger = matchSingleVCardPrefixedField(&quot;IMPP&quot;, rawText, true, false);</span>
+<span class="fc" id="L80">    List&lt;String&gt; geoString = matchSingleVCardPrefixedField(&quot;GEO&quot;, rawText, true, false);</span>
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">    String[] geo = geoString == null ? null : SEMICOLON_OR_COMMA.split(geoString.get(0));</span>
+<span class="pc bpc" id="L82" title="3 of 4 branches missed.">    if (geo != null &amp;&amp; geo.length != 2) {</span>
+<span class="nc" id="L83">      geo = null;</span>
+    }
+<span class="fc" id="L85">    return new AddressBookParsedResult(toPrimaryValues(names),</span>
+                                       nicknames,
+                                       null, 
+<span class="fc" id="L88">                                       toPrimaryValues(phoneNumbers), </span>
+<span class="fc" id="L89">                                       toTypes(phoneNumbers),</span>
+<span class="fc" id="L90">                                       toPrimaryValues(emails),</span>
+<span class="fc" id="L91">                                       toTypes(emails),</span>
+<span class="fc" id="L92">                                       toPrimaryValue(instantMessenger),</span>
+<span class="fc" id="L93">                                       toPrimaryValue(note),</span>
+<span class="fc" id="L94">                                       toPrimaryValues(addresses),</span>
+<span class="fc" id="L95">                                       toTypes(addresses),</span>
+<span class="fc" id="L96">                                       toPrimaryValue(org),</span>
+<span class="fc" id="L97">                                       toPrimaryValue(birthday),</span>
+<span class="fc" id="L98">                                       toPrimaryValue(title),</span>
+<span class="fc" id="L99">                                       toPrimaryValues(urls),</span>
+                                       geo);
+  }
+
+  static List&lt;List&lt;String&gt;&gt; matchVCardPrefixedField(CharSequence prefix,
+                                                    String rawText,
+                                                    boolean trim,
+                                                    boolean parseFieldDivider) {
+<span class="fc" id="L107">    List&lt;List&lt;String&gt;&gt; matches = null;</span>
+<span class="fc" id="L108">    int i = 0;</span>
+<span class="fc" id="L109">    int max = rawText.length();</span>
+
+<span class="pc bpc" id="L111" title="1 of 2 branches missed.">    while (i &lt; max) {</span>
+
+      // At start or after newline, match prefix, followed by optional metadata 
+      // (led by ;) ultimately ending in colon
+<span class="fc" id="L115">      Matcher matcher = Pattern.compile(&quot;(?:^|\n)&quot; + prefix + &quot;(?:;([^:]*))?:&quot;,</span>
+<span class="fc" id="L116">                                        Pattern.CASE_INSENSITIVE).matcher(rawText);</span>
+<span class="fc bfc" id="L117" title="All 2 branches covered.">      if (i &gt; 0) {</span>
+<span class="fc" id="L118">        i--; // Find from i-1 not i since looking at the preceding character</span>
+      }
+<span class="fc bfc" id="L120" title="All 2 branches covered.">      if (!matcher.find(i)) {</span>
+<span class="fc" id="L121">        break;</span>
+      }
+<span class="fc" id="L123">      i = matcher.end(0); // group 0 = whole pattern; end(0) is past final colon</span>
+
+<span class="fc" id="L125">      String metadataString = matcher.group(1); // group 1 = metadata substring</span>
+<span class="fc" id="L126">      List&lt;String&gt; metadata = null;</span>
+<span class="fc" id="L127">      boolean quotedPrintable = false;</span>
+<span class="fc" id="L128">      String quotedPrintableCharset = null;</span>
+<span class="fc" id="L129">      String valueType = null;</span>
+<span class="fc bfc" id="L130" title="All 2 branches covered.">      if (metadataString != null) {</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">        for (String metadatum : SEMICOLON.split(metadataString)) {</span>
+<span class="fc bfc" id="L132" title="All 2 branches covered.">          if (metadata == null) {</span>
+<span class="fc" id="L133">            metadata = new ArrayList&lt;&gt;(1);</span>
+          }
+<span class="fc" id="L135">          metadata.add(metadatum);</span>
+<span class="fc" id="L136">          String[] metadatumTokens = EQUALS.split(metadatum, 2);</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">          if (metadatumTokens.length &gt; 1) {</span>
+<span class="fc" id="L138">            String key = metadatumTokens[0];</span>
+<span class="fc" id="L139">            String value = metadatumTokens[1];</span>
+<span class="pc bpc" id="L140" title="1 of 4 branches missed.">            if (&quot;ENCODING&quot;.equalsIgnoreCase(key) &amp;&amp; &quot;QUOTED-PRINTABLE&quot;.equalsIgnoreCase(value)) {</span>
+<span class="fc" id="L141">              quotedPrintable = true;</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">            } else if (&quot;CHARSET&quot;.equalsIgnoreCase(key)) {</span>
+<span class="fc" id="L143">              quotedPrintableCharset = value;</span>
+<span class="fc bfc" id="L144" title="All 2 branches covered.">            } else if (&quot;VALUE&quot;.equalsIgnoreCase(key)) {</span>
+<span class="fc" id="L145">              valueType = value;</span>
+            }
+          }
+        }
+      }
+
+<span class="fc" id="L151">      int matchStart = i; // Found the start of a match here</span>
+
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">      while ((i = rawText.indexOf('\n', i)) &gt;= 0) { // Really, end in \r\n</span>
+<span class="pc bpc" id="L154" title="1 of 2 branches missed.">        if (i &lt; rawText.length() - 1 &amp;&amp;           // But if followed by tab or space,</span>
+<span class="fc bfc" id="L155" title="All 2 branches covered.">            (rawText.charAt(i + 1) == ' ' ||        // this is only a continuation</span>
+<span class="fc bfc" id="L156" title="All 2 branches covered.">             rawText.charAt(i + 1) == '\t')) {</span>
+<span class="fc" id="L157">          i += 2; // Skip \n and continutation whitespace</span>
+<span class="pc bpc" id="L158" title="1 of 4 branches missed.">        } else if (quotedPrintable &amp;&amp;             // If preceded by = in quoted printable</span>
+<span class="pc bpc" id="L159" title="2 of 4 branches missed.">                   ((i &gt;= 1 &amp;&amp; rawText.charAt(i - 1) == '=') || // this is a continuation</span>
+<span class="fc bfc" id="L160" title="All 2 branches covered.">                    (i &gt;= 2 &amp;&amp; rawText.charAt(i - 2) == '='))) {</span>
+<span class="fc" id="L161">          i++; // Skip \n</span>
+        } else {
+          break;
+        }
+      }
+
+<span class="pc bpc" id="L167" title="1 of 2 branches missed.">      if (i &lt; 0) {</span>
+        // No terminating end character? uh, done. Set i such that loop terminates and break
+<span class="nc" id="L169">        i = max;</span>
+<span class="pc bpc" id="L170" title="1 of 2 branches missed.">      } else if (i &gt; matchStart) {</span>
+        // found a match
+<span class="fc bfc" id="L172" title="All 2 branches covered.">        if (matches == null) {</span>
+<span class="fc" id="L173">          matches = new ArrayList&lt;&gt;(1); // lazy init</span>
+        }
+<span class="pc bpc" id="L175" title="1 of 4 branches missed.">        if (i &gt;= 1 &amp;&amp; rawText.charAt(i - 1) == '\r') {</span>
+<span class="fc" id="L176">          i--; // Back up over \r, which really should be there</span>
+        }
+<span class="fc" id="L178">        String element = rawText.substring(matchStart, i);</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">        if (trim) {</span>
+<span class="fc" id="L180">          element = element.trim();</span>
+        }
+<span class="fc bfc" id="L182" title="All 2 branches covered.">        if (quotedPrintable) {</span>
+<span class="fc" id="L183">          element = decodeQuotedPrintable(element, quotedPrintableCharset);</span>
+<span class="pc bpc" id="L184" title="1 of 2 branches missed.">          if (parseFieldDivider) {</span>
+<span class="fc" id="L185">            element = UNESCAPED_SEMICOLONS.matcher(element).replaceAll(&quot;\n&quot;).trim();</span>
+          }
+        } else {
+<span class="fc bfc" id="L188" title="All 2 branches covered.">          if (parseFieldDivider) {</span>
+<span class="fc" id="L189">            element = UNESCAPED_SEMICOLONS.matcher(element).replaceAll(&quot;\n&quot;).trim();</span>
+          }
+<span class="fc" id="L191">          element = CR_LF_SPACE_TAB.matcher(element).replaceAll(&quot;&quot;);</span>
+<span class="fc" id="L192">          element = NEWLINE_ESCAPE.matcher(element).replaceAll(&quot;\n&quot;);</span>
+<span class="fc" id="L193">          element = VCARD_ESCAPES.matcher(element).replaceAll(&quot;$1&quot;);</span>
+        }
+        // Only handle VALUE=uri specially
+<span class="fc bfc" id="L196" title="All 2 branches covered.">        if (&quot;uri&quot;.equals(valueType)) {</span>
+          // Don't actually support dereferencing URIs, but use scheme-specific part not URI
+          // as value, to support tel: and mailto:
+          try {
+<span class="fc" id="L200">            element = URI.create(element).getSchemeSpecificPart();</span>
+<span class="nc" id="L201">          } catch (IllegalArgumentException iae) {</span>
+            // ignore
+<span class="fc" id="L203">          }</span>
+        }
+<span class="fc bfc" id="L205" title="All 2 branches covered.">        if (metadata == null) {</span>
+<span class="fc" id="L206">          List&lt;String&gt; match = new ArrayList&lt;&gt;(1);</span>
+<span class="fc" id="L207">          match.add(element);</span>
+<span class="fc" id="L208">          matches.add(match);</span>
+<span class="fc" id="L209">        } else {</span>
+<span class="fc" id="L210">          metadata.add(0, element);</span>
+<span class="fc" id="L211">          matches.add(metadata);</span>
+        }
+<span class="fc" id="L213">        i++;</span>
+<span class="fc" id="L214">      } else {</span>
+<span class="nc" id="L215">        i++;</span>
+      }
+
+<span class="fc" id="L218">    }</span>
+
+<span class="fc" id="L220">    return matches;</span>
+  }
+
+  private static String decodeQuotedPrintable(CharSequence value, String charset) {
+<span class="fc" id="L224">    int length = value.length();</span>
+<span class="fc" id="L225">    StringBuilder result = new StringBuilder(length);</span>
+<span class="fc" id="L226">    ByteArrayOutputStream fragmentBuffer = new ByteArrayOutputStream();</span>
+<span class="fc bfc" id="L227" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L228">      char c = value.charAt(i);</span>
+<span class="fc bfc" id="L229" title="All 3 branches covered.">      switch (c) {</span>
+        case '\r':
+        case '\n':
+<span class="fc" id="L232">          break;</span>
+        case '=':
+<span class="pc bpc" id="L234" title="1 of 2 branches missed.">          if (i &lt; length - 2) {</span>
+<span class="fc" id="L235">            char nextChar = value.charAt(i + 1);</span>
+<span class="pc bpc" id="L236" title="1 of 4 branches missed.">            if (nextChar != '\r' &amp;&amp; nextChar != '\n') {</span>
+<span class="fc" id="L237">              char nextNextChar = value.charAt(i + 2);</span>
+<span class="fc" id="L238">              int firstDigit = parseHexDigit(nextChar);</span>
+<span class="fc" id="L239">              int secondDigit = parseHexDigit(nextNextChar);</span>
+<span class="pc bpc" id="L240" title="2 of 4 branches missed.">              if (firstDigit &gt;= 0 &amp;&amp; secondDigit &gt;= 0) {</span>
+<span class="fc" id="L241">                fragmentBuffer.write((firstDigit &lt;&lt; 4) + secondDigit);</span>
+              } // else ignore it, assume it was incorrectly encoded
+<span class="fc" id="L243">              i += 2;</span>
+            }
+<span class="fc" id="L245">          }</span>
+          break;
+        default:
+<span class="fc" id="L248">          maybeAppendFragment(fragmentBuffer, charset, result);</span>
+<span class="fc" id="L249">          result.append(c);</span>
+      }
+    }
+<span class="fc" id="L252">    maybeAppendFragment(fragmentBuffer, charset, result);</span>
+<span class="fc" id="L253">    return result.toString();</span>
+  }
+
+  private static void maybeAppendFragment(ByteArrayOutputStream fragmentBuffer,
+                                          String charset,
+                                          StringBuilder result) {
+<span class="fc bfc" id="L259" title="All 2 branches covered.">    if (fragmentBuffer.size() &gt; 0) {</span>
+<span class="fc" id="L260">      byte[] fragmentBytes = fragmentBuffer.toByteArray();</span>
+      String fragment;
+<span class="pc bpc" id="L262" title="1 of 2 branches missed.">      if (charset == null) {</span>
+<span class="nc" id="L263">        fragment = new String(fragmentBytes, StandardCharsets.UTF_8);</span>
+      } else {
+        try {
+<span class="fc" id="L266">          fragment = new String(fragmentBytes, charset);</span>
+<span class="nc" id="L267">        } catch (UnsupportedEncodingException e) {</span>
+<span class="nc" id="L268">          fragment = new String(fragmentBytes, StandardCharsets.UTF_8);</span>
+<span class="fc" id="L269">        }</span>
+      }
+<span class="fc" id="L271">      fragmentBuffer.reset();</span>
+<span class="fc" id="L272">      result.append(fragment);</span>
+    }
+<span class="fc" id="L274">  }</span>
+
+  static List&lt;String&gt; matchSingleVCardPrefixedField(CharSequence prefix,
+                                                    String rawText,
+                                                    boolean trim,
+                                                    boolean parseFieldDivider) {
+<span class="fc" id="L280">    List&lt;List&lt;String&gt;&gt; values = matchVCardPrefixedField(prefix, rawText, trim, parseFieldDivider);</span>
+<span class="pc bpc" id="L281" title="1 of 4 branches missed.">    return values == null || values.isEmpty() ? null : values.get(0);</span>
+  }
+  
+  private static String toPrimaryValue(List&lt;String&gt; list) {
+<span class="pc bpc" id="L285" title="1 of 4 branches missed.">    return list == null || list.isEmpty() ? null : list.get(0);</span>
+  }
+  
+  private static String[] toPrimaryValues(Collection&lt;List&lt;String&gt;&gt; lists) {
+<span class="pc bpc" id="L289" title="1 of 4 branches missed.">    if (lists == null || lists.isEmpty()) {</span>
+<span class="fc" id="L290">      return null;</span>
+    }
+<span class="fc" id="L292">    List&lt;String&gt; result = new ArrayList&lt;&gt;(lists.size());</span>
+<span class="fc bfc" id="L293" title="All 2 branches covered.">    for (List&lt;String&gt; list : lists) {</span>
+<span class="fc" id="L294">      String value = list.get(0);</span>
+<span class="pc bpc" id="L295" title="1 of 4 branches missed.">      if (value != null &amp;&amp; !value.isEmpty()) {</span>
+<span class="fc" id="L296">        result.add(value);</span>
+      }
+<span class="fc" id="L298">    }</span>
+<span class="fc" id="L299">    return result.toArray(EMPTY_STR_ARRAY);</span>
+  }
+  
+  private static String[] toTypes(Collection&lt;List&lt;String&gt;&gt; lists) {
+<span class="pc bpc" id="L303" title="1 of 4 branches missed.">    if (lists == null || lists.isEmpty()) {</span>
+<span class="fc" id="L304">      return null;</span>
+    }
+<span class="fc" id="L306">    List&lt;String&gt; result = new ArrayList&lt;&gt;(lists.size());</span>
+<span class="fc bfc" id="L307" title="All 2 branches covered.">    for (List&lt;String&gt; list : lists) {</span>
+<span class="fc" id="L308">      String value = list.get(0);</span>
+<span class="pc bpc" id="L309" title="1 of 4 branches missed.">      if (value != null &amp;&amp; !value.isEmpty()) {</span>
+<span class="fc" id="L310">        String type = null;</span>
+<span class="fc bfc" id="L311" title="All 2 branches covered.">        for (int i = 1; i &lt; list.size(); i++) {</span>
+<span class="fc" id="L312">          String metadatum = list.get(i);</span>
+<span class="fc" id="L313">          int equals = metadatum.indexOf('=');</span>
+<span class="fc bfc" id="L314" title="All 2 branches covered.">          if (equals &lt; 0) {</span>
+            // take the whole thing as a usable label
+<span class="fc" id="L316">            type = metadatum;</span>
+<span class="fc" id="L317">            break;</span>
+          }
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">          if (&quot;TYPE&quot;.equalsIgnoreCase(metadatum.substring(0, equals))) {</span>
+<span class="nc" id="L320">            type = metadatum.substring(equals + 1);</span>
+<span class="nc" id="L321">            break;</span>
+          }
+        }
+<span class="fc" id="L324">        result.add(type);</span>
+      }
+<span class="fc" id="L326">    }</span>
+<span class="fc" id="L327">    return result.toArray(EMPTY_STR_ARRAY);</span>
+  }
+
+  private static boolean isLikeVCardDate(CharSequence value) {
+<span class="nc bnc" id="L331" title="All 4 branches missed.">    return value == null || VCARD_LIKE_DATE.matcher(value).matches();</span>
+  }
+
+  /**
+   * Formats name fields of the form &quot;Public;John;Q.;Reverend;III&quot; into a form like
+   * &quot;Reverend John Q. Public III&quot;.
+   *
+   * @param names name values to format, in place
+   */
+  private static void formatNames(Iterable&lt;List&lt;String&gt;&gt; names) {
+<span class="fc bfc" id="L341" title="All 2 branches covered.">    if (names != null) {</span>
+<span class="fc bfc" id="L342" title="All 2 branches covered.">      for (List&lt;String&gt; list : names) {</span>
+<span class="fc" id="L343">        String name = list.get(0);</span>
+<span class="fc" id="L344">        String[] components = new String[5];</span>
+<span class="fc" id="L345">        int start = 0;</span>
+        int end;
+<span class="fc" id="L347">        int componentIndex = 0;</span>
+<span class="fc bfc" id="L348" title="All 4 branches covered.">        while (componentIndex &lt; components.length - 1 &amp;&amp; (end = name.indexOf(';', start)) &gt;= 0) {</span>
+<span class="fc" id="L349">          components[componentIndex] = name.substring(start, end);</span>
+<span class="fc" id="L350">          componentIndex++;</span>
+<span class="fc" id="L351">          start = end + 1;</span>
+        }
+<span class="fc" id="L353">        components[componentIndex] = name.substring(start);</span>
+<span class="fc" id="L354">        StringBuilder newName = new StringBuilder(100);</span>
+<span class="fc" id="L355">        maybeAppendComponent(components, 3, newName);</span>
+<span class="fc" id="L356">        maybeAppendComponent(components, 1, newName);</span>
+<span class="fc" id="L357">        maybeAppendComponent(components, 2, newName);</span>
+<span class="fc" id="L358">        maybeAppendComponent(components, 0, newName);</span>
+<span class="fc" id="L359">        maybeAppendComponent(components, 4, newName);</span>
+<span class="fc" id="L360">        list.set(0, newName.toString().trim());</span>
+<span class="fc" id="L361">      }</span>
+    }
+<span class="fc" id="L363">  }</span>
+
+  private static void maybeAppendComponent(String[] components, int i, StringBuilder newName) {
+<span class="fc bfc" id="L366" title="All 4 branches covered.">    if (components[i] != null &amp;&amp; !components[i].isEmpty()) {</span>
+<span class="fc bfc" id="L367" title="All 2 branches covered.">      if (newName.length() &gt; 0) {</span>
+<span class="fc" id="L368">        newName.append(' ');</span>
+      }
+<span class="fc" id="L370">      newName.append(components[i]);</span>
+    }
+<span class="fc" id="L372">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

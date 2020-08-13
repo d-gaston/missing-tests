@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ColumnTypeDetector.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.io</a> &gt; <span class="el_source">ColumnTypeDetector.java</span></div><h1>ColumnTypeDetector.java</h1><pre class="source lang-java linenums">package tech.tablesaw.io;
+
+import static tech.tablesaw.api.ColumnType.TEXT;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.strings.StringColumnType;
+
+public class ColumnTypeDetector {
+
+  /** Consider using TextColumn instead of StringColumn for string data after this many rows */
+  private static final int STRING_COLUMN_ROW_COUNT_CUTOFF = 50_000;
+
+  /**
+   * Use a TextColumn if at least this proportion of values are found to be unique in the type
+   * detection sample
+   *
+   * &lt;p&gt;Note: This number is based on an assumption that as more records are considered, a smaller
+   * proportion of these new records will be found to be unique
+   *
+   * &lt;p&gt;Sample calculation; 10 character string = 2 bytes * 10 + 38 extra bytes = 58; rounded up to
+   * 64 so it's a multiple of 8
+   *
+   * &lt;p&gt;With dictionary encoding, we have 2*64 + 2*4 = 136 byte per unique value plus 4 bytes for
+   * each value For text columns we have 64 bytes per string
+   *
+   * &lt;p&gt;So, if every value is unique, using dictionary encoding wastes about 70 bytes per value. If
+   * there are only two unique values, dictionary encoding saves about 62 bytes per value.
+   *
+   * &lt;p&gt;Of course, it all depends on the lengths of the strings.
+   */
+  private static final double STRING_COLUMN_CUTOFF = 0.50;
+
+  private final List&lt;ColumnType&gt; typeArray;
+
+  /**
+   * @param typeArray Types to choose from. When more than one would work, we pick the first of the
+   *     options. The order these appear in is critical. The broadest must go last, so String must
+   *     be at the end of the list. Any String read from the input will match string. If it were
+   *     first on the list, you would get nothing but strings in your table. As another example, an
+   *     integer type, should go before double. Otherwise double would match integers so the integer
+   *     test would never be evaluated and all the ints would be read as doubles.
+   */
+<span class="fc" id="L49">  public ColumnTypeDetector(List&lt;ColumnType&gt; typeArray) {</span>
+<span class="fc" id="L50">    this.typeArray = typeArray;</span>
+<span class="fc" id="L51">  }</span>
+
+  /**
+   * Estimates and returns the type for each column in the input text
+   *
+   * &lt;p&gt;The type is determined by checking a sample of the data. Because only a sample of the data
+   * is checked, the types may be incorrect. If that is the case a Parse Exception will be thrown.
+   *
+   * &lt;p&gt;The method {@code printColumnTypes()} can be used to print a list of the detected columns
+   * that can be corrected and used to explicitly specify the correct column types.
+   */
+  public ColumnType[] detectColumnTypes(Iterator&lt;String[]&gt; rows, ReadOptions options) {
+<span class="fc" id="L63">    boolean useSampling = options.sample();</span>
+
+    // to hold the results
+<span class="fc" id="L66">    List&lt;ColumnType&gt; columnTypes = new ArrayList&lt;&gt;();</span>
+
+    // to hold the data read from the file
+<span class="fc" id="L69">    List&lt;List&lt;String&gt;&gt; columnData = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L71">    int rowCount = 0; // make sure we don't go over maxRows</span>
+
+<span class="fc" id="L73">    int nextRow = 0;</span>
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    while (rows.hasNext()) {</span>
+<span class="fc" id="L75">      String[] nextLine = rows.next();</span>
+      // initialize the arrays to hold the strings. we don't know how many we need until we read the
+      // first row
+<span class="fc bfc" id="L78" title="All 2 branches covered.">      if (rowCount == 0) {</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">        for (int i = 0; i &lt; nextLine.length; i++) {</span>
+<span class="fc" id="L80">          columnData.add(new ArrayList&lt;&gt;());</span>
+        }
+      }
+<span class="fc" id="L83">      int columnNumber = 0;</span>
+<span class="fc bfc" id="L84" title="All 2 branches covered.">      if (rowCount == nextRow) {</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">        for (String field : nextLine) {</span>
+<span class="fc" id="L86">          columnData.get(columnNumber).add(field);</span>
+<span class="fc" id="L87">          columnNumber++;</span>
+        }
+<span class="fc bfc" id="L89" title="All 2 branches covered.">        if (useSampling) {</span>
+<span class="fc" id="L90">          nextRow = nextRow(nextRow);</span>
+        } else {
+<span class="fc" id="L92">          nextRow = nextRowWithoutSampling(nextRow);</span>
+        }
+      }
+<span class="fc" id="L95">      rowCount++;</span>
+<span class="fc" id="L96">    }</span>
+
+    // now detect
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    for (List&lt;String&gt; valuesList : columnData) {</span>
+<span class="fc" id="L100">      ColumnType detectedType = detectType(valuesList, options);</span>
+<span class="fc bfc" id="L101" title="All 4 branches covered.">      if (detectedType.equals(StringColumnType.STRING)</span>
+          &amp;&amp; rowCount &gt; STRING_COLUMN_ROW_COUNT_CUTOFF) {
+<span class="fc" id="L103">        HashSet&lt;String&gt; unique = new HashSet&lt;&gt;(valuesList);</span>
+<span class="fc" id="L104">        double uniquePct = unique.size() / (valuesList.size() * 1.0);</span>
+<span class="pc bpc" id="L105" title="1 of 2 branches missed.">        if (uniquePct &gt; STRING_COLUMN_CUTOFF) {</span>
+<span class="nc" id="L106">          detectedType = TEXT;</span>
+        }
+      }
+<span class="fc" id="L109">      columnTypes.add(detectedType);</span>
+<span class="fc" id="L110">    }</span>
+<span class="fc" id="L111">    return columnTypes.toArray(new ColumnType[0]);</span>
+  }
+
+  private int nextRowWithoutSampling(int nextRow) {
+<span class="fc" id="L115">    return nextRow + 1;</span>
+  }
+
+  private int nextRow(int nextRow) {
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    if (nextRow &lt; 10_000) {</span>
+<span class="fc" id="L120">      return nextRow + 1;</span>
+    }
+<span class="pc bpc" id="L122" title="1 of 2 branches missed.">    if (nextRow &lt; 100_000) {</span>
+<span class="fc" id="L123">      return nextRow + 1000;</span>
+    }
+<span class="nc bnc" id="L125" title="All 2 branches missed.">    if (nextRow &lt; 1_000_000) {</span>
+<span class="nc" id="L126">      return nextRow + 10_000;</span>
+    }
+<span class="nc bnc" id="L128" title="All 2 branches missed.">    if (nextRow &lt; 10_000_000) {</span>
+<span class="nc" id="L129">      return nextRow + 100_000;</span>
+    }
+<span class="nc bnc" id="L131" title="All 2 branches missed.">    if (nextRow &lt; 100_000_000) {</span>
+<span class="nc" id="L132">      return nextRow + 1_000_000;</span>
+    }
+<span class="nc" id="L134">    return nextRow + 10_000_000;</span>
+  }
+
+  /**
+   * Returns a predicted ColumnType derived by analyzing the given list of undifferentiated strings
+   * read from a column in the file and applying the given Locale and options
+   */
+  private ColumnType detectType(List&lt;String&gt; valuesList, ReadOptions options) {
+
+<span class="fc" id="L143">    CopyOnWriteArrayList&lt;AbstractColumnParser&lt;?&gt;&gt; parsers =</span>
+<span class="fc" id="L144">        new CopyOnWriteArrayList&lt;&gt;(getParserList(typeArray, options));</span>
+
+<span class="fc" id="L146">    CopyOnWriteArrayList&lt;ColumnType&gt; typeCandidates = new CopyOnWriteArrayList&lt;&gt;(typeArray);</span>
+
+<span class="fc" id="L148">    boolean hasNonMissingValues = false;</span>
+
+<span class="fc bfc" id="L150" title="All 2 branches covered.">    for (String s : valuesList) {</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">      for (AbstractColumnParser&lt;?&gt; parser : parsers) {</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">        if (!parser.isMissing(s)) {</span>
+<span class="fc" id="L153">          hasNonMissingValues = true;</span>
+<span class="fc bfc" id="L154" title="All 2 branches covered.">          if (!parser.canParse(s)) { // we can skip this test if we know the value is missing</span>
+<span class="fc" id="L155">            typeCandidates.remove(parser.columnType());</span>
+<span class="fc" id="L156">            parsers.remove(parser);</span>
+          }
+        }
+<span class="fc" id="L159">      }</span>
+<span class="fc" id="L160">    }</span>
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    if (hasNonMissingValues) {</span>
+<span class="fc" id="L162">      return selectType(typeCandidates);</span>
+    } else {
+      // the last type in the typeArray is the default
+<span class="fc" id="L165">      return typeArray.get(typeArray.size() - 1);</span>
+    }
+  }
+
+  /**
+   * Returns the selected candidate for a column of data, by picking the first value in the given
+   * list
+   *
+   * @param typeCandidates a possibly empty list of candidates. This list should be sorted in order
+   *     of preference
+   */
+  private ColumnType selectType(List&lt;ColumnType&gt; typeCandidates) {
+<span class="fc" id="L177">    return typeCandidates.get(0);</span>
+  }
+
+  /**
+   * Returns the list of parsers to use for type detection
+   *
+   * @param typeArray Array of column types. The order specifies the order the types are applied
+   * @param options CsvReadOptions to use to modify the default parsers for each type
+   * @return A list of parsers in the order they should be used for type detection
+   */
+  private List&lt;AbstractColumnParser&lt;?&gt;&gt; getParserList(
+      List&lt;ColumnType&gt; typeArray, ReadOptions options) {
+    // Types to choose from. When more than one would work, we pick the first of the options
+
+<span class="fc" id="L191">    List&lt;AbstractColumnParser&lt;?&gt;&gt; parsers = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">    for (ColumnType type : typeArray) {</span>
+<span class="fc" id="L193">      parsers.add(type.customParser(options));</span>
+<span class="fc" id="L194">    }</span>
+<span class="fc" id="L195">    return parsers;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

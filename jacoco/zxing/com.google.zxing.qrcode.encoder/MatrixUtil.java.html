@@ -1,0 +1,477 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MatrixUtil.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.encoder</a> &gt; <span class="el_source">MatrixUtil.java</span></div><h1>MatrixUtil.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.encoder;
+
+import com.google.zxing.WriterException;
+import com.google.zxing.common.BitArray;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
+import com.google.zxing.qrcode.decoder.Version;
+
+/**
+ * @author satorux@google.com (Satoru Takabayashi) - creator
+ * @author dswitkin@google.com (Daniel Switkin) - ported from C++
+ */
+final class MatrixUtil {
+
+<span class="fc" id="L30">  private static final int[][] POSITION_DETECTION_PATTERN = {</span>
+      {1, 1, 1, 1, 1, 1, 1},
+      {1, 0, 0, 0, 0, 0, 1},
+      {1, 0, 1, 1, 1, 0, 1},
+      {1, 0, 1, 1, 1, 0, 1},
+      {1, 0, 1, 1, 1, 0, 1},
+      {1, 0, 0, 0, 0, 0, 1},
+      {1, 1, 1, 1, 1, 1, 1},
+  };
+
+<span class="fc" id="L40">  private static final int[][] POSITION_ADJUSTMENT_PATTERN = {</span>
+      {1, 1, 1, 1, 1},
+      {1, 0, 0, 0, 1},
+      {1, 0, 1, 0, 1},
+      {1, 0, 0, 0, 1},
+      {1, 1, 1, 1, 1},
+  };
+
+  // From Appendix E. Table 1, JIS0510X:2004 (p 71). The table was double-checked by komatsu.
+<span class="fc" id="L49">  private static final int[][] POSITION_ADJUSTMENT_PATTERN_COORDINATE_TABLE = {</span>
+      {-1, -1, -1, -1,  -1,  -1,  -1},  // Version 1
+      { 6, 18, -1, -1,  -1,  -1,  -1},  // Version 2
+      { 6, 22, -1, -1,  -1,  -1,  -1},  // Version 3
+      { 6, 26, -1, -1,  -1,  -1,  -1},  // Version 4
+      { 6, 30, -1, -1,  -1,  -1,  -1},  // Version 5
+      { 6, 34, -1, -1,  -1,  -1,  -1},  // Version 6
+      { 6, 22, 38, -1,  -1,  -1,  -1},  // Version 7
+      { 6, 24, 42, -1,  -1,  -1,  -1},  // Version 8
+      { 6, 26, 46, -1,  -1,  -1,  -1},  // Version 9
+      { 6, 28, 50, -1,  -1,  -1,  -1},  // Version 10
+      { 6, 30, 54, -1,  -1,  -1,  -1},  // Version 11
+      { 6, 32, 58, -1,  -1,  -1,  -1},  // Version 12
+      { 6, 34, 62, -1,  -1,  -1,  -1},  // Version 13
+      { 6, 26, 46, 66,  -1,  -1,  -1},  // Version 14
+      { 6, 26, 48, 70,  -1,  -1,  -1},  // Version 15
+      { 6, 26, 50, 74,  -1,  -1,  -1},  // Version 16
+      { 6, 30, 54, 78,  -1,  -1,  -1},  // Version 17
+      { 6, 30, 56, 82,  -1,  -1,  -1},  // Version 18
+      { 6, 30, 58, 86,  -1,  -1,  -1},  // Version 19
+      { 6, 34, 62, 90,  -1,  -1,  -1},  // Version 20
+      { 6, 28, 50, 72,  94,  -1,  -1},  // Version 21
+      { 6, 26, 50, 74,  98,  -1,  -1},  // Version 22
+      { 6, 30, 54, 78, 102,  -1,  -1},  // Version 23
+      { 6, 28, 54, 80, 106,  -1,  -1},  // Version 24
+      { 6, 32, 58, 84, 110,  -1,  -1},  // Version 25
+      { 6, 30, 58, 86, 114,  -1,  -1},  // Version 26
+      { 6, 34, 62, 90, 118,  -1,  -1},  // Version 27
+      { 6, 26, 50, 74,  98, 122,  -1},  // Version 28
+      { 6, 30, 54, 78, 102, 126,  -1},  // Version 29
+      { 6, 26, 52, 78, 104, 130,  -1},  // Version 30
+      { 6, 30, 56, 82, 108, 134,  -1},  // Version 31
+      { 6, 34, 60, 86, 112, 138,  -1},  // Version 32
+      { 6, 30, 58, 86, 114, 142,  -1},  // Version 33
+      { 6, 34, 62, 90, 118, 146,  -1},  // Version 34
+      { 6, 30, 54, 78, 102, 126, 150},  // Version 35
+      { 6, 24, 50, 76, 102, 128, 154},  // Version 36
+      { 6, 28, 54, 80, 106, 132, 158},  // Version 37
+      { 6, 32, 58, 84, 110, 136, 162},  // Version 38
+      { 6, 26, 54, 82, 110, 138, 166},  // Version 39
+      { 6, 30, 58, 86, 114, 142, 170},  // Version 40
+  };
+
+  // Type info cells at the left top corner.
+<span class="fc" id="L93">  private static final int[][] TYPE_INFO_COORDINATES = {</span>
+      {8, 0},
+      {8, 1},
+      {8, 2},
+      {8, 3},
+      {8, 4},
+      {8, 5},
+      {8, 7},
+      {8, 8},
+      {7, 8},
+      {5, 8},
+      {4, 8},
+      {3, 8},
+      {2, 8},
+      {1, 8},
+      {0, 8},
+  };
+
+  // From Appendix D in JISX0510:2004 (p. 67)
+  private static final int VERSION_INFO_POLY = 0x1f25;  // 1 1111 0010 0101
+
+  // From Appendix C in JISX0510:2004 (p.65).
+  private static final int TYPE_INFO_POLY = 0x537;
+  private static final int TYPE_INFO_MASK_PATTERN = 0x5412;
+
+  private MatrixUtil() {
+    // do nothing
+  }
+  
+  // Set all cells to -1.  -1 means that the cell is empty (not set yet).
+  //
+  // JAVAPORT: We shouldn't need to do this at all. The code should be rewritten to begin encoding
+  // with the ByteMatrix initialized all to zero.
+  static void clearMatrix(ByteMatrix matrix) {
+<span class="fc" id="L127">    matrix.clear((byte) -1);</span>
+<span class="fc" id="L128">  }</span>
+
+  // Build 2D matrix of QR Code from &quot;dataBits&quot; with &quot;ecLevel&quot;, &quot;version&quot; and &quot;getMaskPattern&quot;. On
+  // success, store the result in &quot;matrix&quot; and return true.
+  static void buildMatrix(BitArray dataBits,
+                          ErrorCorrectionLevel ecLevel,
+                          Version version,
+                          int maskPattern,
+                          ByteMatrix matrix) throws WriterException {
+<span class="fc" id="L137">    clearMatrix(matrix);</span>
+<span class="fc" id="L138">    embedBasicPatterns(version, matrix);</span>
+    // Type information appear with any version.
+<span class="fc" id="L140">    embedTypeInfo(ecLevel, maskPattern, matrix);</span>
+    // Version info appear if version &gt;= 7.
+<span class="fc" id="L142">    maybeEmbedVersionInfo(version, matrix);</span>
+    // Data should be embedded at end.
+<span class="fc" id="L144">    embedDataBits(dataBits, maskPattern, matrix);</span>
+<span class="fc" id="L145">  }</span>
+
+  // Embed basic patterns. On success, modify the matrix and return true.
+  // The basic patterns are:
+  // - Position detection patterns
+  // - Timing patterns
+  // - Dark dot at the left bottom corner
+  // - Position adjustment patterns, if need be
+  static void embedBasicPatterns(Version version, ByteMatrix matrix) throws WriterException {
+    // Let's get started with embedding big squares at corners.
+<span class="fc" id="L155">    embedPositionDetectionPatternsAndSeparators(matrix);</span>
+    // Then, embed the dark dot at the left bottom corner.
+<span class="fc" id="L157">    embedDarkDotAtLeftBottomCorner(matrix);</span>
+
+    // Position adjustment patterns appear if version &gt;= 2.
+<span class="fc" id="L160">    maybeEmbedPositionAdjustmentPatterns(version, matrix);</span>
+    // Timing patterns should be embedded after position adj. patterns.
+<span class="fc" id="L162">    embedTimingPatterns(matrix);</span>
+<span class="fc" id="L163">  }</span>
+
+  // Embed type information. On success, modify the matrix.
+  static void embedTypeInfo(ErrorCorrectionLevel ecLevel, int maskPattern, ByteMatrix matrix)
+      throws WriterException {
+<span class="fc" id="L168">    BitArray typeInfoBits = new BitArray();</span>
+<span class="fc" id="L169">    makeTypeInfoBits(ecLevel, maskPattern, typeInfoBits);</span>
+
+<span class="fc bfc" id="L171" title="All 2 branches covered.">    for (int i = 0; i &lt; typeInfoBits.getSize(); ++i) {</span>
+      // Place bits in LSB to MSB order.  LSB (least significant bit) is the last value in
+      // &quot;typeInfoBits&quot;.
+<span class="fc" id="L174">      boolean bit = typeInfoBits.get(typeInfoBits.getSize() - 1 - i);</span>
+
+      // Type info bits at the left top corner. See 8.9 of JISX0510:2004 (p.46).
+<span class="fc" id="L177">      int[] coordinates = TYPE_INFO_COORDINATES[i];</span>
+<span class="fc" id="L178">      int x1 = coordinates[0];</span>
+<span class="fc" id="L179">      int y1 = coordinates[1];</span>
+<span class="fc" id="L180">      matrix.set(x1, y1, bit);</span>
+
+<span class="fc bfc" id="L182" title="All 2 branches covered.">      if (i &lt; 8) {</span>
+        // Right top corner.
+<span class="fc" id="L184">        int x2 = matrix.getWidth() - i - 1;</span>
+<span class="fc" id="L185">        int y2 = 8;</span>
+<span class="fc" id="L186">        matrix.set(x2, y2, bit);</span>
+<span class="fc" id="L187">      } else {</span>
+        // Left bottom corner.
+<span class="fc" id="L189">        int x2 = 8;</span>
+<span class="fc" id="L190">        int y2 = matrix.getHeight() - 7 + (i - 8);</span>
+<span class="fc" id="L191">        matrix.set(x2, y2, bit);</span>
+      }
+    }
+<span class="fc" id="L194">  }</span>
+
+  // Embed version information if need be. On success, modify the matrix and return true.
+  // See 8.10 of JISX0510:2004 (p.47) for how to embed version information.
+  static void maybeEmbedVersionInfo(Version version, ByteMatrix matrix) throws WriterException {
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    if (version.getVersionNumber() &lt; 7) {  // Version info is necessary if version &gt;= 7.</span>
+<span class="fc" id="L200">      return;  // Don't need version info.</span>
+    }
+<span class="fc" id="L202">    BitArray versionInfoBits = new BitArray();</span>
+<span class="fc" id="L203">    makeVersionInfoBits(version, versionInfoBits);</span>
+
+<span class="fc" id="L205">    int bitIndex = 6 * 3 - 1;  // It will decrease from 17 to 0.</span>
+<span class="fc bfc" id="L206" title="All 2 branches covered.">    for (int i = 0; i &lt; 6; ++i) {</span>
+<span class="fc bfc" id="L207" title="All 2 branches covered.">      for (int j = 0; j &lt; 3; ++j) {</span>
+        // Place bits in LSB (least significant bit) to MSB order.
+<span class="fc" id="L209">        boolean bit = versionInfoBits.get(bitIndex);</span>
+<span class="fc" id="L210">        bitIndex--;</span>
+        // Left bottom corner.
+<span class="fc" id="L212">        matrix.set(i, matrix.getHeight() - 11 + j, bit);</span>
+        // Right bottom corner.
+<span class="fc" id="L214">        matrix.set(matrix.getHeight() - 11 + j, i, bit);</span>
+      }
+    }
+<span class="fc" id="L217">  }</span>
+
+  // Embed &quot;dataBits&quot; using &quot;getMaskPattern&quot;. On success, modify the matrix and return true.
+  // For debugging purposes, it skips masking process if &quot;getMaskPattern&quot; is -1.
+  // See 8.7 of JISX0510:2004 (p.38) for how to embed data bits.
+  static void embedDataBits(BitArray dataBits, int maskPattern, ByteMatrix matrix)
+      throws WriterException {
+<span class="fc" id="L224">    int bitIndex = 0;</span>
+<span class="fc" id="L225">    int direction = -1;</span>
+    // Start from the right bottom cell.
+<span class="fc" id="L227">    int x = matrix.getWidth() - 1;</span>
+<span class="fc" id="L228">    int y = matrix.getHeight() - 1;</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">    while (x &gt; 0) {</span>
+      // Skip the vertical timing pattern.
+<span class="fc bfc" id="L231" title="All 2 branches covered.">      if (x == 6) {</span>
+<span class="fc" id="L232">        x -= 1;</span>
+      }
+<span class="fc bfc" id="L234" title="All 4 branches covered.">      while (y &gt;= 0 &amp;&amp; y &lt; matrix.getHeight()) {</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">        for (int i = 0; i &lt; 2; ++i) {</span>
+<span class="fc" id="L236">          int xx = x - i;</span>
+          // Skip the cell if it's not empty.
+<span class="fc bfc" id="L238" title="All 2 branches covered.">          if (!isEmpty(matrix.get(xx, y))) {</span>
+<span class="fc" id="L239">            continue;</span>
+          }
+          boolean bit;
+<span class="fc bfc" id="L242" title="All 2 branches covered.">          if (bitIndex &lt; dataBits.getSize()) {</span>
+<span class="fc" id="L243">            bit = dataBits.get(bitIndex);</span>
+<span class="fc" id="L244">            ++bitIndex;</span>
+          } else {
+            // Padding bit. If there is no bit left, we'll fill the left cells with 0, as described
+            // in 8.4.9 of JISX0510:2004 (p. 24).
+<span class="fc" id="L248">            bit = false;</span>
+          }
+
+          // Skip masking if mask_pattern is -1.
+<span class="fc bfc" id="L252" title="All 4 branches covered.">          if (maskPattern != -1 &amp;&amp; MaskUtil.getDataMaskBit(maskPattern, xx, y)) {</span>
+<span class="fc bfc" id="L253" title="All 2 branches covered.">            bit = !bit;</span>
+          }
+<span class="fc" id="L255">          matrix.set(xx, y, bit);</span>
+        }
+<span class="fc" id="L257">        y += direction;</span>
+      }
+<span class="fc" id="L259">      direction = -direction;  // Reverse the direction.</span>
+<span class="fc" id="L260">      y += direction;</span>
+<span class="fc" id="L261">      x -= 2;  // Move to the left.</span>
+    }
+    // All bits should be consumed.
+<span class="pc bpc" id="L264" title="1 of 2 branches missed.">    if (bitIndex != dataBits.getSize()) {</span>
+<span class="nc" id="L265">      throw new WriterException(&quot;Not all bits consumed: &quot; + bitIndex + '/' + dataBits.getSize());</span>
+    }
+<span class="fc" id="L267">  }</span>
+
+  // Return the position of the most significant bit set (to one) in the &quot;value&quot;. The most
+  // significant bit is position 32. If there is no bit set, return 0. Examples:
+  // - findMSBSet(0) =&gt; 0
+  // - findMSBSet(1) =&gt; 1
+  // - findMSBSet(255) =&gt; 8
+  static int findMSBSet(int value) {
+<span class="fc" id="L275">    return 32 - Integer.numberOfLeadingZeros(value);</span>
+  }
+
+  // Calculate BCH (Bose-Chaudhuri-Hocquenghem) code for &quot;value&quot; using polynomial &quot;poly&quot;. The BCH
+  // code is used for encoding type information and version information.
+  // Example: Calculation of version information of 7.
+  // f(x) is created from 7.
+  //   - 7 = 000111 in 6 bits
+  //   - f(x) = x^2 + x^1 + x^0
+  // g(x) is given by the standard (p. 67)
+  //   - g(x) = x^12 + x^11 + x^10 + x^9 + x^8 + x^5 + x^2 + 1
+  // Multiply f(x) by x^(18 - 6)
+  //   - f'(x) = f(x) * x^(18 - 6)
+  //   - f'(x) = x^14 + x^13 + x^12
+  // Calculate the remainder of f'(x) / g(x)
+  //         x^2
+  //         __________________________________________________
+  //   g(x) )x^14 + x^13 + x^12
+  //         x^14 + x^13 + x^12 + x^11 + x^10 + x^7 + x^4 + x^2
+  //         --------------------------------------------------
+  //                              x^11 + x^10 + x^7 + x^4 + x^2
+  //
+  // The remainder is x^11 + x^10 + x^7 + x^4 + x^2
+  // Encode it in binary: 110010010100
+  // The return value is 0xc94 (1100 1001 0100)
+  //
+  // Since all coefficients in the polynomials are 1 or 0, we can do the calculation by bit
+  // operations. We don't care if coefficients are positive or negative.
+  static int calculateBCHCode(int value, int poly) {
+<span class="pc bpc" id="L304" title="1 of 2 branches missed.">    if (poly == 0) {</span>
+<span class="nc" id="L305">      throw new IllegalArgumentException(&quot;0 polynomial&quot;);</span>
+    }
+    // If poly is &quot;1 1111 0010 0101&quot; (version info poly), msbSetInPoly is 13. We'll subtract 1
+    // from 13 to make it 12.
+<span class="fc" id="L309">    int msbSetInPoly = findMSBSet(poly);</span>
+<span class="fc" id="L310">    value &lt;&lt;= msbSetInPoly - 1;</span>
+    // Do the division business using exclusive-or operations.
+<span class="fc bfc" id="L312" title="All 2 branches covered.">    while (findMSBSet(value) &gt;= msbSetInPoly) {</span>
+<span class="fc" id="L313">      value ^= poly &lt;&lt; (findMSBSet(value) - msbSetInPoly);</span>
+    }
+    // Now the &quot;value&quot; is the remainder (i.e. the BCH code)
+<span class="fc" id="L316">    return value;</span>
+  }
+
+  // Make bit vector of type information. On success, store the result in &quot;bits&quot; and return true.
+  // Encode error correction level and mask pattern. See 8.9 of
+  // JISX0510:2004 (p.45) for details.
+  static void makeTypeInfoBits(ErrorCorrectionLevel ecLevel, int maskPattern, BitArray bits)
+      throws WriterException {
+<span class="pc bpc" id="L324" title="1 of 2 branches missed.">    if (!QRCode.isValidMaskPattern(maskPattern)) {</span>
+<span class="nc" id="L325">      throw new WriterException(&quot;Invalid mask pattern&quot;);</span>
+    }
+<span class="fc" id="L327">    int typeInfo = (ecLevel.getBits() &lt;&lt; 3) | maskPattern;</span>
+<span class="fc" id="L328">    bits.appendBits(typeInfo, 5);</span>
+
+<span class="fc" id="L330">    int bchCode = calculateBCHCode(typeInfo, TYPE_INFO_POLY);</span>
+<span class="fc" id="L331">    bits.appendBits(bchCode, 10);</span>
+
+<span class="fc" id="L333">    BitArray maskBits = new BitArray();</span>
+<span class="fc" id="L334">    maskBits.appendBits(TYPE_INFO_MASK_PATTERN, 15);</span>
+<span class="fc" id="L335">    bits.xor(maskBits);</span>
+
+<span class="pc bpc" id="L337" title="1 of 2 branches missed.">    if (bits.getSize() != 15) {  // Just in case.</span>
+<span class="nc" id="L338">      throw new WriterException(&quot;should not happen but we got: &quot; + bits.getSize());</span>
+    }
+<span class="fc" id="L340">  }</span>
+
+  // Make bit vector of version information. On success, store the result in &quot;bits&quot; and return true.
+  // See 8.10 of JISX0510:2004 (p.45) for details.
+  static void makeVersionInfoBits(Version version, BitArray bits) throws WriterException {
+<span class="fc" id="L345">    bits.appendBits(version.getVersionNumber(), 6);</span>
+<span class="fc" id="L346">    int bchCode = calculateBCHCode(version.getVersionNumber(), VERSION_INFO_POLY);</span>
+<span class="fc" id="L347">    bits.appendBits(bchCode, 12);</span>
+
+<span class="pc bpc" id="L349" title="1 of 2 branches missed.">    if (bits.getSize() != 18) {  // Just in case.</span>
+<span class="nc" id="L350">      throw new WriterException(&quot;should not happen but we got: &quot; + bits.getSize());</span>
+    }
+<span class="fc" id="L352">  }</span>
+
+  // Check if &quot;value&quot; is empty.
+  private static boolean isEmpty(int value) {
+<span class="fc bfc" id="L356" title="All 2 branches covered.">    return value == -1;</span>
+  }
+
+  private static void embedTimingPatterns(ByteMatrix matrix) {
+    // -8 is for skipping position detection patterns (size 7), and two horizontal/vertical
+    // separation patterns (size 1). Thus, 8 = 7 + 1.
+<span class="fc bfc" id="L362" title="All 2 branches covered.">    for (int i = 8; i &lt; matrix.getWidth() - 8; ++i) {</span>
+<span class="fc" id="L363">      int bit = (i + 1) % 2;</span>
+      // Horizontal line.
+<span class="fc bfc" id="L365" title="All 2 branches covered.">      if (isEmpty(matrix.get(i, 6))) {</span>
+<span class="fc" id="L366">        matrix.set(i, 6, bit);</span>
+      }
+      // Vertical line.
+<span class="fc bfc" id="L369" title="All 2 branches covered.">      if (isEmpty(matrix.get(6, i))) {</span>
+<span class="fc" id="L370">        matrix.set(6, i, bit);</span>
+      }
+    }
+<span class="fc" id="L373">  }</span>
+
+  // Embed the lonely dark dot at left bottom corner. JISX0510:2004 (p.46)
+  private static void embedDarkDotAtLeftBottomCorner(ByteMatrix matrix) throws WriterException {
+<span class="pc bpc" id="L377" title="1 of 2 branches missed.">    if (matrix.get(8, matrix.getHeight() - 8) == 0) {</span>
+<span class="nc" id="L378">      throw new WriterException();</span>
+    }
+<span class="fc" id="L380">    matrix.set(8, matrix.getHeight() - 8, 1);</span>
+<span class="fc" id="L381">  }</span>
+
+  private static void embedHorizontalSeparationPattern(int xStart,
+                                                       int yStart,
+                                                       ByteMatrix matrix) throws WriterException {
+<span class="fc bfc" id="L386" title="All 2 branches covered.">    for (int x = 0; x &lt; 8; ++x) {</span>
+<span class="pc bpc" id="L387" title="1 of 2 branches missed.">      if (!isEmpty(matrix.get(xStart + x, yStart))) {</span>
+<span class="nc" id="L388">        throw new WriterException();</span>
+      }
+<span class="fc" id="L390">      matrix.set(xStart + x, yStart, 0);</span>
+    }
+<span class="fc" id="L392">  }</span>
+
+  private static void embedVerticalSeparationPattern(int xStart,
+                                                     int yStart,
+                                                     ByteMatrix matrix) throws WriterException {
+<span class="fc bfc" id="L397" title="All 2 branches covered.">    for (int y = 0; y &lt; 7; ++y) {</span>
+<span class="pc bpc" id="L398" title="1 of 2 branches missed.">      if (!isEmpty(matrix.get(xStart, yStart + y))) {</span>
+<span class="nc" id="L399">        throw new WriterException();</span>
+      }
+<span class="fc" id="L401">      matrix.set(xStart, yStart + y, 0);</span>
+    }
+<span class="fc" id="L403">  }</span>
+
+  private static void embedPositionAdjustmentPattern(int xStart, int yStart, ByteMatrix matrix) {
+<span class="fc bfc" id="L406" title="All 2 branches covered.">    for (int y = 0; y &lt; 5; ++y) {</span>
+<span class="fc" id="L407">      int[] patternY = POSITION_ADJUSTMENT_PATTERN[y];</span>
+<span class="fc bfc" id="L408" title="All 2 branches covered.">      for (int x = 0; x &lt; 5; ++x) {</span>
+<span class="fc" id="L409">        matrix.set(xStart + x, yStart + y, patternY[x]);</span>
+      }
+    }
+<span class="fc" id="L412">  }</span>
+
+  private static void embedPositionDetectionPattern(int xStart, int yStart, ByteMatrix matrix) {
+<span class="fc bfc" id="L415" title="All 2 branches covered.">    for (int y = 0; y &lt; 7; ++y) {</span>
+<span class="fc" id="L416">      int[] patternY = POSITION_DETECTION_PATTERN[y];</span>
+<span class="fc bfc" id="L417" title="All 2 branches covered.">      for (int x = 0; x &lt; 7; ++x) {</span>
+<span class="fc" id="L418">        matrix.set(xStart + x, yStart + y, patternY[x]);</span>
+      }
+    }
+<span class="fc" id="L421">  }</span>
+
+  // Embed position detection patterns and surrounding vertical/horizontal separators.
+  private static void embedPositionDetectionPatternsAndSeparators(ByteMatrix matrix) throws WriterException {
+    // Embed three big squares at corners.
+<span class="fc" id="L426">    int pdpWidth = POSITION_DETECTION_PATTERN[0].length;</span>
+    // Left top corner.
+<span class="fc" id="L428">    embedPositionDetectionPattern(0, 0, matrix);</span>
+    // Right top corner.
+<span class="fc" id="L430">    embedPositionDetectionPattern(matrix.getWidth() - pdpWidth, 0, matrix);</span>
+    // Left bottom corner.
+<span class="fc" id="L432">    embedPositionDetectionPattern(0, matrix.getWidth() - pdpWidth, matrix);</span>
+
+    // Embed horizontal separation patterns around the squares.
+<span class="fc" id="L435">    int hspWidth = 8;</span>
+    // Left top corner.
+<span class="fc" id="L437">    embedHorizontalSeparationPattern(0, hspWidth - 1, matrix);</span>
+    // Right top corner.
+<span class="fc" id="L439">    embedHorizontalSeparationPattern(matrix.getWidth() - hspWidth,</span>
+        hspWidth - 1, matrix);
+    // Left bottom corner.
+<span class="fc" id="L442">    embedHorizontalSeparationPattern(0, matrix.getWidth() - hspWidth, matrix);</span>
+
+    // Embed vertical separation patterns around the squares.
+<span class="fc" id="L445">    int vspSize = 7;</span>
+    // Left top corner.
+<span class="fc" id="L447">    embedVerticalSeparationPattern(vspSize, 0, matrix);</span>
+    // Right top corner.
+<span class="fc" id="L449">    embedVerticalSeparationPattern(matrix.getHeight() - vspSize - 1, 0, matrix);</span>
+    // Left bottom corner.
+<span class="fc" id="L451">    embedVerticalSeparationPattern(vspSize, matrix.getHeight() - vspSize,</span>
+        matrix);
+<span class="fc" id="L453">  }</span>
+
+  // Embed position adjustment patterns if need be.
+  private static void maybeEmbedPositionAdjustmentPatterns(Version version, ByteMatrix matrix) {
+<span class="fc bfc" id="L457" title="All 2 branches covered.">    if (version.getVersionNumber() &lt; 2) {  // The patterns appear if version &gt;= 2</span>
+<span class="fc" id="L458">      return;</span>
+    }
+<span class="fc" id="L460">    int index = version.getVersionNumber() - 1;</span>
+<span class="fc" id="L461">    int[] coordinates = POSITION_ADJUSTMENT_PATTERN_COORDINATE_TABLE[index];</span>
+<span class="fc bfc" id="L462" title="All 2 branches covered.">    for (int y : coordinates) {</span>
+<span class="fc bfc" id="L463" title="All 2 branches covered.">      if (y &gt;= 0) {</span>
+<span class="fc bfc" id="L464" title="All 2 branches covered.">        for (int x : coordinates) {</span>
+<span class="fc bfc" id="L465" title="All 4 branches covered.">          if (x &gt;= 0 &amp;&amp; isEmpty(matrix.get(x, y))) {</span>
+            // If the cell is unset, we embed the position adjustment pattern here.
+            // -2 is necessary since the x/y coordinates point to the center of the pattern, not the
+            // left top corner.
+<span class="fc" id="L469">            embedPositionAdjustmentPattern(x - 2, y - 2, matrix);</span>
+          }
+        }
+      }
+    }
+<span class="fc" id="L474">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

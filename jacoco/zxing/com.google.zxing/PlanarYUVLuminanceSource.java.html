@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PlanarYUVLuminanceSource.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing</a> &gt; <span class="el_source">PlanarYUVLuminanceSource.java</span></div><h1>PlanarYUVLuminanceSource.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2009 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing;
+
+/**
+ * This object extends LuminanceSource around an array of YUV data returned from the camera driver,
+ * with the option to crop to a rectangle within the full data. This can be used to exclude
+ * superfluous pixels around the perimeter and speed up decoding.
+ *
+ * It works for any pixel format where the Y channel is planar and appears first, including
+ * YCbCr_420_SP and YCbCr_422_SP.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ */
+public final class PlanarYUVLuminanceSource extends LuminanceSource {
+
+  private static final int THUMBNAIL_SCALE_FACTOR = 2;
+
+  private final byte[] yuvData;
+  private final int dataWidth;
+  private final int dataHeight;
+  private final int left;
+  private final int top;
+
+  public PlanarYUVLuminanceSource(byte[] yuvData,
+                                  int dataWidth,
+                                  int dataHeight,
+                                  int left,
+                                  int top,
+                                  int width,
+                                  int height,
+                                  boolean reverseHorizontal) {
+<span class="fc" id="L47">    super(width, height);</span>
+
+<span class="pc bpc" id="L49" title="2 of 4 branches missed.">    if (left + width &gt; dataWidth || top + height &gt; dataHeight) {</span>
+<span class="nc" id="L50">      throw new IllegalArgumentException(&quot;Crop rectangle does not fit within image data.&quot;);</span>
+    }
+
+<span class="fc" id="L53">    this.yuvData = yuvData;</span>
+<span class="fc" id="L54">    this.dataWidth = dataWidth;</span>
+<span class="fc" id="L55">    this.dataHeight = dataHeight;</span>
+<span class="fc" id="L56">    this.left = left;</span>
+<span class="fc" id="L57">    this.top = top;</span>
+<span class="pc bpc" id="L58" title="1 of 2 branches missed.">    if (reverseHorizontal) {</span>
+<span class="nc" id="L59">      reverseHorizontal(width, height);</span>
+    }
+<span class="fc" id="L61">  }</span>
+
+  @Override
+  public byte[] getRow(int y, byte[] row) {
+<span class="pc bpc" id="L65" title="2 of 4 branches missed.">    if (y &lt; 0 || y &gt;= getHeight()) {</span>
+<span class="nc" id="L66">      throw new IllegalArgumentException(&quot;Requested row is outside the image: &quot; + y);</span>
+    }
+<span class="fc" id="L68">    int width = getWidth();</span>
+<span class="pc bpc" id="L69" title="3 of 4 branches missed.">    if (row == null || row.length &lt; width) {</span>
+<span class="fc" id="L70">      row = new byte[width];</span>
+    }
+<span class="fc" id="L72">    int offset = (y + top) * dataWidth + left;</span>
+<span class="fc" id="L73">    System.arraycopy(yuvData, offset, row, 0, width);</span>
+<span class="fc" id="L74">    return row;</span>
+  }
+
+  @Override
+  public byte[] getMatrix() {
+<span class="fc" id="L79">    int width = getWidth();</span>
+<span class="fc" id="L80">    int height = getHeight();</span>
+
+    // If the caller asks for the entire underlying image, save the copy and give them the
+    // original data. The docs specifically warn that result.length must be ignored.
+<span class="pc bpc" id="L84" title="1 of 4 branches missed.">    if (width == dataWidth &amp;&amp; height == dataHeight) {</span>
+<span class="fc" id="L85">      return yuvData;</span>
+    }
+
+<span class="fc" id="L88">    int area = width * height;</span>
+<span class="fc" id="L89">    byte[] matrix = new byte[area];</span>
+<span class="fc" id="L90">    int inputOffset = top * dataWidth + left;</span>
+
+    // If the width matches the full width of the underlying data, perform a single copy.
+<span class="pc bpc" id="L93" title="1 of 2 branches missed.">    if (width == dataWidth) {</span>
+<span class="nc" id="L94">      System.arraycopy(yuvData, inputOffset, matrix, 0, area);</span>
+<span class="nc" id="L95">      return matrix;</span>
+    }
+
+    // Otherwise copy one cropped row at a time.
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc" id="L100">      int outputOffset = y * width;</span>
+<span class="fc" id="L101">      System.arraycopy(yuvData, inputOffset, matrix, outputOffset, width);</span>
+<span class="fc" id="L102">      inputOffset += dataWidth;</span>
+    }
+<span class="fc" id="L104">    return matrix;</span>
+  }
+
+  @Override
+  public boolean isCropSupported() {
+<span class="fc" id="L109">    return true;</span>
+  }
+
+  @Override
+  public LuminanceSource crop(int left, int top, int width, int height) {
+<span class="nc" id="L114">    return new PlanarYUVLuminanceSource(yuvData,</span>
+                                        dataWidth,
+                                        dataHeight,
+                                        this.left + left,
+                                        this.top + top,
+                                        width,
+                                        height,
+                                        false);
+  }
+
+  public int[] renderThumbnail() {
+<span class="fc" id="L125">    int width = getWidth() / THUMBNAIL_SCALE_FACTOR;</span>
+<span class="fc" id="L126">    int height = getHeight() / THUMBNAIL_SCALE_FACTOR;</span>
+<span class="fc" id="L127">    int[] pixels = new int[width * height];</span>
+<span class="fc" id="L128">    byte[] yuv = yuvData;</span>
+<span class="fc" id="L129">    int inputOffset = top * dataWidth + left;</span>
+
+<span class="fc bfc" id="L131" title="All 2 branches covered.">    for (int y = 0; y &lt; height; y++) {</span>
+<span class="fc" id="L132">      int outputOffset = y * width;</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">      for (int x = 0; x &lt; width; x++) {</span>
+<span class="fc" id="L134">        int grey = yuv[inputOffset + x * THUMBNAIL_SCALE_FACTOR] &amp; 0xff;</span>
+<span class="fc" id="L135">        pixels[outputOffset + x] = 0xFF000000 | (grey * 0x00010101);</span>
+      }
+<span class="fc" id="L137">      inputOffset += dataWidth * THUMBNAIL_SCALE_FACTOR;</span>
+    }
+<span class="fc" id="L139">    return pixels;</span>
+  }
+
+  /**
+   * @return width of image from {@link #renderThumbnail()}
+   */
+  public int getThumbnailWidth() {
+<span class="nc" id="L146">    return getWidth() / THUMBNAIL_SCALE_FACTOR;</span>
+  }
+
+  /**
+   * @return height of image from {@link #renderThumbnail()}
+   */
+  public int getThumbnailHeight() {
+<span class="nc" id="L153">    return getHeight() / THUMBNAIL_SCALE_FACTOR;</span>
+  }
+
+  private void reverseHorizontal(int width, int height) {
+<span class="nc" id="L157">    byte[] yuvData = this.yuvData;</span>
+<span class="nc bnc" id="L158" title="All 2 branches missed.">    for (int y = 0, rowStart = top * dataWidth + left; y &lt; height; y++, rowStart += dataWidth) {</span>
+<span class="nc" id="L159">      int middle = rowStart + width / 2;</span>
+<span class="nc bnc" id="L160" title="All 2 branches missed.">      for (int x1 = rowStart, x2 = rowStart + width - 1; x1 &lt; middle; x1++, x2--) {</span>
+<span class="nc" id="L161">        byte temp = yuvData[x1];</span>
+<span class="nc" id="L162">        yuvData[x1] = yuvData[x2];</span>
+<span class="nc" id="L163">        yuvData[x2] = temp;</span>
+      }
+    }
+<span class="nc" id="L166">  }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

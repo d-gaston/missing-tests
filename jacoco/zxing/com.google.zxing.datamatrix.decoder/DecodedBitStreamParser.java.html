@@ -1,0 +1,526 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DecodedBitStreamParser.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.datamatrix.decoder</a> &gt; <span class="el_source">DecodedBitStreamParser.java</span></div><h1>DecodedBitStreamParser.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.datamatrix.decoder;
+
+import com.google.zxing.FormatException;
+import com.google.zxing.common.BitSource;
+import com.google.zxing.common.DecoderResult;
+
+import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+/**
+ * &lt;p&gt;Data Matrix Codes can encode text as bits in one of several modes, and can use multiple modes
+ * in one Data Matrix Code. This class decodes the bits back into text.&lt;/p&gt;
+ *
+ * &lt;p&gt;See ISO 16022:2006, 5.2.1 - 5.2.9.2&lt;/p&gt;
+ *
+ * @author bbrown@google.com (Brian Brown)
+ * @author Sean Owen
+ */
+final class DecodedBitStreamParser {
+
+<span class="fc" id="L39">  private enum Mode {</span>
+<span class="fc" id="L40">    PAD_ENCODE, // Not really a mode</span>
+<span class="fc" id="L41">    ASCII_ENCODE,</span>
+<span class="fc" id="L42">    C40_ENCODE,</span>
+<span class="fc" id="L43">    TEXT_ENCODE,</span>
+<span class="fc" id="L44">    ANSIX12_ENCODE,</span>
+<span class="fc" id="L45">    EDIFACT_ENCODE,</span>
+<span class="fc" id="L46">    BASE256_ENCODE</span>
+  }
+
+  /**
+   * See ISO 16022:2006, Annex C Table C.1
+   * The C40 Basic Character Set (*'s used for placeholders for the shift values)
+   */
+<span class="fc" id="L53">  private static final char[] C40_BASIC_SET_CHARS = {</span>
+    '*', '*', '*', ' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
+    'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
+  };
+
+<span class="fc" id="L59">  private static final char[] C40_SHIFT2_SET_CHARS = {</span>
+    '!', '&quot;', '#', '$', '%', '&amp;', '\'', '(', ')', '*',  '+', ',', '-', '.',
+    '/', ':', ';', '&lt;', '=', '&gt;', '?',  '@', '[', '\\', ']', '^', '_'
+  };
+
+  /**
+   * See ISO 16022:2006, Annex C Table C.2
+   * The Text Basic Character Set (*'s used for placeholders for the shift values)
+   */
+<span class="fc" id="L68">  private static final char[] TEXT_BASIC_SET_CHARS = {</span>
+    '*', '*', '*', ' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
+    'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
+  };
+
+  // Shift 2 for Text is the same encoding as C40
+<span class="fc" id="L75">  private static final char[] TEXT_SHIFT2_SET_CHARS = C40_SHIFT2_SET_CHARS;</span>
+
+<span class="fc" id="L77">  private static final char[] TEXT_SHIFT3_SET_CHARS = {</span>
+    '`', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
+    'O',  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '{', '|', '}', '~', (char) 127
+  };
+
+  private DecodedBitStreamParser() {
+  }
+
+  static DecoderResult decode(byte[] bytes) throws FormatException {
+<span class="fc" id="L86">    BitSource bits = new BitSource(bytes);</span>
+<span class="fc" id="L87">    StringBuilder result = new StringBuilder(100);</span>
+<span class="fc" id="L88">    StringBuilder resultTrailer = new StringBuilder(0);</span>
+<span class="fc" id="L89">    List&lt;byte[]&gt; byteSegments = new ArrayList&lt;&gt;(1);</span>
+<span class="fc" id="L90">    Mode mode = Mode.ASCII_ENCODE;</span>
+    do {
+<span class="fc bfc" id="L92" title="All 2 branches covered.">      if (mode == Mode.ASCII_ENCODE) {</span>
+<span class="fc" id="L93">        mode = decodeAsciiSegment(bits, result, resultTrailer);</span>
+      } else {
+<span class="pc bpc" id="L95" title="1 of 6 branches missed.">        switch (mode) {</span>
+          case C40_ENCODE:
+<span class="fc" id="L97">            decodeC40Segment(bits, result);</span>
+<span class="fc" id="L98">            break;</span>
+          case TEXT_ENCODE:
+<span class="fc" id="L100">            decodeTextSegment(bits, result);</span>
+<span class="fc" id="L101">            break;</span>
+          case ANSIX12_ENCODE:
+<span class="fc" id="L103">            decodeAnsiX12Segment(bits, result);</span>
+<span class="fc" id="L104">            break;</span>
+          case EDIFACT_ENCODE:
+<span class="fc" id="L106">            decodeEdifactSegment(bits, result);</span>
+<span class="fc" id="L107">            break;</span>
+          case BASE256_ENCODE:
+<span class="fc" id="L109">            decodeBase256Segment(bits, result, byteSegments);</span>
+<span class="fc" id="L110">            break;</span>
+          default:
+<span class="nc" id="L112">            throw FormatException.getFormatInstance();</span>
+        }
+<span class="fc" id="L114">        mode = Mode.ASCII_ENCODE;</span>
+      }
+<span class="fc bfc" id="L116" title="All 4 branches covered.">    } while (mode != Mode.PAD_ENCODE &amp;&amp; bits.available() &gt; 0);</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">    if (resultTrailer.length() &gt; 0) {</span>
+<span class="nc" id="L118">      result.append(resultTrailer);</span>
+    }
+<span class="fc bfc" id="L120" title="All 2 branches covered.">    return new DecoderResult(bytes, result.toString(), byteSegments.isEmpty() ? null : byteSegments, null);</span>
+  }
+
+  /**
+   * See ISO 16022:2006, 5.2.3 and Annex C, Table C.2
+   */
+  private static Mode decodeAsciiSegment(BitSource bits,
+                                         StringBuilder result,
+                                         StringBuilder resultTrailer) throws FormatException {
+<span class="fc" id="L129">    boolean upperShift = false;</span>
+    do {
+<span class="fc" id="L131">      int oneByte = bits.readBits(8);</span>
+<span class="pc bpc" id="L132" title="1 of 2 branches missed.">      if (oneByte == 0) {</span>
+<span class="nc" id="L133">        throw FormatException.getFormatInstance();</span>
+<span class="fc bfc" id="L134" title="All 2 branches covered.">      } else if (oneByte &lt;= 128) {  // ASCII data (ASCII value + 1)</span>
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">        if (upperShift) {</span>
+<span class="nc" id="L136">          oneByte += 128;</span>
+          //upperShift = false;
+        }
+<span class="fc" id="L139">        result.append((char) (oneByte - 1));</span>
+<span class="fc" id="L140">        return Mode.ASCII_ENCODE;</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">      } else if (oneByte == 129) {  // Pad</span>
+<span class="fc" id="L142">        return Mode.PAD_ENCODE;</span>
+<span class="fc bfc" id="L143" title="All 2 branches covered.">      } else if (oneByte &lt;= 229) {  // 2-digit data 00-99 (Numeric Value + 130)</span>
+<span class="fc" id="L144">        int value = oneByte - 130;</span>
+<span class="fc bfc" id="L145" title="All 2 branches covered.">        if (value &lt; 10) { // pad with '0' for single digit values</span>
+<span class="fc" id="L146">          result.append('0');</span>
+        }
+<span class="fc" id="L148">        result.append(value);</span>
+<span class="fc" id="L149">      } else {</span>
+<span class="pc bpc" id="L150" title="7 of 12 branches missed.">        switch (oneByte) {</span>
+          case 230: // Latch to C40 encodation
+<span class="fc" id="L152">            return Mode.C40_ENCODE;</span>
+          case 231: // Latch to Base 256 encodation
+<span class="fc" id="L154">            return Mode.BASE256_ENCODE;</span>
+          case 232: // FNC1
+<span class="nc" id="L156">            result.append((char) 29); // translate as ASCII 29</span>
+<span class="nc" id="L157">            break;</span>
+          case 233: // Structured Append
+          case 234: // Reader Programming
+            // Ignore these symbols for now
+            //throw ReaderException.getInstance();
+<span class="nc" id="L162">            break;</span>
+          case 235: // Upper Shift (shift to Extended ASCII)
+<span class="nc" id="L164">            upperShift = true;</span>
+<span class="nc" id="L165">            break;</span>
+          case 236: // 05 Macro
+<span class="nc" id="L167">            result.append(&quot;[)&gt;\u001E05\u001D&quot;);</span>
+<span class="nc" id="L168">            resultTrailer.insert(0, &quot;\u001E\u0004&quot;);</span>
+<span class="nc" id="L169">            break;</span>
+          case 237: // 06 Macro
+<span class="nc" id="L171">            result.append(&quot;[)&gt;\u001E06\u001D&quot;);</span>
+<span class="nc" id="L172">            resultTrailer.insert(0, &quot;\u001E\u0004&quot;);</span>
+<span class="nc" id="L173">            break;</span>
+          case 238: // Latch to ANSI X12 encodation
+<span class="fc" id="L175">            return Mode.ANSIX12_ENCODE;</span>
+          case 239: // Latch to Text encodation
+<span class="fc" id="L177">            return Mode.TEXT_ENCODE;</span>
+          case 240: // Latch to EDIFACT encodation
+<span class="fc" id="L179">            return Mode.EDIFACT_ENCODE;</span>
+          case 241: // ECI Character
+            // TODO(bbrown): I think we need to support ECI
+            //throw ReaderException.getInstance();
+            // Ignore this symbol for now
+<span class="nc" id="L184">            break;</span>
+          default:
+            // Not to be used in ASCII encodation
+            // but work around encoders that end with 254, latch back to ASCII
+<span class="nc bnc" id="L188" title="All 4 branches missed.">            if (oneByte != 254 || bits.available() != 0) {</span>
+<span class="nc" id="L189">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+        }
+      }
+<span class="fc bfc" id="L194" title="All 2 branches covered.">    } while (bits.available() &gt; 0);</span>
+<span class="fc" id="L195">    return Mode.ASCII_ENCODE;</span>
+  }
+
+  /**
+   * See ISO 16022:2006, 5.2.5 and Annex C, Table C.1
+   */
+  private static void decodeC40Segment(BitSource bits, StringBuilder result) throws FormatException {
+    // Three C40 values are encoded in a 16-bit value as
+    // (1600 * C1) + (40 * C2) + C3 + 1
+    // TODO(bbrown): The Upper Shift with C40 doesn't work in the 4 value scenario all the time
+<span class="fc" id="L205">    boolean upperShift = false;</span>
+
+<span class="fc" id="L207">    int[] cValues = new int[3];</span>
+<span class="fc" id="L208">    int shift = 0;</span>
+
+    do {
+      // If there is only one byte left then it will be encoded as ASCII
+<span class="pc bpc" id="L212" title="1 of 2 branches missed.">      if (bits.available() == 8) {</span>
+<span class="nc" id="L213">        return;</span>
+      }
+<span class="fc" id="L215">      int firstByte = bits.readBits(8);</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">      if (firstByte == 254) {  // Unlatch codeword</span>
+<span class="fc" id="L217">        return;</span>
+      }
+
+<span class="fc" id="L220">      parseTwoBytes(firstByte, bits.readBits(8), cValues);</span>
+
+<span class="fc bfc" id="L222" title="All 2 branches covered.">      for (int i = 0; i &lt; 3; i++) {</span>
+<span class="fc" id="L223">        int cValue = cValues[i];</span>
+<span class="pc bpc" id="L224" title="3 of 5 branches missed.">        switch (shift) {</span>
+          case 0:
+<span class="fc bfc" id="L226" title="All 2 branches covered.">            if (cValue &lt; 3) {</span>
+<span class="fc" id="L227">              shift = cValue + 1;</span>
+<span class="pc bpc" id="L228" title="1 of 2 branches missed.">            } else if (cValue &lt; C40_BASIC_SET_CHARS.length) {</span>
+<span class="fc" id="L229">              char c40char = C40_BASIC_SET_CHARS[cValue];</span>
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">              if (upperShift) {</span>
+<span class="nc" id="L231">                result.append((char) (c40char + 128));</span>
+<span class="nc" id="L232">                upperShift = false;</span>
+              } else {
+<span class="fc" id="L234">                result.append(c40char);</span>
+              }
+<span class="fc" id="L236">            } else {</span>
+<span class="nc" id="L237">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          case 1:
+<span class="nc bnc" id="L241" title="All 2 branches missed.">            if (upperShift) {</span>
+<span class="nc" id="L242">              result.append((char) (cValue + 128));</span>
+<span class="nc" id="L243">              upperShift = false;</span>
+            } else {
+<span class="nc" id="L245">              result.append((char) cValue);</span>
+            }
+<span class="nc" id="L247">            shift = 0;</span>
+<span class="nc" id="L248">            break;</span>
+          case 2:
+<span class="nc bnc" id="L250" title="All 2 branches missed.">            if (cValue &lt; C40_SHIFT2_SET_CHARS.length) {</span>
+<span class="nc" id="L251">              char c40char = C40_SHIFT2_SET_CHARS[cValue];</span>
+<span class="nc bnc" id="L252" title="All 2 branches missed.">              if (upperShift) {</span>
+<span class="nc" id="L253">                result.append((char) (c40char + 128));</span>
+<span class="nc" id="L254">                upperShift = false;</span>
+              } else {
+<span class="nc" id="L256">                result.append(c40char);</span>
+              }
+<span class="nc" id="L258">            } else {</span>
+<span class="nc bnc" id="L259" title="All 3 branches missed.">              switch (cValue) {</span>
+                case 27: // FNC1
+<span class="nc" id="L261">                  result.append((char) 29); // translate as ASCII 29</span>
+<span class="nc" id="L262">                  break;</span>
+                case 30: // Upper Shift
+<span class="nc" id="L264">                  upperShift = true;</span>
+<span class="nc" id="L265">                  break;</span>
+                default:
+<span class="nc" id="L267">                  throw FormatException.getFormatInstance();</span>
+              }
+            }
+<span class="nc" id="L270">            shift = 0;</span>
+<span class="nc" id="L271">            break;</span>
+          case 3:
+<span class="pc bpc" id="L273" title="1 of 2 branches missed.">            if (upperShift) {</span>
+<span class="nc" id="L274">              result.append((char) (cValue + 224));</span>
+<span class="nc" id="L275">              upperShift = false;</span>
+            } else {
+<span class="fc" id="L277">              result.append((char) (cValue + 96));</span>
+            }
+<span class="fc" id="L279">            shift = 0;</span>
+<span class="fc" id="L280">            break;</span>
+          default:
+<span class="nc" id="L282">            throw FormatException.getFormatInstance();</span>
+        }
+      }
+<span class="pc bpc" id="L285" title="1 of 2 branches missed.">    } while (bits.available() &gt; 0);</span>
+<span class="nc" id="L286">  }</span>
+
+  /**
+   * See ISO 16022:2006, 5.2.6 and Annex C, Table C.2
+   */
+  private static void decodeTextSegment(BitSource bits, StringBuilder result) throws FormatException {
+    // Three Text values are encoded in a 16-bit value as
+    // (1600 * C1) + (40 * C2) + C3 + 1
+    // TODO(bbrown): The Upper Shift with Text doesn't work in the 4 value scenario all the time
+<span class="fc" id="L295">    boolean upperShift = false;</span>
+
+<span class="fc" id="L297">    int[] cValues = new int[3];</span>
+<span class="fc" id="L298">    int shift = 0;</span>
+    do {
+      // If there is only one byte left then it will be encoded as ASCII
+<span class="pc bpc" id="L301" title="1 of 2 branches missed.">      if (bits.available() == 8) {</span>
+<span class="nc" id="L302">        return;</span>
+      }
+<span class="fc" id="L304">      int firstByte = bits.readBits(8);</span>
+<span class="fc bfc" id="L305" title="All 2 branches covered.">      if (firstByte == 254) {  // Unlatch codeword</span>
+<span class="fc" id="L306">        return;</span>
+      }
+
+<span class="fc" id="L309">      parseTwoBytes(firstByte, bits.readBits(8), cValues);</span>
+
+<span class="fc bfc" id="L311" title="All 2 branches covered.">      for (int i = 0; i &lt; 3; i++) {</span>
+<span class="fc" id="L312">        int cValue = cValues[i];</span>
+<span class="pc bpc" id="L313" title="4 of 5 branches missed.">        switch (shift) {</span>
+          case 0:
+<span class="pc bpc" id="L315" title="1 of 2 branches missed.">            if (cValue &lt; 3) {</span>
+<span class="nc" id="L316">              shift = cValue + 1;</span>
+<span class="pc bpc" id="L317" title="1 of 2 branches missed.">            } else if (cValue &lt; TEXT_BASIC_SET_CHARS.length) {</span>
+<span class="fc" id="L318">              char textChar = TEXT_BASIC_SET_CHARS[cValue];</span>
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">              if (upperShift) {</span>
+<span class="nc" id="L320">                result.append((char) (textChar + 128));</span>
+<span class="nc" id="L321">                upperShift = false;</span>
+              } else {
+<span class="fc" id="L323">                result.append(textChar);</span>
+              }
+<span class="fc" id="L325">            } else {</span>
+<span class="nc" id="L326">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          case 1:
+<span class="nc bnc" id="L330" title="All 2 branches missed.">            if (upperShift) {</span>
+<span class="nc" id="L331">              result.append((char) (cValue + 128));</span>
+<span class="nc" id="L332">              upperShift = false;</span>
+            } else {
+<span class="nc" id="L334">              result.append((char) cValue);</span>
+            }
+<span class="nc" id="L336">            shift = 0;</span>
+<span class="nc" id="L337">            break;</span>
+          case 2:
+            // Shift 2 for Text is the same encoding as C40
+<span class="nc bnc" id="L340" title="All 2 branches missed.">            if (cValue &lt; TEXT_SHIFT2_SET_CHARS.length) {</span>
+<span class="nc" id="L341">              char textChar = TEXT_SHIFT2_SET_CHARS[cValue];</span>
+<span class="nc bnc" id="L342" title="All 2 branches missed.">              if (upperShift) {</span>
+<span class="nc" id="L343">                result.append((char) (textChar + 128));</span>
+<span class="nc" id="L344">                upperShift = false;</span>
+              } else {
+<span class="nc" id="L346">                result.append(textChar);</span>
+              }
+<span class="nc" id="L348">            } else {</span>
+<span class="nc bnc" id="L349" title="All 3 branches missed.">              switch (cValue) {</span>
+                case 27: // FNC1
+<span class="nc" id="L351">                  result.append((char) 29); // translate as ASCII 29</span>
+<span class="nc" id="L352">                  break;</span>
+                case 30: // Upper Shift
+<span class="nc" id="L354">                  upperShift = true;</span>
+<span class="nc" id="L355">                  break;</span>
+                default:
+<span class="nc" id="L357">                  throw FormatException.getFormatInstance();</span>
+              }
+            }
+<span class="nc" id="L360">            shift = 0;</span>
+<span class="nc" id="L361">            break;</span>
+          case 3:
+<span class="nc bnc" id="L363" title="All 2 branches missed.">            if (cValue &lt; TEXT_SHIFT3_SET_CHARS.length) {</span>
+<span class="nc" id="L364">              char textChar = TEXT_SHIFT3_SET_CHARS[cValue];</span>
+<span class="nc bnc" id="L365" title="All 2 branches missed.">              if (upperShift) {</span>
+<span class="nc" id="L366">                result.append((char) (textChar + 128));</span>
+<span class="nc" id="L367">                upperShift = false;</span>
+              } else {
+<span class="nc" id="L369">                result.append(textChar);</span>
+              }
+<span class="nc" id="L371">              shift = 0;</span>
+<span class="nc" id="L372">            } else {</span>
+<span class="nc" id="L373">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+          default:
+<span class="nc" id="L377">            throw FormatException.getFormatInstance();</span>
+        }
+      }
+<span class="pc bpc" id="L380" title="1 of 2 branches missed.">    } while (bits.available() &gt; 0);</span>
+<span class="nc" id="L381">  }</span>
+
+  /**
+   * See ISO 16022:2006, 5.2.7
+   */
+  private static void decodeAnsiX12Segment(BitSource bits,
+                                           StringBuilder result) throws FormatException {
+    // Three ANSI X12 values are encoded in a 16-bit value as
+    // (1600 * C1) + (40 * C2) + C3 + 1
+
+<span class="fc" id="L391">    int[] cValues = new int[3];</span>
+    do {
+      // If there is only one byte left then it will be encoded as ASCII
+<span class="pc bpc" id="L394" title="1 of 2 branches missed.">      if (bits.available() == 8) {</span>
+<span class="nc" id="L395">        return;</span>
+      }
+<span class="fc" id="L397">      int firstByte = bits.readBits(8);</span>
+<span class="fc bfc" id="L398" title="All 2 branches covered.">      if (firstByte == 254) {  // Unlatch codeword</span>
+<span class="fc" id="L399">        return;</span>
+      }
+
+<span class="fc" id="L402">      parseTwoBytes(firstByte, bits.readBits(8), cValues);</span>
+
+<span class="fc bfc" id="L404" title="All 2 branches covered.">      for (int i = 0; i &lt; 3; i++) {</span>
+<span class="fc" id="L405">        int cValue = cValues[i];</span>
+<span class="pc bpc" id="L406" title="4 of 5 branches missed.">        switch (cValue) {</span>
+          case 0: // X12 segment terminator &lt;CR&gt;
+<span class="nc" id="L408">            result.append('\r');</span>
+<span class="nc" id="L409">            break;</span>
+          case 1: // X12 segment separator *
+<span class="nc" id="L411">            result.append('*');</span>
+<span class="nc" id="L412">            break;</span>
+          case 2: // X12 sub-element separator &gt;
+<span class="nc" id="L414">            result.append('&gt;');</span>
+<span class="nc" id="L415">            break;</span>
+          case 3: // space
+<span class="nc" id="L417">            result.append(' ');</span>
+<span class="nc" id="L418">            break;</span>
+          default:
+<span class="fc bfc" id="L420" title="All 2 branches covered.">            if (cValue &lt; 14) {  // 0 - 9</span>
+<span class="fc" id="L421">              result.append((char) (cValue + 44));</span>
+<span class="pc bpc" id="L422" title="1 of 2 branches missed.">            } else if (cValue &lt; 40) {  // A - Z</span>
+<span class="fc" id="L423">              result.append((char) (cValue + 51));</span>
+            } else {
+<span class="nc" id="L425">              throw FormatException.getFormatInstance();</span>
+            }
+            break;
+        }
+      }
+<span class="pc bpc" id="L430" title="1 of 2 branches missed.">    } while (bits.available() &gt; 0);</span>
+<span class="nc" id="L431">  }</span>
+
+  private static void parseTwoBytes(int firstByte, int secondByte, int[] result) {
+<span class="fc" id="L434">    int fullBitValue = (firstByte &lt;&lt; 8) + secondByte - 1;</span>
+<span class="fc" id="L435">    int temp = fullBitValue / 1600;</span>
+<span class="fc" id="L436">    result[0] = temp;</span>
+<span class="fc" id="L437">    fullBitValue -= temp * 1600;</span>
+<span class="fc" id="L438">    temp = fullBitValue / 40;</span>
+<span class="fc" id="L439">    result[1] = temp;</span>
+<span class="fc" id="L440">    result[2] = fullBitValue - temp * 40;</span>
+<span class="fc" id="L441">  }</span>
+
+  /**
+   * See ISO 16022:2006, 5.2.8 and Annex C Table C.3
+   */
+  private static void decodeEdifactSegment(BitSource bits, StringBuilder result) {
+    do {
+      // If there is only two or less bytes left then it will be encoded as ASCII
+<span class="pc bpc" id="L449" title="1 of 2 branches missed.">      if (bits.available() &lt;= 16) {</span>
+<span class="nc" id="L450">        return;</span>
+      }
+
+<span class="fc bfc" id="L453" title="All 2 branches covered.">      for (int i = 0; i &lt; 4; i++) {</span>
+<span class="fc" id="L454">        int edifactValue = bits.readBits(6);</span>
+
+        // Check for the unlatch character
+<span class="fc bfc" id="L457" title="All 2 branches covered.">        if (edifactValue == 0x1F) {  // 011111</span>
+          // Read rest of byte, which should be 0, and stop
+<span class="fc" id="L459">          int bitsLeft = 8 - bits.getBitOffset();</span>
+<span class="pc bpc" id="L460" title="1 of 2 branches missed.">          if (bitsLeft != 8) {</span>
+<span class="fc" id="L461">            bits.readBits(bitsLeft);</span>
+          }
+<span class="fc" id="L463">          return;</span>
+        }
+
+<span class="pc bpc" id="L466" title="1 of 2 branches missed.">        if ((edifactValue &amp; 0x20) == 0) {  // no 1 in the leading (6th) bit</span>
+<span class="fc" id="L467">          edifactValue |= 0x40;  // Add a leading 01 to the 6 bit binary value</span>
+        }
+<span class="fc" id="L469">        result.append((char) edifactValue);</span>
+      }
+<span class="pc bpc" id="L471" title="1 of 2 branches missed.">    } while (bits.available() &gt; 0);</span>
+<span class="nc" id="L472">  }</span>
+
+  /**
+   * See ISO 16022:2006, 5.2.9 and Annex B, B.2
+   */
+  private static void decodeBase256Segment(BitSource bits,
+                                           StringBuilder result,
+                                           Collection&lt;byte[]&gt; byteSegments)
+      throws FormatException {
+    // Figure out how long the Base 256 Segment is.
+<span class="fc" id="L482">    int codewordPosition = 1 + bits.getByteOffset(); // position is 1-indexed</span>
+<span class="fc" id="L483">    int d1 = unrandomize255State(bits.readBits(8), codewordPosition++);</span>
+    int count;
+<span class="pc bpc" id="L485" title="1 of 2 branches missed.">    if (d1 == 0) {  // Read the remainder of the symbol</span>
+<span class="nc" id="L486">      count = bits.available() / 8;</span>
+<span class="pc bpc" id="L487" title="1 of 2 branches missed.">    } else if (d1 &lt; 250) {</span>
+<span class="fc" id="L488">      count = d1;</span>
+    } else {
+<span class="nc" id="L490">      count = 250 * (d1 - 249) + unrandomize255State(bits.readBits(8), codewordPosition++);</span>
+    }
+
+    // We're seeing NegativeArraySizeException errors from users.
+<span class="pc bpc" id="L494" title="1 of 2 branches missed.">    if (count &lt; 0) {</span>
+<span class="nc" id="L495">      throw FormatException.getFormatInstance();</span>
+    }
+
+<span class="fc" id="L498">    byte[] bytes = new byte[count];</span>
+<span class="fc bfc" id="L499" title="All 2 branches covered.">    for (int i = 0; i &lt; count; i++) {</span>
+      // Have seen this particular error in the wild, such as at
+      // http://www.bcgen.com/demo/IDAutomationStreamingDataMatrix.aspx?MODE=3&amp;D=Fred&amp;PFMT=3&amp;PT=F&amp;X=0.3&amp;O=0&amp;LM=0.2
+<span class="pc bpc" id="L502" title="1 of 2 branches missed.">      if (bits.available() &lt; 8) {</span>
+<span class="nc" id="L503">        throw FormatException.getFormatInstance();</span>
+      }
+<span class="fc" id="L505">      bytes[i] = (byte) unrandomize255State(bits.readBits(8), codewordPosition++);</span>
+    }
+<span class="fc" id="L507">    byteSegments.add(bytes);</span>
+    try {
+<span class="fc" id="L509">      result.append(new String(bytes, &quot;ISO8859_1&quot;));</span>
+<span class="nc" id="L510">    } catch (UnsupportedEncodingException uee) {</span>
+<span class="nc" id="L511">      throw new IllegalStateException(&quot;Platform does not support required encoding: &quot; + uee);</span>
+<span class="fc" id="L512">    }</span>
+<span class="fc" id="L513">  }</span>
+
+  /**
+   * See ISO 16022:2006, Annex B, B.2
+   */
+  private static int unrandomize255State(int randomizedBase256Codeword,
+                                          int base256CodewordPosition) {
+<span class="fc" id="L520">    int pseudoRandomNumber = ((149 * base256CodewordPosition) % 255) + 1;</span>
+<span class="fc" id="L521">    int tempVariable = randomizedBase256Codeword - pseudoRandomNumber;</span>
+<span class="fc bfc" id="L522" title="All 2 branches covered.">    return tempVariable &gt;= 0 ? tempVariable : tempVariable + 256;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

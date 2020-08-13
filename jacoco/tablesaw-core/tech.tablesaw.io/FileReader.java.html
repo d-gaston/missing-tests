@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FileReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.io</a> &gt; <span class="el_source">FileReader.java</span></div><h1>FileReader.java</h1><pre class="source lang-java linenums">package tech.tablesaw.io;
+
+import static tech.tablesaw.api.ColumnType.SKIP;
+
+import com.google.common.base.Strings;
+import com.google.common.collect.Lists;
+import com.univocity.parsers.common.AbstractParser;
+import java.io.Reader;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+
+public abstract class FileReader {
+
+  /** Constructs a CsvReader */
+<span class="fc" id="L22">  public FileReader() {}</span>
+
+  /**
+   * Returns an array containing the inferred columnTypes for the file being read, as calculated by
+   * the ColumnType inference logic. These types may not be correct.
+   */
+  public ColumnType[] getColumnTypes(
+      Reader reader, ReadOptions options, int linesToSkip, AbstractParser&lt;?&gt; parser) {
+
+<span class="fc" id="L31">    parser.beginParsing(reader);</span>
+
+<span class="fc bfc" id="L33" title="All 2 branches covered.">    for (int i = 0; i &lt; linesToSkip; i++) {</span>
+<span class="fc" id="L34">      parser.parseNext();</span>
+    }
+
+<span class="fc" id="L37">    ColumnTypeDetector detector = new ColumnTypeDetector(options.columnTypesToDetect());</span>
+
+<span class="fc" id="L39">    return detector.detectColumnTypes(</span>
+<span class="fc" id="L40">        new Iterator&lt;String[]&gt;() {</span>
+
+<span class="fc" id="L42">          String[] nextRow = parser.parseNext();</span>
+
+          @Override
+          public boolean hasNext() {
+<span class="fc bfc" id="L46" title="All 2 branches covered.">            return nextRow != null;</span>
+          }
+
+          @Override
+          public String[] next() {
+<span class="fc" id="L51">            String[] tmp = nextRow;</span>
+<span class="fc" id="L52">            nextRow = parser.parseNext();</span>
+<span class="fc" id="L53">            return tmp;</span>
+          }
+        },
+        options);
+  }
+
+  private String cleanName(String name) {
+<span class="fc" id="L60">    return name.trim();</span>
+  }
+
+  /** Returns the column names for each column in the source. */
+  public String[] getColumnNames(
+      ReadOptions options, ColumnType[] types, AbstractParser&lt;?&gt; parser) {
+<span class="fc bfc" id="L66" title="All 2 branches covered.">    if (options.header()) {</span>
+<span class="fc" id="L67">      String[] headerNames = parser.parseNext();</span>
+      // work around issue where Univocity returns null if a column has no header.
+<span class="fc bfc" id="L69" title="All 2 branches covered.">      for (int i = 0; i &lt; headerNames.length; i++) {</span>
+<span class="pc bpc" id="L70" title="1 of 2 branches missed.">        if (headerNames[i] == null) {</span>
+<span class="nc" id="L71">          headerNames[i] = &quot;C&quot; + i;</span>
+        } else {
+<span class="fc" id="L73">          headerNames[i] = headerNames[i].trim();</span>
+        }
+      }
+<span class="fc" id="L76">      return headerNames;</span>
+    } else {
+      // Placeholder column names for when the file read has no header
+<span class="fc" id="L79">      String[] headerNames = new String[types.length];</span>
+<span class="fc bfc" id="L80" title="All 2 branches covered.">      for (int i = 0; i &lt; types.length; i++) {</span>
+<span class="fc" id="L81">        headerNames[i] = &quot;C&quot; + i;</span>
+      }
+<span class="fc" id="L83">      return headerNames;</span>
+    }
+  }
+
+  protected Table parseRows(
+      ReadOptions options,
+      boolean headerOnly,
+      Reader reader,
+      ColumnType[] types,
+      AbstractParser&lt;?&gt; parser) {
+<span class="fc" id="L93">    parser.beginParsing(reader);</span>
+<span class="fc" id="L94">    Table table = Table.create(options.tableName());</span>
+
+<span class="fc" id="L96">    List&lt;String&gt; headerRow = Lists.newArrayList(getColumnNames(options, types, parser));</span>
+
+<span class="fc bfc" id="L98" title="All 2 branches covered.">    for (int x = 0; x &lt; types.length; x++) {</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">      if (types[x] != SKIP) {</span>
+<span class="fc" id="L100">        String columnName = cleanName(headerRow.get(x));</span>
+<span class="pc bpc" id="L101" title="1 of 2 branches missed.">        if (Strings.isNullOrEmpty(columnName)) {</span>
+<span class="nc" id="L102">          columnName = &quot;Column &quot; + table.columnCount();</span>
+        }
+<span class="fc" id="L104">        Column&lt;?&gt; newColumn = types[x].create(columnName);</span>
+<span class="fc" id="L105">        table.addColumns(newColumn);</span>
+      }
+    }
+
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    if (!headerOnly) {</span>
+<span class="fc" id="L110">      String[] columnNames = selectColumnNames(headerRow, types);</span>
+<span class="fc" id="L111">      int[] columnIndexes = new int[columnNames.length];</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">      for (int i = 0; i &lt; columnIndexes.length; i++) {</span>
+        // get the index in the original table, which includes skipped fields
+<span class="fc" id="L114">        columnIndexes[i] = headerRow.indexOf(columnNames[i]);</span>
+      }
+<span class="fc" id="L116">      addRows(options, types, parser, table, columnIndexes);</span>
+    }
+
+<span class="fc" id="L119">    return table;</span>
+  }
+
+  private void addRows(
+      ReadOptions options,
+      ColumnType[] types,
+      AbstractParser&lt;?&gt; reader,
+      Table table,
+      int[] columnIndexes) {
+    String[] nextLine;
+
+<span class="fc" id="L130">    Map&lt;String, AbstractColumnParser&lt;?&gt;&gt; parserMap = getParserMap(options, table);</span>
+
+    // Add the rows
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    for (long rowNumber = options.header() ? 1L : 0L;</span>
+<span class="fc bfc" id="L134" title="All 2 branches covered.">        (nextLine = reader.parseNext()) != null;</span>
+<span class="fc" id="L135">        rowNumber++) {</span>
+      // validation
+<span class="fc bfc" id="L137" title="All 2 branches covered.">      if (nextLine.length &lt; types.length) {</span>
+<span class="pc bpc" id="L138" title="3 of 4 branches missed.">        if (nextLine.length == 1 &amp;&amp; Strings.isNullOrEmpty(nextLine[0])) {</span>
+<span class="nc" id="L139">          System.err.println(&quot;Warning: Invalid file. Row &quot; + rowNumber + &quot; is empty. Continuing.&quot;);</span>
+<span class="nc" id="L140">          continue;</span>
+        } else {
+<span class="fc" id="L142">          Exception e =</span>
+              new IndexOutOfBoundsException(
+                  &quot;Row number &quot;
+                      + rowNumber
+                      + &quot; contains &quot;
+                      + nextLine.length
+                      + &quot; columns. &quot;
+                      + types.length
+                      + &quot; expected.&quot;);
+<span class="fc" id="L151">          throw new AddCellToColumnException(e, 0, rowNumber, table.columnNames(), nextLine);</span>
+        }
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">      } else if (nextLine.length &gt; types.length) {</span>
+<span class="nc" id="L154">        throw new IllegalArgumentException(</span>
+            &quot;Row number &quot;
+                + rowNumber
+                + &quot; contains &quot;
+                + nextLine.length
+                + &quot; columns. &quot;
+                + types.length
+                + &quot; expected.&quot;);
+      }
+
+      // append each column that we're including (not skipping)
+<span class="fc" id="L165">      int cellIndex = 0;</span>
+<span class="fc bfc" id="L166" title="All 2 branches covered.">      for (int columnIndex : columnIndexes) {</span>
+<span class="fc" id="L167">        Column&lt;?&gt; column = table.column(cellIndex);</span>
+<span class="fc" id="L168">        AbstractColumnParser&lt;?&gt; parser = parserMap.get(column.name());</span>
+        try {
+<span class="fc" id="L170">          String value = nextLine[columnIndex];</span>
+<span class="fc" id="L171">          column.appendCell(value, parser);</span>
+<span class="nc" id="L172">        } catch (Exception e) {</span>
+<span class="nc" id="L173">          throw new AddCellToColumnException(</span>
+<span class="nc" id="L174">              e, columnIndex, rowNumber, table.columnNames(), nextLine);</span>
+<span class="fc" id="L175">        }</span>
+<span class="fc" id="L176">        cellIndex++;</span>
+      }
+    }
+<span class="fc" id="L179">  }</span>
+
+  private Map&lt;String, AbstractColumnParser&lt;?&gt;&gt; getParserMap(ReadOptions options, Table table) {
+<span class="fc" id="L182">    Map&lt;String, AbstractColumnParser&lt;?&gt;&gt; parserMap = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L183" title="All 2 branches covered.">    for (Column&lt;?&gt; column : table.columns()) {</span>
+<span class="fc" id="L184">      AbstractColumnParser&lt;?&gt; parser = column.type().customParser(options);</span>
+<span class="fc" id="L185">      parserMap.put(column.name(), parser);</span>
+<span class="fc" id="L186">    }</span>
+<span class="fc" id="L187">    return parserMap;</span>
+  }
+
+  /** Reads column names from header, skipping any for which the type == SKIP */
+  private String[] selectColumnNames(List&lt;String&gt; names, ColumnType[] types) {
+<span class="fc" id="L192">    List&lt;String&gt; header = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">    for (int i = 0; i &lt; types.length; i++) {</span>
+<span class="fc bfc" id="L194" title="All 2 branches covered.">      if (types[i] != SKIP) {</span>
+<span class="fc" id="L195">        String name = names.get(i);</span>
+<span class="fc" id="L196">        name = name.trim();</span>
+<span class="fc" id="L197">        header.add(name);</span>
+      }
+    }
+<span class="fc" id="L200">    String[] result = new String[header.size()];</span>
+<span class="fc" id="L201">    return header.toArray(result);</span>
+  }
+
+  protected String getTypeString(Table structure) {
+<span class="fc" id="L205">    StringBuilder buf = new StringBuilder();</span>
+<span class="fc" id="L206">    buf.append(&quot;ColumnType[] columnTypes = {&quot;);</span>
+<span class="fc" id="L207">    buf.append(System.lineSeparator());</span>
+
+<span class="fc" id="L209">    Column&lt;?&gt; typeCol = structure.column(&quot;Column Type&quot;);</span>
+<span class="fc" id="L210">    Column&lt;?&gt; indxCol = structure.column(&quot;Index&quot;);</span>
+<span class="fc" id="L211">    Column&lt;?&gt; nameCol = structure.column(&quot;Column Name&quot;);</span>
+
+    // add the column headers
+<span class="fc" id="L214">    int typeColIndex = structure.columnIndex(typeCol);</span>
+<span class="fc" id="L215">    int indxColIndex = structure.columnIndex(indxCol);</span>
+<span class="fc" id="L216">    int nameColIndex = structure.columnIndex(nameCol);</span>
+
+<span class="fc" id="L218">    int typeColWidth = typeCol.columnWidth();</span>
+<span class="fc" id="L219">    int indxColWidth = indxCol.columnWidth();</span>
+<span class="fc" id="L220">    int nameColWidth = nameCol.columnWidth();</span>
+
+<span class="fc" id="L222">    final char padChar = ' ';</span>
+<span class="fc bfc" id="L223" title="All 2 branches covered.">    for (int r = 0; r &lt; structure.rowCount(); r++) {</span>
+<span class="fc" id="L224">      String cell = Strings.padEnd(structure.get(r, typeColIndex) + &quot;,&quot;, typeColWidth, padChar);</span>
+<span class="fc" id="L225">      buf.append(cell);</span>
+<span class="fc" id="L226">      buf.append(&quot; // &quot;);</span>
+
+<span class="fc" id="L228">      cell = Strings.padEnd(structure.getUnformatted(r, indxColIndex), indxColWidth, padChar);</span>
+<span class="fc" id="L229">      buf.append(cell);</span>
+<span class="fc" id="L230">      buf.append(' ');</span>
+
+<span class="fc" id="L232">      cell = Strings.padEnd(structure.getUnformatted(r, nameColIndex), nameColWidth, padChar);</span>
+<span class="fc" id="L233">      buf.append(cell);</span>
+<span class="fc" id="L234">      buf.append(' ');</span>
+
+<span class="fc" id="L236">      buf.append(System.lineSeparator());</span>
+    }
+<span class="fc" id="L238">    buf.append(&quot;}&quot;);</span>
+<span class="fc" id="L239">    buf.append(System.lineSeparator());</span>
+<span class="fc" id="L240">    return buf.toString();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

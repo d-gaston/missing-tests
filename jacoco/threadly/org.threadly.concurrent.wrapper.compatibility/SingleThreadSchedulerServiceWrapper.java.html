@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SingleThreadSchedulerServiceWrapper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.compatibility</a> &gt; <span class="el_source">SingleThreadSchedulerServiceWrapper.java</span></div><h1>SingleThreadSchedulerServiceWrapper.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.compatibility;
+
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
+
+import org.threadly.concurrent.SingleThreadScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.ThreadlyInternalAccessor;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.concurrent.wrapper.priority.DefaultPriorityWrapper;
+
+/**
+ * This is a wrapper for {@link SingleThreadScheduler} to be a drop in replacement for any 
+ * {@link java.util.concurrent.ScheduledExecutorService} (AKA the 
+ * {@link java.util.concurrent.ScheduledThreadPoolExecutor} 
+ * interface). It does make some performance sacrifices to adhere to this interface, but those are 
+ * pretty minimal.  The largest compromise in here is easily scheduleAtFixedRate (which you should 
+ * read the javadocs for if you need).
+ * 
+ * @since 4.6.0 (since 2.0.0 at org.threadly.concurrent)
+ */
+public class SingleThreadSchedulerServiceWrapper extends AbstractExecutorServiceWrapper {
+  protected final SingleThreadScheduler singleThreadScheduler;
+  protected final TaskPriority taskPriority;
+
+  /**
+   * Constructs a new wrapper to adhere to the 
+   * {@link java.util.concurrent.ScheduledExecutorService} interface.
+   * 
+   * @param scheduler scheduler implementation to rely on
+   */
+  public SingleThreadSchedulerServiceWrapper(SingleThreadScheduler scheduler) {
+<span class="fc" id="L35">    this(scheduler, null);</span>
+<span class="fc" id="L36">  }</span>
+  /**
+   * Constructs a new wrapper to adhere to the 
+   * {@link java.util.concurrent.ScheduledExecutorService} interface.
+   * 
+   * @param scheduler scheduler implementation to rely on
+   * @param taskPriority Priority for all tasks submitted to the parent scheduler
+   */
+  public SingleThreadSchedulerServiceWrapper(SingleThreadScheduler scheduler, 
+                                             TaskPriority taskPriority) {
+<span class="fc" id="L46">    super(DefaultPriorityWrapper.ensurePriority(scheduler, taskPriority));</span>
+    
+<span class="fc" id="L48">    this.singleThreadScheduler = scheduler;</span>
+<span class="pc bpc" id="L49" title="1 of 2 branches missed.">    this.taskPriority = taskPriority == null ? scheduler.getDefaultPriority() : taskPriority;</span>
+<span class="fc" id="L50">  }</span>
+
+  @Override
+  public void shutdown() {
+<span class="fc" id="L54">    singleThreadScheduler.shutdown();</span>
+<span class="fc" id="L55">  }</span>
+
+  @Override
+  public List&lt;Runnable&gt; shutdownNow() {
+<span class="fc" id="L59">    return singleThreadScheduler.shutdownNow();</span>
+  }
+
+  @Override
+  public boolean isTerminated() {
+<span class="fc" id="L64">    return singleThreadScheduler.isTerminated();</span>
+  }
+
+  @Override
+  public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+<span class="fc" id="L69">    return singleThreadScheduler.awaitTermination(unit.toMillis(timeout));</span>
+  }
+
+  @Override
+  protected ListenableScheduledFuture&lt;?&gt; schedule(Runnable task, long delayInMillis) {
+<span class="fc" id="L74">    ListenableFutureTask&lt;Void&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, singleThreadScheduler);</span>
+<span class="fc" id="L75">    Delayed d = ThreadlyInternalAccessor.doScheduleAndGetDelayed(singleThreadScheduler, </span>
+                                                                 lft, taskPriority, delayInMillis);
+    
+<span class="fc" id="L78">    return new ScheduledFutureDelegate&lt;&gt;(lft, d);</span>
+  }
+
+  @Override
+  protected &lt;V&gt; ListenableScheduledFuture&lt;V&gt; schedule(Callable&lt;V&gt; callable, long delayInMillis) {
+<span class="fc" id="L83">    ListenableFutureTask&lt;V&gt; lft = new ListenableFutureTask&lt;&gt;(false, callable, singleThreadScheduler);</span>
+<span class="fc" id="L84">    Delayed d = ThreadlyInternalAccessor.doScheduleAndGetDelayed(singleThreadScheduler, </span>
+                                                                 lft, taskPriority, delayInMillis);
+    
+<span class="fc" id="L87">    return new ScheduledFutureDelegate&lt;&gt;(lft, d);</span>
+  }
+
+  @Override
+  protected ListenableScheduledFuture&lt;?&gt; scheduleWithFixedDelay(Runnable task,
+                                                                long initialDelay, long delayInMillis) {
+    // wrap the task to ensure the correct behavior on exceptions
+<span class="fc" id="L94">    task = new ThrowableHandlingRecurringRunnable(scheduler, task);</span>
+    
+<span class="fc" id="L96">    ListenableFutureTask&lt;Void&gt; lft = </span>
+        new CancelRemovingListenableFutureTask&lt;&gt;(scheduler, true, task, singleThreadScheduler);
+<span class="fc" id="L98">    Delayed d = ThreadlyInternalAccessor.doScheduleWithFixedDelayAndGetDelayed(singleThreadScheduler, </span>
+                                                                               lft, taskPriority, 
+                                                                               initialDelay, 
+                                                                               delayInMillis);
+    
+<span class="fc" id="L103">    return new ScheduledFutureDelegate&lt;&gt;(lft, d);</span>
+  }
+
+  @Override
+  protected ListenableScheduledFuture&lt;?&gt; scheduleAtFixedRate(Runnable task,
+                                                             long initialDelay, long periodInMillis) {
+    // wrap the task to ensure the correct behavior on exceptions
+<span class="fc" id="L110">    task = new ThrowableHandlingRecurringRunnable(scheduler, task);</span>
+    
+<span class="fc" id="L112">    ListenableFutureTask&lt;Void&gt; lft = </span>
+        new CancelRemovingListenableFutureTask&lt;&gt;(scheduler, true, task, singleThreadScheduler);
+<span class="fc" id="L114">    Delayed d = ThreadlyInternalAccessor.doScheduleAtFixedRateAndGetDelayed(singleThreadScheduler, </span>
+                                                                            lft, taskPriority, 
+                                                                            initialDelay, 
+                                                                            periodInMillis);
+    
+<span class="fc" id="L119">    return new ScheduledFutureDelegate&lt;&gt;(lft, d);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

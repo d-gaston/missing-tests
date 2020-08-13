@@ -1,0 +1,1581 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BlockRealMatrix.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.linear</a> &gt; <span class="el_source">BlockRealMatrix.java</span></div><h1>BlockRealMatrix.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.linear;
+
+import java.io.Serializable;
+import java.util.Arrays;
+
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.NoDataException;
+import org.apache.commons.math4.exception.NotStrictlyPositiveException;
+import org.apache.commons.math4.exception.NullArgumentException;
+import org.apache.commons.math4.exception.NumberIsTooSmallException;
+import org.apache.commons.math4.exception.OutOfRangeException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.MathUtils;
+
+/**
+ * Cache-friendly implementation of RealMatrix using a flat arrays to store
+ * square blocks of the matrix.
+ * &lt;p&gt;
+ * This implementation is specially designed to be cache-friendly. Square blocks are
+ * stored as small arrays and allow efficient traversal of data both in row major direction
+ * and columns major direction, one block at a time. This greatly increases performances
+ * for algorithms that use crossed directions loops like multiplication or transposition.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * The size of square blocks is a static parameter. It may be tuned according to the cache
+ * size of the target computer processor. As a rule of thumbs, it should be the largest
+ * value that allows three blocks to be simultaneously cached (this is necessary for example
+ * for matrix multiplication). The default value is to use 52x52 blocks which is well suited
+ * for processors with 64k L1 cache (one block holds 2704 values or 21632 bytes). This value
+ * could be lowered to 36x36 for processors with 32k L1 cache.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * The regular blocks represent {@link #BLOCK_SIZE} x {@link #BLOCK_SIZE} squares. Blocks
+ * at right hand side and bottom side which may be smaller to fit matrix dimensions. The square
+ * blocks are flattened in row major order in single dimension arrays which are therefore
+ * {@link #BLOCK_SIZE}&lt;sup&gt;2&lt;/sup&gt; elements long for regular blocks. The blocks are themselves
+ * organized in row major order.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * As an example, for a block size of 52x52, a 100x60 matrix would be stored in 4 blocks.
+ * Block 0 would be a double[2704] array holding the upper left 52x52 square, block 1 would be
+ * a double[416] array holding the upper right 52x8 rectangle, block 2 would be a double[2496]
+ * array holding the lower left 48x52 rectangle and block 3 would be a double[384] array
+ * holding the lower right 48x8 rectangle.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * The layout complexity overhead versus simple mapping of matrices to java
+ * arrays is negligible for small matrices (about 1%). The gain from cache efficiency leads
+ * to up to 3-fold improvements for matrices of moderate to large size.
+ * &lt;/p&gt;
+ * @since 2.0
+ */
+public class BlockRealMatrix extends AbstractRealMatrix implements Serializable {
+    /** Block size. */
+    public static final int BLOCK_SIZE = 52;
+    /** Serializable version identifier */
+    private static final long serialVersionUID = 4991895511313664478L;
+    /** Blocks of matrix entries. */
+    private final double blocks[][];
+    /** Number of rows of the matrix. */
+    private final int rows;
+    /** Number of columns of the matrix. */
+    private final int columns;
+    /** Number of block rows of the matrix. */
+    private final int blockRows;
+    /** Number of block columns of the matrix. */
+    private final int blockColumns;
+
+    /**
+     * Create a new matrix with the supplied row and column dimensions.
+     *
+     * @param rows  the number of rows in the new matrix
+     * @param columns  the number of columns in the new matrix
+     * @throws NotStrictlyPositiveException if row or column dimension is not
+     * positive.
+     */
+    public BlockRealMatrix(final int rows, final int columns)
+        throws NotStrictlyPositiveException {
+<span class="fc" id="L97">        super(rows, columns);</span>
+<span class="fc" id="L98">        this.rows = rows;</span>
+<span class="fc" id="L99">        this.columns = columns;</span>
+
+        // number of blocks
+<span class="fc" id="L102">        blockRows = (rows + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+<span class="fc" id="L103">        blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+
+        // allocate storage blocks, taking care of smaller ones at right and bottom
+<span class="fc" id="L106">        blocks = createBlocksLayout(rows, columns);</span>
+<span class="fc" id="L107">    }</span>
+
+    /**
+     * Create a new dense matrix copying entries from raw layout data.
+     * &lt;p&gt;The input array &lt;em&gt;must&lt;/em&gt; already be in raw layout.&lt;/p&gt;
+     * &lt;p&gt;Calling this constructor is equivalent to call:
+     * &lt;pre&gt;matrix = new BlockRealMatrix(rawData.length, rawData[0].length,
+     *                                   toBlocksLayout(rawData), false);&lt;/pre&gt;
+     *
+     * @param rawData data for new matrix, in raw layout
+     * @throws DimensionMismatchException if the shape of {@code blockData} is
+     * inconsistent with block layout.
+     * @throws NotStrictlyPositiveException if row or column dimension is not
+     * positive.
+     * @see #BlockRealMatrix(int, int, double[][], boolean)
+     */
+    public BlockRealMatrix(final double[][] rawData)
+        throws DimensionMismatchException, NotStrictlyPositiveException {
+<span class="fc" id="L125">        this(rawData.length, rawData[0].length, toBlocksLayout(rawData), false);</span>
+<span class="fc" id="L126">    }</span>
+
+    /**
+     * Create a new dense matrix copying entries from block layout data.
+     * &lt;p&gt;The input array &lt;em&gt;must&lt;/em&gt; already be in blocks layout.&lt;/p&gt;
+     *
+     * @param rows Number of rows in the new matrix.
+     * @param columns Number of columns in the new matrix.
+     * @param blockData data for new matrix
+     * @param copyArray Whether the input array will be copied or referenced.
+     * @throws DimensionMismatchException if the shape of {@code blockData} is
+     * inconsistent with block layout.
+     * @throws NotStrictlyPositiveException if row or column dimension is not
+     * positive.
+     * @see #createBlocksLayout(int, int)
+     * @see #toBlocksLayout(double[][])
+     * @see #BlockRealMatrix(double[][])
+     */
+    public BlockRealMatrix(final int rows, final int columns,
+                           final double[][] blockData, final boolean copyArray)
+        throws DimensionMismatchException, NotStrictlyPositiveException {
+<span class="fc" id="L147">        super(rows, columns);</span>
+<span class="fc" id="L148">        this.rows = rows;</span>
+<span class="fc" id="L149">        this.columns = columns;</span>
+
+        // number of blocks
+<span class="fc" id="L152">        blockRows = (rows + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+<span class="fc" id="L153">        blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+
+<span class="pc bpc" id="L155" title="1 of 2 branches missed.">        if (copyArray) {</span>
+            // allocate storage blocks, taking care of smaller ones at right and bottom
+<span class="nc" id="L157">            blocks = new double[blockRows * blockColumns][];</span>
+        } else {
+            // reference existing array
+<span class="fc" id="L160">            blocks = blockData;</span>
+        }
+
+<span class="fc" id="L163">        int index = 0;</span>
+<span class="fc bfc" id="L164" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L165">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc bfc" id="L166" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock, ++index) {</span>
+<span class="pc bpc" id="L167" title="1 of 2 branches missed.">                if (blockData[index].length != iHeight * blockWidth(jBlock)) {</span>
+<span class="nc" id="L168">                    throw new DimensionMismatchException(blockData[index].length,</span>
+<span class="nc" id="L169">                                                         iHeight * blockWidth(jBlock));</span>
+                }
+<span class="pc bpc" id="L171" title="1 of 2 branches missed.">                if (copyArray) {</span>
+<span class="nc" id="L172">                    blocks[index] = blockData[index].clone();</span>
+                }
+            }
+        }
+<span class="fc" id="L176">    }</span>
+
+    /**
+     * Convert a data array from raw layout to blocks layout.
+     * &lt;p&gt;
+     * Raw layout is the straightforward layout where element at row i and
+     * column j is in array element &lt;code&gt;rawData[i][j]&lt;/code&gt;. Blocks layout
+     * is the layout used in {@link BlockRealMatrix} instances, where the matrix
+     * is split in square blocks (except at right and bottom side where blocks may
+     * be rectangular to fit matrix size) and each block is stored in a flattened
+     * one-dimensional array.
+     * &lt;/p&gt;
+     * &lt;p&gt;
+     * This method creates an array in blocks layout from an input array in raw layout.
+     * It can be used to provide the array argument of the {@link
+     * #BlockRealMatrix(int, int, double[][], boolean)} constructor.
+     * &lt;/p&gt;
+     * @param rawData Data array in raw layout.
+     * @return a new data array containing the same entries but in blocks layout.
+     * @throws DimensionMismatchException if {@code rawData} is not rectangular.
+     * @see #createBlocksLayout(int, int)
+     * @see #BlockRealMatrix(int, int, double[][], boolean)
+     */
+    public static double[][] toBlocksLayout(final double[][] rawData)
+        throws DimensionMismatchException {
+<span class="fc" id="L201">        final int rows = rawData.length;</span>
+<span class="fc" id="L202">        final int columns = rawData[0].length;</span>
+<span class="fc" id="L203">        final int blockRows = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+<span class="fc" id="L204">        final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+
+        // safety checks
+<span class="fc bfc" id="L207" title="All 2 branches covered.">        for (int i = 0; i &lt; rawData.length; ++i) {</span>
+<span class="fc" id="L208">            final int length = rawData[i].length;</span>
+<span class="pc bpc" id="L209" title="1 of 2 branches missed.">            if (length != columns) {</span>
+<span class="nc" id="L210">                throw new DimensionMismatchException(columns, length);</span>
+            }
+        }
+
+        // convert array
+<span class="fc" id="L215">        final double[][] blocks = new double[blockRows * blockColumns][];</span>
+<span class="fc" id="L216">        int blockIndex = 0;</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L218">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L219">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc" id="L220">            final int iHeight = pEnd - pStart;</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L222">                final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L223">                final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L224">                final int jWidth = qEnd - qStart;</span>
+
+                // allocate new block
+<span class="fc" id="L227">                final double[] block = new double[iHeight * jWidth];</span>
+<span class="fc" id="L228">                blocks[blockIndex] = block;</span>
+
+                // copy data
+<span class="fc" id="L231">                int index = 0;</span>
+<span class="fc bfc" id="L232" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L233">                    System.arraycopy(rawData[p], qStart, block, index, jWidth);</span>
+<span class="fc" id="L234">                    index += jWidth;</span>
+                }
+<span class="fc" id="L236">                ++blockIndex;</span>
+            }
+        }
+
+<span class="fc" id="L240">        return blocks;</span>
+    }
+
+    /**
+     * Create a data array in blocks layout.
+     * &lt;p&gt;
+     * This method can be used to create the array argument of the {@link
+     * #BlockRealMatrix(int, int, double[][], boolean)} constructor.
+     * &lt;/p&gt;
+     * @param rows Number of rows in the new matrix.
+     * @param columns Number of columns in the new matrix.
+     * @return a new data array in blocks layout.
+     * @see #toBlocksLayout(double[][])
+     * @see #BlockRealMatrix(int, int, double[][], boolean)
+     */
+    public static double[][] createBlocksLayout(final int rows, final int columns) {
+<span class="fc" id="L256">        final int blockRows = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+<span class="fc" id="L257">        final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;</span>
+
+<span class="fc" id="L259">        final double[][] blocks = new double[blockRows * blockColumns][];</span>
+<span class="fc" id="L260">        int blockIndex = 0;</span>
+<span class="fc bfc" id="L261" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L262">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L263">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc" id="L264">            final int iHeight = pEnd - pStart;</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L266">                final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L267">                final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L268">                final int jWidth = qEnd - qStart;</span>
+<span class="fc" id="L269">                blocks[blockIndex] = new double[iHeight * jWidth];</span>
+<span class="fc" id="L270">                ++blockIndex;</span>
+            }
+        }
+
+<span class="fc" id="L274">        return blocks;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix createMatrix(final int rowDimension,
+                                        final int columnDimension)
+        throws NotStrictlyPositiveException {
+<span class="fc" id="L282">        return new BlockRealMatrix(rowDimension, columnDimension);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix copy() {
+        // create an empty matrix
+<span class="fc" id="L289">        BlockRealMatrix copied = new BlockRealMatrix(rows, columns);</span>
+
+        // copy the blocks
+<span class="fc bfc" id="L292" title="All 2 branches covered.">        for (int i = 0; i &lt; blocks.length; ++i) {</span>
+<span class="fc" id="L293">            System.arraycopy(blocks[i], 0, copied.blocks[i], 0, blocks[i].length);</span>
+        }
+
+<span class="fc" id="L296">        return copied;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix add(final RealMatrix m)
+        throws MatrixDimensionMismatchException {
+        try {
+<span class="fc" id="L304">            return add((BlockRealMatrix) m);</span>
+<span class="nc" id="L305">        } catch (ClassCastException cce) {</span>
+            // safety check
+<span class="nc" id="L307">            MatrixUtils.checkAdditionCompatible(this, m);</span>
+
+<span class="nc" id="L309">            final BlockRealMatrix out = new BlockRealMatrix(rows, columns);</span>
+
+            // perform addition block-wise, to ensure good cache behavior
+<span class="nc" id="L312">            int blockIndex = 0;</span>
+<span class="nc bnc" id="L313" title="All 2 branches missed.">            for (int iBlock = 0; iBlock &lt; out.blockRows; ++iBlock) {</span>
+<span class="nc bnc" id="L314" title="All 2 branches missed.">                for (int jBlock = 0; jBlock &lt; out.blockColumns; ++jBlock) {</span>
+
+                    // perform addition on the current block
+<span class="nc" id="L317">                    final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="nc" id="L318">                    final double[] tBlock   = blocks[blockIndex];</span>
+<span class="nc" id="L319">                    final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="nc" id="L320">                    final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="nc" id="L321">                    final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="nc" id="L322">                    final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="nc" id="L323">                    int k = 0;</span>
+<span class="nc bnc" id="L324" title="All 2 branches missed.">                    for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="nc bnc" id="L325" title="All 2 branches missed.">                        for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="nc" id="L326">                            outBlock[k] = tBlock[k] + m.getEntry(p, q);</span>
+<span class="nc" id="L327">                            ++k;</span>
+                        }
+                    }
+                    // go to next block
+<span class="nc" id="L331">                    ++blockIndex;</span>
+                }
+            }
+
+<span class="nc" id="L335">            return out;</span>
+        }
+    }
+
+    /**
+     * Compute the sum of this matrix and {@code m}.
+     *
+     * @param m Matrix to be added.
+     * @return {@code this} + m.
+     * @throws MatrixDimensionMismatchException if {@code m} is not the same
+     * size as this matrix.
+     */
+    public BlockRealMatrix add(final BlockRealMatrix m)
+        throws MatrixDimensionMismatchException {
+        // safety check
+<span class="fc" id="L350">        MatrixUtils.checkAdditionCompatible(this, m);</span>
+
+<span class="fc" id="L352">        final BlockRealMatrix out = new BlockRealMatrix(rows, columns);</span>
+
+        // perform addition block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L355" title="All 2 branches covered.">        for (int blockIndex = 0; blockIndex &lt; out.blocks.length; ++blockIndex) {</span>
+<span class="fc" id="L356">            final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="fc" id="L357">            final double[] tBlock = blocks[blockIndex];</span>
+<span class="fc" id="L358">            final double[] mBlock = m.blocks[blockIndex];</span>
+<span class="fc bfc" id="L359" title="All 2 branches covered.">            for (int k = 0; k &lt; outBlock.length; ++k) {</span>
+<span class="fc" id="L360">                outBlock[k] = tBlock[k] + mBlock[k];</span>
+            }
+        }
+
+<span class="fc" id="L364">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix subtract(final RealMatrix m)
+        throws MatrixDimensionMismatchException {
+        try {
+<span class="fc" id="L372">            return subtract((BlockRealMatrix) m);</span>
+<span class="fc" id="L373">        } catch (ClassCastException cce) {</span>
+            // safety check
+<span class="fc" id="L375">            MatrixUtils.checkSubtractionCompatible(this, m);</span>
+
+<span class="fc" id="L377">            final BlockRealMatrix out = new BlockRealMatrix(rows, columns);</span>
+
+            // perform subtraction block-wise, to ensure good cache behavior
+<span class="fc" id="L380">            int blockIndex = 0;</span>
+<span class="fc bfc" id="L381" title="All 2 branches covered.">            for (int iBlock = 0; iBlock &lt; out.blockRows; ++iBlock) {</span>
+<span class="fc bfc" id="L382" title="All 2 branches covered.">                for (int jBlock = 0; jBlock &lt; out.blockColumns; ++jBlock) {</span>
+
+                    // perform subtraction on the current block
+<span class="fc" id="L385">                    final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="fc" id="L386">                    final double[] tBlock = blocks[blockIndex];</span>
+<span class="fc" id="L387">                    final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L388">                    final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc" id="L389">                    final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L390">                    final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L391">                    int k = 0;</span>
+<span class="fc bfc" id="L392" title="All 2 branches covered.">                    for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L393" title="All 2 branches covered.">                        for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L394">                            outBlock[k] = tBlock[k] - m.getEntry(p, q);</span>
+<span class="fc" id="L395">                            ++k;</span>
+                        }
+                    }
+                    // go to next block
+<span class="fc" id="L399">                    ++blockIndex;</span>
+                }
+            }
+
+<span class="fc" id="L403">            return out;</span>
+        }
+    }
+
+    /**
+     * Subtract {@code m} from this matrix.
+     *
+     * @param m Matrix to be subtracted.
+     * @return {@code this} - m.
+     * @throws MatrixDimensionMismatchException if {@code m} is not the
+     * same size as this matrix.
+     */
+    public BlockRealMatrix subtract(final BlockRealMatrix m)
+        throws MatrixDimensionMismatchException {
+        // safety check
+<span class="fc" id="L418">        MatrixUtils.checkSubtractionCompatible(this, m);</span>
+
+<span class="fc" id="L420">        final BlockRealMatrix out = new BlockRealMatrix(rows, columns);</span>
+
+        // perform subtraction block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L423" title="All 2 branches covered.">        for (int blockIndex = 0; blockIndex &lt; out.blocks.length; ++blockIndex) {</span>
+<span class="fc" id="L424">            final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="fc" id="L425">            final double[] tBlock = blocks[blockIndex];</span>
+<span class="fc" id="L426">            final double[] mBlock = m.blocks[blockIndex];</span>
+<span class="fc bfc" id="L427" title="All 2 branches covered.">            for (int k = 0; k &lt; outBlock.length; ++k) {</span>
+<span class="fc" id="L428">                outBlock[k] = tBlock[k] - mBlock[k];</span>
+            }
+        }
+
+<span class="fc" id="L432">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix scalarAdd(final double d) {
+
+<span class="fc" id="L439">        final BlockRealMatrix out = new BlockRealMatrix(rows, columns);</span>
+
+        // perform subtraction block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L442" title="All 2 branches covered.">        for (int blockIndex = 0; blockIndex &lt; out.blocks.length; ++blockIndex) {</span>
+<span class="fc" id="L443">            final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="fc" id="L444">            final double[] tBlock = blocks[blockIndex];</span>
+<span class="fc bfc" id="L445" title="All 2 branches covered.">            for (int k = 0; k &lt; outBlock.length; ++k) {</span>
+<span class="fc" id="L446">                outBlock[k] = tBlock[k] + d;</span>
+            }
+        }
+
+<span class="fc" id="L450">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public RealMatrix scalarMultiply(final double d) {
+<span class="fc" id="L456">        final BlockRealMatrix out = new BlockRealMatrix(rows, columns);</span>
+
+        // perform subtraction block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L459" title="All 2 branches covered.">        for (int blockIndex = 0; blockIndex &lt; out.blocks.length; ++blockIndex) {</span>
+<span class="fc" id="L460">            final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="fc" id="L461">            final double[] tBlock = blocks[blockIndex];</span>
+<span class="fc bfc" id="L462" title="All 2 branches covered.">            for (int k = 0; k &lt; outBlock.length; ++k) {</span>
+<span class="fc" id="L463">                outBlock[k] = tBlock[k] * d;</span>
+            }
+        }
+
+<span class="fc" id="L467">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix multiply(final RealMatrix m)
+        throws DimensionMismatchException {
+        try {
+<span class="fc" id="L475">            return multiply((BlockRealMatrix) m);</span>
+<span class="fc" id="L476">        } catch (ClassCastException cce) {</span>
+            // safety check
+<span class="fc" id="L478">            MatrixUtils.checkMultiplicationCompatible(this, m);</span>
+
+<span class="fc" id="L480">            final BlockRealMatrix out = new BlockRealMatrix(rows, m.getColumnDimension());</span>
+
+            // perform multiplication block-wise, to ensure good cache behavior
+<span class="fc" id="L483">            int blockIndex = 0;</span>
+<span class="fc bfc" id="L484" title="All 2 branches covered.">            for (int iBlock = 0; iBlock &lt; out.blockRows; ++iBlock) {</span>
+<span class="fc" id="L485">                final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L486">                final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+
+<span class="fc bfc" id="L488" title="All 2 branches covered.">                for (int jBlock = 0; jBlock &lt; out.blockColumns; ++jBlock) {</span>
+<span class="fc" id="L489">                    final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L490">                    final int qEnd = FastMath.min(qStart + BLOCK_SIZE, m.getColumnDimension());</span>
+
+                    // select current block
+<span class="fc" id="L493">                    final double[] outBlock = out.blocks[blockIndex];</span>
+
+                    // perform multiplication on current block
+<span class="fc bfc" id="L496" title="All 2 branches covered.">                    for (int kBlock = 0; kBlock &lt; blockColumns; ++kBlock) {</span>
+<span class="fc" id="L497">                        final int kWidth = blockWidth(kBlock);</span>
+<span class="fc" id="L498">                        final double[] tBlock = blocks[iBlock * blockColumns + kBlock];</span>
+<span class="fc" id="L499">                        final int rStart = kBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L500">                        int k = 0;</span>
+<span class="fc bfc" id="L501" title="All 2 branches covered.">                        for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L502">                            final int lStart = (p - pStart) * kWidth;</span>
+<span class="fc" id="L503">                            final int lEnd = lStart + kWidth;</span>
+<span class="fc bfc" id="L504" title="All 2 branches covered.">                            for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L505">                                double sum = 0;</span>
+<span class="fc" id="L506">                                int r = rStart;</span>
+<span class="fc bfc" id="L507" title="All 2 branches covered.">                                for (int l = lStart; l &lt; lEnd; ++l) {</span>
+<span class="fc" id="L508">                                    sum += tBlock[l] * m.getEntry(r, q);</span>
+<span class="fc" id="L509">                                    ++r;</span>
+                                }
+<span class="fc" id="L511">                                outBlock[k] += sum;</span>
+<span class="fc" id="L512">                                ++k;</span>
+                            }
+                        }
+                    }
+                    // go to next block
+<span class="fc" id="L517">                    ++blockIndex;</span>
+                }
+            }
+
+<span class="fc" id="L521">            return out;</span>
+        }
+    }
+
+    /**
+     * Returns the result of postmultiplying this by {@code m}.
+     *
+     * @param m Matrix to postmultiply by.
+     * @return {@code this} * m.
+     * @throws DimensionMismatchException if the matrices are not compatible.
+     */
+    public BlockRealMatrix multiply(BlockRealMatrix m)
+        throws DimensionMismatchException {
+        // safety check
+<span class="fc" id="L535">        MatrixUtils.checkMultiplicationCompatible(this, m);</span>
+
+<span class="fc" id="L537">        final BlockRealMatrix out = new BlockRealMatrix(rows, m.columns);</span>
+
+        // perform multiplication block-wise, to ensure good cache behavior
+<span class="fc" id="L540">        int blockIndex = 0;</span>
+<span class="fc bfc" id="L541" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; out.blockRows; ++iBlock) {</span>
+
+<span class="fc" id="L543">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L544">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+
+<span class="fc bfc" id="L546" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; out.blockColumns; ++jBlock) {</span>
+<span class="fc" id="L547">                final int jWidth = out.blockWidth(jBlock);</span>
+<span class="fc" id="L548">                final int jWidth2 = jWidth  + jWidth;</span>
+<span class="fc" id="L549">                final int jWidth3 = jWidth2 + jWidth;</span>
+<span class="fc" id="L550">                final int jWidth4 = jWidth3 + jWidth;</span>
+
+                // select current block
+<span class="fc" id="L553">                final double[] outBlock = out.blocks[blockIndex];</span>
+
+                // perform multiplication on current block
+<span class="fc bfc" id="L556" title="All 2 branches covered.">                for (int kBlock = 0; kBlock &lt; blockColumns; ++kBlock) {</span>
+<span class="fc" id="L557">                    final int kWidth = blockWidth(kBlock);</span>
+<span class="fc" id="L558">                    final double[] tBlock = blocks[iBlock * blockColumns + kBlock];</span>
+<span class="fc" id="L559">                    final double[] mBlock = m.blocks[kBlock * m.blockColumns + jBlock];</span>
+<span class="fc" id="L560">                    int k = 0;</span>
+<span class="fc bfc" id="L561" title="All 2 branches covered.">                    for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L562">                        final int lStart = (p - pStart) * kWidth;</span>
+<span class="fc" id="L563">                        final int lEnd = lStart + kWidth;</span>
+<span class="fc bfc" id="L564" title="All 2 branches covered.">                        for (int nStart = 0; nStart &lt; jWidth; ++nStart) {</span>
+<span class="fc" id="L565">                            double sum = 0;</span>
+<span class="fc" id="L566">                            int l = lStart;</span>
+<span class="fc" id="L567">                            int n = nStart;</span>
+<span class="fc bfc" id="L568" title="All 2 branches covered.">                            while (l &lt; lEnd - 3) {</span>
+<span class="fc" id="L569">                                sum += tBlock[l] * mBlock[n] +</span>
+                                       tBlock[l + 1] * mBlock[n + jWidth] +
+                                       tBlock[l + 2] * mBlock[n + jWidth2] +
+                                       tBlock[l + 3] * mBlock[n + jWidth3];
+<span class="fc" id="L573">                                l += 4;</span>
+<span class="fc" id="L574">                                n += jWidth4;</span>
+                            }
+<span class="fc bfc" id="L576" title="All 2 branches covered.">                            while (l &lt; lEnd) {</span>
+<span class="fc" id="L577">                                sum += tBlock[l++] * mBlock[n];</span>
+<span class="fc" id="L578">                                n += jWidth;</span>
+                            }
+<span class="fc" id="L580">                            outBlock[k] += sum;</span>
+<span class="fc" id="L581">                            ++k;</span>
+                        }
+                    }
+                }
+                // go to next block
+<span class="fc" id="L586">                ++blockIndex;</span>
+            }
+        }
+
+<span class="fc" id="L590">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double[][] getData() {
+<span class="fc" id="L596">        final double[][] data = new double[getRowDimension()][getColumnDimension()];</span>
+<span class="fc" id="L597">        final int lastColumns = columns - (blockColumns - 1) * BLOCK_SIZE;</span>
+
+<span class="fc bfc" id="L599" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L600">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L601">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc" id="L602">            int regularPos = 0;</span>
+<span class="fc" id="L603">            int lastPos = 0;</span>
+<span class="fc bfc" id="L604" title="All 2 branches covered.">            for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L605">                final double[] dataP = data[p];</span>
+<span class="fc" id="L606">                int blockIndex = iBlock * blockColumns;</span>
+<span class="fc" id="L607">                int dataPos = 0;</span>
+<span class="fc bfc" id="L608" title="All 2 branches covered.">                for (int jBlock = 0; jBlock &lt; blockColumns - 1; ++jBlock) {</span>
+<span class="fc" id="L609">                    System.arraycopy(blocks[blockIndex++], regularPos, dataP, dataPos, BLOCK_SIZE);</span>
+<span class="fc" id="L610">                    dataPos += BLOCK_SIZE;</span>
+                }
+<span class="fc" id="L612">                System.arraycopy(blocks[blockIndex], lastPos, dataP, dataPos, lastColumns);</span>
+<span class="fc" id="L613">                regularPos += BLOCK_SIZE;</span>
+<span class="fc" id="L614">                lastPos    += lastColumns;</span>
+            }
+        }
+
+<span class="fc" id="L618">        return data;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double getNorm() {
+<span class="fc" id="L624">        final double[] colSums = new double[BLOCK_SIZE];</span>
+<span class="fc" id="L625">        double maxColSum = 0;</span>
+<span class="fc bfc" id="L626" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; jBlock++) {</span>
+<span class="fc" id="L627">            final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L628">            Arrays.fill(colSums, 0, jWidth, 0.0);</span>
+<span class="fc bfc" id="L629" title="All 2 branches covered.">            for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L630">                final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L631">                final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L632" title="All 2 branches covered.">                for (int j = 0; j &lt; jWidth; ++j) {</span>
+<span class="fc" id="L633">                    double sum = 0;</span>
+<span class="fc bfc" id="L634" title="All 2 branches covered.">                    for (int i = 0; i &lt; iHeight; ++i) {</span>
+<span class="fc" id="L635">                        sum += FastMath.abs(block[i * jWidth + j]);</span>
+                    }
+<span class="fc" id="L637">                    colSums[j] += sum;</span>
+                }
+            }
+<span class="fc bfc" id="L640" title="All 2 branches covered.">            for (int j = 0; j &lt; jWidth; ++j) {</span>
+<span class="fc" id="L641">                maxColSum = FastMath.max(maxColSum, colSums[j]);</span>
+            }
+        }
+<span class="fc" id="L644">        return maxColSum;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double getFrobeniusNorm() {
+<span class="fc" id="L650">        double sum2 = 0;</span>
+<span class="fc bfc" id="L651" title="All 2 branches covered.">        for (int blockIndex = 0; blockIndex &lt; blocks.length; ++blockIndex) {</span>
+<span class="fc bfc" id="L652" title="All 2 branches covered.">            for (final double entry : blocks[blockIndex]) {</span>
+<span class="fc" id="L653">                sum2 += entry * entry;</span>
+            }
+        }
+<span class="fc" id="L656">        return FastMath.sqrt(sum2);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix getSubMatrix(final int startRow, final int endRow,
+                                        final int startColumn,
+                                        final int endColumn)
+        throws OutOfRangeException, NumberIsTooSmallException {
+        // safety checks
+<span class="fc" id="L666">        MatrixUtils.checkSubMatrixIndex(this, startRow, endRow, startColumn, endColumn);</span>
+
+        // create the output matrix
+<span class="fc" id="L669">        final BlockRealMatrix out =</span>
+            new BlockRealMatrix(endRow - startRow + 1, endColumn - startColumn + 1);
+
+        // compute blocks shifts
+<span class="fc" id="L673">        final int blockStartRow = startRow / BLOCK_SIZE;</span>
+<span class="fc" id="L674">        final int rowsShift = startRow % BLOCK_SIZE;</span>
+<span class="fc" id="L675">        final int blockStartColumn = startColumn / BLOCK_SIZE;</span>
+<span class="fc" id="L676">        final int columnsShift = startColumn % BLOCK_SIZE;</span>
+
+        // perform extraction block-wise, to ensure good cache behavior
+<span class="fc" id="L679">        int pBlock = blockStartRow;</span>
+<span class="fc bfc" id="L680" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; out.blockRows; ++iBlock) {</span>
+<span class="fc" id="L681">            final int iHeight = out.blockHeight(iBlock);</span>
+<span class="fc" id="L682">            int qBlock = blockStartColumn;</span>
+<span class="fc bfc" id="L683" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; out.blockColumns; ++jBlock) {</span>
+<span class="fc" id="L684">                final int jWidth = out.blockWidth(jBlock);</span>
+
+                // handle one block of the output matrix
+<span class="fc" id="L687">                final int outIndex = iBlock * out.blockColumns + jBlock;</span>
+<span class="fc" id="L688">                final double[] outBlock = out.blocks[outIndex];</span>
+<span class="fc" id="L689">                final int index = pBlock * blockColumns + qBlock;</span>
+<span class="fc" id="L690">                final int width = blockWidth(qBlock);</span>
+
+<span class="fc" id="L692">                final int heightExcess = iHeight + rowsShift - BLOCK_SIZE;</span>
+<span class="fc" id="L693">                final int widthExcess = jWidth + columnsShift - BLOCK_SIZE;</span>
+<span class="fc bfc" id="L694" title="All 2 branches covered.">                if (heightExcess &gt; 0) {</span>
+                    // the submatrix block spans on two blocks rows from the original matrix
+<span class="fc bfc" id="L696" title="All 2 branches covered.">                    if (widthExcess &gt; 0) {</span>
+                        // the submatrix block spans on two blocks columns from the original matrix
+<span class="fc" id="L698">                        final int width2 = blockWidth(qBlock + 1);</span>
+<span class="fc" id="L699">                        copyBlockPart(blocks[index], width,</span>
+                                      rowsShift, BLOCK_SIZE,
+                                      columnsShift, BLOCK_SIZE,
+                                      outBlock, jWidth, 0, 0);
+<span class="fc" id="L703">                        copyBlockPart(blocks[index + 1], width2,</span>
+                                      rowsShift, BLOCK_SIZE,
+                                      0, widthExcess,
+                                      outBlock, jWidth, 0, jWidth - widthExcess);
+<span class="fc" id="L707">                        copyBlockPart(blocks[index + blockColumns], width,</span>
+                                      0, heightExcess,
+                                      columnsShift, BLOCK_SIZE,
+                                      outBlock, jWidth, iHeight - heightExcess, 0);
+<span class="fc" id="L711">                        copyBlockPart(blocks[index + blockColumns + 1], width2,</span>
+                                      0, heightExcess,
+                                      0, widthExcess,
+                                      outBlock, jWidth, iHeight - heightExcess, jWidth - widthExcess);
+<span class="fc" id="L715">                    } else {</span>
+                        // the submatrix block spans on one block column from the original matrix
+<span class="fc" id="L717">                        copyBlockPart(blocks[index], width,</span>
+                                      rowsShift, BLOCK_SIZE,
+                                      columnsShift, jWidth + columnsShift,
+                                      outBlock, jWidth, 0, 0);
+<span class="fc" id="L721">                        copyBlockPart(blocks[index + blockColumns], width,</span>
+                                      0, heightExcess,
+                                      columnsShift, jWidth + columnsShift,
+                                      outBlock, jWidth, iHeight - heightExcess, 0);
+                    }
+                } else {
+                    // the submatrix block spans on one block row from the original matrix
+<span class="fc bfc" id="L728" title="All 2 branches covered.">                    if (widthExcess &gt; 0) {</span>
+                        // the submatrix block spans on two blocks columns from the original matrix
+<span class="fc" id="L730">                        final int width2 = blockWidth(qBlock + 1);</span>
+<span class="fc" id="L731">                        copyBlockPart(blocks[index], width,</span>
+                                      rowsShift, iHeight + rowsShift,
+                                      columnsShift, BLOCK_SIZE,
+                                      outBlock, jWidth, 0, 0);
+<span class="fc" id="L735">                        copyBlockPart(blocks[index + 1], width2,</span>
+                                      rowsShift, iHeight + rowsShift,
+                                      0, widthExcess,
+                                      outBlock, jWidth, 0, jWidth - widthExcess);
+<span class="fc" id="L739">                    } else {</span>
+                        // the submatrix block spans on one block column from the original matrix
+<span class="fc" id="L741">                        copyBlockPart(blocks[index], width,</span>
+                                      rowsShift, iHeight + rowsShift,
+                                      columnsShift, jWidth + columnsShift,
+                                      outBlock, jWidth, 0, 0);
+                    }
+               }
+<span class="fc" id="L747">                ++qBlock;</span>
+            }
+<span class="fc" id="L749">            ++pBlock;</span>
+        }
+
+<span class="fc" id="L752">        return out;</span>
+    }
+
+    /**
+     * Copy a part of a block into another one
+     * &lt;p&gt;This method can be called only when the specified part fits in both
+     * blocks, no verification is done here.&lt;/p&gt;
+     * @param srcBlock source block
+     * @param srcWidth source block width ({@link #BLOCK_SIZE} or smaller)
+     * @param srcStartRow start row in the source block
+     * @param srcEndRow end row (exclusive) in the source block
+     * @param srcStartColumn start column in the source block
+     * @param srcEndColumn end column (exclusive) in the source block
+     * @param dstBlock destination block
+     * @param dstWidth destination block width ({@link #BLOCK_SIZE} or smaller)
+     * @param dstStartRow start row in the destination block
+     * @param dstStartColumn start column in the destination block
+     */
+    private void copyBlockPart(final double[] srcBlock, final int srcWidth,
+                               final int srcStartRow, final int srcEndRow,
+                               final int srcStartColumn, final int srcEndColumn,
+                               final double[] dstBlock, final int dstWidth,
+                               final int dstStartRow, final int dstStartColumn) {
+<span class="fc" id="L775">        final int length = srcEndColumn - srcStartColumn;</span>
+<span class="fc" id="L776">        int srcPos = srcStartRow * srcWidth + srcStartColumn;</span>
+<span class="fc" id="L777">        int dstPos = dstStartRow * dstWidth + dstStartColumn;</span>
+<span class="fc bfc" id="L778" title="All 2 branches covered.">        for (int srcRow = srcStartRow; srcRow &lt; srcEndRow; ++srcRow) {</span>
+<span class="fc" id="L779">            System.arraycopy(srcBlock, srcPos, dstBlock, dstPos, length);</span>
+<span class="fc" id="L780">            srcPos += srcWidth;</span>
+<span class="fc" id="L781">            dstPos += dstWidth;</span>
+        }
+<span class="fc" id="L783">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public void setSubMatrix(final double[][] subMatrix, final int row,
+                             final int column)
+        throws OutOfRangeException, NoDataException, NullArgumentException,
+        DimensionMismatchException {
+        // safety checks
+<span class="fc" id="L792">        MathUtils.checkNotNull(subMatrix);</span>
+<span class="fc" id="L793">        final int refLength = subMatrix[0].length;</span>
+<span class="fc bfc" id="L794" title="All 2 branches covered.">        if (refLength == 0) {</span>
+<span class="fc" id="L795">            throw new NoDataException(LocalizedFormats.AT_LEAST_ONE_COLUMN);</span>
+        }
+<span class="fc" id="L797">        final int endRow = row + subMatrix.length - 1;</span>
+<span class="fc" id="L798">        final int endColumn = column + refLength - 1;</span>
+<span class="fc" id="L799">        MatrixUtils.checkSubMatrixIndex(this, row, endRow, column, endColumn);</span>
+<span class="fc bfc" id="L800" title="All 2 branches covered.">        for (final double[] subRow : subMatrix) {</span>
+<span class="fc bfc" id="L801" title="All 2 branches covered.">            if (subRow.length != refLength) {</span>
+<span class="fc" id="L802">                throw new DimensionMismatchException(refLength, subRow.length);</span>
+            }
+        }
+
+        // compute blocks bounds
+<span class="fc" id="L807">        final int blockStartRow = row / BLOCK_SIZE;</span>
+<span class="fc" id="L808">        final int blockEndRow = (endRow + BLOCK_SIZE) / BLOCK_SIZE;</span>
+<span class="fc" id="L809">        final int blockStartColumn = column / BLOCK_SIZE;</span>
+<span class="fc" id="L810">        final int blockEndColumn = (endColumn + BLOCK_SIZE) / BLOCK_SIZE;</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L813" title="All 2 branches covered.">        for (int iBlock = blockStartRow; iBlock &lt; blockEndRow; ++iBlock) {</span>
+<span class="fc" id="L814">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L815">            final int firstRow = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L816">            final int iStart = FastMath.max(row,    firstRow);</span>
+<span class="fc" id="L817">            final int iEnd = FastMath.min(endRow + 1, firstRow + iHeight);</span>
+
+<span class="fc bfc" id="L819" title="All 2 branches covered.">            for (int jBlock = blockStartColumn; jBlock &lt; blockEndColumn; ++jBlock) {</span>
+<span class="fc" id="L820">                final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L821">                final int firstColumn = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L822">                final int jStart = FastMath.max(column,    firstColumn);</span>
+<span class="fc" id="L823">                final int jEnd = FastMath.min(endColumn + 1, firstColumn + jWidth);</span>
+<span class="fc" id="L824">                final int jLength = jEnd - jStart;</span>
+
+                // handle one block, row by row
+<span class="fc" id="L827">                final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L828" title="All 2 branches covered.">                for (int i = iStart; i &lt; iEnd; ++i) {</span>
+<span class="fc" id="L829">                    System.arraycopy(subMatrix[i - row], jStart - column,</span>
+                                     block, (i - firstRow) * jWidth + (jStart - firstColumn),
+                                     jLength);
+                }
+
+            }
+        }
+<span class="fc" id="L836">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix getRowMatrix(final int row)
+        throws OutOfRangeException {
+<span class="fc" id="L842">        MatrixUtils.checkRowIndex(this, row);</span>
+<span class="fc" id="L843">        final BlockRealMatrix out = new BlockRealMatrix(1, columns);</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L846">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L847">        final int iRow = row - iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L848">        int outBlockIndex = 0;</span>
+<span class="fc" id="L849">        int outIndex = 0;</span>
+<span class="fc" id="L850">        double[] outBlock = out.blocks[outBlockIndex];</span>
+<span class="fc bfc" id="L851" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L852">            final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L853">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L854">            final int available = outBlock.length - outIndex;</span>
+<span class="fc bfc" id="L855" title="All 2 branches covered.">            if (jWidth &gt; available) {</span>
+<span class="fc" id="L856">                System.arraycopy(block, iRow * jWidth, outBlock, outIndex, available);</span>
+<span class="fc" id="L857">                outBlock = out.blocks[++outBlockIndex];</span>
+<span class="fc" id="L858">                System.arraycopy(block, iRow * jWidth, outBlock, 0, jWidth - available);</span>
+<span class="fc" id="L859">                outIndex = jWidth - available;</span>
+            } else {
+<span class="fc" id="L861">                System.arraycopy(block, iRow * jWidth, outBlock, outIndex, jWidth);</span>
+<span class="fc" id="L862">                outIndex += jWidth;</span>
+            }
+        }
+
+<span class="fc" id="L866">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setRowMatrix(final int row, final RealMatrix matrix)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+        try {
+<span class="fc" id="L874">            setRowMatrix(row, (BlockRealMatrix) matrix);</span>
+<span class="nc" id="L875">        } catch (ClassCastException cce) {</span>
+<span class="nc" id="L876">            super.setRowMatrix(row, matrix);</span>
+<span class="fc" id="L877">        }</span>
+<span class="fc" id="L878">    }</span>
+
+    /**
+     * Sets the entries in row number &lt;code&gt;row&lt;/code&gt;
+     * as a row matrix.  Row indices start at 0.
+     *
+     * @param row the row to be set
+     * @param matrix row matrix (must have one row and the same number of columns
+     * as the instance)
+     * @throws OutOfRangeException if the specified row index is invalid.
+     * @throws MatrixDimensionMismatchException if the matrix dimensions do
+     * not match one instance row.
+     */
+    public void setRowMatrix(final int row, final BlockRealMatrix matrix)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+<span class="fc" id="L893">        MatrixUtils.checkRowIndex(this, row);</span>
+<span class="fc" id="L894">        final int nCols = getColumnDimension();</span>
+<span class="fc bfc" id="L895" title="All 2 branches covered.">        if ((matrix.getRowDimension() != 1) ||</span>
+<span class="pc bpc" id="L896" title="1 of 2 branches missed.">            (matrix.getColumnDimension() != nCols)) {</span>
+<span class="fc" id="L897">            throw new MatrixDimensionMismatchException(matrix.getRowDimension(),</span>
+<span class="fc" id="L898">                                                       matrix.getColumnDimension(),</span>
+                                                       1, nCols);
+        }
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L903">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L904">        final int iRow = row - iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L905">        int mBlockIndex = 0;</span>
+<span class="fc" id="L906">        int mIndex = 0;</span>
+<span class="fc" id="L907">        double[] mBlock = matrix.blocks[mBlockIndex];</span>
+<span class="fc bfc" id="L908" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L909">            final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L910">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L911">            final int available  = mBlock.length - mIndex;</span>
+<span class="fc bfc" id="L912" title="All 2 branches covered.">            if (jWidth &gt; available) {</span>
+<span class="fc" id="L913">                System.arraycopy(mBlock, mIndex, block, iRow * jWidth, available);</span>
+<span class="fc" id="L914">                mBlock = matrix.blocks[++mBlockIndex];</span>
+<span class="fc" id="L915">                System.arraycopy(mBlock, 0, block, iRow * jWidth, jWidth - available);</span>
+<span class="fc" id="L916">                mIndex = jWidth - available;</span>
+            } else {
+<span class="fc" id="L918">                System.arraycopy(mBlock, mIndex, block, iRow * jWidth, jWidth);</span>
+<span class="fc" id="L919">                mIndex += jWidth;</span>
+           }
+        }
+<span class="fc" id="L922">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix getColumnMatrix(final int column)
+        throws OutOfRangeException {
+<span class="fc" id="L928">        MatrixUtils.checkColumnIndex(this, column);</span>
+<span class="fc" id="L929">        final BlockRealMatrix out = new BlockRealMatrix(rows, 1);</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L932">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="fc" id="L933">        final int jColumn = column - jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L934">        final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L935">        int outBlockIndex = 0;</span>
+<span class="fc" id="L936">        int outIndex = 0;</span>
+<span class="fc" id="L937">        double[] outBlock = out.blocks[outBlockIndex];</span>
+<span class="fc bfc" id="L938" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L939">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L940">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L941" title="All 2 branches covered.">            for (int i = 0; i &lt; iHeight; ++i) {</span>
+<span class="fc bfc" id="L942" title="All 2 branches covered.">                if (outIndex &gt;= outBlock.length) {</span>
+<span class="fc" id="L943">                    outBlock = out.blocks[++outBlockIndex];</span>
+<span class="fc" id="L944">                    outIndex = 0;</span>
+                }
+<span class="fc" id="L946">                outBlock[outIndex++] = block[i * jWidth + jColumn];</span>
+            }
+        }
+
+<span class="fc" id="L950">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setColumnMatrix(final int column, final RealMatrix matrix)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+        try {
+<span class="fc" id="L958">            setColumnMatrix(column, (BlockRealMatrix) matrix);</span>
+<span class="nc" id="L959">        } catch (ClassCastException cce) {</span>
+<span class="nc" id="L960">            super.setColumnMatrix(column, matrix);</span>
+<span class="fc" id="L961">        }</span>
+<span class="fc" id="L962">    }</span>
+
+    /**
+     * Sets the entries in column number &lt;code&gt;column&lt;/code&gt;
+     * as a column matrix.  Column indices start at 0.
+     *
+     * @param column the column to be set
+     * @param matrix column matrix (must have one column and the same number of rows
+     * as the instance)
+     * @throws OutOfRangeException if the specified column index is invalid.
+     * @throws MatrixDimensionMismatchException if the matrix dimensions do
+     * not match one instance column.
+     */
+    void setColumnMatrix(final int column, final BlockRealMatrix matrix)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+<span class="fc" id="L977">        MatrixUtils.checkColumnIndex(this, column);</span>
+<span class="fc" id="L978">        final int nRows = getRowDimension();</span>
+<span class="pc bpc" id="L979" title="1 of 2 branches missed.">        if ((matrix.getRowDimension() != nRows) ||</span>
+<span class="fc bfc" id="L980" title="All 2 branches covered.">            (matrix.getColumnDimension() != 1)) {</span>
+<span class="fc" id="L981">            throw new MatrixDimensionMismatchException(matrix.getRowDimension(),</span>
+<span class="fc" id="L982">                                                       matrix.getColumnDimension(),</span>
+                                                       nRows, 1);
+        }
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L987">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="fc" id="L988">        final int jColumn = column - jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L989">        final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L990">        int mBlockIndex = 0;</span>
+<span class="fc" id="L991">        int mIndex = 0;</span>
+<span class="fc" id="L992">        double[] mBlock = matrix.blocks[mBlockIndex];</span>
+<span class="fc bfc" id="L993" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L994">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L995">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L996" title="All 2 branches covered.">            for (int i = 0; i &lt; iHeight; ++i) {</span>
+<span class="fc bfc" id="L997" title="All 2 branches covered.">                if (mIndex &gt;= mBlock.length) {</span>
+<span class="fc" id="L998">                    mBlock = matrix.blocks[++mBlockIndex];</span>
+<span class="fc" id="L999">                    mIndex = 0;</span>
+                }
+<span class="fc" id="L1001">                block[i * jWidth + jColumn] = mBlock[mIndex++];</span>
+            }
+        }
+<span class="fc" id="L1004">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public RealVector getRowVector(final int row)
+        throws OutOfRangeException {
+<span class="fc" id="L1010">        MatrixUtils.checkRowIndex(this, row);</span>
+<span class="fc" id="L1011">        final double[] outData = new double[columns];</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L1014">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L1015">        final int iRow = row - iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1016">        int outIndex = 0;</span>
+<span class="fc bfc" id="L1017" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1018">            final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1019">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1020">            System.arraycopy(block, iRow * jWidth, outData, outIndex, jWidth);</span>
+<span class="fc" id="L1021">            outIndex += jWidth;</span>
+        }
+
+<span class="fc" id="L1024">        return new ArrayRealVector(outData, false);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setRowVector(final int row, final RealVector vector)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+        try {
+<span class="fc" id="L1032">            setRow(row, ((ArrayRealVector) vector).getDataRef());</span>
+<span class="nc" id="L1033">        } catch (ClassCastException cce) {</span>
+<span class="nc" id="L1034">            super.setRowVector(row, vector);</span>
+<span class="fc" id="L1035">        }</span>
+<span class="fc" id="L1036">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public RealVector getColumnVector(final int column)
+        throws OutOfRangeException {
+<span class="fc" id="L1042">        MatrixUtils.checkColumnIndex(this, column);</span>
+<span class="fc" id="L1043">        final double[] outData = new double[rows];</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L1046">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="fc" id="L1047">        final int jColumn = column - jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1048">        final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1049">        int outIndex = 0;</span>
+<span class="fc bfc" id="L1050" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1051">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L1052">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L1053" title="All 2 branches covered.">            for (int i = 0; i &lt; iHeight; ++i) {</span>
+<span class="fc" id="L1054">                outData[outIndex++] = block[i * jWidth + jColumn];</span>
+            }
+        }
+
+<span class="fc" id="L1058">        return new ArrayRealVector(outData, false);</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setColumnVector(final int column, final RealVector vector)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+        try {
+<span class="fc" id="L1066">            setColumn(column, ((ArrayRealVector) vector).getDataRef());</span>
+<span class="nc" id="L1067">        } catch (ClassCastException cce) {</span>
+<span class="nc" id="L1068">            super.setColumnVector(column, vector);</span>
+<span class="fc" id="L1069">        }</span>
+<span class="fc" id="L1070">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public double[] getRow(final int row) throws OutOfRangeException {
+<span class="fc" id="L1075">        MatrixUtils.checkRowIndex(this, row);</span>
+<span class="fc" id="L1076">        final double[] out = new double[columns];</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L1079">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L1080">        final int iRow = row - iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1081">        int outIndex = 0;</span>
+<span class="fc bfc" id="L1082" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1083">            final int jWidth     = blockWidth(jBlock);</span>
+<span class="fc" id="L1084">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1085">            System.arraycopy(block, iRow * jWidth, out, outIndex, jWidth);</span>
+<span class="fc" id="L1086">            outIndex += jWidth;</span>
+        }
+
+<span class="fc" id="L1089">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setRow(final int row, final double[] array)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+<span class="fc" id="L1096">        MatrixUtils.checkRowIndex(this, row);</span>
+<span class="fc" id="L1097">        final int nCols = getColumnDimension();</span>
+<span class="fc bfc" id="L1098" title="All 2 branches covered.">        if (array.length != nCols) {</span>
+<span class="fc" id="L1099">            throw new MatrixDimensionMismatchException(1, array.length, 1, nCols);</span>
+        }
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L1103">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L1104">        final int iRow = row - iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1105">        int outIndex = 0;</span>
+<span class="fc bfc" id="L1106" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1107">            final int jWidth     = blockWidth(jBlock);</span>
+<span class="fc" id="L1108">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1109">            System.arraycopy(array, outIndex, block, iRow * jWidth, jWidth);</span>
+<span class="fc" id="L1110">            outIndex += jWidth;</span>
+        }
+<span class="fc" id="L1112">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public double[] getColumn(final int column) throws OutOfRangeException {
+<span class="fc" id="L1117">        MatrixUtils.checkColumnIndex(this, column);</span>
+<span class="fc" id="L1118">        final double[] out = new double[rows];</span>
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L1121">        final int jBlock  = column / BLOCK_SIZE;</span>
+<span class="fc" id="L1122">        final int jColumn = column - jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1123">        final int jWidth  = blockWidth(jBlock);</span>
+<span class="fc" id="L1124">        int outIndex = 0;</span>
+<span class="fc bfc" id="L1125" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1126">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L1127">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L1128" title="All 2 branches covered.">            for (int i = 0; i &lt; iHeight; ++i) {</span>
+<span class="fc" id="L1129">                out[outIndex++] = block[i * jWidth + jColumn];</span>
+            }
+        }
+
+<span class="fc" id="L1133">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setColumn(final int column, final double[] array)
+        throws OutOfRangeException, MatrixDimensionMismatchException {
+<span class="fc" id="L1140">        MatrixUtils.checkColumnIndex(this, column);</span>
+<span class="fc" id="L1141">        final int nRows = getRowDimension();</span>
+<span class="fc bfc" id="L1142" title="All 2 branches covered.">        if (array.length != nRows) {</span>
+<span class="fc" id="L1143">            throw new MatrixDimensionMismatchException(array.length, 1, nRows, 1);</span>
+        }
+
+        // perform copy block-wise, to ensure good cache behavior
+<span class="fc" id="L1147">        final int jBlock  = column / BLOCK_SIZE;</span>
+<span class="fc" id="L1148">        final int jColumn = column - jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1149">        final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1150">        int outIndex = 0;</span>
+<span class="fc bfc" id="L1151" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1152">            final int iHeight = blockHeight(iBlock);</span>
+<span class="fc" id="L1153">            final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L1154" title="All 2 branches covered.">            for (int i = 0; i &lt; iHeight; ++i) {</span>
+<span class="fc" id="L1155">                block[i * jWidth + jColumn] = array[outIndex++];</span>
+            }
+        }
+<span class="fc" id="L1158">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public double getEntry(final int row, final int column)
+        throws OutOfRangeException {
+<span class="fc" id="L1164">        MatrixUtils.checkMatrixIndex(this, row, column);</span>
+<span class="fc" id="L1165">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L1166">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="fc" id="L1167">        final int k = (row - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +</span>
+            (column - jBlock * BLOCK_SIZE);
+<span class="fc" id="L1169">        return blocks[iBlock * blockColumns + jBlock][k];</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void setEntry(final int row, final int column, final double value)
+        throws OutOfRangeException {
+<span class="fc" id="L1176">        MatrixUtils.checkMatrixIndex(this, row, column);</span>
+<span class="fc" id="L1177">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="fc" id="L1178">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="fc" id="L1179">        final int k = (row - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +</span>
+            (column - jBlock * BLOCK_SIZE);
+<span class="fc" id="L1181">        blocks[iBlock * blockColumns + jBlock][k] = value;</span>
+<span class="fc" id="L1182">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public void addToEntry(final int row, final int column,
+                           final double increment)
+        throws OutOfRangeException {
+<span class="fc" id="L1189">        MatrixUtils.checkMatrixIndex(this, row, column);</span>
+<span class="fc" id="L1190">        final int iBlock = row    / BLOCK_SIZE;</span>
+<span class="fc" id="L1191">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="fc" id="L1192">        final int k = (row    - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +</span>
+            (column - jBlock * BLOCK_SIZE);
+<span class="fc" id="L1194">        blocks[iBlock * blockColumns + jBlock][k] += increment;</span>
+<span class="fc" id="L1195">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public void multiplyEntry(final int row, final int column,
+                              final double factor)
+        throws OutOfRangeException {
+<span class="nc" id="L1202">        MatrixUtils.checkMatrixIndex(this, row, column);</span>
+<span class="nc" id="L1203">        final int iBlock = row / BLOCK_SIZE;</span>
+<span class="nc" id="L1204">        final int jBlock = column / BLOCK_SIZE;</span>
+<span class="nc" id="L1205">        final int k = (row - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +</span>
+            (column - jBlock * BLOCK_SIZE);
+<span class="nc" id="L1207">        blocks[iBlock * blockColumns + jBlock][k] *= factor;</span>
+<span class="nc" id="L1208">    }</span>
+
+    /** {@inheritDoc} */
+    @Override
+    public BlockRealMatrix transpose() {
+<span class="fc" id="L1213">        final int nRows = getRowDimension();</span>
+<span class="fc" id="L1214">        final int nCols = getColumnDimension();</span>
+<span class="fc" id="L1215">        final BlockRealMatrix out = new BlockRealMatrix(nCols, nRows);</span>
+
+        // perform transpose block-wise, to ensure good cache behavior
+<span class="fc" id="L1218">        int blockIndex = 0;</span>
+<span class="fc bfc" id="L1219" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockColumns; ++iBlock) {</span>
+<span class="fc bfc" id="L1220" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockRows; ++jBlock) {</span>
+                // transpose current block
+<span class="fc" id="L1222">                final double[] outBlock = out.blocks[blockIndex];</span>
+<span class="fc" id="L1223">                final double[] tBlock = blocks[jBlock * blockColumns + iBlock];</span>
+<span class="fc" id="L1224">                final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1225">                final int pEnd = FastMath.min(pStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L1226">                final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1227">                final int qEnd = FastMath.min(qStart + BLOCK_SIZE, rows);</span>
+<span class="fc" id="L1228">                int k = 0;</span>
+<span class="fc bfc" id="L1229" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L1230">                    final int lInc = pEnd - pStart;</span>
+<span class="fc" id="L1231">                    int l = p - pStart;</span>
+<span class="fc bfc" id="L1232" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1233">                        outBlock[k] = tBlock[l];</span>
+<span class="fc" id="L1234">                        ++k;</span>
+<span class="fc" id="L1235">                        l+= lInc;</span>
+                    }
+                }
+                // go to next block
+<span class="fc" id="L1239">                ++blockIndex;</span>
+            }
+        }
+
+<span class="fc" id="L1243">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public int getRowDimension() {
+<span class="fc" id="L1249">        return rows;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public int getColumnDimension() {
+<span class="fc" id="L1255">        return columns;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double[] operate(final double[] v)
+        throws DimensionMismatchException {
+<span class="fc bfc" id="L1262" title="All 2 branches covered.">        if (v.length != columns) {</span>
+<span class="fc" id="L1263">            throw new DimensionMismatchException(v.length, columns);</span>
+        }
+<span class="fc" id="L1265">        final double[] out = new double[rows];</span>
+
+        // perform multiplication block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L1268" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1269">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1270">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc bfc" id="L1271" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1272">                final double[] block  = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1273">                final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1274">                final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L1275">                int k = 0;</span>
+<span class="fc bfc" id="L1276" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L1277">                    double sum = 0;</span>
+<span class="fc" id="L1278">                    int q = qStart;</span>
+<span class="fc bfc" id="L1279" title="All 2 branches covered.">                    while (q &lt; qEnd - 3) {</span>
+<span class="fc" id="L1280">                        sum += block[k]     * v[q]     +</span>
+                               block[k + 1] * v[q + 1] +
+                               block[k + 2] * v[q + 2] +
+                               block[k + 3] * v[q + 3];
+<span class="fc" id="L1284">                        k += 4;</span>
+<span class="fc" id="L1285">                        q += 4;</span>
+                    }
+<span class="fc bfc" id="L1287" title="All 2 branches covered.">                    while (q &lt; qEnd) {</span>
+<span class="fc" id="L1288">                        sum += block[k++] * v[q++];</span>
+                    }
+<span class="fc" id="L1290">                    out[p] += sum;</span>
+                }
+            }
+        }
+
+<span class="fc" id="L1295">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double[] preMultiply(final double[] v)
+        throws DimensionMismatchException {
+<span class="fc bfc" id="L1302" title="All 2 branches covered.">        if (v.length != rows) {</span>
+<span class="fc" id="L1303">            throw new DimensionMismatchException(v.length, rows);</span>
+        }
+<span class="fc" id="L1305">        final double[] out = new double[columns];</span>
+
+        // perform multiplication block-wise, to ensure good cache behavior
+<span class="fc bfc" id="L1308" title="All 2 branches covered.">        for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1309">            final int jWidth  = blockWidth(jBlock);</span>
+<span class="fc" id="L1310">            final int jWidth2 = jWidth  + jWidth;</span>
+<span class="fc" id="L1311">            final int jWidth3 = jWidth2 + jWidth;</span>
+<span class="fc" id="L1312">            final int jWidth4 = jWidth3 + jWidth;</span>
+<span class="fc" id="L1313">            final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1314">            final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc bfc" id="L1315" title="All 2 branches covered.">            for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1316">                final double[] block  = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1317">                final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1318">                final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc bfc" id="L1319" title="All 2 branches covered.">                for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1320">                    int k = q - qStart;</span>
+<span class="fc" id="L1321">                    double sum = 0;</span>
+<span class="fc" id="L1322">                    int p = pStart;</span>
+<span class="fc bfc" id="L1323" title="All 2 branches covered.">                    while (p &lt; pEnd - 3) {</span>
+<span class="fc" id="L1324">                        sum += block[k]           * v[p]     +</span>
+                               block[k + jWidth]  * v[p + 1] +
+                               block[k + jWidth2] * v[p + 2] +
+                               block[k + jWidth3] * v[p + 3];
+<span class="fc" id="L1328">                        k += jWidth4;</span>
+<span class="fc" id="L1329">                        p += 4;</span>
+                    }
+<span class="fc bfc" id="L1331" title="All 2 branches covered.">                    while (p &lt; pEnd) {</span>
+<span class="fc" id="L1332">                        sum += block[k] * v[p++];</span>
+<span class="fc" id="L1333">                        k += jWidth;</span>
+                    }
+<span class="fc" id="L1335">                    out[q] += sum;</span>
+                }
+            }
+        }
+
+<span class="fc" id="L1340">        return out;</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInRowOrder(final RealMatrixChangingVisitor visitor) {
+<span class="fc" id="L1346">        visitor.start(rows, columns, 0, rows - 1, 0, columns - 1);</span>
+<span class="fc bfc" id="L1347" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1348">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1349">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc bfc" id="L1350" title="All 2 branches covered.">            for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L1351" title="All 2 branches covered.">                for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1352">                    final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1353">                    final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1354">                    final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L1355">                    final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1356">                    int k = (p - pStart) * jWidth;</span>
+<span class="fc bfc" id="L1357" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1358">                        block[k] = visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1359">                        ++k;</span>
+                    }
+                }
+             }
+        }
+<span class="fc" id="L1364">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInRowOrder(final RealMatrixPreservingVisitor visitor) {
+<span class="fc" id="L1370">        visitor.start(rows, columns, 0, rows - 1, 0, columns - 1);</span>
+<span class="fc bfc" id="L1371" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1372">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1373">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc bfc" id="L1374" title="All 2 branches covered.">            for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L1375" title="All 2 branches covered.">                for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1376">                    final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1377">                    final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1378">                    final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L1379">                    final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1380">                    int k = (p - pStart) * jWidth;</span>
+<span class="fc bfc" id="L1381" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1382">                        visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1383">                        ++k;</span>
+                    }
+                }
+             }
+        }
+<span class="fc" id="L1388">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInRowOrder(final RealMatrixChangingVisitor visitor,
+                                 final int startRow, final int endRow,
+                                 final int startColumn, final int endColumn)
+        throws OutOfRangeException, NumberIsTooSmallException {
+<span class="fc" id="L1397">        MatrixUtils.checkSubMatrixIndex(this, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc" id="L1398">        visitor.start(rows, columns, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc bfc" id="L1399" title="All 2 branches covered.">        for (int iBlock = startRow / BLOCK_SIZE; iBlock &lt; 1 + endRow / BLOCK_SIZE; ++iBlock) {</span>
+<span class="fc" id="L1400">            final int p0 = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1401">            final int pStart = FastMath.max(startRow, p0);</span>
+<span class="fc" id="L1402">            final int pEnd = FastMath.min((iBlock + 1) * BLOCK_SIZE, 1 + endRow);</span>
+<span class="fc bfc" id="L1403" title="All 2 branches covered.">            for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L1404" title="All 2 branches covered.">                for (int jBlock = startColumn / BLOCK_SIZE; jBlock &lt; 1 + endColumn / BLOCK_SIZE; ++jBlock) {</span>
+<span class="fc" id="L1405">                    final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1406">                    final int q0 = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1407">                    final int qStart = FastMath.max(startColumn, q0);</span>
+<span class="fc" id="L1408">                    final int qEnd = FastMath.min((jBlock + 1) * BLOCK_SIZE, 1 + endColumn);</span>
+<span class="fc" id="L1409">                    final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1410">                    int k = (p - p0) * jWidth + qStart - q0;</span>
+<span class="fc bfc" id="L1411" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1412">                        block[k] = visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1413">                        ++k;</span>
+                    }
+                }
+             }
+        }
+<span class="fc" id="L1418">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInRowOrder(final RealMatrixPreservingVisitor visitor,
+                                 final int startRow, final int endRow,
+                                 final int startColumn, final int endColumn)
+        throws OutOfRangeException, NumberIsTooSmallException {
+<span class="fc" id="L1427">        MatrixUtils.checkSubMatrixIndex(this, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc" id="L1428">        visitor.start(rows, columns, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc bfc" id="L1429" title="All 2 branches covered.">        for (int iBlock = startRow / BLOCK_SIZE; iBlock &lt; 1 + endRow / BLOCK_SIZE; ++iBlock) {</span>
+<span class="fc" id="L1430">            final int p0 = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1431">            final int pStart = FastMath.max(startRow, p0);</span>
+<span class="fc" id="L1432">            final int pEnd = FastMath.min((iBlock + 1) * BLOCK_SIZE, 1 + endRow);</span>
+<span class="fc bfc" id="L1433" title="All 2 branches covered.">            for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L1434" title="All 2 branches covered.">                for (int jBlock = startColumn / BLOCK_SIZE; jBlock &lt; 1 + endColumn / BLOCK_SIZE; ++jBlock) {</span>
+<span class="fc" id="L1435">                    final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1436">                    final int q0 = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1437">                    final int qStart = FastMath.max(startColumn, q0);</span>
+<span class="fc" id="L1438">                    final int qEnd = FastMath.min((jBlock + 1) * BLOCK_SIZE, 1 + endColumn);</span>
+<span class="fc" id="L1439">                    final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc" id="L1440">                    int k = (p - p0) * jWidth + qStart - q0;</span>
+<span class="fc bfc" id="L1441" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1442">                        visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1443">                        ++k;</span>
+                    }
+                }
+             }
+        }
+<span class="fc" id="L1448">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInOptimizedOrder(final RealMatrixChangingVisitor visitor) {
+<span class="fc" id="L1454">        visitor.start(rows, columns, 0, rows - 1, 0, columns - 1);</span>
+<span class="fc" id="L1455">        int blockIndex = 0;</span>
+<span class="fc bfc" id="L1456" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1457">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1458">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc bfc" id="L1459" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1460">                final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1461">                final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L1462">                final double[] block = blocks[blockIndex];</span>
+<span class="fc" id="L1463">                int k = 0;</span>
+<span class="fc bfc" id="L1464" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L1465" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1466">                        block[k] = visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1467">                        ++k;</span>
+                    }
+                }
+<span class="fc" id="L1470">                ++blockIndex;</span>
+            }
+        }
+<span class="fc" id="L1473">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInOptimizedOrder(final RealMatrixPreservingVisitor visitor) {
+<span class="fc" id="L1479">        visitor.start(rows, columns, 0, rows - 1, 0, columns - 1);</span>
+<span class="fc" id="L1480">        int blockIndex = 0;</span>
+<span class="fc bfc" id="L1481" title="All 2 branches covered.">        for (int iBlock = 0; iBlock &lt; blockRows; ++iBlock) {</span>
+<span class="fc" id="L1482">            final int pStart = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1483">            final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);</span>
+<span class="fc bfc" id="L1484" title="All 2 branches covered.">            for (int jBlock = 0; jBlock &lt; blockColumns; ++jBlock) {</span>
+<span class="fc" id="L1485">                final int qStart = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1486">                final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);</span>
+<span class="fc" id="L1487">                final double[] block = blocks[blockIndex];</span>
+<span class="fc" id="L1488">                int k = 0;</span>
+<span class="fc bfc" id="L1489" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc bfc" id="L1490" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1491">                        visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1492">                        ++k;</span>
+                    }
+                }
+<span class="fc" id="L1495">                ++blockIndex;</span>
+            }
+        }
+<span class="fc" id="L1498">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInOptimizedOrder(final RealMatrixChangingVisitor visitor,
+                                       final int startRow, final int endRow,
+                                       final int startColumn,
+                                       final int endColumn)
+        throws OutOfRangeException, NumberIsTooSmallException {
+<span class="fc" id="L1508">        MatrixUtils.checkSubMatrixIndex(this, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc" id="L1509">        visitor.start(rows, columns, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc bfc" id="L1510" title="All 2 branches covered.">        for (int iBlock = startRow / BLOCK_SIZE; iBlock &lt; 1 + endRow / BLOCK_SIZE; ++iBlock) {</span>
+<span class="fc" id="L1511">            final int p0 = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1512">            final int pStart = FastMath.max(startRow, p0);</span>
+<span class="fc" id="L1513">            final int pEnd = FastMath.min((iBlock + 1) * BLOCK_SIZE, 1 + endRow);</span>
+<span class="fc bfc" id="L1514" title="All 2 branches covered.">            for (int jBlock = startColumn / BLOCK_SIZE; jBlock &lt; 1 + endColumn / BLOCK_SIZE; ++jBlock) {</span>
+<span class="fc" id="L1515">                final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1516">                final int q0 = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1517">                final int qStart = FastMath.max(startColumn, q0);</span>
+<span class="fc" id="L1518">                final int qEnd = FastMath.min((jBlock + 1) * BLOCK_SIZE, 1 + endColumn);</span>
+<span class="fc" id="L1519">                final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L1520" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L1521">                    int k = (p - p0) * jWidth + qStart - q0;</span>
+<span class="fc bfc" id="L1522" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1523">                        block[k] = visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1524">                        ++k;</span>
+                    }
+                }
+            }
+        }
+<span class="fc" id="L1529">        return visitor.end();</span>
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double walkInOptimizedOrder(final RealMatrixPreservingVisitor visitor,
+                                       final int startRow, final int endRow,
+                                       final int startColumn,
+                                       final int endColumn)
+        throws OutOfRangeException, NumberIsTooSmallException {
+<span class="fc" id="L1539">        MatrixUtils.checkSubMatrixIndex(this, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc" id="L1540">        visitor.start(rows, columns, startRow, endRow, startColumn, endColumn);</span>
+<span class="fc bfc" id="L1541" title="All 2 branches covered.">        for (int iBlock = startRow / BLOCK_SIZE; iBlock &lt; 1 + endRow / BLOCK_SIZE; ++iBlock) {</span>
+<span class="fc" id="L1542">            final int p0 = iBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1543">            final int pStart = FastMath.max(startRow, p0);</span>
+<span class="fc" id="L1544">            final int pEnd = FastMath.min((iBlock + 1) * BLOCK_SIZE, 1 + endRow);</span>
+<span class="fc bfc" id="L1545" title="All 2 branches covered.">            for (int jBlock = startColumn / BLOCK_SIZE; jBlock &lt; 1 + endColumn / BLOCK_SIZE; ++jBlock) {</span>
+<span class="fc" id="L1546">                final int jWidth = blockWidth(jBlock);</span>
+<span class="fc" id="L1547">                final int q0 = jBlock * BLOCK_SIZE;</span>
+<span class="fc" id="L1548">                final int qStart = FastMath.max(startColumn, q0);</span>
+<span class="fc" id="L1549">                final int qEnd = FastMath.min((jBlock + 1) * BLOCK_SIZE, 1 + endColumn);</span>
+<span class="fc" id="L1550">                final double[] block = blocks[iBlock * blockColumns + jBlock];</span>
+<span class="fc bfc" id="L1551" title="All 2 branches covered.">                for (int p = pStart; p &lt; pEnd; ++p) {</span>
+<span class="fc" id="L1552">                    int k = (p - p0) * jWidth + qStart - q0;</span>
+<span class="fc bfc" id="L1553" title="All 2 branches covered.">                    for (int q = qStart; q &lt; qEnd; ++q) {</span>
+<span class="fc" id="L1554">                        visitor.visit(p, q, block[k]);</span>
+<span class="fc" id="L1555">                        ++k;</span>
+                    }
+                }
+            }
+        }
+<span class="fc" id="L1560">        return visitor.end();</span>
+    }
+
+    /**
+     * Get the height of a block.
+     * @param blockRow row index (in block sense) of the block
+     * @return height (number of rows) of the block
+     */
+    private int blockHeight(final int blockRow) {
+<span class="fc bfc" id="L1569" title="All 2 branches covered.">        return (blockRow == blockRows - 1) ? rows - blockRow * BLOCK_SIZE : BLOCK_SIZE;</span>
+    }
+
+    /**
+     * Get the width of a block.
+     * @param blockColumn column index (in block sense) of the block
+     * @return width (number of columns) of the block
+     */
+    private int blockWidth(final int blockColumn) {
+<span class="fc bfc" id="L1578" title="All 2 branches covered.">        return (blockColumn == blockColumns - 1) ? columns - blockColumn * BLOCK_SIZE : BLOCK_SIZE;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

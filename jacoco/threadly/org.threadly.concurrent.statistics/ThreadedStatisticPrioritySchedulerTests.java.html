@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ThreadedStatisticPrioritySchedulerTests.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.statistics</a> &gt; <span class="el_source">ThreadedStatisticPrioritySchedulerTests.java</span></div><h1>ThreadedStatisticPrioritySchedulerTests.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.statistics;
+
+import static org.junit.Assert.*;
+
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.TimeoutException;
+
+import org.threadly.BlockingTestRunnable;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.test.concurrent.TestRunnable;
+import org.threadly.test.concurrent.TestUtils;
+import org.threadly.util.Pair;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="nc" id="L20">public class ThreadedStatisticPrioritySchedulerTests extends ThreadlyTester {</span>
+  public static void blockTillSchedulerIdle(final StatisticPriorityScheduler scheduler, 
+                                            final int expectedSampleSize) {
+<span class="fc bfc" id="L23" title="All 2 branches covered.">    new TestCondition(() -&gt; scheduler.getActiveTaskCount() == 0 &amp;&amp; </span>
+<span class="fc bfc" id="L24" title="All 2 branches covered.">        scheduler.getExecutionDurationSamples().size() &gt;= expectedSampleSize) // block till all are finished</span>
+<span class="fc" id="L25">      .blockTillTrue();</span>
+<span class="fc" id="L26">  }</span>
+  
+  public static void resetCollectedStatsTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L29">    TestRunnable lastRunnable = null;</span>
+<span class="fc" id="L30">    boolean flip = false;</span>
+<span class="fc bfc" id="L31" title="All 2 branches covered.">    for (int i = 0; i &lt; TEST_QTY; i++) {</span>
+<span class="fc" id="L32">      lastRunnable = new TestRunnable();</span>
+<span class="fc bfc" id="L33" title="All 2 branches covered.">      if (flip) {</span>
+<span class="fc" id="L34">        scheduler.execute(lastRunnable, TaskPriority.High);</span>
+<span class="fc" id="L35">        flip = false;</span>
+      } else {
+<span class="fc" id="L37">        scheduler.execute(lastRunnable, TaskPriority.Low);</span>
+<span class="fc" id="L38">        flip = true;</span>
+      }
+    }
+    
+<span class="fc" id="L42">    lastRunnable.blockTillFinished();</span>
+    // block till all are finished
+<span class="fc" id="L44">    blockTillSchedulerIdle(scheduler, TEST_QTY);</span>
+    
+    // reset stats
+<span class="fc" id="L47">    scheduler.resetCollectedStats();</span>
+    
+<span class="fc" id="L49">    assertEquals(-1, scheduler.getAverageExecutionDuration(), 0);</span>
+<span class="fc bfc" id="L50" title="All 2 branches covered.">    for (TaskPriority p : TaskPriority.values()) {</span>
+<span class="fc" id="L51">      assertEquals(-1, scheduler.getAverageExecutionDelay(p), 0);</span>
+    }
+<span class="fc" id="L53">  }</span>
+  
+  public static void getTotalExecutionCountTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L56">    final int starvablePriorityCount = 1;</span>
+<span class="fc" id="L57">    final int lowPriorityCount = TEST_QTY;</span>
+<span class="fc" id="L58">    final int highPriorityCount = TEST_QTY * 2;</span>
+<span class="fc" id="L59">    TestRunnable lastStarvablePriorityRunnable = null;</span>
+<span class="fc bfc" id="L60" title="All 2 branches covered.">    for (int i = 0; i &lt; starvablePriorityCount; i++) {</span>
+<span class="fc" id="L61">      lastStarvablePriorityRunnable = new TestRunnable();</span>
+<span class="fc" id="L62">      scheduler.execute(lastStarvablePriorityRunnable, TaskPriority.Starvable);</span>
+    }
+<span class="fc" id="L64">    TestRunnable lastLowPriorityRunnable = null;</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">    for (int i = 0; i &lt; lowPriorityCount; i++) {</span>
+<span class="fc" id="L66">      lastLowPriorityRunnable = new TestRunnable();</span>
+<span class="fc" id="L67">      scheduler.execute(lastLowPriorityRunnable, TaskPriority.Low);</span>
+    }
+<span class="fc" id="L69">    TestRunnable lastHighPriorityRunnable = null;</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">    for (int i = 0; i &lt; highPriorityCount; i++) {</span>
+<span class="fc" id="L71">      lastHighPriorityRunnable = new TestRunnable();</span>
+<span class="fc" id="L72">      scheduler.execute(lastHighPriorityRunnable, TaskPriority.High);</span>
+    }
+<span class="fc" id="L74">    lastLowPriorityRunnable.blockTillFinished();</span>
+<span class="fc" id="L75">    lastHighPriorityRunnable.blockTillFinished();</span>
+    
+    // should not be very long after waiting above
+<span class="fc" id="L78">    blockTillSchedulerIdle(scheduler, </span>
+                           starvablePriorityCount + lowPriorityCount + highPriorityCount);
+    
+<span class="fc" id="L81">    assertEquals(starvablePriorityCount, scheduler.getTotalExecutionCount(TaskPriority.Starvable));</span>
+<span class="fc" id="L82">    assertEquals(lowPriorityCount, scheduler.getTotalExecutionCount(TaskPriority.Low));</span>
+<span class="fc" id="L83">    assertEquals(highPriorityCount, scheduler.getTotalExecutionCount(TaskPriority.High));</span>
+<span class="fc" id="L84">    assertEquals(starvablePriorityCount + lowPriorityCount + highPriorityCount, </span>
+<span class="fc" id="L85">                 scheduler.getTotalExecutionCount(null));</span>
+<span class="fc" id="L86">    assertEquals(starvablePriorityCount + lowPriorityCount + highPriorityCount, </span>
+<span class="fc" id="L87">                 scheduler.getTotalExecutionCount());</span>
+<span class="fc" id="L88">  }</span>
+  
+  public static void getAverageExecutionDelayNoInputTest(StatisticPriorityScheduler scheduler) {
+<span class="nc" id="L91">    assertEquals(-1, scheduler.getAverageExecutionDelay(), 0);</span>
+<span class="nc" id="L92">  }</span>
+
+  public static void getPriorityAverageExecutionDelayNoInputTest(StatisticPriorityScheduler scheduler, 
+                                                                 TaskPriority testPriority) {
+<span class="fc" id="L96">    assertEquals(-1, scheduler.getAverageExecutionDelay(testPriority), 0);</span>
+    
+<span class="fc" id="L98">    BlockingTestRunnable br = new BlockingTestRunnable();</span>
+    try {
+<span class="pc bpc" id="L100" title="1 of 3 branches missed.">      switch (testPriority) { // submit with opposite priority</span>
+        case High:
+<span class="fc" id="L102">          scheduler.execute(br, TaskPriority.Low);</span>
+<span class="fc" id="L103">          break;</span>
+        case Low:
+<span class="fc" id="L105">          scheduler.execute(br, TaskPriority.High);</span>
+<span class="fc" id="L106">          break;</span>
+        default:
+<span class="nc" id="L108">          throw new UnsupportedOperationException(&quot;Priority not implenented: &quot; + testPriority);</span>
+      }
+<span class="fc" id="L110">      br.unblock();</span>
+      
+      // wait for task to finish now
+<span class="fc" id="L113">      br.blockTillFinished();</span>
+<span class="fc" id="L114">      blockTillSchedulerIdle(scheduler, 1);</span>
+      
+<span class="fc" id="L116">      assertEquals(-1, scheduler.getAverageExecutionDelay(testPriority), 0);</span>
+    } finally {
+<span class="fc" id="L118">      br.unblock();</span>
+    }
+<span class="fc" id="L120">  }</span>
+
+  public static void getPriorityAverageExecutionDelayTest(StatisticPriorityScheduler scheduler, 
+                                                          TaskPriority priority) {
+<span class="fc" id="L124">    int lowPriorityCount = TEST_QTY;</span>
+<span class="fc" id="L125">    int highPriorityCount = TEST_QTY * 2;</span>
+<span class="fc" id="L126">    BlockingTestRunnable lastRunnable = null;</span>
+<span class="fc bfc" id="L127" title="All 2 branches covered.">    for (int i = 0; i &lt; lowPriorityCount; i++) {</span>
+<span class="fc bfc" id="L128" title="All 2 branches covered.">      if (lastRunnable != null) {</span>
+<span class="fc" id="L129">        TestUtils.blockTillClockAdvances();</span>
+<span class="fc" id="L130">        lastRunnable.unblock();</span>
+      }
+<span class="fc" id="L132">      lastRunnable = new BlockingTestRunnable();</span>
+<span class="fc" id="L133">      scheduler.execute(lastRunnable, TaskPriority.Low);</span>
+    }
+<span class="fc bfc" id="L135" title="All 2 branches covered.">    for (int i = 0; i &lt; highPriorityCount; i++) {</span>
+<span class="fc" id="L136">      TestUtils.blockTillClockAdvances();</span>
+<span class="fc" id="L137">      lastRunnable.unblock();</span>
+<span class="fc" id="L138">      lastRunnable = new BlockingTestRunnable();</span>
+<span class="fc" id="L139">      scheduler.execute(lastRunnable, TaskPriority.High);</span>
+    }
+<span class="fc" id="L141">    TestUtils.blockTillClockAdvances();</span>
+<span class="fc" id="L142">    lastRunnable.unblock();</span>
+    
+<span class="fc" id="L144">    lastRunnable.blockTillFinished();</span>
+<span class="fc" id="L145">    blockTillSchedulerIdle(scheduler, lowPriorityCount + highPriorityCount);</span>
+    
+<span class="fc" id="L147">    List&lt;Long&gt; samples = scheduler.getExecutionDelaySamples(priority);</span>
+<span class="fc" id="L148">    List&lt;Long&gt; allSamples = scheduler.getExecutionDelaySamples();</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">    if (priority != null) {</span>
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">      assertTrue(allSamples.size() &gt; samples.size());</span>
+    }
+<span class="fc" id="L152">    assertTrue(allSamples.containsAll(samples));</span>
+    
+<span class="fc" id="L154">    double total = 0;</span>
+<span class="fc" id="L155">    Iterator&lt;Long&gt; it = samples.iterator();</span>
+<span class="fc bfc" id="L156" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L157">      total += it.next();</span>
+    }
+    
+<span class="fc" id="L160">    double expectedAvg = total / samples.size();</span>
+    
+<span class="fc" id="L162">    assertEquals(expectedAvg, scheduler.getAverageExecutionDelay(priority), 0);</span>
+<span class="fc" id="L163">  }</span>
+  
+  public static void getExecutionDelayPercentilesTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L166">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+    try {
+<span class="fc" id="L168">      assertEquals(0, scheduler.getExecutionDelayPercentiles(90).get(90.), 0);</span>
+<span class="fc" id="L169">      scheduler.execute(btr);</span>
+<span class="fc" id="L170">      scheduler.execute(new ClockUpdateRunnable());</span>
+<span class="fc" id="L171">      TestUtils.blockTillClockAdvances();</span>
+<span class="fc" id="L172">      btr.unblock();</span>
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">      assertEquals(2, scheduler.getExecutionDelayPercentiles(90).get(90.), SLOW_MACHINE ? 50 : 20);</span>
+    } finally {
+<span class="fc" id="L175">      btr.unblock();</span>
+    }
+<span class="fc" id="L177">  }</span>
+  
+  public static void getPriorityExecutionDelayPercentilesTest(StatisticPriorityScheduler scheduler, 
+                                                              TaskPriority priority) {
+<span class="fc" id="L181">    BlockingTestRunnable btr = new BlockingTestRunnable();</span>
+    try {
+<span class="fc" id="L183">      assertEquals(0, scheduler.getExecutionDelayPercentiles(90).get(90.), 0);</span>
+<span class="fc" id="L184">      scheduler.execute(btr);</span>
+<span class="fc" id="L185">      scheduler.execute(new ClockUpdateRunnable(), priority);</span>
+<span class="fc" id="L186">      TestUtils.blockTillClockAdvances();</span>
+<span class="fc" id="L187">      btr.unblock();</span>
+<span class="pc bpc" id="L188" title="1 of 2 branches missed.">      assertEquals(2, scheduler.getExecutionDelayPercentiles(90).get(90.), SLOW_MACHINE ? 50 : 20);</span>
+    } finally {
+<span class="fc" id="L190">      btr.unblock();</span>
+    }
+<span class="fc" id="L192">  }</span>
+  
+  public static void getAverageExecutionDurationNoInputTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L195">    assertEquals(-1, scheduler.getAverageExecutionDuration(), 0);</span>
+<span class="fc" id="L196">  }</span>
+
+  public static void getAverageExecutionDurationSimpleTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L199">    assertEquals(-1, scheduler.getAverageExecutionDuration(), 0);</span>
+<span class="fc" id="L200">    scheduler.execute(new ClockUpdateRunnable());</span>
+<span class="fc" id="L201">    blockTillSchedulerIdle(scheduler, 1);</span>
+<span class="fc" id="L202">    assertEquals(1, scheduler.getAverageExecutionDuration(), 1);</span>
+<span class="fc" id="L203">    scheduler.execute(new ClockUpdateRunnable(DELAY_TIME));</span>
+<span class="fc" id="L204">    blockTillSchedulerIdle(scheduler, 2);</span>
+<span class="pc bpc" id="L205" title="1 of 2 branches missed.">    assertTrue(scheduler.getAverageExecutionDuration() &gt;= DELAY_TIME / 2);</span>
+<span class="fc" id="L206">  }</span>
+  
+  public static void getAverageExecutionDurationTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L209">    int lowPriorityCount = TEST_QTY;</span>
+<span class="fc" id="L210">    int highPriorityCount = TEST_QTY * 2;</span>
+<span class="fc bfc" id="L211" title="All 2 branches covered.">    for (int i = 0; i &lt; lowPriorityCount; i++) {</span>
+<span class="fc" id="L212">      scheduler.execute(DoNothingRunnable.instance(), TaskPriority.Low);</span>
+    }
+<span class="fc" id="L214">    TestRunnable lastRunnable = null;</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    for (int i = 0; i &lt; highPriorityCount; i++) {</span>
+<span class="fc" id="L216">      lastRunnable = new TestRunnable();</span>
+<span class="fc" id="L217">      scheduler.execute(lastRunnable, TaskPriority.High);</span>
+    }
+    
+<span class="fc" id="L220">    lastRunnable.blockTillFinished();</span>
+<span class="fc" id="L221">    int expectedCount = lowPriorityCount + highPriorityCount;</span>
+    // block till all are finished
+<span class="fc" id="L223">    blockTillSchedulerIdle(scheduler, expectedCount);</span>
+    
+<span class="fc" id="L225">    List&lt;Long&gt; runTimes = scheduler.getExecutionDurationSamples();</span>
+<span class="fc" id="L226">    assertEquals(expectedCount, runTimes.size());</span>
+    
+<span class="fc" id="L228">    double totalRunTime = 0;</span>
+<span class="fc" id="L229">    Iterator&lt;Long&gt; it = runTimes.iterator();</span>
+<span class="fc bfc" id="L230" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L231">      totalRunTime += it.next();</span>
+    }
+    
+<span class="fc" id="L234">    double avgRunTime = totalRunTime / runTimes.size();</span>
+    
+<span class="fc" id="L236">    assertEquals(avgRunTime, scheduler.getAverageExecutionDuration(), 0);</span>
+<span class="fc" id="L237">  }</span>
+  
+  public static void getWithPriorityAverageExecutionDurationNoInputTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L240">    TestRunnable tr = new TestRunnable();</span>
+<span class="fc" id="L241">    scheduler.execute(tr, TaskPriority.Low);</span>
+<span class="fc" id="L242">    tr.blockTillFinished();</span>
+<span class="fc" id="L243">    blockTillSchedulerIdle(scheduler, 1);</span>
+<span class="fc" id="L244">    assertEquals(-1, scheduler.getAverageExecutionDuration(TaskPriority.High), 0);</span>
+<span class="fc" id="L245">  }</span>
+  
+  public static void getWithPriorityAverageExecutionDurationTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L248">    int lowPriorityCount = TEST_QTY;</span>
+<span class="fc" id="L249">    int highPriorityCount = TEST_QTY * 2;</span>
+<span class="fc bfc" id="L250" title="All 2 branches covered.">    for (int i = 0; i &lt; lowPriorityCount; i++) {</span>
+<span class="fc" id="L251">      scheduler.execute(DoNothingRunnable.instance(), TaskPriority.Low);</span>
+    }
+<span class="fc" id="L253">    TestRunnable lastRunnable = null;</span>
+<span class="fc bfc" id="L254" title="All 2 branches covered.">    for (int i = 0; i &lt; highPriorityCount; i++) {</span>
+<span class="fc" id="L255">      lastRunnable = new TestRunnable();</span>
+<span class="fc" id="L256">      scheduler.execute(lastRunnable, TaskPriority.High);</span>
+    }
+    
+<span class="fc" id="L259">    lastRunnable.blockTillFinished();</span>
+    // block till all are finished
+<span class="fc" id="L261">    blockTillSchedulerIdle(scheduler, lowPriorityCount + highPriorityCount);</span>
+    
+<span class="fc" id="L263">    List&lt;Long&gt; runTimes = scheduler.getExecutionDurationSamples(TaskPriority.High);</span>
+<span class="fc" id="L264">    assertEquals(highPriorityCount, runTimes.size());</span>
+    
+<span class="fc" id="L266">    double totalRunTime = 0;</span>
+<span class="fc" id="L267">    Iterator&lt;Long&gt; it = runTimes.iterator();</span>
+<span class="fc bfc" id="L268" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L269">      totalRunTime += it.next();</span>
+    }
+    
+<span class="fc" id="L272">    double avgRunTime = totalRunTime / runTimes.size();</span>
+    
+<span class="fc" id="L274">    assertEquals(avgRunTime, scheduler.getAverageExecutionDuration(TaskPriority.High), 0);</span>
+<span class="fc" id="L275">  }</span>
+
+  public static void getExecutionDurationPercentilesTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L278">    assertEquals(0, scheduler.getExecutionDurationPercentiles(50).get(50.), 0);</span>
+<span class="fc" id="L279">    scheduler.execute(new ClockUpdateRunnable());</span>
+<span class="fc" id="L280">    blockTillSchedulerIdle(scheduler, 1);</span>
+<span class="fc" id="L281">    assertEquals(1, scheduler.getExecutionDurationPercentiles(50).get(50.), 1);</span>
+<span class="fc" id="L282">    scheduler.execute(new ClockUpdateRunnable());</span>
+<span class="fc" id="L283">    scheduler.execute(new ClockUpdateRunnable());</span>
+<span class="fc" id="L284">    scheduler.execute(new ClockUpdateRunnable());</span>
+<span class="fc" id="L285">    scheduler.execute(new ClockUpdateRunnable(DELAY_TIME));</span>
+<span class="fc" id="L286">    blockTillSchedulerIdle(scheduler, 5);</span>
+<span class="fc" id="L287">    assertEquals(1, scheduler.getExecutionDurationPercentiles(75).get(75.), 1);</span>
+<span class="pc bpc" id="L288" title="1 of 2 branches missed.">    assertTrue(scheduler.getExecutionDurationPercentiles(90).get(90.) &gt;= DELAY_TIME-ALLOWED_VARIANCE);</span>
+<span class="fc" id="L289">  }</span>
+
+  public static void getWithPriorityExecutionDurationPercentilesTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L292">    assertEquals(0, scheduler.getExecutionDurationPercentiles(TaskPriority.High, 50).get(50.), 0);</span>
+<span class="fc" id="L293">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.Low);</span>
+<span class="fc" id="L294">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.Low);</span>
+<span class="fc" id="L295">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.Low);</span>
+<span class="fc" id="L296">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.Low);</span>
+<span class="fc" id="L297">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.Low);</span>
+<span class="fc" id="L298">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.High);</span>
+<span class="fc" id="L299">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.High);</span>
+<span class="fc" id="L300">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.High);</span>
+<span class="fc" id="L301">    scheduler.execute(new ClockUpdateRunnable(), TaskPriority.High);</span>
+<span class="fc" id="L302">    scheduler.execute(new ClockUpdateRunnable(DELAY_TIME), TaskPriority.High);</span>
+<span class="fc" id="L303">    blockTillSchedulerIdle(scheduler, 10);</span>
+<span class="fc" id="L304">    assertEquals(1, scheduler.getExecutionDurationPercentiles(TaskPriority.High, 75).get(75.), 1);</span>
+<span class="pc bpc" id="L305" title="1 of 2 branches missed.">    assertTrue(scheduler.getExecutionDurationPercentiles(TaskPriority.High, 90).get(90.) &gt;= (DELAY_TIME-ALLOWED_VARIANCE));</span>
+<span class="fc" id="L306">    assertEquals(1, scheduler.getExecutionDurationPercentiles(TaskPriority.Low, 90).get(90.), 1);</span>
+<span class="fc" id="L307">  }</span>
+  
+  public static void getLongRunningTasksTest(StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L310">    final int checkTime = DELAY_TIME;</span>
+<span class="fc" id="L311">    BlockingTestRunnable br = new BlockingTestRunnable();</span>
+<span class="fc" id="L312">    scheduler.execute(br);</span>
+    
+<span class="fc" id="L314">    br.blockTillStarted();</span>
+<span class="fc" id="L315">    TestUtils.sleep(checkTime + 1);</span>
+    
+<span class="fc" id="L317">    assertEquals(1, scheduler.getLongRunningTasksQty(checkTime));</span>
+<span class="fc" id="L318">    List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; longRunning = scheduler.getLongRunningTasks(checkTime);</span>
+<span class="fc" id="L319">    br.unblock();</span>
+    
+<span class="fc" id="L321">    assertEquals(1, longRunning.size());</span>
+<span class="pc bpc" id="L322" title="1 of 2 branches missed.">    assertTrue(longRunning.get(0).getLeft() == br);</span>
+    
+    // wait for task to finish now
+<span class="fc" id="L325">    blockTillSchedulerIdle(scheduler, 1);</span>
+    
+<span class="fc" id="L327">    assertEquals(0, scheduler.getLongRunningTasksQty(0));</span>
+<span class="fc" id="L328">    longRunning = scheduler.getLongRunningTasks(0);</span>
+    
+<span class="fc" id="L330">    assertTrue(longRunning.isEmpty());</span>
+<span class="fc" id="L331">  }</span>
+  
+  public static void getLongRunningTasksWrappedFutureTest(final StatisticPriorityScheduler scheduler) throws InterruptedException, TimeoutException {
+<span class="fc" id="L334">    final AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L335">    scheduler.submit(new ClockUpdateRunnable() {</span>
+      @Override
+      public void handleRunStart() {
+        // even submitted (and thus wrapped in a future), we should get our direct reference
+<span class="pc bpc" id="L339" title="1 of 2 branches missed.">        av.assertTrue(scheduler.getLongRunningTasks(-1).get(0).getLeft() == this);</span>
+<span class="fc" id="L340">        av.signalComplete();</span>
+<span class="fc" id="L341">      }</span>
+    });
+<span class="fc" id="L343">    av.waitForTest();</span>
+<span class="fc" id="L344">  }</span>
+  
+  public static void getLongRunningTasksQtyTest(final StatisticPriorityScheduler scheduler) {
+<span class="fc" id="L347">    assertEquals(0, scheduler.getLongRunningTasksQty(-1));</span>
+<span class="fc" id="L348">    scheduler.execute(new ClockUpdateRunnable() {</span>
+      @Override
+      public void handleRunStart() {
+<span class="nc" id="L351">        assertEquals(1, scheduler.getLongRunningTasksQty(-1));</span>
+<span class="nc" id="L352">        assertEquals(0, scheduler.getLongRunningTasksQty(10));</span>
+<span class="nc" id="L353">      }</span>
+    });
+<span class="fc" id="L355">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

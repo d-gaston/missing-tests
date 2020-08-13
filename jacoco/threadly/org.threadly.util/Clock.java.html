@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Clock.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.util</a> &gt; <span class="el_source">Clock.java</span></div><h1>Clock.java</h1><pre class="source lang-java linenums">package org.threadly.util;
+
+import java.util.concurrent.locks.LockSupport;
+
+/**
+ * This is a utility class for low-resolution timing which avoids frequent 
+ * {@link System#currentTimeMillis()} calls (which perform poorly because they require system 
+ * calls).
+ * &lt;p&gt;
+ * Each call to {@link Clock#lastKnownTimeMillis()} will return the value of 
+ * {@link System#currentTimeMillis()} as of the last call to {@link Clock#accurateTimeMillis()}.  
+ * This means {@link #lastKnownTimeMillis()} will only be as accurate as the frequency with which 
+ * {@link #accurateTimeMillis()} is called.
+ * &lt;p&gt;
+ * In order to ensure a minimum level of accuracy, by default a thread is started to call 
+ * {@link #accurateTimeMillis()} every 100 milliseconds.  This can be disabled by calling 
+ * {@link #stopClockUpdateThread()}.
+ * 
+ * @since 1.0.0
+ */
+<span class="nc" id="L21">public class Clock {</span>
+  /**
+   * Simple conversion of how many nanoseconds exist within a single millisecond.
+   * 
+   * @since 3.1.0
+   */
+  public static final int NANOS_IN_MILLISECOND = 1_000_000;
+  /**
+   * This is the frequency at which the thread which regularly updates the clock wakes up and 
+   * updates the time.  Invocations to {@link #accurateForwardProgressingMillis()} and 
+   * {@link #accurateTimeMillis()} both update their respective times, but this will make sure 
+   * that even if those calls are not made requests to {@link #lastKnownForwardProgressingMillis()} 
+   * and {@link #lastKnownTimeMillis()} have at least some level of accuracy.
+   *  
+   * @since 4.0.0
+   */
+  public static final short AUTOMATIC_UPDATE_FREQUENCY_IN_MS = 100;
+  protected static final short STOP_PARK_TIME_NANOS = 25000;
+  
+<span class="fc" id="L40">  protected static final Object UPDATE_LOCK = new Object();</span>
+<span class="fc" id="L41">  protected static ClockUpdater clockUpdater = null;</span>
+<span class="fc" id="L42">  protected static final long CLOCK_STARTUP_TIME_NANOS = System.nanoTime();</span>
+<span class="fc" id="L43">  private static volatile long nowNanos = CLOCK_STARTUP_TIME_NANOS;</span>
+<span class="fc" id="L44">  private static volatile long nowMillis = System.currentTimeMillis();</span>
+  
+  static {
+<span class="fc" id="L47">    startClockUpdateThread();</span>
+<span class="fc" id="L48">  }</span>
+  
+  /** 
+   * Starts a thread to regularly updated the clock automatically.
+   */
+  public static void startClockUpdateThread() {
+<span class="fc" id="L54">    synchronized (UPDATE_LOCK) {</span>
+<span class="fc bfc" id="L55" title="All 2 branches covered.">      if (clockUpdater != null) {</span>
+<span class="fc" id="L56">        return;</span>
+      } else {
+<span class="fc" id="L58">        clockUpdater = new ClockUpdater();</span>
+        
+<span class="fc" id="L60">        Thread thread = new Thread(clockUpdater);</span>
+        
+<span class="fc" id="L62">        thread.setName(&quot;Threadly clock updater&quot;); // name referenced in Profiler</span>
+<span class="fc" id="L63">        thread.setDaemon(true);</span>
+<span class="fc" id="L64">        thread.start();</span>
+      }
+<span class="fc" id="L66">    }</span>
+<span class="fc" id="L67">  }</span>
+
+  /**
+   * Stops the clock from updating automatically.  
+   * 
+   * This call blocks until the automatic update thread stops, or until this thread is interrupted.
+   */
+  public static void stopClockUpdateThread() {
+    ClockUpdater oldUpdater;
+<span class="fc" id="L76">    synchronized (UPDATE_LOCK) {</span>
+<span class="fc" id="L77">      oldUpdater = clockUpdater;</span>
+      
+<span class="fc" id="L79">      clockUpdater = null;</span>
+      
+<span class="fc" id="L81">      UPDATE_LOCK.notifyAll();</span>
+<span class="fc" id="L82">    }</span>
+    
+<span class="fc bfc" id="L84" title="All 2 branches covered.">    if (oldUpdater != null) {</span>
+<span class="fc" id="L85">      Thread currentThread = Thread.currentThread();</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      while (! oldUpdater.runnableFinished &amp;&amp; </span>
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">             ! currentThread.isInterrupted()) {</span>
+<span class="fc" id="L88">        LockSupport.parkNanos(STOP_PARK_TIME_NANOS);</span>
+      }
+    }
+<span class="fc" id="L91">  }</span>
+  
+  /**
+   * This directly returns the result of {@link System#nanoTime()}.  Using this as an alternative 
+   * to invoking {@link System#nanoTime()} directly is that it updates the nano time 
+   * representation, allowing for more accurate time references when calling 
+   * {@link #lastKnownTimeNanos()} and {@link Clock#lastKnownForwardProgressingMillis()}.
+   * &lt;p&gt;
+   * Please read the java documentation about {@link System#nanoTime()} to understand the nature 
+   * of this value (it may be positive, negative, overflow, and is completely arbitrary from its 
+   * start point).
+   * 
+   * @return a long which is a constantly forward moving representation of nano seconds
+   */
+  public static long accurateTimeNanos() {
+<span class="fc" id="L106">    return nowNanos = System.nanoTime();</span>
+  }
+  
+  /**
+   * This returns a fuzzy known nano time from invocations to either {@link #accurateTimeNanos()} 
+   * or {@link #accurateForwardProgressingMillis()}.  In addition (unless manually stopped via 
+   * {@link #stopClockUpdateThread()}) this time is updated at the frequency of 
+   * {@link #AUTOMATIC_UPDATE_FREQUENCY_IN_MS}.  Thus providing a minimal level of accuracy.
+   * &lt;p&gt;
+   * Please read the java documentation about {@link System#nanoTime()} to understand the nature 
+   * of this value (it may be positive, negative, overflow, and is completely arbitrary from its 
+   * start point).
+   * 
+   * @return a long which is a constantly forward moving representation of nano seconds
+   */
+  public static long lastKnownTimeNanos() {
+<span class="fc" id="L122">    return nowNanos;</span>
+  }
+  
+  /**
+   * Returns a fuzzy time for how much time in milliseconds since this class has loaded (starting 
+   * at {@code 0}).  If {@link Clock} was loaded at the start of the application, this can provide 
+   * the amount of time the application has been running.  
+   * &lt;p&gt;
+   * This call is guaranteed to only progress forward, regardless of system clock changes it will 
+   * move forward at a consistent rate.  
+   * &lt;p&gt;
+   * By default (unless manually stopped via {@link #stopClockUpdateThread()}) this time is 
+   * updated automatically at the frequency of {@link #AUTOMATIC_UPDATE_FREQUENCY_IN_MS}.  Thus 
+   * allowing a guarantee of minimal accuracy within the set milliseconds.
+   * 
+   * @since 3.1.0
+   * @return Amount of time in milliseconds since Clock class was loaded
+   */
+  public static long lastKnownForwardProgressingMillis() {
+    /* We can not guarantee that nowNanos is &gt; CLOCK_STARTUP_TIME_NANOS, since the nano time may 
+     * overflow.  But subtracting after an overflow, will still produce a positive result.
+     */
+<span class="fc" id="L144">    return (nowNanos - CLOCK_STARTUP_TIME_NANOS) / NANOS_IN_MILLISECOND;</span>
+  }
+  
+  /**
+   * Returns an accurate amount of time in milliseconds since this class has loaded (starting at 
+   * {@code 0}).  If {@link Clock} was loaded at the start of the application, this can provide 
+   * the amount of time the application has been running.  Calls to this will NOT update the time 
+   * in {@link #accurateTimeMillis()}.  
+   * &lt;p&gt;
+   * This call is guaranteed to only progress forward, regardless of system clock changes it will 
+   * move forward at a consistent rate.
+   * 
+   * @since 3.1.0
+   * @return Amount of time in milliseconds since Clock class was loaded
+   */
+  public static long accurateForwardProgressingMillis() {
+<span class="fc" id="L160">    return ((nowNanos = System.nanoTime()) - CLOCK_STARTUP_TIME_NANOS) / NANOS_IN_MILLISECOND;</span>
+  }
+  
+  /**
+   * Finds the duration in milliseconds from the reference time.  Effectively this is the same as 
+   * subtracting the result from {@link #lastKnownForwardProgressingMillis()} from the parameter 
+   * provided.  The parameter provided should have been a result from 
+   * {@link #lastKnownForwardProgressingMillis()} or {@link #accurateForwardProgressingMillis()}.  
+   * Manipulating that time before calling this is not supported (negative results will not be 
+   * provided).  This is simply a helper function for this very common operation.
+   * 
+   * @param forwardMillis The reference time
+   * @return The milliseconds from the provided reference time
+   */
+  public static long forwardProgressingDuration(long forwardMillis) {
+<span class="fc" id="L175">    return Math.max(0, lastKnownForwardProgressingMillis() - forwardMillis);</span>
+  }
+
+  /**
+   * Getter for the last known time in milliseconds.  This time is considered semi-accurate, based 
+   * off the last time accurate time has been requested, or this class has automatically updated 
+   * the time (unless requested to stop automatically updating).  
+   * &lt;p&gt;
+   * If the system clock goes backwards this too can go backwards.  If that is not desirable 
+   * consider using {@link #lastKnownForwardProgressingMillis()}.  
+   * &lt;p&gt;
+   * By default (unless manually stopped via {@link #stopClockUpdateThread()}) this time is 
+   * updated automatically at the frequency of {@link #AUTOMATIC_UPDATE_FREQUENCY_IN_MS}.  Thus 
+   * allowing a guarantee of minimal accuracy within the set milliseconds.
+   * 
+   * @return last known time in milliseconds
+   */
+  public static long lastKnownTimeMillis() {
+<span class="fc" id="L193">    return nowMillis;</span>
+  }
+
+  /**
+   * Updates the clock so that future calls to {@link #lastKnownTimeMillis()} can benefit, and 
+   * returns the accurate time in milliseconds.  This will NOT update the time for calls to 
+   * {@link #lastKnownForwardProgressingMillis()}.
+   * &lt;p&gt;
+   * If the system clock goes backwards this too can go backwards.  If that is not desirable 
+   * consider using {@link #accurateForwardProgressingMillis()}.
+   * 
+   * @since 2.0.0 (since 1.0.0 as accurateTime)
+   * @return accurate time in milliseconds
+   */
+  public static long accurateTimeMillis() {
+<span class="fc" id="L208">    return nowMillis = System.currentTimeMillis();</span>
+  }
+  
+  /**
+   * Runnable which will regularly update the stored clock time.  This runnable is designed to run 
+   * in its own dedicated thread.
+   * 
+   * @since 1.0.0
+   */
+<span class="fc" id="L217">  protected static class ClockUpdater implements Runnable {</span>
+<span class="fc" id="L218">    protected volatile boolean runnableFinished = false;</span>
+<span class="fc" id="L219">    protected long lastUpdatedMillis = -1;</span>
+<span class="fc" id="L220">    protected long lastUpdatedNanos = -1;</span>
+    
+    @Override
+    public void run() {
+      try {
+<span class="fc" id="L225">        synchronized (UPDATE_LOCK) {</span>
+<span class="fc bfc" id="L226" title="All 2 branches covered.">          while (clockUpdater == this) {</span>
+            try {
+<span class="fc bfc" id="L228" title="All 2 branches covered.">              if (nowMillis == lastUpdatedMillis || </span>
+                  // check if task is not waking up as expected, if not lets update while we have cpu time
+<span class="fc bfc" id="L230" title="All 2 branches covered.">                  nowMillis - lastUpdatedMillis &gt; AUTOMATIC_UPDATE_FREQUENCY_IN_MS) {</span>
+<span class="fc" id="L231">                nowMillis = lastUpdatedMillis = System.currentTimeMillis();</span>
+              } else {
+<span class="fc" id="L233">                lastUpdatedMillis = nowMillis;</span>
+              }
+<span class="fc bfc" id="L235" title="All 2 branches covered.">              if (nowNanos == lastUpdatedNanos || </span>
+                  // check if task is not waking up as expected, if not lets update while we have cpu time
+<span class="fc bfc" id="L237" title="All 2 branches covered.">                  nowNanos - lastUpdatedNanos &gt; AUTOMATIC_UPDATE_FREQUENCY_IN_MS * NANOS_IN_MILLISECOND) {</span>
+<span class="fc" id="L238">                nowNanos = lastUpdatedNanos = System.nanoTime();</span>
+              } else {
+<span class="fc" id="L240">                lastUpdatedNanos = nowNanos;</span>
+              }
+              
+<span class="fc" id="L243">              UPDATE_LOCK.wait(AUTOMATIC_UPDATE_FREQUENCY_IN_MS);</span>
+<span class="nc" id="L244">            } catch (InterruptedException e) {</span>
+<span class="nc" id="L245">              clockUpdater = null;  // let thread exit</span>
+<span class="nc" id="L246">              Thread.currentThread().interrupt();</span>
+<span class="pc" id="L247">            }</span>
+          }
+<span class="fc" id="L249">        }</span>
+      } finally {
+<span class="fc" id="L251">        runnableFinished = true;</span>
+      }
+<span class="fc" id="L253">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

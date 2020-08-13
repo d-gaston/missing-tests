@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SingleThreadScheduler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">SingleThreadScheduler.java</span></div><h1>SingleThreadScheduler.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * A simple and light weight implementation of the {@link SchedulerService}.  This is designed to 
+ * be a lighter weight option to the {@link PriorityScheduler}, for when multiple threads are 
+ * either not needed, or not desired.
+ * 
+ * @since 2.0.0
+ */
+public class SingleThreadScheduler extends AbstractPriorityScheduler {
+  protected final SchedulerManager sManager;
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.
+   */
+  public SingleThreadScheduler() {
+<span class="fc" id="L27">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS);</span>
+<span class="fc" id="L28">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  public SingleThreadScheduler(TaskPriority defaultPriority, long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L38">    this(defaultPriority, maxWaitForLowPriorityInMs, true);</span>
+<span class="fc" id="L39">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   */
+  public SingleThreadScheduler(boolean daemonThread) {
+<span class="fc" id="L48">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, daemonThread);</span>
+<span class="fc" id="L49">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   */
+  public SingleThreadScheduler(TaskPriority defaultPriority, 
+                               long maxWaitForLowPriorityInMs, boolean daemonThread) {
+<span class="fc" id="L61">    this(defaultPriority, maxWaitForLowPriorityInMs, </span>
+<span class="fc" id="L62">         new ConfigurableThreadFactory(SingleThreadScheduler.class.getSimpleName() + &quot;-&quot;,</span>
+                                       true, daemonThread, Thread.NORM_PRIORITY, null, null));
+<span class="fc" id="L64">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param threadFactory factory to make thread for scheduler
+   */
+  public SingleThreadScheduler(ThreadFactory threadFactory) {
+<span class="fc" id="L73">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, threadFactory);</span>
+<span class="fc" id="L74">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param threadFactory factory to make thread for scheduler
+   */
+  public SingleThreadScheduler(TaskPriority defaultPriority, 
+                               long maxWaitForLowPriorityInMs, ThreadFactory threadFactory) {
+<span class="fc" id="L86">    this(defaultPriority, </span>
+         new SchedulerManager(defaultPriority, maxWaitForLowPriorityInMs, threadFactory));
+<span class="fc" id="L88">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  This is for internal usage where different 
+   * implementations of {@link SchedulerManager} need to be provided.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param SchedulerManager Scheduler manager to run against
+   */
+  protected SingleThreadScheduler(TaskPriority defaultPriority, SchedulerManager schedulerManager) {
+<span class="fc" id="L98">    super(defaultPriority);</span>
+    
+<span class="fc" id="L100">    this.sManager = schedulerManager;</span>
+<span class="fc" id="L101">  }</span>
+  
+  /**
+   * Gets the instance of the scheduler for this instance.  The scheduler must be accessed from 
+   * this function because it is lazily constructed and started.  This call will verify the 
+   * scheduler is running before it is returned
+   * 
+   * @return instance of the internal scheduler
+   * @throws RejectedExecutionException thrown if the scheduler has been shutdown
+   */
+  protected NoThreadScheduler getRunningScheduler() throws RejectedExecutionException {
+<span class="fc" id="L112">    sManager.startIfNotRunning();</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    if (sManager.hasBeenStopped()) {</span>
+<span class="fc" id="L114">      throw new RejectedExecutionException(&quot;Thread pool shutdown&quot;);</span>
+    }
+    
+<span class="fc" id="L117">    return sManager.scheduler;</span>
+  }
+  
+  /**
+   * Stops the scheduler, constructing if necessary.
+   * 
+   * @param stopImmediately if {@code true} after invocation no additional executions will occur
+   * @return if stopped immediately a list of Runnables that were in queue at stop will be returned
+   */
+  private List&lt;Runnable&gt; shutdown(boolean stopImmediately) {
+<span class="fc" id="L127">    return sManager.stop(stopImmediately);</span>
+  }
+
+  /**
+   * Stops any new tasks from being submitted to the pool.  But allows all tasks which are 
+   * submitted to execute, or scheduled (and have elapsed their delay time) to run.  If recurring 
+   * tasks are present they will also be unable to reschedule.  This call will not block to wait 
+   * for the shutdown of the scheduler to finish.  If {@code shutdown()} or 
+   * {@link #shutdownNow()} has already been called, this will have no effect.  
+   * &lt;p&gt;
+   * If you wish to not want to run any queued tasks you should use {@link #shutdownNow()}.
+   */
+  public void shutdown() {
+<span class="fc" id="L140">    shutdown(false);</span>
+<span class="fc" id="L141">  }</span>
+
+  /**
+   * Stops any new tasks from being submitted to the pool.  If any tasks are waiting for execution 
+   * they will be prevented from being run.  If a task is currently running it will be allowed to 
+   * finish (though this call will not block waiting for it to finish).
+   * 
+   * @return returns a list of runnables which were waiting in the queue to be run at time of shutdown
+   */
+  public List&lt;Runnable&gt; shutdownNow() {
+<span class="fc" id="L151">    return shutdown(true);</span>
+  }
+
+  /**
+   * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+   * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block forever.
+   * 
+   * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+   */
+  public void awaitTermination() throws InterruptedException {
+<span class="fc" id="L161">    sManager.execThread.join();</span>
+<span class="fc" id="L162">  }</span>
+
+  /**
+   * Block until the thread pool has shutdown and all threads have been stopped.  If neither 
+   * {@link #shutdown()} or {@link #shutdownNow()} is invoked, then this will block until the 
+   * timeout is reached.
+   * 
+   * @param timeoutMillis time to block and wait for thread pool to shutdown
+   * @return {@code true} if the pool has shutdown, false if timeout was reached
+   * @throws InterruptedException Thrown if blocking thread is interrupted waiting for shutdown
+   */
+  public boolean awaitTermination(long timeoutMillis) throws InterruptedException {
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">    if (timeoutMillis &gt; 0) {</span>
+<span class="fc" id="L175">      sManager.execThread.join(timeoutMillis);</span>
+<span class="nc bnc" id="L176" title="All 2 branches missed.">    } else if (timeoutMillis == Long.MAX_VALUE) {</span>
+<span class="nc" id="L177">      sManager.execThread.join();</span>
+    }
+    
+<span class="fc bfc" id="L180" title="All 2 branches covered.">    return ! sManager.execThread.isAlive();</span>
+  }
+
+  @Override
+  public boolean isShutdown() {
+<span class="fc" id="L185">    return sManager.hasBeenStopped();</span>
+  }
+  
+  /**
+   * One step beyond {@link #isShutdown()}, a {@code true} here indicates that not only has a 
+   * shutdown on the pool been requested, but that the thread running tasks has completed.
+   * 
+   * @return {@code true} if this scheduler is no longer processing any tasks
+   */
+  public boolean isTerminated() {
+<span class="fc bfc" id="L195" title="All 4 branches covered.">    return sManager.hasBeenStopped() &amp;&amp; ! sManager.execThread.isAlive();</span>
+  }
+  
+  /**
+   * Start thread for execution if not already started.  This can avoid the minor delay of the 
+   * thread starting later.  This will not block till the thread is running, instead letting it 
+   * start in the background (usually fine).
+   */
+  public void prestartExecutionThread() {
+<span class="nc" id="L204">    prestartExecutionThread(false);</span>
+<span class="nc" id="L205">  }</span>
+
+  /**
+   * Start thread for execution if not already started.  This can avoid the minor delay of the 
+   * thread starting later.
+   * 
+   * @param blockTillStarted If {@code true} this will not return till the scheduler thread has started 
+   */
+  public void prestartExecutionThread(boolean blockTillStarted) {
+<span class="fc bfc" id="L214" title="All 2 branches covered.">    if (sManager.startIfNotRunning()) {</span>
+<span class="fc" id="L215">      sManager.scheduler.execute(DoNothingRunnable.instance());</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">      if (blockTillStarted) {</span>
+<span class="pc bpc" id="L217" title="3 of 4 branches missed.">        while (! sManager.execThread.isAlive() &amp;&amp; sManager.state.get() &lt; 1) {</span>
+<span class="nc" id="L218">          Thread.yield();</span>
+        }
+      }
+    }
+<span class="fc" id="L222">  }</span>
+
+  @Override
+  protected QueueManager getQueueManager() {
+<span class="fc" id="L226">    return sManager.scheduler.queueManager;</span>
+  }
+
+  @Override
+  protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L231">    return getRunningScheduler().doSchedule(task, delayInMillis, priority);</span>
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay,
+                                     TaskPriority priority) {
+<span class="fc" id="L237">    getRunningScheduler().scheduleWithFixedDelay(task, initialDelay, recurringDelay, priority);</span>
+<span class="fc" id="L238">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay, long period,
+                                  TaskPriority priority) {
+<span class="fc" id="L243">    getRunningScheduler().scheduleAtFixedRate(task, initialDelay, period, priority);</span>
+<span class="fc" id="L244">  }</span>
+  
+  @Override
+  protected void finalize() {
+    // if being GC'ed, stop thread so that it also can be GC'ed
+<span class="fc" id="L249">    shutdown();</span>
+<span class="fc" id="L250">  }</span>
+
+  @Override
+  public int getActiveTaskCount() {
+<span class="fc" id="L254">    return sManager.scheduler.getActiveTaskCount();</span>
+  }
+  
+  /**
+   * This class contains the thread and instance of {@link NoThreadScheduler} that is used to 
+   * provide single threaded scheduler implementation.  The only implementation here is to contain 
+   * those objects, and know how to start and stop the scheduler.
+   * 
+   * @since 2.0.0
+   */
+  protected static class SchedulerManager implements Runnable {
+    protected final NoThreadScheduler scheduler;
+<span class="fc" id="L266">    protected final AtomicInteger state = new AtomicInteger(-1); // -1 = new, 0 = started, 1 = stopping, 2 = stopped</span>
+    protected final Thread execThread;
+    
+    public SchedulerManager(TaskPriority defaultPriority, 
+                            long maxWaitForLowPriorityInMs, ThreadFactory threadFactory) {
+<span class="fc" id="L271">      this(new NoThreadScheduler(defaultPriority, maxWaitForLowPriorityInMs), threadFactory);</span>
+<span class="fc" id="L272">    }</span>
+    
+<span class="fc" id="L274">    public SchedulerManager(NoThreadScheduler scheduler, ThreadFactory threadFactory) {</span>
+<span class="fc" id="L275">      ArgumentVerifier.assertNotNull(threadFactory, &quot;threadFactory&quot;);</span>
+      
+<span class="fc" id="L277">      this.scheduler = scheduler;</span>
+<span class="fc" id="L278">      execThread = threadFactory.newThread(this);</span>
+<span class="fc bfc" id="L279" title="All 2 branches covered.">      if (execThread.isAlive()) {</span>
+<span class="fc" id="L280">        throw new IllegalThreadStateException();</span>
+      }
+<span class="fc" id="L282">    }</span>
+
+    /**
+     * Checks if the scheduler has been requested to at least start the shutdown sequence.  This 
+     * may return {@code true} if the thread is still running, but should not accept more tasks 
+     * unless this is returning {@code false}.
+     * 
+     * @return {@code true} if the scheduler has been stopped
+     */
+    public boolean hasBeenStopped() {
+<span class="fc bfc" id="L292" title="All 2 branches covered.">      return state.get() &gt; 0;</span>
+    }
+
+    /**
+     * Starts the scheduler thread.  If it has already been started this will throw an 
+     * {@link IllegalStateException}.
+     * 
+     * @return {@code true} if scheduler was started.
+     */
+    public boolean startIfNotRunning() {
+<span class="pc bpc" id="L302" title="1 of 4 branches missed.">      if (state.get() == -1 &amp;&amp; state.compareAndSet(-1, 0)) {</span>
+<span class="fc" id="L303">        execThread.start();</span>
+        
+<span class="fc" id="L305">        return true;</span>
+      }
+<span class="fc" id="L307">      return false;</span>
+    }
+    
+    /**
+     * Call to stop the thread which is running tasks.  If this has already been stopped this call 
+     * will have no effect.  Regardless if true or false is passed in, running tasks will NOT be 
+     * Interrupted or stopped.  True will only prevent ANY extra tasks from running, while a false 
+     * will let tasks ready to run complete before shutting down.
+     * 
+     * @param stopImmediately {@code false} if the scheduler should let ready tasks run, 
+     *                        {@code true} stops scheduler immediately
+     * @return if {@code stopImmediately} is {@code true}, this will include tasks which were queued to run, 
+     *         otherwise will be an empty list
+     */
+    public List&lt;Runnable&gt; stop(boolean stopImmediately) {
+<span class="fc" id="L322">      int stateVal = state.get();</span>
+<span class="fc bfc" id="L323" title="All 2 branches covered.">      while (stateVal &lt; 1) {</span>
+<span class="pc bpc" id="L324" title="1 of 2 branches missed.">        if (state.compareAndSet(stateVal, 1)) {</span>
+          // we finish the shutdown immediately if requested, or if it was never started
+<span class="fc bfc" id="L326" title="All 4 branches covered.">          if (stopImmediately || stateVal == -1) {</span>
+<span class="fc" id="L327">            return finishShutdown();</span>
+          } else {
+            /* add to the end of the ready to execute queue a task which 
+             * will finish the shutdown of the scheduler. 
+             */
+<span class="fc" id="L332">            scheduler.execute(new InternalRunnable() {</span>
+              @Override
+              public void run() {
+<span class="fc" id="L335">                finishShutdown();</span>
+<span class="fc" id="L336">              }</span>
+            }, TaskPriority.Low);
+          }
+          
+<span class="fc" id="L340">          break;</span>
+        } else {
+<span class="nc" id="L342">          stateVal = state.get();</span>
+        }
+      }
+      
+<span class="fc" id="L346">      return Collections.emptyList();</span>
+    }
+    
+    /**
+     * Finishes shutdown process, and clears any tasks that remain in the queue.
+     * 
+     * @return a list of runnables which remained in the queue after shutdown
+     */
+    private List&lt;Runnable&gt; finishShutdown() {
+<span class="fc" id="L355">      state.set(2);</span>
+<span class="fc" id="L356">      scheduler.cancelTick();</span>
+      
+<span class="fc" id="L358">      return scheduler.clearTasks();</span>
+    }
+    
+    @Override
+    public void run() {
+<span class="fc bfc" id="L363" title="All 2 branches covered.">      while (state.get() != 2) {</span>
+        try {
+<span class="fc" id="L365">          scheduler.blockingTick(null);</span>
+<span class="fc" id="L366">        } catch (InterruptedException e) {</span>
+          // reset interrupted status
+<span class="fc" id="L368">          Thread.interrupted();</span>
+<span class="fc" id="L369">        } catch (Throwable t) {</span>
+<span class="fc" id="L370">          ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L371">        }</span>
+      }
+<span class="fc" id="L373">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

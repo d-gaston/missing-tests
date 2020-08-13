@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RateLimiterExecutor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper.limiter</a> &gt; <span class="el_source">RateLimiterExecutor.java</span></div><h1>RateLimiterExecutor.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper.limiter;
+
+import java.util.concurrent.Callable;
+
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.SubmitterScheduler;
+import org.threadly.concurrent.future.FutureUtils;
+import org.threadly.concurrent.future.ImmediateResultListenableFuture;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+
+/**
+ * Another way to limit executions on a scheduler.  Unlike the {@link ExecutorLimiter} this does 
+ * not attempt to limit concurrency.  Instead it schedules tasks on a scheduler so that given 
+ * permits are only used at a rate per second.  This can be used for limiting the rate of data 
+ * that you want to put on hardware resource (in a non-blocking way).
+ * &lt;p&gt;
+ * It is important to note that if something is executed and it exceeds the rate, it will be 
+ * future tasks which are delayed longer.
+ * &lt;p&gt;
+ * It is also important to note that it is the responsibility of the application to not be 
+ * providing more tasks into this limiter than can be consumed at the rate.  Since this limiter 
+ * will not block, if provided tasks too fast they could continue to be scheduled out further and 
+ * further.  This should be used to flatten out possible bursts that could be used in the 
+ * application, it is not designed to be a push back mechanism for the application.
+ * 
+ * @since 4.6.0 (since 2.0.0 at org.threadly.concurrent.limiter)
+ */
+public class RateLimiterExecutor implements SubmitterExecutor {
+  protected final SubmitterScheduler scheduler;
+  protected final RejectedExecutionHandler rejectedExecutionHandler;
+  protected final Object permitLock;
+  protected volatile double permitsPerSecond;
+  protected volatile long maxScheduleDelayMillis;
+  private double lastScheduleTime;
+  
+  /**
+   * Constructs a new {@link RateLimiterExecutor}.  Tasks will be scheduled on the provided 
+   * scheduler, so it is assumed that the scheduler will have enough threads to handle the 
+   * average permit amount per task, per second.  
+   * &lt;p&gt;
+   * This will schedule tasks out infinitely far in order to maintain rate.  If you want tasks to 
+   * be rejected at a certain point consider using 
+   * {@link #RateLimiterExecutor(SubmitterScheduler, double, long)}.
+   * 
+   * @param scheduler scheduler to schedule/execute tasks on
+   * @param permitsPerSecond how many permits should be allowed per second
+   */
+  public RateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond) {
+<span class="fc" id="L53">    this(scheduler, permitsPerSecond, Long.MAX_VALUE);</span>
+<span class="fc" id="L54">  }</span>
+  
+  /**
+   * Constructs a new {@link RateLimiterExecutor}.  Tasks will be scheduled on the provided 
+   * scheduler, so it is assumed that the scheduler will have enough threads to handle the 
+   * average permit amount per task, per second.  
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then a {@link java.util.concurrent.RejectedExecutionException} will be 
+   * thrown instead of scheduling the task.
+   * 
+   * @since 4.8.0
+   * @param scheduler scheduler to schedule/execute tasks on
+   * @param permitsPerSecond how many permits should be allowed per second
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   */
+  public RateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                             long maxScheduleDelayMillis) {
+<span class="fc" id="L72">    this(scheduler, permitsPerSecond, maxScheduleDelayMillis, null);</span>
+<span class="fc" id="L73">  }</span>
+  
+  /**
+   * Constructs a new {@link RateLimiterExecutor}.  Tasks will be scheduled on the provided 
+   * scheduler, so it is assumed that the scheduler will have enough threads to handle the 
+   * average permit amount per task, per second.  
+   * &lt;p&gt;
+   * This constructor accepts a maximum schedule delay.  If a task requires being scheduled out 
+   * beyond this delay, then the provided {@link RejectedExecutionHandler} will be invoked.
+   * 
+   * @since 4.8.0
+   * @param scheduler scheduler to schedule/execute tasks on
+   * @param permitsPerSecond how many permits should be allowed per second
+   * @param maxScheduleDelayMillis Maximum amount of time delay tasks in order to maintain rate
+   * @param rejectedExecutionHandler Handler to accept tasks which could not be executed
+   */
+  public RateLimiterExecutor(SubmitterScheduler scheduler, double permitsPerSecond, 
+                             long maxScheduleDelayMillis, 
+<span class="fc" id="L91">                             RejectedExecutionHandler rejectedExecutionHandler) {</span>
+<span class="fc" id="L92">    ArgumentVerifier.assertNotNull(scheduler, &quot;scheduler&quot;);</span>
+    
+<span class="fc" id="L94">    this.scheduler = scheduler;</span>
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">    if (rejectedExecutionHandler == null) {</span>
+<span class="fc" id="L96">      rejectedExecutionHandler = RejectedExecutionHandler.THROW_REJECTED_EXECUTION_EXCEPTION;</span>
+    }
+<span class="fc" id="L98">    this.rejectedExecutionHandler = rejectedExecutionHandler;</span>
+<span class="fc" id="L99">    this.permitLock = new Object();</span>
+<span class="fc" id="L100">    this.lastScheduleTime = Clock.lastKnownForwardProgressingMillis();</span>
+<span class="fc" id="L101">    setPermitsPerSecond(permitsPerSecond);</span>
+<span class="fc" id="L102">    setMaxScheduleDelayMillis(maxScheduleDelayMillis);</span>
+<span class="fc" id="L103">  }</span>
+  
+  /**
+   * Sets the allowed permits per second.  When this rate is updated, it only applies to future 
+   * submitted task.  In addition if the rate has already been exceeded (and thus there is a delay 
+   * in scheduling future items), that delay based off the previous permit rate will not be 
+   * adjusted.  For example if the rate was {@code 1/sec} and a 10 permit task was just submitted, 
+   * and thus we have a delay of 10 seconds for a future task.  Adjusting this higher will NOT 
+   * reduce the delay time for the next task, it will only effect schedule rates after currently 
+   * scheduled tasks have been satisfied.
+   *  
+   * @since 4.6.3
+   * @param permitsPerSecond how many permits should be allowed per second
+   */
+  public void setPermitsPerSecond(double permitsPerSecond) {
+<span class="fc" id="L118">    ArgumentVerifier.assertGreaterThanZero(permitsPerSecond, &quot;permitsPerSecond&quot;);</span>
+    
+<span class="fc" id="L120">    this.permitsPerSecond = permitsPerSecond;</span>
+<span class="fc" id="L121">  }</span>
+  
+  /**
+   * At runtime adjust the maximum amount that this rate limiter will be willing to schedule out 
+   * tasks in order to maintain the rate.  This value must be greater than zero.
+   * 
+   * @since 4.8.0
+   * @param maxScheduleDelayMillis Maximum task delay in milliseconds
+   */
+  public void setMaxScheduleDelayMillis(long maxScheduleDelayMillis) {
+<span class="fc" id="L131">    ArgumentVerifier.assertGreaterThanZero(maxScheduleDelayMillis, &quot;maxScheduleDelayMillis&quot;);</span>
+    
+<span class="fc" id="L133">    this.maxScheduleDelayMillis = maxScheduleDelayMillis;</span>
+<span class="fc" id="L134">  }</span>
+  
+  /**
+   * This call will check how far out we have already scheduled tasks to be run.  Because it is 
+   * the applications responsibility to not provide tasks too fast for the limiter to run them, 
+   * this can give an idea of how backed up tasks provided through this limiter actually are.
+   * 
+   * @return minimum delay in milliseconds for the next task to be provided
+   */
+  public int getMinimumDelay() {
+    double accurateDelayMillis;
+<span class="fc" id="L145">    synchronized (permitLock) {</span>
+<span class="fc" id="L146">      accurateDelayMillis = lastScheduleTime - Clock.lastKnownForwardProgressingMillis();</span>
+<span class="fc" id="L147">    }</span>
+<span class="fc" id="L148">    return (int)Math.max(0, Math.ceil(accurateDelayMillis));</span>
+  }
+  
+  /**
+   * Call to get the time the last task was scheduled at.  This time is relative to 
+   * {@link Clock#lastKnownForwardProgressingMillis()}.  It may be in the future or present.
+   * 
+   * @return Time that last task was scheduled at
+   */
+  protected long getLastScheduleTime() {
+<span class="fc" id="L158">    synchronized (permitLock) {</span>
+<span class="fc" id="L159">      return (long)lastScheduleTime;</span>
+    }
+  }
+  
+  /**
+   * In order to help assist with avoiding to schedule too much on the scheduler at any given 
+   * time, this call returns a future that will block until the delay for the next task falls 
+   * below the maximum delay provided into this call.  If you want to ensure that the next task 
+   * will execute immediately, you should provide a zero to this function.  If more tasks are 
+   * added to the limiter after this call, it will NOT impact when this future will unblock.  So 
+   * this future is assuming that nothing else is added to the limiter after requested.
+   * 
+   * @param maximumDelay maximum delay in milliseconds until returned Future should unblock
+   * @return Future that will unblock {@code get()} calls once delay has been reduced below the provided maximum
+   */
+  public ListenableFuture&lt;?&gt; getFutureTillDelay(long maximumDelay) {
+<span class="fc" id="L175">    int currentMinimumDelay = getMinimumDelay();</span>
+<span class="fc bfc" id="L176" title="All 2 branches covered.">    if (currentMinimumDelay == 0) {</span>
+<span class="fc" id="L177">      return ImmediateResultListenableFuture.NULL_RESULT;</span>
+    } else {
+<span class="fc" id="L179">      ListenableFutureTask&lt;?&gt; lft = new ListenableFutureTask&lt;&gt;(false, DoNothingRunnable.instance(), this);</span>
+      
+      long futureDelay;
+<span class="pc bpc" id="L182" title="3 of 4 branches missed.">      if (maximumDelay &gt; 0 &amp;&amp; currentMinimumDelay &gt; maximumDelay) {</span>
+<span class="nc" id="L183">        futureDelay = maximumDelay;</span>
+      } else {
+<span class="fc" id="L185">        futureDelay = currentMinimumDelay;</span>
+      }
+      
+<span class="fc" id="L188">      scheduler.schedule(lft, futureDelay);</span>
+      
+<span class="fc" id="L190">      return lft;</span>
+    }
+  }
+
+  @Override
+  public void execute(Runnable task) {
+<span class="fc" id="L196">    execute(1, task);</span>
+<span class="fc" id="L197">  }</span>
+  
+  /**
+   * Exact same as execute counter part, except you can specify how many permits this task will 
+   * require/use (instead of defaulting to 1).  The task will be scheduled out as far as necessary 
+   * to ensure it conforms to the set rate.
+   * 
+   * @param permits resource permits for this task
+   * @param task Runnable to execute when ready
+   * @return Time in milliseconds task was delayed to maintain rate, or {@code -1} if rejected but handler did not throw
+   */
+  public long execute(double permits, Runnable task) {
+<span class="fc" id="L209">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L210">    ArgumentVerifier.assertNotNegative(permits, &quot;permits&quot;);</span>
+   
+<span class="fc bfc" id="L212" title="All 2 branches covered.">    if (task == DoNothingRunnable.instance()) {</span>
+<span class="fc" id="L213">      long result = taskDelayForPermits(permits);</span>
+<span class="fc bfc" id="L214" title="All 2 branches covered.">      if (result &lt; 0) {</span>
+<span class="nc" id="L215">        rejectedExecutionHandler.handleRejectedTask(task);</span>
+      }
+<span class="fc" id="L217">      return result;</span>
+    } else {
+<span class="fc" id="L219">      return doExecute(permits, task);</span>
+    }
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result) {
+<span class="fc" id="L225">    return submit(1, task, result);</span>
+  }
+
+  /**
+   * Exact same as the submit counter part, except you can specify how many permits this task will 
+   * require/use (instead of defaulting to 1).  The task will be scheduled out as far as necessary 
+   * to ensure it conforms to the set rate.
+   * 
+   * @param permits resource permits for this task
+   * @param task Runnable to execute when ready
+   * @return Future that will indicate when the execution of this task has completed
+   */
+  public ListenableFuture&lt;?&gt; submit(double permits, Runnable task) {
+<span class="fc" id="L238">    return submit(permits, task, null);</span>
+  }
+
+  /**
+   * Exact same as the submit counter part, except you can specify how many permits this task will 
+   * require/use (instead of defaulting to 1).  The task will be scheduled out as far as necessary 
+   * to ensure it conforms to the set rate.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param permits resource permits for this task
+   * @param task Runnable to execute when ready
+   * @param result result to return from future when task completes
+   * @return Future that will return provided result when the execution has completed
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(double permits, Runnable task, T result) {
+<span class="fc" id="L253">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L254">    ArgumentVerifier.assertNotNegative(permits, &quot;permits&quot;);</span>
+    
+<span class="pc bpc" id="L256" title="1 of 2 branches missed.">    if (task == DoNothingRunnable.instance()) {</span>
+<span class="nc" id="L257">      long taskDelay = taskDelayForPermits(permits);</span>
+<span class="nc bnc" id="L258" title="All 2 branches missed.">      if (taskDelay == 0) {</span>
+        // don't even need to burden the scheduler
+<span class="nc" id="L260">        return FutureUtils.immediateResultFuture(result);</span>
+      } else {
+<span class="nc" id="L262">        ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, result, this);</span>
+        
+<span class="nc bnc" id="L264" title="All 2 branches missed.">        if (taskDelay &lt; 0) {</span>
+<span class="nc" id="L265">          rejectedExecutionHandler.handleRejectedTask(lft);</span>
+        } else {
+<span class="nc" id="L267">          scheduler.schedule(lft, taskDelay);</span>
+        }
+        
+<span class="nc" id="L270">        return lft;</span>
+      }
+    } else {
+<span class="fc" id="L273">      ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, result, this);</span>
+      
+<span class="fc" id="L275">      doExecute(permits, lft);</span>
+      
+<span class="fc" id="L277">      return lft;</span>
+    }
+  }
+
+  @Override
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task) {
+<span class="fc" id="L283">    return submit(1, task);</span>
+  }
+
+  /**
+   * Exact same as the submit counter part, except you can specify how many permits this task will 
+   * require/use (instead of defaulting to 1).  The task will be scheduled out as far as necessary 
+   * to ensure it conforms to the set rate.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param permits resource permits for this task
+   * @param task Callable to execute when ready
+   * @return Future that will return the callables provided result when the execution has completed
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(double permits, Callable&lt;T&gt; task) {
+<span class="fc" id="L297">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+<span class="fc" id="L298">    ArgumentVerifier.assertNotNegative(permits, &quot;permits&quot;);</span>
+    
+<span class="fc" id="L300">    ListenableFutureTask&lt;T&gt; lft = new ListenableFutureTask&lt;&gt;(false, task, this);</span>
+    
+<span class="fc" id="L302">    doExecute(permits, lft);</span>
+    
+<span class="fc" id="L304">    return lft;</span>
+  }
+  
+  private long taskDelayForPermits(double permits) {
+<span class="fc" id="L308">    double effectiveDelay = (permits / permitsPerSecond) * 1000;</span>
+<span class="fc" id="L309">    synchronized (permitLock) {</span>
+<span class="pc bpc" id="L310" title="3 of 4 branches missed.">      if (permits == 0 &amp;&amp; lastScheduleTime &lt; Clock.lastKnownForwardProgressingMillis()) {</span>
+        // shortcut
+<span class="nc" id="L312">        return 0;</span>
+      } else {
+<span class="fc" id="L314">        double scheduleDelay = lastScheduleTime - Clock.accurateForwardProgressingMillis();</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">        if (scheduleDelay &gt; maxScheduleDelayMillis) {</span>
+          // let rejection handler invoke outside of lock
+<span class="fc" id="L317">          return -1;</span>
+<span class="fc bfc" id="L318" title="All 2 branches covered.">        } else if (scheduleDelay &lt; 1) {</span>
+<span class="fc bfc" id="L319" title="All 2 branches covered.">          if (scheduleDelay &lt; 0) {</span>
+<span class="fc" id="L320">            lastScheduleTime = Clock.lastKnownForwardProgressingMillis() + effectiveDelay;</span>
+          } else {
+<span class="fc" id="L322">            lastScheduleTime += effectiveDelay;</span>
+          }
+<span class="fc" id="L324">          return 0;</span>
+        } else {
+<span class="fc" id="L326">          lastScheduleTime += effectiveDelay;</span>
+<span class="fc" id="L327">          return (long)scheduleDelay;</span>
+        }
+      }
+    }
+  }
+  
+  /**
+   * Performs the execution by scheduling the task out as necessary.  The provided permits will 
+   * impact the next execution's schedule time to ensure the given rate.
+   * 
+   * @param permits number of permits for this task
+   * @param task Runnable to be executed once rate can be maintained
+   * @return Time in milliseconds task was delayed to maintain rate, or {@code -1} if rejected but handler did not throw
+   */
+  protected long doExecute(double permits, Runnable task) {
+<span class="fc" id="L342">    long taskDelay = taskDelayForPermits(permits);</span>
+<span class="pc bpc" id="L343" title="1 of 2 branches missed.">    if (taskDelay &lt; 0) {</span>
+<span class="nc" id="L344">      rejectedExecutionHandler.handleRejectedTask(task);</span>
+    } else {
+<span class="fc" id="L346">      scheduler.schedule(task, taskDelay);</span>
+    }
+    
+<span class="fc" id="L349">    return taskDelay;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

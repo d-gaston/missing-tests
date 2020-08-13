@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ProfilerTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.util.debug</a> &gt; <span class="el_source">ProfilerTest.java</span></div><h1>ProfilerTest.java</h1><pre class="source lang-java linenums">package org.threadly.util.debug;
+
+import static org.junit.Assert.*;
+
+import java.io.ByteArrayOutputStream;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.threadly.ThreadlyTester;
+import org.threadly.concurrent.ConfigurableThreadFactory;
+import org.threadly.concurrent.DoNothingRunnable;
+import org.threadly.concurrent.PriorityScheduler;
+import org.threadly.concurrent.SameThreadSubmitterExecutor;
+import org.threadly.concurrent.SingleThreadScheduler;
+import org.threadly.concurrent.StrictPriorityScheduler;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.statistics.PrioritySchedulerStatisticTracker;
+import org.threadly.test.concurrent.AsyncVerifier;
+import org.threadly.test.concurrent.TestCondition;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionHandler;
+
+@SuppressWarnings(&quot;javadoc&quot;)
+<span class="fc" id="L36">public class ProfilerTest extends ThreadlyTester {</span>
+  private static final int POLL_INTERVAL = 1;
+  private static final int MIN_RESPONSE_LENGTH = 10;
+  
+  protected Profiler profiler;
+  
+  @Before
+  public void setup() {
+<span class="fc" id="L44">    profiler = new Profiler(POLL_INTERVAL);</span>
+<span class="fc" id="L45">  }</span>
+  
+  @After
+  public void cleanup() {
+<span class="fc" id="L49">    profiler.stop();</span>
+<span class="fc" id="L50">    profiler = null;</span>
+<span class="fc" id="L51">  }</span>
+  
+  protected void profilingExecutor(@SuppressWarnings(&quot;unused&quot;) Executor executor) {
+    // ignored by default, overriden in other cases
+<span class="fc" id="L55">  }</span>
+  
+  protected void blockForProfilerSample() {
+<span class="fc" id="L58">    int startCount = profiler.getCollectedSampleQty();</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">    new TestCondition(() -&gt; profiler.getCollectedSampleQty() &gt; startCount).blockTillTrue(1000 * 20);</span>
+<span class="fc" id="L60">  }</span>
+  
+  @Test
+  public void constructorTest() {
+<span class="fc" id="L64">    int testPollInterval = Profiler.DEFAULT_POLL_INTERVAL_IN_MILLIS * 10;</span>
+    Profiler p;
+    
+<span class="fc" id="L67">    p = new Profiler();</span>
+<span class="fc" id="L68">    assertNotNull(p.pStore.threadTraces);</span>
+<span class="fc" id="L69">    assertEquals(0, p.pStore.threadTraces.size());</span>
+<span class="fc" id="L70">    assertEquals(Profiler.DEFAULT_POLL_INTERVAL_IN_MILLIS, p.pStore.pollIntervalInMs);</span>
+<span class="fc" id="L71">    assertNull(p.pStore.collectorThread.get());</span>
+<span class="fc" id="L72">    assertNull(p.pStore.dumpingThread);</span>
+<span class="fc" id="L73">    assertNotNull(p.startStopLock);</span>
+    
+<span class="fc" id="L75">    p = new Profiler(testPollInterval);</span>
+<span class="fc" id="L76">    assertNotNull(p.pStore.threadTraces);</span>
+<span class="fc" id="L77">    assertEquals(0, p.pStore.threadTraces.size());</span>
+<span class="fc" id="L78">    assertEquals(testPollInterval, p.pStore.pollIntervalInMs);</span>
+<span class="fc" id="L79">    assertNull(p.pStore.collectorThread.get());</span>
+<span class="fc" id="L80">    assertNull(p.pStore.dumpingThread);</span>
+<span class="fc" id="L81">    assertNotNull(p.startStopLock);</span>
+<span class="fc" id="L82">  }</span>
+  
+  @Test
+  public void getProfileThreadsIteratorTest() {
+<span class="fc" id="L86">    Iterator&lt;?&gt; it = profiler.pStore.getProfileThreadsIterator();</span>
+    
+<span class="fc" id="L88">    assertNotNull(it);</span>
+<span class="fc" id="L89">    assertTrue(it.hasNext());</span>
+<span class="fc" id="L90">    assertNotNull(it.next());</span>
+<span class="fc" id="L91">  }</span>
+  
+  @Test (expected = NoSuchElementException.class)
+  public void profileThreadsIteratorNextFail() {
+<span class="fc" id="L95">    Iterator&lt;?&gt; it = profiler.pStore.getProfileThreadsIterator();</span>
+    
+<span class="pc bpc" id="L97" title="1 of 2 branches missed.">    while (it.hasNext()) {</span>
+<span class="fc" id="L98">      assertNotNull(it.next());</span>
+    }
+    
+<span class="nc" id="L101">    it.next();</span>
+<span class="nc" id="L102">    fail(&quot;Exception should have thrown&quot;);</span>
+<span class="nc" id="L103">  }</span>
+  
+  @Test (expected = UnsupportedOperationException.class)
+  public void profileThreadsIteratorRemoveFail() {
+<span class="fc" id="L107">    Iterator&lt;?&gt; it = profiler.pStore.getProfileThreadsIterator();</span>
+<span class="fc" id="L108">    it.next();</span>
+    
+    // not currently supported
+<span class="nc" id="L111">    it.remove();</span>
+<span class="nc" id="L112">  }</span>
+  
+  @SuppressWarnings(&quot;unused&quot;)
+  @Test (expected = IllegalArgumentException.class)
+  public void constructorFail() {
+<span class="nc" id="L117">    new Profiler(-1);</span>
+<span class="nc" id="L118">  }</span>
+  
+  @Test
+  public void isRunningTest() {
+<span class="fc" id="L122">    assertFalse(profiler.isRunning());</span>
+    
+    /* verification of isRunning after start happens in 
+     * startWithoutExecutorTest and startWitExecutorTest
+     */
+<span class="fc" id="L127">  }</span>
+  
+  @Test
+  public void startWithoutExecutorTest() {
+<span class="fc" id="L131">    profiler.start(null);</span>
+    
+<span class="fc" id="L133">    assertTrue(profiler.isRunning());</span>
+<span class="fc" id="L134">    blockForProfilerSample();</span>
+<span class="fc" id="L135">  }</span>
+  
+  @Test
+  public void startWithExecutorTest() {
+<span class="fc" id="L139">    PrioritySchedulerStatisticTracker e = new PrioritySchedulerStatisticTracker(1);</span>
+    try {
+<span class="fc" id="L141">      assertEquals(0, e.getActiveTaskCount());</span>
+      
+<span class="fc" id="L143">      profiler.start(e);</span>
+      
+<span class="fc" id="L145">      assertTrue(profiler.isRunning());</span>
+<span class="fc" id="L146">      assertEquals(1, e.getActiveTaskCount());</span>
+<span class="fc" id="L147">      blockForProfilerSample();</span>
+    } finally {
+<span class="fc" id="L149">      profiler.stop();</span>
+<span class="fc" id="L150">      e.shutdownNow();</span>
+    }
+<span class="fc" id="L152">  }</span>
+  
+  @Test
+  public void startWithSameThreadExecutorTest() throws InterruptedException, TimeoutException {
+<span class="fc" id="L156">    AsyncVerifier av = new AsyncVerifier();</span>
+<span class="fc" id="L157">    PrioritySchedulerStatisticTracker s = new PrioritySchedulerStatisticTracker(1);</span>
+    try {
+<span class="fc" id="L159">      s.schedule(() -&gt; {</span>
+<span class="fc" id="L160">        av.assertTrue(profiler.isRunning());</span>
+        try {
+<span class="fc" id="L162">          blockForProfilerSample();</span>
+<span class="fc" id="L163">          profiler.stop();  // this should unblock the test thread</span>
+<span class="nc" id="L164">        } catch (Exception e) {</span>
+<span class="nc" id="L165">          av.fail(e);</span>
+<span class="fc" id="L166">        }</span>
+<span class="fc" id="L167">        av.signalComplete();</span>
+<span class="fc" id="L168">      }, 200);</span>
+<span class="fc" id="L169">      profiler.start(SameThreadSubmitterExecutor.instance()); // will block while profile runs</span>
+<span class="fc" id="L170">      av.waitForTest();  // test already completed, just check result</span>
+    } finally {
+<span class="fc" id="L172">      s.shutdownNow();</span>
+    }
+<span class="fc" id="L174">  }</span>
+  
+  @Test
+  public void startWithSameThreadExecutorAndTimeoutTest() {
+<span class="fc" id="L178">    profiler.start(SameThreadSubmitterExecutor.instance(), 200);</span>
+<span class="fc" id="L179">    assertFalse(profiler.isRunning());</span>
+<span class="pc bpc" id="L180" title="1 of 2 branches missed.">    assertTrue(profiler.getCollectedSampleQty() &gt; 0);</span>
+<span class="fc" id="L181">  }</span>
+  
+  @Test
+  public void startWithTimeoutTest() throws InterruptedException, ExecutionException, TimeoutException {
+<span class="fc" id="L185">    long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L186">    ListenableFuture&lt;String&gt; lf = profiler.start(DELAY_TIME);</span>
+<span class="fc" id="L187">    String result = lf.get(DELAY_TIME + (10 * 1000), TimeUnit.MILLISECONDS);</span>
+<span class="fc" id="L188">    long end = Clock.accurateForwardProgressingMillis();</span>
+
+    // profiler should be stopped now
+<span class="fc" id="L191">    assertFalse(profiler.isRunning());</span>
+<span class="pc bpc" id="L192" title="1 of 2 branches missed.">    assertTrue(end - start &gt;= DELAY_TIME);</span>
+<span class="fc" id="L193">    assertNotNull(result);</span>
+<span class="fc" id="L194">  }</span>
+  
+  @Test
+  public void startWitExecutorAndTimeoutTest() throws InterruptedException, ExecutionException, TimeoutException {
+<span class="fc" id="L198">    StrictPriorityScheduler ps = new StrictPriorityScheduler(2);</span>
+    try {
+<span class="fc" id="L200">      long start = Clock.accurateForwardProgressingMillis();</span>
+<span class="fc" id="L201">      ListenableFuture&lt;String&gt; lf = profiler.start(ps, DELAY_TIME);</span>
+<span class="fc" id="L202">      String result = lf.get(10 * 1000, TimeUnit.MILLISECONDS);</span>
+<span class="fc" id="L203">      long end = Clock.accurateForwardProgressingMillis();</span>
+
+      // profiler should be stopped now
+<span class="fc" id="L206">      assertFalse(profiler.isRunning());</span>
+<span class="pc bpc" id="L207" title="1 of 2 branches missed.">      assertTrue(end - start &gt;= DELAY_TIME);</span>
+<span class="fc" id="L208">      assertNotNull(result);</span>
+    } finally {
+<span class="fc" id="L210">      ps.shutdownNow();</span>
+    }
+<span class="fc" id="L212">  }</span>
+
+  @Test
+  public void stopTwiceTest() {
+<span class="fc" id="L216">    ListenableFuture&lt;String&gt; lf = profiler.start(20_000);</span>
+<span class="fc" id="L217">    profiler.stop();</span>
+<span class="fc" id="L218">    assertTrue(lf.isDone());</span>
+<span class="fc" id="L219">    lf = profiler.start(20_000);</span>
+<span class="fc" id="L220">    profiler.stop();</span>
+<span class="fc" id="L221">    assertTrue(lf.isDone());</span>
+<span class="fc" id="L222">  }</span>
+  
+  @Test
+  public void getAndSetProfileIntervalTest() {
+<span class="fc" id="L226">    int TEST_VAL = 100;</span>
+<span class="fc" id="L227">    profiler.setPollInterval(TEST_VAL);</span>
+    
+<span class="fc" id="L229">    assertEquals(TEST_VAL, profiler.getPollInterval());</span>
+<span class="fc" id="L230">  }</span>
+  
+  @Test (expected = IllegalArgumentException.class)
+  public void setProfileIntervalFail() {
+<span class="nc" id="L234">    profiler.setPollInterval(-1);</span>
+<span class="nc" id="L235">  }</span>
+  
+  @Test
+  public void resetTest() {
+<span class="fc" id="L239">    profiler.start();</span>
+    // verify there are some samples
+<span class="fc" id="L241">    blockForProfilerSample();</span>
+<span class="fc" id="L242">    final Thread runningThread = profiler.pStore.collectorThread.get();</span>
+<span class="fc" id="L243">    profiler.stop();</span>
+    
+    // verify stopped
+<span class="fc bfc" id="L246" title="All 2 branches covered.">    new TestCondition(() -&gt; ! runningThread.isAlive()).blockTillTrue(1000 * 20);</span>
+    
+<span class="fc" id="L248">    profiler.reset();</span>
+    
+<span class="fc" id="L250">    assertEquals(0, profiler.pStore.threadTraces.size());</span>
+<span class="fc" id="L251">    assertEquals(0, profiler.getCollectedSampleQty());</span>
+<span class="fc" id="L252">  }</span>
+  
+  @Test
+  public void dumpStoppedStringTest() {
+<span class="fc" id="L256">    profiler.start();</span>
+    
+<span class="fc" id="L258">    blockForProfilerSample();</span>
+    
+<span class="fc" id="L260">    profiler.stop();</span>
+    
+<span class="fc" id="L262">    String resultStr = profiler.dump();</span>
+    
+<span class="fc" id="L264">    verifyDumpStr(resultStr);</span>
+<span class="fc" id="L265">  }</span>
+  
+  @Test
+  public void dumpStoppedOutputStreamTest() {
+<span class="fc" id="L269">    profiler.start();</span>
+    
+<span class="fc" id="L271">    blockForProfilerSample();</span>
+    
+<span class="fc" id="L273">    profiler.stop();</span>
+    
+<span class="fc" id="L275">    ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L276">    profiler.dump(out);</span>
+    
+<span class="fc" id="L278">    String resultStr = out.toString();</span>
+    
+<span class="fc" id="L280">    verifyDumpStr(resultStr);</span>
+<span class="fc" id="L281">  }</span>
+  
+  @Test
+  public void dumpStringTest() {
+<span class="fc" id="L285">    profiler.start();</span>
+    
+<span class="fc" id="L287">    blockForProfilerSample();</span>
+    
+<span class="fc" id="L289">    String resultStr = profiler.dump();</span>
+    
+<span class="fc" id="L291">    verifyDumpStr(resultStr);</span>
+<span class="fc" id="L292">  }</span>
+  
+  @Test
+  public void dumpOutputStreamTest() {
+<span class="fc" id="L296">    profiler.start();</span>
+    
+<span class="fc" id="L298">    blockForProfilerSample();</span>
+    
+<span class="fc" id="L300">    ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+<span class="fc" id="L301">    profiler.dump(out);</span>
+    
+<span class="fc" id="L303">    String resultStr = out.toString();</span>
+    
+<span class="fc" id="L305">    verifyDumpStr(resultStr);</span>
+<span class="fc" id="L306">  }</span>
+  
+  @Test
+  public void dumpStringOnlySummaryTest() {
+<span class="fc" id="L310">    profiler.start();</span>
+<span class="fc" id="L311">    blockForProfilerSample();</span>
+    
+<span class="fc" id="L313">    assertTrue(profiler.dump(false).startsWith(&quot;Combined profile for all threads&quot;));</span>
+<span class="fc" id="L314">  }</span>
+  
+  protected static void verifyDumpStr(String resultStr) {
+<span class="pc bpc" id="L317" title="1 of 2 branches missed.">    assertTrue(resultStr.length() &gt; MIN_RESPONSE_LENGTH);</span>
+    
+<span class="fc" id="L319">    assertTrue(resultStr.contains(Profiler.FUNCTION_BY_COUNT_HEADER));</span>
+<span class="fc" id="L320">    assertTrue(resultStr.contains(Profiler.FUNCTION_BY_NET_HEADER));</span>
+<span class="fc" id="L321">  }</span>
+  
+  private void verifyDumpContains(String str) {
+<span class="fc" id="L324">    new TestCondition(() -&gt; profiler.dump(false), (s) -&gt; s.contains(str)).blockTillTrue();</span>
+<span class="fc" id="L325">  }</span>
+  
+  @Test
+  public void idlePrioritySchedulerTest() {
+<span class="fc" id="L329">    PriorityScheduler ps = new PriorityScheduler(2);</span>
+<span class="fc" id="L330">    profilingExecutor(ps);</span>
+<span class="fc" id="L331">    ps.prestartAllThreads();</span>
+<span class="fc" id="L332">    profiler.start();</span>
+<span class="fc" id="L333">    blockForProfilerSample();</span>
+    
+<span class="fc" id="L335">    new TestCondition(() -&gt; profiler.dump(false), </span>
+<span class="pc bpc" id="L336" title="1 of 2 branches missed.">                      (s) -&gt; s.contains(&quot;PriorityScheduler idle thread (stack 1)&quot;) &amp;&amp;</span>
+<span class="pc bpc" id="L337" title="1 of 2 branches missed.">                             s.contains(&quot;PriorityScheduler idle thread (stack 2)&quot;))</span>
+<span class="fc" id="L338">        .blockTillTrue();</span>
+<span class="fc" id="L339">  }</span>
+  
+  @Test
+  public void idleSingleThreadSchedulerTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L343">    SingleThreadScheduler sts = new SingleThreadScheduler();</span>
+<span class="fc" id="L344">    profilingExecutor(sts);</span>
+<span class="fc" id="L345">    sts.prestartExecutionThread(true);</span>
+<span class="fc" id="L346">    profiler.start();</span>
+<span class="fc" id="L347">    blockForProfilerSample();</span>
+
+<span class="fc" id="L349">    verifyDumpContains(&quot;SingleThreadScheduler idle thread (stack 1)&quot;);</span>
+    
+<span class="fc" id="L351">    sts.schedule(DoNothingRunnable.instance(), 600_000);</span>
+<span class="fc" id="L352">    sts.submit(DoNothingRunnable.instance()).get();</span>
+<span class="fc" id="L353">    blockForProfilerSample();</span>
+
+<span class="fc" id="L355">    verifyDumpContains(&quot;SingleThreadScheduler idle thread (stack 2)&quot;);</span>
+<span class="fc" id="L356">  }</span>
+  
+  @Test
+  public void idlePrioritySchedulerWithExceptionHandlerTest() {
+<span class="fc" id="L360">    PriorityScheduler ps = new PriorityScheduler(2, null, 100, </span>
+                                                 new ConfigurableThreadFactory(ExceptionHandler.PRINT_STACKTRACE_HANDLER));
+<span class="fc" id="L362">    profilingExecutor(ps);</span>
+<span class="fc" id="L363">    ps.prestartAllThreads();</span>
+<span class="fc" id="L364">    profiler.start();</span>
+<span class="fc" id="L365">    blockForProfilerSample();</span>
+
+<span class="fc" id="L367">    verifyDumpContains(&quot;PriorityScheduler with ExceptionHandler idle thread (stack 1)&quot;);</span>
+<span class="fc" id="L368">    verifyDumpContains(&quot;PriorityScheduler with ExceptionHandler idle thread (stack 2)&quot;);</span>
+<span class="fc" id="L369">  }</span>
+  
+  @Test
+  public void idleSingleThreadSchedulerWithExceptionHandlerTest() throws InterruptedException, ExecutionException {
+<span class="fc" id="L373">    SingleThreadScheduler sts = new SingleThreadScheduler(new ConfigurableThreadFactory(ExceptionHandler.PRINT_STACKTRACE_HANDLER));</span>
+<span class="fc" id="L374">    profilingExecutor(sts);</span>
+<span class="fc" id="L375">    sts.prestartExecutionThread(true);</span>
+<span class="fc" id="L376">    profiler.start();</span>
+<span class="fc" id="L377">    blockForProfilerSample();</span>
+
+<span class="fc" id="L379">    verifyDumpContains(&quot;SingleThreadScheduler with ExceptionHandler idle thread (stack 1)&quot;);</span>
+    
+<span class="fc" id="L381">    sts.schedule(DoNothingRunnable.instance(), 600_000);</span>
+<span class="fc" id="L382">    sts.submit(DoNothingRunnable.instance()).get();</span>
+<span class="fc" id="L383">    blockForProfilerSample();</span>
+
+<span class="fc" id="L385">    verifyDumpContains(&quot;SingleThreadScheduler with ExceptionHandler idle thread (stack 2)&quot;);</span>
+<span class="fc" id="L386">  }</span>
+  
+  @Test
+  public void idleThreadPoolExecutorSynchronousQueueTest() {
+<span class="fc" id="L390">    ThreadPoolExecutor tpe = new ThreadPoolExecutor(1, 1, 100, TimeUnit.MILLISECONDS, </span>
+                                                    new SynchronousQueue&lt;&gt;());
+<span class="fc" id="L392">    profilingExecutor(tpe);</span>
+<span class="fc" id="L393">    tpe.prestartCoreThread();</span>
+<span class="fc" id="L394">    profiler.start();</span>
+<span class="fc" id="L395">    blockForProfilerSample();</span>
+
+<span class="fc" id="L397">    verifyDumpContains(&quot;ThreadPoolExecutor SynchronousQueue idle thread&quot;);</span>
+<span class="fc" id="L398">  }</span>
+  
+  @Test
+  public void idleThreadPoolExecutorArrayBlockingQueueTest() {
+<span class="fc" id="L402">    ThreadPoolExecutor tpe = new ThreadPoolExecutor(1, 1, 100, TimeUnit.MILLISECONDS, </span>
+                                                    new ArrayBlockingQueue&lt;&gt;(1));
+<span class="fc" id="L404">    profilingExecutor(tpe);</span>
+<span class="fc" id="L405">    tpe.prestartCoreThread();</span>
+<span class="fc" id="L406">    profiler.start();</span>
+<span class="fc" id="L407">    blockForProfilerSample();</span>
+
+<span class="fc" id="L409">    verifyDumpContains(&quot;ThreadPoolExecutor ArrayBlockingQueue idle thread&quot;);</span>
+<span class="fc" id="L410">  }</span>
+  
+  @Test
+  public void idleThreadPoolExecutorLinkedBlockingQueueTest() {
+<span class="fc" id="L414">    ThreadPoolExecutor tpe = new ThreadPoolExecutor(1, 1, 100, TimeUnit.MILLISECONDS, </span>
+                                                    new LinkedBlockingQueue&lt;&gt;());
+<span class="fc" id="L416">    profilingExecutor(tpe);</span>
+<span class="fc" id="L417">    tpe.prestartCoreThread();</span>
+<span class="fc" id="L418">    profiler.start();</span>
+<span class="fc" id="L419">    blockForProfilerSample();</span>
+
+<span class="fc" id="L421">    verifyDumpContains(&quot;ThreadPoolExecutor LinkedBlockingQueue idle thread&quot;);</span>
+<span class="fc" id="L422">  }</span>
+  
+  @Test
+  public void idleScheduledThreadPoolExecutorTest() {
+<span class="fc" id="L426">    ScheduledThreadPoolExecutor stpe = new ScheduledThreadPoolExecutor(1);</span>
+<span class="fc" id="L427">    profilingExecutor(stpe);</span>
+<span class="fc" id="L428">    stpe.prestartCoreThread();</span>
+<span class="fc" id="L429">    profiler.start();</span>
+<span class="fc" id="L430">    blockForProfilerSample();</span>
+
+<span class="fc" id="L432">    verifyDumpContains(&quot;ScheduledThreadPoolExecutor idle thread&quot;);</span>
+<span class="fc" id="L433">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

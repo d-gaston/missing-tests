@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>InvocationTee.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.event</a> &gt; <span class="el_source">InvocationTee.java</span></div><h1>InvocationTee.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.event;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.Executor;
+
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * Simple utility for multiplying invocations across multiple instances of a given interface.
+ * 
+ * @since 4.3.0
+ */
+@SuppressWarnings(&quot;unchecked&quot;)
+<span class="nc" id="L16">public class InvocationTee {</span>
+  /**
+   * This creates a tee proxy for a given class with a set of instances of said interface.  Any 
+   * invocation to the returned instance (proxy), will be multiple to all provided instances.  If 
+   * provided arguments are mutable, and an instance mutates that argument, future invoked 
+   * instances may see that modification.  It is not deterministic which order the instances will 
+   * be invoked in.  
+   * &lt;p&gt;
+   * If any listeners throw an exception it will be delegated to 
+   * {@link org.threadly.util.ExceptionUtils#handleException(Throwable)}.  So a listener throwing 
+   * an exception will NOT interrupt other listeners from being invoked.  If you want you can 
+   * handle thrown exceptions by setting an {@link org.threadly.util.ExceptionHandler} into 
+   * {@link org.threadly.util.ExceptionUtils}.  Make sure the handler is set it in a way that makes 
+   * sense based off what thread will be invoking the returned interface.  
+   * &lt;p&gt;
+   * Under the hood this depends on {@link ListenerHelper}, and thus has the same limitations.  
+   * Most specifically the provided {@code teeInterface} must in fact be an interface, and not a 
+   * an abstract class, or other non-interface types.  In addition any invocations called to this 
+   * must be a {@code void} return type.
+   * 
+   * @param &lt;T&gt; Type representing interface to multiple invocations of
+   * @param teeInterface Interface class for which the returned instance must implement
+   * @param instances Instances of said interface which invocations should be multiplied to
+   * @return A returned interface which will map all invocations to all provided interfaces
+   */
+  public static &lt;T&gt; T tee(Class&lt;? super T&gt; teeInterface, T ... instances) {
+<span class="fc" id="L42">    return setupHelper(new ListenerHelper&lt;&gt;(teeInterface), instances);</span>
+  }
+  
+  /**
+   * This implementation is variation from {@link #tee(Class, Object...)}, read that documentation 
+   * first.  
+   * &lt;p&gt;
+   * The behavior modifies from that implementation is in how exceptions are handled.  Rather than 
+   * handling them and ensuring that all instances are invoked, this will throw the exception.  
+   * More specifically when an instance throws an exception it will prevent further instances from 
+   * bring invoked, and that exception will bubble up to the original interface invoker.
+   * 
+   * @param &lt;T&gt; Type representing interface to multiple invocations of
+   * @param teeInterface Interface class for which the returned instance must implement
+   * @param instances Instances of said interface which invocations should be multiplied to
+   * @return A returned interface which will map all invocations to all provided interfaces
+   */
+  public static &lt;T&gt; T teeWithExceptionThrowing(Class&lt;? super T&gt; teeInterface, T ... instances) {
+<span class="fc" id="L60">    ListenerHelper&lt;T&gt; lh = new ListenerHelper&lt;T&gt;(teeInterface) {</span>
+      @Override
+      protected T makeProxyInstance(Class&lt;? super T&gt; listenerInterface) {
+<span class="fc" id="L63">        return (T) Proxy.newProxyInstance(listenerInterface.getClassLoader(), </span>
+                                          new Class&lt;?&gt;[] { listenerInterface }, 
+<span class="fc" id="L65">                                          new ListenerCaller() {</span>
+          @Override
+          protected void callListener(T listener, Method method, Object[] args) {
+            try {
+<span class="fc" id="L69">              method.invoke(listener, args);</span>
+<span class="nc" id="L70">            } catch (IllegalAccessException e) {</span>
+              /* should not be possible since only interfaces are allowed, and 
+               * all functions in interfaces are public
+               */
+<span class="nc" id="L74">              ExceptionUtils.handleException(e);</span>
+<span class="fc" id="L75">            } catch (InvocationTargetException e) {</span>
+              // throw exception to interrupt calling handlers
+<span class="fc" id="L77">              throw ExceptionUtils.makeRuntime(e.getCause());</span>
+<span class="pc" id="L78">            }</span>
+<span class="fc" id="L79">          }</span>
+        });
+      }
+    };
+    
+<span class="fc" id="L84">    return setupHelper(lh, instances);</span>
+  }
+  
+  /**
+   * This implementation is variation from {@link #tee(Class, Object...)}, read that documentation 
+   * first.  
+   * &lt;p&gt;
+   * The behavior modifies from that implementation is that all instances will be called by a 
+   * executor.  This means that invocations into the returned instance will return immediately, 
+   * but instance invocation will happen async.  It is guaranteed that any single instance will NOT 
+   * be invoked in parallel.  Thus meaning that if you invoke into the proxy two times before 
+   * a give instance finishes processing the first invocation, the second invocation will queue and 
+   * only be invoked after the first finishes.  
+   * &lt;p&gt;
+   * Under the hood {@link DefaultExecutorListenerHelper} is used to provide this behavior.
+   * 
+   * @param &lt;T&gt; Type representing interface to multiple invocations of
+   * @param executor Executor that instances will be invoked on to
+   * @param teeInterface Interface class for which the returned instance must implement
+   * @param instances Instances of said interface which invocations should be multiplied to
+   * @return A returned interface which will map all invocations to all provided interfaces
+   */
+  public static &lt;T&gt; T teeWithExecutor(Executor executor, 
+                                      Class&lt;? super T&gt; teeInterface, T ... instances) {
+<span class="fc" id="L108">    return setupHelper(new DefaultExecutorListenerHelper&lt;&gt;(teeInterface, executor), instances);</span>
+  }
+
+  private static &lt;T&gt; T setupHelper(ListenerHelper&lt;T&gt; lh, T ... instances) {
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    for (T instance : instances) {</span>
+<span class="fc" id="L113">      lh.addListener(instance);</span>
+    }
+    
+<span class="fc" id="L116">    return lh.call();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

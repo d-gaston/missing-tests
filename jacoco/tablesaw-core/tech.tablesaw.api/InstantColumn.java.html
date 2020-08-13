@@ -1,0 +1,727 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>InstantColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">InstantColumn.java</span></div><h1>InstantColumn.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import static tech.tablesaw.columns.temporal.TemporalPredicates.isMissing;
+import static tech.tablesaw.columns.temporal.TemporalPredicates.isNotMissing;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongArrays;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import java.nio.ByteBuffer;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+import tech.tablesaw.columns.AbstractColumn;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.instant.InstantColumnFormatter;
+import tech.tablesaw.columns.instant.InstantColumnType;
+import tech.tablesaw.columns.instant.InstantMapFunctions;
+import tech.tablesaw.columns.instant.PackedInstant;
+import tech.tablesaw.columns.temporal.TemporalFillers;
+import tech.tablesaw.columns.temporal.TemporalFilters;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.sorting.comparators.DescendingLongComparator;
+
+/** A column in a table that contains long-integer encoded (packed) local date-time values */
+public class InstantColumn extends AbstractColumn&lt;InstantColumn, Instant&gt;
+    implements InstantMapFunctions,
+        TemporalFillers&lt;Instant, InstantColumn&gt;,
+        TemporalFilters&lt;Instant&gt;,
+        CategoricalColumn&lt;Instant&gt; {
+
+<span class="fc" id="L63">  private final LongComparator reverseLongComparator = DescendingLongComparator.instance();</span>
+
+  private LongArrayList data;
+
+<span class="fc" id="L67">  private final IntComparator comparator =</span>
+      (r1, r2) -&gt; {
+<span class="nc" id="L69">        long f1 = getPackedDateTime(r1);</span>
+<span class="nc" id="L70">        long f2 = getPackedDateTime(r2);</span>
+<span class="nc" id="L71">        return Long.compare(f1, f2);</span>
+      };
+
+<span class="fc" id="L74">  private InstantColumnFormatter printFormatter = new InstantColumnFormatter();</span>
+
+  private InstantColumn(String name, LongArrayList data) {
+<span class="fc" id="L77">    super(InstantColumnType.instance(), name);</span>
+<span class="fc" id="L78">    this.data = data;</span>
+<span class="fc" id="L79">  }</span>
+
+  public static InstantColumn create(String name) {
+<span class="fc" id="L82">    return new InstantColumn(name, new LongArrayList(DEFAULT_ARRAY_SIZE));</span>
+  }
+
+  public static InstantColumn create(String name, int initialSize) {
+<span class="fc" id="L86">    InstantColumn column = new InstantColumn(name, new LongArrayList(initialSize));</span>
+<span class="fc bfc" id="L87" title="All 2 branches covered.">    for (int i = 0; i &lt; initialSize; i++) {</span>
+<span class="fc" id="L88">      column.appendMissing();</span>
+    }
+<span class="fc" id="L90">    return column;</span>
+  }
+
+  public static InstantColumn create(String name, List&lt;Instant&gt; data) {
+<span class="nc" id="L94">    InstantColumn column = new InstantColumn(name, new LongArrayList(data.size()));</span>
+<span class="nc bnc" id="L95" title="All 2 branches missed.">    for (Instant date : data) {</span>
+<span class="nc" id="L96">      column.append(date);</span>
+<span class="nc" id="L97">    }</span>
+<span class="nc" id="L98">    return column;</span>
+  }
+
+  public static InstantColumn create(String name, Instant[] data) {
+<span class="fc" id="L102">    InstantColumn column = new InstantColumn(name, new LongArrayList(data.length));</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    for (Instant date : data) {</span>
+<span class="fc" id="L104">      column.append(date);</span>
+    }
+<span class="fc" id="L106">    return column;</span>
+  }
+
+  public static InstantColumn create(String name, Stream&lt;Instant&gt; stream) {
+<span class="nc" id="L110">    InstantColumn column = create(name);</span>
+<span class="nc" id="L111">    stream.forEach(val -&gt; column.append(val));</span>
+<span class="nc" id="L112">    return column;</span>
+  }
+
+  public static boolean valueIsMissing(long value) {
+<span class="nc" id="L116">    return InstantColumnType.valueIsMissing(value);</span>
+  }
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="nc" id="L121">    return valueIsMissing(getLongInternal(rowNumber));</span>
+  }
+
+  @Override
+  public InstantColumn plus(long amountToAdd, ChronoUnit unit) {
+<span class="nc" id="L126">    InstantColumn newColumn = emptyCopy();</span>
+<span class="nc" id="L127">    newColumn.setName(temporalColumnName(this, amountToAdd, unit));</span>
+<span class="nc" id="L128">    InstantColumn column1 = this;</span>
+
+<span class="nc bnc" id="L130" title="All 2 branches missed.">    for (int r = 0; r &lt; column1.size(); r++) {</span>
+<span class="nc" id="L131">      long packedDateTime = column1.getLongInternal(r);</span>
+<span class="nc bnc" id="L132" title="All 2 branches missed.">      if (packedDateTime == InstantColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L133">        newColumn.appendMissing();</span>
+      } else {
+<span class="nc" id="L135">        newColumn.appendInternal(PackedInstant.plus(packedDateTime, amountToAdd, unit));</span>
+      }
+    }
+<span class="nc" id="L138">    return newColumn;</span>
+  }
+
+  @Override
+  public InstantColumn subset(final int[] rows) {
+<span class="nc" id="L143">    final InstantColumn c = this.emptyCopy();</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">    for (final int row : rows) {</span>
+<span class="nc" id="L145">      c.appendInternal(getLongInternal(row));</span>
+    }
+<span class="nc" id="L147">    return c;</span>
+  }
+
+  @Override
+  public InstantColumn removeMissing() {
+<span class="nc" id="L152">    InstantColumn noMissing = emptyCopy();</span>
+<span class="nc" id="L153">    LongIterator iterator = longIterator();</span>
+<span class="nc bnc" id="L154" title="All 2 branches missed.">    while (iterator.hasNext()) {</span>
+<span class="nc" id="L155">      long i = iterator.nextLong();</span>
+<span class="nc bnc" id="L156" title="All 2 branches missed.">      if (!valueIsMissing(i)) {</span>
+<span class="nc" id="L157">        noMissing.appendInternal(i);</span>
+      }
+<span class="nc" id="L159">    }</span>
+<span class="nc" id="L160">    return noMissing;</span>
+  }
+
+  public boolean contains(Instant dateTime) {
+<span class="nc" id="L164">    long dt = PackedInstant.pack(dateTime);</span>
+<span class="nc" id="L165">    return data.contains(dt);</span>
+  }
+
+  @Override
+  public Column&lt;Instant&gt; setMissing(int i) {
+<span class="nc" id="L170">    return set(i, InstantColumnType.missingValueIndicator());</span>
+  }
+
+  public InstantColumn where(Selection selection) {
+<span class="nc" id="L174">    return subset(selection.toArray());</span>
+  }
+
+  public void setPrintFormatter(InstantColumnFormatter formatter) {
+<span class="fc" id="L178">    Preconditions.checkNotNull(formatter);</span>
+<span class="fc" id="L179">    this.printFormatter = formatter;</span>
+<span class="fc" id="L180">  }</span>
+
+  @Override
+  public InstantColumn lag(int n) {
+<span class="nc bnc" id="L184" title="All 2 branches missed.">    int srcPos = n &gt;= 0 ? 0 : 0 - n;</span>
+<span class="nc" id="L185">    long[] dest = new long[size()];</span>
+<span class="nc bnc" id="L186" title="All 2 branches missed.">    int destPos = n &lt;= 0 ? 0 : n;</span>
+<span class="nc bnc" id="L187" title="All 2 branches missed.">    int length = n &gt;= 0 ? size() - n : size() + n;</span>
+
+<span class="nc bnc" id="L189" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L190">      dest[i] = InstantColumnType.missingValueIndicator();</span>
+    }
+
+<span class="nc" id="L193">    System.arraycopy(data.toLongArray(), srcPos, dest, destPos, length);</span>
+
+<span class="nc" id="L195">    InstantColumn copy = emptyCopy(size());</span>
+<span class="nc" id="L196">    copy.data = new LongArrayList(dest);</span>
+<span class="nc" id="L197">    copy.setName(name() + &quot; lag(&quot; + n + &quot;)&quot;);</span>
+<span class="nc" id="L198">    return copy;</span>
+  }
+
+  @Override
+  public InstantColumn appendCell(String stringValue) {
+<span class="nc" id="L203">    return appendInternal(PackedInstant.pack(InstantColumnType.DEFAULT_PARSER.parse(stringValue)));</span>
+  }
+
+  @Override
+  public InstantColumn appendCell(String stringValue, AbstractColumnParser&lt;?&gt; parser) {
+<span class="nc" id="L208">    return appendObj(parser.parse(stringValue));</span>
+  }
+
+  public InstantColumn append(Instant dateTime) {
+<span class="pc bpc" id="L212" title="1 of 2 branches missed.">    if (dateTime != null) {</span>
+<span class="fc" id="L213">      final long dt = PackedInstant.pack(dateTime);</span>
+<span class="fc" id="L214">      appendInternal(dt);</span>
+<span class="fc" id="L215">    } else {</span>
+<span class="nc" id="L216">      appendInternal(InstantColumnType.missingValueIndicator());</span>
+    }
+<span class="fc" id="L218">    return this;</span>
+  }
+
+  @Override
+  public InstantColumn appendObj(Object obj) {
+<span class="pc bpc" id="L223" title="1 of 2 branches missed.">    if (obj == null) {</span>
+<span class="nc" id="L224">      return appendMissing();</span>
+    }
+<span class="pc bpc" id="L226" title="1 of 2 branches missed.">    if (obj instanceof Instant) {</span>
+<span class="nc" id="L227">      return append((Instant) obj);</span>
+    }
+<span class="pc bpc" id="L229" title="1 of 2 branches missed.">    if (obj instanceof Timestamp) {</span>
+<span class="fc" id="L230">      Timestamp timestamp = (Timestamp) obj;</span>
+<span class="fc" id="L231">      return append(timestamp.toInstant());</span>
+    }
+<span class="nc" id="L233">    throw new IllegalArgumentException(</span>
+<span class="nc" id="L234">        &quot;Cannot append &quot; + obj.getClass().getName() + &quot; to DateTimeColumn&quot;);</span>
+  }
+
+  public int size() {
+<span class="fc" id="L238">    return data.size();</span>
+  }
+
+  /** @deprecated Please use the longIterator() or getLongInternal() methods */
+  @Deprecated
+  public LongArrayList data() {
+<span class="nc" id="L244">    return data;</span>
+  }
+
+  public InstantColumn appendInternal(long dateTime) {
+<span class="fc" id="L248">    data.add(dateTime);</span>
+<span class="fc" id="L249">    return this;</span>
+  }
+
+  @Override
+  public String getString(int row) {
+<span class="nc" id="L254">    return printFormatter.format(getPackedDateTime(row));</span>
+  }
+
+  @Override
+  public String getUnformattedString(int row) {
+<span class="fc" id="L259">    return PackedInstant.toString(getPackedDateTime(row));</span>
+  }
+
+  @Override
+  public InstantColumn emptyCopy() {
+<span class="nc" id="L264">    InstantColumn empty = create(name());</span>
+<span class="nc" id="L265">    empty.printFormatter = printFormatter;</span>
+<span class="nc" id="L266">    return empty;</span>
+  }
+
+  @Override
+  public InstantColumn emptyCopy(int rowSize) {
+<span class="fc" id="L271">    InstantColumn column = create(name(), rowSize);</span>
+<span class="fc" id="L272">    column.setPrintFormatter(printFormatter);</span>
+<span class="fc" id="L273">    return column;</span>
+  }
+
+  @Override
+  public InstantColumn copy() {
+<span class="nc" id="L278">    InstantColumn column = emptyCopy(data.size());</span>
+<span class="nc" id="L279">    column.data = data.clone();</span>
+<span class="nc" id="L280">    return column;</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="nc" id="L285">    data.clear();</span>
+<span class="nc" id="L286">  }</span>
+
+  @Override
+  public void sortAscending() {
+<span class="nc" id="L290">    Arrays.parallelSort(data.elements());</span>
+<span class="nc" id="L291">  }</span>
+
+  @Override
+  public void sortDescending() {
+<span class="nc" id="L295">    LongArrays.parallelQuickSort(data.elements(), reverseLongComparator);</span>
+<span class="nc" id="L296">  }</span>
+
+  @Override
+  public Table summary() {
+<span class="nc" id="L300">    Table table = Table.create(&quot;Column: &quot; + name());</span>
+<span class="nc" id="L301">    StringColumn measure = StringColumn.create(&quot;Measure&quot;);</span>
+<span class="nc" id="L302">    StringColumn value = StringColumn.create(&quot;Value&quot;);</span>
+<span class="nc" id="L303">    table.addColumns(measure);</span>
+<span class="nc" id="L304">    table.addColumns(value);</span>
+
+<span class="nc" id="L306">    measure.append(&quot;Count&quot;);</span>
+<span class="nc" id="L307">    value.append(String.valueOf(size()));</span>
+
+<span class="nc" id="L309">    measure.append(&quot;Missing&quot;);</span>
+<span class="nc" id="L310">    value.append(String.valueOf(countMissing()));</span>
+
+<span class="nc" id="L312">    measure.append(&quot;Earliest&quot;);</span>
+<span class="nc" id="L313">    value.append(String.valueOf(min()));</span>
+
+<span class="nc" id="L315">    measure.append(&quot;Latest&quot;);</span>
+<span class="nc" id="L316">    value.append(String.valueOf(max()));</span>
+
+<span class="nc" id="L318">    return table;</span>
+  }
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L323">    LongSet ints = new LongOpenHashSet(data.size());</span>
+<span class="fc bfc" id="L324" title="All 2 branches covered.">    for (long i : data) {</span>
+<span class="fc" id="L325">      ints.add(i);</span>
+<span class="fc" id="L326">    }</span>
+<span class="fc" id="L327">    return ints.size();</span>
+  }
+
+  @Override
+  public InstantColumn unique() {
+<span class="nc" id="L332">    LongSet ints = new LongOpenHashSet(data.size());</span>
+<span class="nc bnc" id="L333" title="All 2 branches missed.">    for (long i : data) {</span>
+<span class="nc" id="L334">      ints.add(i);</span>
+<span class="nc" id="L335">    }</span>
+<span class="nc" id="L336">    InstantColumn column = emptyCopy(ints.size());</span>
+<span class="nc" id="L337">    column.setName(name() + &quot; Unique values&quot;);</span>
+<span class="nc" id="L338">    column.data = LongArrayList.wrap(ints.toLongArray());</span>
+<span class="nc" id="L339">    return column;</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="nc" id="L344">    return data.isEmpty();</span>
+  }
+
+  public long getLongInternal(int index) {
+<span class="fc" id="L348">    return data.getLong(index);</span>
+  }
+
+  protected long getPackedDateTime(int index) {
+<span class="fc" id="L352">    return getLongInternal(index);</span>
+  }
+
+  public Instant get(int index) {
+<span class="nc" id="L356">    return PackedInstant.asInstant(getPackedDateTime(index));</span>
+  }
+
+  @Override
+  public IntComparator rowComparator() {
+<span class="nc" id="L361">    return comparator;</span>
+  }
+
+  /**
+   * Conditionally update this column, replacing current values with newValue for all rows where the
+   * current value matches the selection criteria
+   *
+   * &lt;p&gt;Example: myColumn.set(myColumn.valueIsMissing(), Instant.now()); // no more missing values
+   */
+  public InstantColumn set(Selection rowSelection, Instant newValue) {
+<span class="nc bnc" id="L371" title="All 2 branches missed.">    for (int row : rowSelection) {</span>
+<span class="nc" id="L372">      set(row, newValue);</span>
+<span class="nc" id="L373">    }</span>
+<span class="nc" id="L374">    return this;</span>
+  }
+
+  /** Returns the count of missing values in this column */
+  @Override
+  public int countMissing() {
+<span class="nc" id="L380">    int count = 0;</span>
+<span class="nc bnc" id="L381" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc bnc" id="L382" title="All 2 branches missed.">      if (getPackedDateTime(i) == InstantColumnType.missingValueIndicator()) {</span>
+<span class="nc" id="L383">        count++;</span>
+      }
+    }
+<span class="nc" id="L386">    return count;</span>
+  }
+
+  /**
+   * Returns an array where each entry is the difference, measured in seconds, between the Instant
+   * and midnight, January 1, 1970 UTC.
+   *
+   * &lt;p&gt;If a value is missing, InstantColumnType.missingValueIndicator() is used
+   */
+  public long[] asEpochSecondArray() {
+<span class="nc" id="L396">    return asEpochSecondArray(ZoneOffset.UTC);</span>
+  }
+
+  /**
+   * Returns the seconds from epoch for each value as an array based on the given offset
+   *
+   * &lt;p&gt;If a value is missing, InstantColumnType.missingValueIndicator() is used
+   */
+  public long[] asEpochSecondArray(ZoneOffset offset) {
+<span class="nc" id="L405">    long[] output = new long[data.size()];</span>
+<span class="nc bnc" id="L406" title="All 2 branches missed.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="nc" id="L407">      Instant instant = PackedInstant.asInstant(data.getLong(i));</span>
+<span class="nc bnc" id="L408" title="All 2 branches missed.">      if (instant == null) {</span>
+<span class="nc" id="L409">        output[i] = InstantColumnType.missingValueIndicator();</span>
+      } else {
+<span class="nc" id="L411">        output[i] = instant.getEpochSecond();</span>
+      }
+    }
+<span class="nc" id="L414">    return output;</span>
+  }
+
+  /**
+   * Returns an array where each entry is the difference, measured in milliseconds, between the
+   * Instant and midnight, January 1, 1970 UTC.
+   *
+   * &lt;p&gt;If a missing value is encountered, InstantColumnType.missingValueIndicator() is inserted in
+   * the array
+   */
+  public long[] asEpochMillisArray() {
+<span class="nc" id="L425">    return asEpochMillisArray(ZoneOffset.UTC);</span>
+  }
+
+  /**
+   * Returns an array where each entry is the difference, measured in milliseconds, between the
+   * Instant and midnight, January 1, 1970 UTC.
+   *
+   * &lt;p&gt;If a missing value is encountered, InstantColumnType.missingValueIndicator() is inserted in
+   * the array
+   */
+  public long[] asEpochMillisArray(ZoneOffset offset) {
+<span class="nc" id="L436">    long[] output = new long[data.size()];</span>
+<span class="nc bnc" id="L437" title="All 2 branches missed.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="nc" id="L438">      Instant instant = PackedInstant.asInstant(data.getLong(i));</span>
+<span class="nc bnc" id="L439" title="All 2 branches missed.">      if (instant == null) {</span>
+<span class="nc" id="L440">        output[i] = InstantColumnType.missingValueIndicator();</span>
+      } else {
+<span class="nc" id="L442">        output[i] = instant.toEpochMilli();</span>
+      }
+    }
+<span class="nc" id="L445">    return output;</span>
+  }
+
+  public DateTimeColumn asLocalDateTimeColumn() {
+<span class="fc" id="L449">    return asLocalDateTimeColumn(ZoneOffset.UTC);</span>
+  }
+
+  public DateTimeColumn asLocalDateTimeColumn(ZoneId zone) {
+<span class="fc" id="L453">    LocalDateTime[] output = new LocalDateTime[data.size()];</span>
+<span class="fc bfc" id="L454" title="All 2 branches covered.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="fc" id="L455">      Instant instant = PackedInstant.asInstant(data.getLong(i));</span>
+<span class="pc bpc" id="L456" title="1 of 2 branches missed.">      if (instant == null) {</span>
+<span class="nc" id="L457">        output[i] = null;</span>
+      } else {
+<span class="fc" id="L459">        output[i] = LocalDateTime.ofInstant(instant, zone);</span>
+      }
+    }
+<span class="fc" id="L462">    return DateTimeColumn.create(name(), output);</span>
+  }
+
+  @Override
+  public InstantColumn append(Column&lt;Instant&gt; column) {
+<span class="nc bnc" id="L467" title="All 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="nc" id="L468">    InstantColumn dateTimeColumn = (InstantColumn) column;</span>
+<span class="nc" id="L469">    final int size = dateTimeColumn.size();</span>
+<span class="nc bnc" id="L470" title="All 2 branches missed.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="nc" id="L471">      append(dateTimeColumn.get(i));</span>
+    }
+<span class="nc" id="L473">    return this;</span>
+  }
+
+  @Override
+  public InstantColumn append(Column&lt;Instant&gt; column, int row) {
+<span class="nc bnc" id="L478" title="All 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="nc" id="L479">    return appendInternal(((InstantColumn) column).getLongInternal(row));</span>
+  }
+
+  @Override
+  public InstantColumn set(int row, Column&lt;Instant&gt; column, int sourceRow) {
+<span class="pc bpc" id="L484" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L485">    return set(row, ((InstantColumn) column).getLongInternal(sourceRow));</span>
+  }
+
+  public Instant max() {
+    long max;
+<span class="nc bnc" id="L490" title="All 2 branches missed.">    if (!isEmpty()) {</span>
+<span class="nc" id="L491">      max = getPackedDateTime(0);</span>
+    } else {
+<span class="nc" id="L493">      return null;</span>
+    }
+<span class="nc bnc" id="L495" title="All 2 branches missed.">    for (long aData : data) {</span>
+<span class="nc bnc" id="L496" title="All 2 branches missed.">      if (InstantColumnType.missingValueIndicator() != aData) {</span>
+<span class="nc bnc" id="L497" title="All 2 branches missed.">        max = (max &gt; aData) ? max : aData;</span>
+      }
+<span class="nc" id="L499">    }</span>
+
+<span class="nc bnc" id="L501" title="All 2 branches missed.">    if (InstantColumnType.missingValueIndicator() == max) {</span>
+<span class="nc" id="L502">      return null;</span>
+    }
+<span class="nc" id="L504">    return PackedInstant.asInstant(max);</span>
+  }
+
+  @Override
+  public InstantColumn appendMissing() {
+<span class="fc" id="L509">    appendInternal(InstantColumnType.missingValueIndicator());</span>
+<span class="fc" id="L510">    return this;</span>
+  }
+
+  @Override
+  public Instant min() {
+    long min;
+
+<span class="nc bnc" id="L517" title="All 2 branches missed.">    if (!isEmpty()) {</span>
+<span class="nc" id="L518">      min = getPackedDateTime(0);</span>
+    } else {
+<span class="nc" id="L520">      return null;</span>
+    }
+<span class="nc bnc" id="L522" title="All 2 branches missed.">    for (long aData : data) {</span>
+<span class="nc bnc" id="L523" title="All 2 branches missed.">      if (InstantColumnType.missingValueIndicator() != aData) {</span>
+<span class="nc bnc" id="L524" title="All 2 branches missed.">        min = (min &lt; aData) ? min : aData;</span>
+      }
+<span class="nc" id="L526">    }</span>
+<span class="nc bnc" id="L527" title="All 2 branches missed.">    if (Integer.MIN_VALUE == min) {</span>
+<span class="nc" id="L528">      return null;</span>
+    }
+<span class="nc" id="L530">    return PackedInstant.asInstant(min);</span>
+  }
+
+  public InstantColumn set(int index, long value) {
+<span class="fc" id="L534">    data.set(index, value);</span>
+<span class="fc" id="L535">    return this;</span>
+  }
+
+  @Override
+  public InstantColumn set(int index, Instant value) {
+<span class="nc" id="L540">    data.set(index, PackedInstant.pack(value));</span>
+<span class="nc" id="L541">    return this;</span>
+  }
+
+  /**
+   * Returns the largest (&quot;top&quot;) n values in the column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the largest observations
+   */
+  public List&lt;Instant&gt; top(int n) {
+<span class="nc" id="L552">    List&lt;Instant&gt; top = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L553">    long[] values = data.toLongArray();</span>
+<span class="nc" id="L554">    LongArrays.parallelQuickSort(values, DescendingLongComparator.instance());</span>
+<span class="nc bnc" id="L555" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L556">      top.add(PackedInstant.asInstant(values[i]));</span>
+    }
+<span class="nc" id="L558">    return top;</span>
+  }
+
+  /**
+   * Returns the smallest (&quot;bottom&quot;) n values in the column
+   *
+   * @param n The maximum number of records to return. The actual number will be smaller if n is
+   *     greater than the number of observations in the column
+   * @return A list, possibly empty, of the smallest n observations
+   */
+  public List&lt;Instant&gt; bottom(int n) {
+<span class="nc" id="L569">    List&lt;Instant&gt; bottom = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L570">    long[] values = data.toLongArray();</span>
+<span class="nc" id="L571">    LongArrays.parallelQuickSort(values);</span>
+<span class="nc bnc" id="L572" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L573">      bottom.add(PackedInstant.asInstant(values[i]));</span>
+    }
+<span class="nc" id="L575">    return bottom;</span>
+  }
+
+  public LongIterator longIterator() {
+<span class="nc" id="L579">    return data.iterator();</span>
+  }
+
+  public Set&lt;Instant&gt; asSet() {
+<span class="nc" id="L583">    Set&lt;Instant&gt; times = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L584">    InstantColumn unique = unique();</span>
+<span class="nc bnc" id="L585" title="All 2 branches missed.">    for (Instant Instant : unique) {</span>
+<span class="nc" id="L586">      times.add(Instant);</span>
+<span class="nc" id="L587">    }</span>
+<span class="nc" id="L588">    return times;</span>
+  }
+
+  public int byteSize() {
+<span class="nc" id="L592">    return type().byteSize();</span>
+  }
+
+  /** Returns the contents of the cell at rowNumber as a byte[] */
+  @Override
+  public byte[] asBytes(int rowNumber) {
+<span class="nc" id="L598">    return ByteBuffer.allocate(byteSize()).putLong(getPackedDateTime(rowNumber)).array();</span>
+  }
+
+  public double getDouble(int i) {
+<span class="nc" id="L602">    return getPackedDateTime(i);</span>
+  }
+
+  public double[] asDoubleArray() {
+<span class="nc" id="L606">    double[] doubles = new double[size()];</span>
+<span class="nc" id="L607">    long[] millis = asEpochSecondArray();</span>
+<span class="nc bnc" id="L608" title="All 2 branches missed.">    for (int i = 0; i &lt; millis.length; i++) {</span>
+<span class="nc" id="L609">      doubles[i] = millis[i];</span>
+    }
+<span class="nc" id="L611">    return doubles;</span>
+  }
+
+  public DoubleColumn asDoubleColumn() {
+<span class="nc" id="L615">    return DoubleColumn.create(name(), asEpochSecondArray());</span>
+  }
+
+  /**
+   * Returns an iterator over elements of type {@code T}.
+   *
+   * @return an Iterator.
+   */
+  @Override
+  public Iterator&lt;Instant&gt; iterator() {
+
+<span class="nc" id="L626">    return new Iterator&lt;Instant&gt;() {</span>
+
+<span class="nc" id="L628">      final LongIterator longIterator = longIterator();</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="nc" id="L632">        return longIterator.hasNext();</span>
+      }
+
+      @Override
+      public Instant next() {
+<span class="nc" id="L637">        return PackedInstant.asInstant(longIterator.nextLong());</span>
+      }
+    };
+  }
+
+  // fillWith methods
+
+  private InstantColumn fillWith(
+      int count, Iterator&lt;Instant&gt; iterator, Consumer&lt;Instant&gt; acceptor) {
+<span class="nc bnc" id="L646" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="nc bnc" id="L647" title="All 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L648">        break;</span>
+      }
+<span class="nc" id="L650">      acceptor.accept(iterator.next());</span>
+    }
+<span class="nc" id="L652">    return this;</span>
+  }
+
+  @Override
+  public InstantColumn fillWith(Iterator&lt;Instant&gt; iterator) {
+<span class="nc" id="L657">    int[] r = new int[1];</span>
+<span class="nc" id="L658">    fillWith(size(), iterator, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L659">    return this;</span>
+  }
+
+  private InstantColumn fillWith(
+      int count, Iterable&lt;Instant&gt; iterable, Consumer&lt;Instant&gt; acceptor) {
+<span class="nc" id="L664">    Iterator&lt;Instant&gt; iterator = iterable.iterator();</span>
+<span class="nc bnc" id="L665" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+<span class="nc bnc" id="L666" title="All 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L667">        iterator = iterable.iterator();</span>
+<span class="nc bnc" id="L668" title="All 2 branches missed.">        if (!iterator.hasNext()) {</span>
+<span class="nc" id="L669">          break;</span>
+        }
+      }
+<span class="nc" id="L672">      acceptor.accept(iterator.next());</span>
+    }
+<span class="nc" id="L674">    return this;</span>
+  }
+
+  @Override
+  public InstantColumn fillWith(Iterable&lt;Instant&gt; iterable) {
+<span class="nc" id="L679">    int[] r = new int[1];</span>
+<span class="nc" id="L680">    fillWith(size(), iterable, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L681">    return this;</span>
+  }
+
+  private InstantColumn fillWith(
+      int count, Supplier&lt;Instant&gt; supplier, Consumer&lt;Instant&gt; acceptor) {
+<span class="nc bnc" id="L686" title="All 2 branches missed.">    for (int r = 0; r &lt; count; r++) {</span>
+      try {
+<span class="nc" id="L688">        acceptor.accept(supplier.get());</span>
+<span class="nc" id="L689">      } catch (Exception e) {</span>
+<span class="nc" id="L690">        break;</span>
+<span class="nc" id="L691">      }</span>
+    }
+<span class="nc" id="L693">    return this;</span>
+  }
+
+  @Override
+  public InstantColumn fillWith(Supplier&lt;Instant&gt; supplier) {
+<span class="nc" id="L698">    int[] r = new int[1];</span>
+<span class="nc" id="L699">    fillWith(size(), supplier, date -&gt; set(r[0]++, date));</span>
+<span class="nc" id="L700">    return this;</span>
+  }
+
+  @Override
+  public Instant[] asObjectArray() {
+<span class="nc" id="L705">    final Instant[] output = new Instant[data.size()];</span>
+<span class="nc bnc" id="L706" title="All 2 branches missed.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="nc" id="L707">      output[i] = get(i);</span>
+    }
+<span class="nc" id="L709">    return output;</span>
+  }
+
+  @Override
+  public int compare(Instant o1, Instant o2) {
+<span class="nc" id="L714">    return o1.compareTo(o2);</span>
+  }
+
+  @Override
+  public Selection isMissing() {
+<span class="fc" id="L719">    return eval(isMissing);</span>
+  }
+
+  @Override
+  public Selection isNotMissing() {
+<span class="fc" id="L724">    return eval(isNotMissing);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

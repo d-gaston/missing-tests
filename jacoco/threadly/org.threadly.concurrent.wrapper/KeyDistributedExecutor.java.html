@@ -1,0 +1,584 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KeyDistributedExecutor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.wrapper</a> &gt; <span class="el_source">KeyDistributedExecutor.java</span></div><h1>KeyDistributedExecutor.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.wrapper;
+
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.function.BiFunction;
+
+import org.threadly.concurrent.RunnableCallableAdapter;
+import org.threadly.concurrent.SubmitterExecutor;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.ListenableFutureTask;
+import org.threadly.concurrent.future.ListenableRunnableFuture;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.ExceptionUtils;
+
+/**
+ * TaskDistributor is designed such that tasks executed on it for a given key will run in a single 
+ * threaded manner.  It needs a multi-threaded pool supplied to it, to then execute those tasks 
+ * on.  While the thread which runs those tasks may be different between multiple executions, no 
+ * two tasks for the same key will ever be run in parallel.
+ * &lt;p&gt;
+ * Because of that, it is recommended that the executor provided has as many possible threads as 
+ * possible keys that could be provided to be run in parallel.  If this class is starved for 
+ * threads some keys may continue to process new tasks, while other keys could be starved.
+ * &lt;p&gt;
+ * Assuming that the shared memory (any objects, primitives, etc) are only accessed through the 
+ * same instance of {@link KeyDistributedExecutor}, and assuming that those variables are only 
+ * accessed via the same key.  Then the programmer does not need to worry about synchronization, or 
+ * volatile.  The {@link KeyDistributedExecutor} will ensure the happens-before relationship.
+ * 
+ * @since 4.6.0 (since 1.0.0 as org.threadly.concurrent.TaskExecutorDistributor)
+ */
+public class KeyDistributedExecutor {
+  protected static final short CONCURRENT_HASH_MAP_INITIAL_SIZE = 16;
+  protected static final short ARRAY_DEQUE_INITIAL_SIZE = 8;  // minimum is 8, should be 2^X
+  
+  protected final Executor executor;
+  protected final int maxTasksPerCycle;
+  protected final BiFunction&lt;Object, Runnable, TaskQueueWorker&gt; wFactory;
+  protected final ConcurrentHashMap&lt;Object, TaskQueueWorker&gt; taskWorkers;
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.  
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16.  This also does not 
+   * attempt to have an accurate queue size for the {@link #getTaskQueueSize(Object)} call (thus 
+   * preferring high performance).
+   * 
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel. 
+   */
+  public KeyDistributedExecutor(Executor executor) {
+<span class="fc" id="L59">    this(executor, Integer.MAX_VALUE, false);</span>
+<span class="fc" id="L60">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.  
+   * &lt;p&gt;
+   * This constructor allows you to specify if you want accurate queue sizes to be tracked for 
+   * given thread keys.  There is a performance hit associated with this, so this should only be 
+   * enabled if {@link #getTaskQueueSize(Object)} calls will be used.  
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16.
+   * 
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  public KeyDistributedExecutor(Executor executor, boolean accurateQueueSize) {
+<span class="fc" id="L76">    this(executor, Integer.MAX_VALUE, accurateQueueSize);</span>
+<span class="fc" id="L77">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.  
+   * &lt;p&gt;
+   * This also allows you to specify if you want accurate queue sizes to be tracked for given 
+   * thread keys.  There is a performance hit associated with this, so this should only be enabled 
+   * if {@link #getTaskQueueSize(Object)} calls will be used.  
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16.  This also does not 
+   * attempt to have an accurate queue size for the &quot;getTaskQueueSize&quot; call (thus preferring 
+   * high performance).
+   * 
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   */
+  public KeyDistributedExecutor(Executor executor, int maxTasksPerCycle) {
+<span class="fc" id="L101">    this(executor, maxTasksPerCycle, false);</span>
+<span class="fc" id="L102">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.  
+   * &lt;p&gt;
+   * This also allows you to specify if you want accurate queue sizes to be tracked for given 
+   * thread keys.  There is a performance hit associated with this, so this should only be enabled 
+   * if {@link #getTaskQueueSize(Object)} calls will be used.
+   * &lt;p&gt;
+   * This constructs with a default expected level of concurrency of 16. 
+   * 
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  public KeyDistributedExecutor(Executor executor, int maxTasksPerCycle, 
+<span class="fc" id="L125">                                boolean accurateQueueSize) {</span>
+<span class="fc" id="L126">    ArgumentVerifier.assertNotNull(executor, &quot;executor&quot;);</span>
+<span class="fc" id="L127">    ArgumentVerifier.assertGreaterThanZero(maxTasksPerCycle, &quot;maxTasksPerCycle&quot;);</span>
+    
+<span class="fc" id="L129">    this.executor = executor;</span>
+<span class="fc" id="L130">    this.maxTasksPerCycle = maxTasksPerCycle;</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">    if (accurateQueueSize) {</span>
+<span class="fc" id="L132">      wFactory = StatisticWorker::new;</span>
+    } else {
+<span class="fc" id="L134">      wFactory = TaskQueueWorker::new;</span>
+    }
+<span class="fc" id="L136">    this.taskWorkers = new ConcurrentHashMap&lt;&gt;(CONCURRENT_HASH_MAP_INITIAL_SIZE);</span>
+<span class="fc" id="L137">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor does not attempt to have an accurate queue size for the 
+   * {@link #getTaskQueueSize(Object)} call (thus preferring high performance).
+   * 
+   * @deprecated Please use {@link #KeyDistributedExecutor(Executor)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   */
+  @Deprecated
+  public KeyDistributedExecutor(int expectedParallism, Executor executor) {
+<span class="nc" id="L153">    this(expectedParallism, executor, Integer.MAX_VALUE, false);</span>
+<span class="nc" id="L154">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to specify if you want accurate queue sizes to be tracked for 
+   * given thread keys.  There is a performance hit associated with this, so this should only be 
+   * enabled if {@link #getTaskQueueSize(Object)} calls will be used.
+   * 
+   * @deprecated Please use {@link #KeyDistributedExecutor(Executor, boolean)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  @Deprecated
+  public KeyDistributedExecutor(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, Executor executor, 
+                                boolean accurateQueueSize) {
+<span class="nc" id="L173">    this(executor, Integer.MAX_VALUE, accurateQueueSize);</span>
+<span class="nc" id="L174">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.
+   * &lt;p&gt;
+   * This constructor does not attempt to have an accurate queue size for the 
+   * {@link #getTaskQueueSize(Object)} call (thus preferring high performance).
+   * 
+   * @deprecated Please use {@link #KeyDistributedExecutor(Executor, int)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   */
+  @Deprecated
+  public KeyDistributedExecutor(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, 
+                                Executor executor, int maxTasksPerCycle) {
+<span class="nc" id="L198">    this(executor, maxTasksPerCycle, false);</span>
+<span class="nc" id="L199">  }</span>
+  
+  /**
+   * Constructor to use a provided executor implementation for running tasks.
+   * &lt;p&gt;
+   * This constructor allows you to provide a maximum number of tasks for a key before it yields 
+   * to another key.  This can make it more fair, and make it so no single key can starve other 
+   * keys from running.  The lower this is set however, the less efficient it becomes in part 
+   * because it has to give up the thread and get it again, but also because it must copy the 
+   * subset of the task queue which it can run.
+   * &lt;p&gt;
+   * This also allows you to specify if you want accurate queue sizes to be tracked for given 
+   * thread keys.  There is a performance hit associated with this, so this should only be enabled 
+   * if {@link #getTaskQueueSize(Object)} calls will be used.
+   * 
+   * @deprecated Please use {@link #KeyDistributedExecutor(Executor, int, boolean)}
+   * 
+   * @param expectedParallism IGNORED AND DEPRECATED
+   * @param executor A multi-threaded executor to distribute tasks to.  Ideally has as many 
+   *                 possible threads as keys that will be used in parallel.
+   * @param maxTasksPerCycle maximum tasks run per key before yielding for other keys
+   * @param accurateQueueSize {@code true} to make {@link #getTaskQueueSize(Object)} more accurate
+   */
+  @Deprecated
+  public KeyDistributedExecutor(@SuppressWarnings(&quot;unused&quot;) int expectedParallism, Executor executor, 
+                                int maxTasksPerCycle, boolean accurateQueueSize) {
+<span class="nc" id="L225">    this(executor, maxTasksPerCycle, accurateQueueSize);</span>
+<span class="nc" id="L226">  }</span>
+  
+  /**
+   * Getter for the executor being used behind the scenes.
+   * 
+   * @return executor tasks are being distributed to
+   */
+  public Executor getExecutor() {
+<span class="fc" id="L234">    return executor;</span>
+  }
+  
+  /**
+   * Returns a {@link SubmitterExecutor} implementation where all tasks submitted on this executor 
+   * will run on the provided key.
+   * 
+   * @param threadKey object key where hashCode will be used to determine execution thread
+   * @return executor which will only execute based on the provided key
+   */
+  public SubmitterExecutor getExecutorForKey(Object threadKey) {
+<span class="fc" id="L245">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+    
+<span class="fc" id="L247">    return new KeySubmitter(threadKey);</span>
+  }
+  
+  /**
+   * Call to check how many tasks have been queued up for a given key.  Depending on what 
+   * constructor was used, and if a {@code true} was passed in for {@code accurateQueueSize}, the 
+   * accuracy of this call varies dramatically.
+   * &lt;p&gt;
+   * If {@code true} was not supplied in the constructor for {@code accurateQueueSize}, this will 
+   * only report how many tasks have not been accepted by the worker yet.  The accepting of those 
+   * tasks occur in batches, so this number will vary dramatically (and probably be unusable).
+   * &lt;p&gt;
+   * So it is highly recommended that if your interested in this functionality you supply a 
+   * {@code true} into the constructor.
+   * &lt;p&gt;
+   * Supplying a {@code true} for {@code accurateQueueSize} in the constructor does involve some 
+   * performance cost, but that overhead should be minimal (just no reason to accept any loss if 
+   * not interested in this feature).
+   * 
+   * @since 1.2.0
+   * @param threadKey key for task queue to examine
+   * @return the number of tasks queued for the key
+   */
+  public int getTaskQueueSize(Object threadKey) {
+<span class="fc" id="L271">    TaskQueueWorker worker = taskWorkers.get(threadKey);</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">    if (worker == null) {</span>
+<span class="fc" id="L273">      return 0;</span>
+    } else {
+<span class="fc" id="L275">      return worker.getQueueSize();</span>
+    }
+  }
+  
+  /**
+   * Get a map of all the keys and how many tasks are queued per key.  This map is generated 
+   * without locking.  Due to that, this may be inaccurate as task queue sizes changed while 
+   * iterating all key's active workers.
+   * &lt;p&gt;
+   * Because this requires an iteration of all task workers, if only a single key's queue size is 
+   * needed, use {@link #getTaskQueueSize(Object)} as a cheaper alternative.
+   * &lt;p&gt;
+   * If {@code true} was not supplied in the constructor for {@code accurateQueueSize}, this will 
+   * only report how many tasks have not been accepted by the worker yet.  The accepting of those 
+   * tasks occur in batches, so this number will vary dramatically (and probably be unusable).
+   * &lt;p&gt;
+   * So it is highly recommended that if your interested in this functionality you supply a 
+   * {@code true} into the constructor.
+   * &lt;p&gt;
+   * Supplying a {@code true} for {@code accurateQueueSize} in the constructor does involve some 
+   * performance cost, but that overhead should be minimal (just no reason to accept any loss if 
+   * not interested in this feature).
+   * 
+   * @return Map of task key's to their respective queue size
+   */
+  public Map&lt;Object, Integer&gt; getTaskQueueSizeMap() {
+<span class="fc" id="L301">    Map&lt;Object, Integer&gt; result = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L302" title="All 2 branches covered.">    for (Map.Entry&lt;Object, TaskQueueWorker&gt; e : taskWorkers.entrySet()) {</span>
+<span class="fc" id="L303">      result.put(e.getKey(), e.getValue().getQueueSize());</span>
+<span class="fc" id="L304">    }</span>
+<span class="fc" id="L305">    return result;</span>
+  }
+  
+  /**
+   * Provide a task to be run with a given thread key.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed
+   */
+  public void execute(Object threadKey, Runnable task) {
+<span class="fc" id="L315">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+<span class="fc" id="L316">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L318">    addTask(threadKey, task, executor);</span>
+<span class="fc" id="L319">  }</span>
+  
+  /**
+   * This is a protected implementation to add the task to a worker.  No safety checks are done at 
+   * this point, so only provide non-null inputs.
+   * &lt;p&gt;
+   * You can supply the executor in case extending classes want to use different executors than 
+   * the class was constructed with.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be added to worker
+   * @param Executor to run worker on (if it needs to be started)
+   */
+  protected void addTask(Object threadKey, Runnable task, Executor executor) {
+<span class="fc" id="L333">    boolean[] startCapture = new boolean[1];</span>
+<span class="fc" id="L334">    TaskQueueWorker worker = taskWorkers.compute(threadKey, (k, v) -&gt; {</span>
+<span class="fc bfc" id="L335" title="All 2 branches covered.">      if (v == null) {</span>
+<span class="fc" id="L336">        startCapture[0] = true;</span>
+<span class="fc" id="L337">        v = wFactory.apply(threadKey, task);</span>
+      } else {
+<span class="fc" id="L339">        startCapture[0] = false;</span>
+<span class="fc" id="L340">        v.add(task);</span>
+      }
+<span class="fc" id="L342">      return v;</span>
+    });
+
+    // must run execute outside of lock
+<span class="fc bfc" id="L346" title="All 2 branches covered.">    if (startCapture[0]) {</span>
+<span class="fc" id="L347">      executor.execute(worker);</span>
+    }
+<span class="fc" id="L349">  }</span>
+  
+  /**
+   * Submit a task to be run with a given thread key.
+   * 
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Task to be executed
+   * @return Future to represent when the execution has occurred
+   */
+  public ListenableFuture&lt;?&gt; submit(Object threadKey, Runnable task) {
+<span class="fc" id="L359">    return submit(threadKey, task, null);</span>
+  }
+  
+  /**
+   * Submit a task to be run with a given thread key.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Runnable to be executed
+   * @param result Result to be returned from future when task completes
+   * @return Future to represent when the execution has occurred and provide the given result
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Object threadKey, Runnable task, T result) {
+<span class="fc" id="L372">    return submit(threadKey, RunnableCallableAdapter.adapt(task, result));</span>
+  }
+  
+  /**
+   * Submit a callable to be run with a given thread key.
+   * 
+   * @param &lt;T&gt; type of result returned from the future
+   * @param threadKey object key where {@code equals()} will be used to determine execution thread
+   * @param task Callable to be executed
+   * @return Future to represent when the execution has occurred and provide the result from the callable
+   */
+  public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Object threadKey, Callable&lt;T&gt; task) {
+<span class="fc" id="L384">    ArgumentVerifier.assertNotNull(threadKey, &quot;threadKey&quot;);</span>
+<span class="fc" id="L385">    ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+    
+<span class="fc" id="L387">    ListenableRunnableFuture&lt;T&gt; rf = new ListenableFutureTask&lt;&gt;(false, task);</span>
+    
+<span class="fc" id="L389">    addTask(threadKey, rf, executor);</span>
+    
+<span class="fc" id="L391">    return rf;</span>
+  }
+  
+  /**
+   * Worker which will consume through a given queue of tasks.  Each key is represented by one 
+   * worker at any given time.
+   * 
+   * @since 1.0.0
+   */
+  protected class TaskQueueWorker implements Runnable {
+    protected final Object mapKey;
+    // we treat the first task special to attempt to avoid constructing the ArrayDeque
+    protected volatile Runnable firstTask;
+    protected Queue&lt;Runnable&gt; queue;  // locked around workerLock
+    
+<span class="fc" id="L406">    protected TaskQueueWorker(Object mapKey, Runnable firstTask) {</span>
+<span class="fc" id="L407">      this.mapKey = mapKey;</span>
+<span class="fc" id="L408">      this.queue = null;</span>
+<span class="fc" id="L409">      this.firstTask = firstTask;</span>
+<span class="fc" id="L410">    }</span>
+    
+    /**
+     * Call to get this workers current queue size.
+     * 
+     * @return How many tasks are waiting to be executed.
+     */
+    public int getQueueSize() {
+      // the default implementation is very inaccurate
+<span class="fc" id="L419">      int[] resultCapture = new int[1];</span>
+<span class="fc" id="L420">      taskWorkers.computeIfPresent(mapKey, (k, v) -&gt; {</span>
+<span class="fc bfc" id="L421" title="All 4 branches covered.">        resultCapture[0] = (v.firstTask == null ? 0 : 1) + (v.queue == null ? 0 : v.queue.size());</span>
+<span class="fc" id="L422">        return v;</span>
+      });
+<span class="fc" id="L424">      return resultCapture[0];</span>
+    }
+    
+    /**
+     * You MUST be within `compute` of taskWorkers before calling into this.  This is designed to 
+     * be overridden if you need to track how tasks are being added.
+     * 
+     * @param task Runnable to add to the worker's queue
+     */
+    protected void add(Runnable task) {
+<span class="fc bfc" id="L434" title="All 2 branches covered.">      if (queue == null) {</span>
+<span class="fc" id="L435">        queue = new ArrayDeque&lt;&gt;(ARRAY_DEQUE_INITIAL_SIZE);</span>
+      }
+<span class="fc" id="L437">      queue.add(task);</span>
+<span class="fc" id="L438">    }</span>
+    
+    /**
+     * Runs the provided task in the invoking thread.  This is designed to be overridden if 
+     * needed.  No exceptions will ever be thrown from this call.
+     * 
+     * @param task Runnable to run
+     */
+    protected void runTask(Runnable task) {
+      try {
+<span class="fc" id="L448">        task.run();</span>
+<span class="fc" id="L449">      } catch (Throwable t) {</span>
+<span class="fc" id="L450">        ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L451">      }</span>
+<span class="fc" id="L452">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L456">      int consumedItems = 0;</span>
+      // firstTask may be null if we exceeded our maxTasksPerCycle
+<span class="fc bfc" id="L458" title="All 2 branches covered.">      if (firstTask != null) {</span>
+<span class="fc" id="L459">        consumedItems++;</span>
+        // we need to set firstTask to null before we run the task (for semi-accurate queue size)
+<span class="fc" id="L461">        Runnable task = firstTask;</span>
+        // set to null to allow GC
+<span class="fc" id="L463">        firstTask = null;</span>
+        
+<span class="fc" id="L465">        runTask(task);</span>
+      }
+      
+      while (true) {
+        @SuppressWarnings({&quot;unchecked&quot;, &quot;rawtypes&quot;})
+<span class="fc" id="L470">        Queue&lt;Runnable&gt;[] nextQueue = new Queue[1];</span>
+<span class="fc" id="L471">        final int fConsumedItems = consumedItems;</span>
+<span class="fc" id="L472">        TaskQueueWorker self = taskWorkers.compute(mapKey, (k, v) -&gt; {</span>
+<span class="fc bfc" id="L473" title="All 2 branches covered.">          if (queue == null) {  // nothing left to run</span>
+<span class="fc" id="L474">            return null;</span>
+<span class="fc bfc" id="L475" title="All 2 branches covered.">          } else if (fConsumedItems &lt; maxTasksPerCycle) {</span>
+            // we can run at least one task...let's figure out how much we can run
+<span class="fc bfc" id="L477" title="All 2 branches covered.">            if (queue.size() + fConsumedItems &lt;= maxTasksPerCycle) {</span>
+              // we can run the entire next queue
+<span class="fc" id="L479">              nextQueue[0] = queue;</span>
+<span class="fc" id="L480">              queue = null;</span>
+            } else {
+              // we need to run a subset of the queue, so copy and remove what we can run
+<span class="fc" id="L483">              int nextListSize = maxTasksPerCycle - fConsumedItems;</span>
+<span class="fc" id="L484">              nextQueue[0] = new ArrayDeque&lt;&gt;(nextListSize);</span>
+<span class="fc" id="L485">              Iterator&lt;Runnable&gt; it = queue.iterator();</span>
+              do {
+<span class="fc" id="L487">                nextQueue[0].add(it.next());</span>
+<span class="fc" id="L488">                it.remove();</span>
+<span class="fc bfc" id="L489" title="All 2 branches covered.">              } while (nextQueue[0].size() &lt; nextListSize);</span>
+<span class="fc" id="L490">            }</span>
+          } else {
+            // just don't set the queue, but also don't remove the worker.  This will 
+            // re-execute this worker to give other workers a chance to run
+<span class="fc" id="L494">            nextQueue[0] = null;</span>
+          }
+<span class="fc" id="L496">          return v;</span>
+        });
+
+<span class="fc bfc" id="L499" title="All 2 branches covered.">        if (nextQueue[0] != null) {</span>
+<span class="fc" id="L500">          consumedItems += nextQueue[0].size();</span>
+<span class="fc bfc" id="L501" title="All 2 branches covered.">          for (Runnable r : nextQueue[0]) {</span>
+<span class="fc" id="L502">            runTask(r);</span>
+<span class="fc" id="L503">          }</span>
+        } else {
+<span class="fc bfc" id="L505" title="All 2 branches covered.">          if (self != null) {</span>
+            // we are just re-executing ourselves (reached execution limit)
+<span class="fc" id="L507">            executor.execute(this);</span>
+          }
+          break;
+        }
+<span class="fc" id="L511">      }</span>
+<span class="fc" id="L512">    }</span>
+  }
+  
+  /**
+   * Extending class that will accurately track how many tasks have been added, and how many 
+   * have been run.  Thus providing an accurate queue size statistic.
+   * 
+   * @since 1.2.0
+   */
+  protected class StatisticWorker extends TaskQueueWorker {
+    private final LongAdder queueSize;
+    
+<span class="fc" id="L524">    protected StatisticWorker(Object mapKey, Runnable firstTask) {</span>
+<span class="fc" id="L525">      super(mapKey, firstTask);</span>
+      
+<span class="fc" id="L527">      queueSize = new LongAdder();</span>
+<span class="fc" id="L528">      queueSize.increment();</span>
+<span class="fc" id="L529">    }</span>
+    
+    @Override
+    public int getQueueSize() {
+<span class="fc" id="L533">      return queueSize.intValue();</span>
+    }
+    
+    @Override
+    protected void add(Runnable task) {
+<span class="fc" id="L538">      queueSize.increment();</span>
+      
+<span class="fc" id="L540">      super.add(task);</span>
+<span class="fc" id="L541">    }</span>
+    
+    @Override
+    protected void runTask(Runnable task) {
+<span class="fc" id="L545">      queueSize.decrement();</span>
+      
+<span class="fc" id="L547">      super.runTask(task);</span>
+<span class="fc" id="L548">    }</span>
+  }
+  
+  /**
+   * Simple {@link SubmitterExecutor} implementation that submits for a given key.
+   * 
+   * @since 2.5.0
+   */
+  protected class KeySubmitter implements SubmitterExecutor {
+    protected final Object threadKey;
+    
+<span class="fc" id="L559">    protected KeySubmitter(Object threadKey) {</span>
+<span class="fc" id="L560">      this.threadKey = threadKey;</span>
+<span class="fc" id="L561">    }</span>
+    
+    @Override
+    public void execute(Runnable command) {
+<span class="fc" id="L565">      KeyDistributedExecutor.this.execute(threadKey, command);</span>
+<span class="fc" id="L566">    }</span>
+
+    @Override
+    public ListenableFuture&lt;?&gt; submit(Runnable task) {
+<span class="fc" id="L570">      return KeyDistributedExecutor.this.submit(threadKey, task);</span>
+    }
+
+    @Override
+    public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Runnable task, T result) {
+<span class="fc" id="L575">      return KeyDistributedExecutor.this.submit(threadKey, task, result);</span>
+    }
+
+    @Override
+    public &lt;T&gt; ListenableFuture&lt;T&gt; submit(Callable&lt;T&gt; task) {
+<span class="fc" id="L580">      return KeyDistributedExecutor.this.submit(threadKey, task);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

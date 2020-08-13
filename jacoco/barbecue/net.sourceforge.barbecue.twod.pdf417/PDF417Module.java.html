@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PDF417Module.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">barbecue$All_in_barbecue_test.exec</a> &gt; <a href="index.source.html" class="el_package">net.sourceforge.barbecue.twod.pdf417</a> &gt; <span class="el_source">PDF417Module.java</span></div><h1>PDF417Module.java</h1><pre class="source lang-java linenums">/***********************************************************************************************************************
+Copyright (c) 2003, International Barcode Consortium
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of
+      conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+    * Neither the name of the International Barcode Consortium nor the names of any contributors may be used to endorse
+      or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+***********************************************************************************************************************/
+
+package net.sourceforge.barbecue.twod.pdf417;
+
+import net.sourceforge.barbecue.Module;
+import net.sourceforge.barbecue.output.Output;
+import net.sourceforge.barbecue.output.OutputException;
+
+/**
+ * Specific module implementation that draws an entire PDF417 barcode
+ * as one barbecue module. This is not an ideal implementation, but was
+ * the best way of integrating the PDF417 code short of re-writing it.
+ *
+ * &lt;p/&gt;Contributed by Alex Ferrer &lt;alex@ftconsult.com&gt;
+ *
+ * @author Alex Ferrer
+ * @author &lt;a href=&quot;mailto:opensource@ianbourke.com&quot;&gt;Ian Bourke&lt;/a&gt;
+ *
+ * @todo Do we really want to fix the DATACOLS to 12?
+ */
+public class PDF417Module extends Module {
+	private static final int DATACOLS = 12;
+
+	private final String data;
+	private int[] out;
+	private int outlen;
+	private int outrows;
+<span class="fc" id="L52">	private int col = 0;</span>
+	private int xp;
+	private int yp;
+	private int startX;
+<span class="fc" id="L56">	private int wsize = 0;</span>
+	private int barWidth;
+
+	/**
+	 * Constructs the PDF417 barcode with the specified data.
+	 * @param data The data to encode
+	 */
+	public PDF417Module(String data) {
+<span class="fc" id="L64">		super(new int[0]);</span>
+<span class="fc" id="L65">		this.data = data;</span>
+<span class="fc" id="L66">	}</span>
+
+	/**
+	 * Returns the barcode width;
+	 * @return The barcode width
+	 */
+	private int getBarcodeWidth() {
+<span class="fc" id="L73">		return wsize - startX;</span>
+	}
+
+	/**
+	 * Returns the barcode height.
+	 * @return The barcode height
+	 */
+	int getBarcodeHeight() {
+<span class="fc" id="L81">		return yp;</span>
+	}
+
+	/**
+	 * Draw the barcode to the specified outputter, at the specified origin.
+	 * @param outputter The outputter
+	 * @param x The X component of the origin
+	 * @param y The Y component of the origin
+	 * @param barWidth
+	 * @param barHeight
+	 * @return The total width drawn
+	 */
+	protected int draw(Output outputter, int x, int y, int barWidth, int barHeight) throws OutputException {
+<span class="fc" id="L94">		this.xp = (int) x;</span>
+<span class="fc" id="L95">		this.startX = (int) x;</span>
+<span class="fc" id="L96">		this.yp = (int) y;</span>
+<span class="fc" id="L97">		this.barWidth = (int) barWidth;</span>
+<span class="fc" id="L98">		createCodewords(data.toCharArray(), data.length());</span>
+<span class="fc" id="L99">		createBits(out, outlen, outrows);</span>
+<span class="fc" id="L100">		encode(out, outrows, outputter);</span>
+
+<span class="fc" id="L102">		return getBarcodeWidth();</span>
+	}
+
+	/**
+	 * I have no idea what this does.
+	 * @param data The barcode data
+	 * @param length The length of the data
+	 * @param ecLength The length of the EC (2)
+	 */
+	private void generateEC(int[] data, int length, int ecLength) {
+<span class="fc" id="L112">		int b0 = 0;</span>
+<span class="fc" id="L113">		int b1 = 0;</span>
+<span class="fc" id="L114">		int g0 = 27;</span>
+<span class="fc" id="L115">		int g1 = 917;  /* (x-3)(x-9) = x^2+917x+27 mod 929 */</span>
+
+		/* Initialize */
+<span class="fc" id="L118">		data[length] = 0;</span>
+<span class="fc" id="L119">		data[length + 1] = 0;</span>
+
+		/* We only know ecLength == 2 for now */
+<span class="pc bpc" id="L122" title="1 of 2 branches missed.">		if (ecLength != 2) {</span>
+<span class="nc" id="L123">			return;</span>
+		}
+
+		/* Load up with data */
+<span class="fc bfc" id="L127" title="All 2 branches covered.">		for (int i = 0; i &lt; length; ++i) {</span>
+<span class="fc" id="L128">			int wrap = (b1 + data[i]) % 929;</span>
+
+<span class="pc bpc" id="L130" title="1 of 2 branches missed.">			if (wrap != 0) {</span>
+<span class="fc" id="L131">				wrap = 929 - wrap;</span>
+			}
+
+<span class="fc" id="L134">			b1 = (b0 + g1 * wrap) % 929;</span>
+<span class="fc" id="L135">			b0 = (0 + g0 * wrap) % 929;</span>
+		}
+
+		/* Read off the info */
+<span class="pc bpc" id="L139" title="1 of 2 branches missed.">		if (b0 != 0) {</span>
+<span class="fc" id="L140">			b0 = 929 - b0;</span>
+		}
+
+<span class="pc bpc" id="L143" title="1 of 2 branches missed.">		if (b1 != 0) {</span>
+<span class="fc" id="L144">			b1 = 929 - b1;</span>
+		}
+
+<span class="fc" id="L147">		data[length] = b1;</span>
+<span class="fc" id="L148">		data[length + 1] = b0;</span>
+<span class="fc" id="L149">	}</span>
+
+	private void outbit(int bit, Output params) throws OutputException {
+<span class="fc bfc" id="L152" title="All 2 branches covered.">		params.drawBar(xp, yp, 1, 1, bit == 1);</span>
+
+<span class="fc" id="L154">		xp = xp + barWidth;</span>
+<span class="fc bfc" id="L155" title="All 2 branches covered.">		if (col++ == wsize - 1) {</span>
+<span class="fc" id="L156">			col = 0;</span>
+<span class="fc" id="L157">			yp = yp + 1;</span>
+<span class="fc" id="L158">			xp = startX;</span>
+		}
+<span class="fc" id="L160">	}</span>
+
+	private void createCodewords(char[] data, int len) {
+<span class="fc" id="L163">		int ecLength = 2; /* Number of codewords for error correction */</span>
+		/* Check args */
+
+		if (DATACOLS &lt; 1 || DATACOLS &gt; 30) {
+			return;
+		}
+		/* Calculate the length of the eventual sequence */
+<span class="fc" id="L170">		outlen = 2 + (len / 6) * 5 + (len % 6) + ecLength;</span>
+
+		/* Pad to an integer number of rows, at least 3 */
+<span class="fc" id="L173">		outrows = outlen / DATACOLS;</span>
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">		if ((outlen % DATACOLS) != 0) {</span>
+<span class="fc" id="L175">			++outrows;</span>
+		}
+<span class="pc bpc" id="L177" title="1 of 2 branches missed.">		if (outrows &lt; 3) {</span>
+<span class="fc" id="L178">			outrows = 3;</span>
+		}
+<span class="pc bpc" id="L180" title="1 of 2 branches missed.">		if (outrows &gt; 90) {</span>
+<span class="nc" id="L181">			return;</span>
+		}
+<span class="fc" id="L183">		outlen = outrows * DATACOLS;</span>
+		/* We don't do multipart symbols (Macro PDF 417) */
+<span class="pc bpc" id="L185" title="1 of 2 branches missed.">		if (outlen &gt; 928) {</span>
+<span class="nc" id="L186">			return;</span>
+		}
+
+		/* The first two codewords are the length and the BC mode latch
+		   The mode latch is 924 if len is a multiple of 6, 901 otherwise */
+<span class="fc" id="L191">		out = new int[outlen];              // dimension the array</span>
+<span class="fc" id="L192">		out[0] = 2 + (len / 6) * 5 + (len % 6);   // 1st value s size of sequence</span>
+<span class="pc bpc" id="L193" title="1 of 2 branches missed.">		if (len % 6 != 0) {</span>
+<span class="fc" id="L194">			out[1] = 901;  					// if len not a multiple of 6</span>
+		} else {
+<span class="nc" id="L196">			out[1] = 924;                    // if len *is* a multiple of 6</span>
+		}
+
+		/* Map blocks of 6 bytes to block of 5 codewords */
+<span class="fc" id="L200">		int inp = 0;</span>
+<span class="fc" id="L201">		int outp = 2;</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">		while (inp + 5 &lt; len) {</span>
+			/* Treat the 6 bytes as a big-endian base 256 number */
+<span class="fc" id="L204">			long codeval = 0;</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">			for (int i = 0; i &lt; 6; ++i) {</span>
+<span class="fc" id="L206">				codeval &lt;&lt;= 8;</span>
+<span class="fc" id="L207">				codeval += data[inp++];</span>
+			}
+			/* Convert the number to base 900 */
+<span class="fc bfc" id="L210" title="All 2 branches covered.">			for (int i = 0; i &lt; 5; i++) {</span>
+<span class="fc" id="L211">				out[outp + 4 - i] = new Long(codeval % 900).intValue();</span>
+<span class="fc" id="L212">				codeval /= 900;</span>
+			}
+<span class="fc" id="L214">			outp += 5;</span>
+<span class="fc" id="L215">		}</span>
+
+		/* Finish up the data */
+<span class="fc bfc" id="L218" title="All 2 branches covered.">		while (inp &lt; len) {</span>
+<span class="fc" id="L219">			out[outp++] = data[inp++];</span>
+		}
+
+		/* Do padding */
+<span class="fc bfc" id="L223" title="All 2 branches covered.">		while (outp &lt; outlen - ecLength) {</span>
+<span class="fc" id="L224">			out[outp++] = 900;</span>
+		}
+
+<span class="fc" id="L227">		generateEC(out, outp, ecLength);</span>
+<span class="fc" id="L228">	}</span>
+
+	private void createBits(int[] codes, int codelen, int datarows) {
+		int row, inp, outp;
+<span class="pc bpc" id="L232" title="3 of 6 branches missed.">		if (DATACOLS &lt; 1 || DATACOLS &gt; 30</span>
+		 				 || datarows &lt; 3 || datarows &gt; 90
+		 				 || codelen != DATACOLS * datarows) {
+<span class="nc" id="L235">			return;</span>
+		}
+		/* Each row has start, left, data, right, stop */
+<span class="fc" id="L238">		int outlen = datarows * (DATACOLS + 4);</span>
+<span class="fc" id="L239">		int[] out = new int[outlen];</span>
+<span class="fc" id="L240">		outp = 0;</span>
+<span class="fc" id="L241">		inp = 0;</span>
+
+<span class="fc bfc" id="L243" title="All 2 branches covered.">		for (row = 0; row &lt; datarows; ++row) {</span>
+			/* Do each row */
+<span class="fc" id="L245">			int v = DATACOLS - 1;</span>
+<span class="fc" id="L246">			int w = row % 3;</span>
+<span class="fc" id="L247">			int x = row / 3;</span>
+<span class="fc" id="L248">			int y = datarows / 3;</span>
+<span class="fc" id="L249">			int z = 0 * 3 + datarows % 3;  /* The 0 is the error correction level */</span>
+<span class="fc" id="L250">			out[outp++] = PDF417Data.PDF417_START;</span>
+<span class="pc bpc" id="L251" title="1 of 4 branches missed.">			switch (w) {</span>
+				case 0:
+<span class="fc" id="L253">					out[outp++] = PDF417Data.PDF417_BITS[w][30 * x + y];</span>
+<span class="fc" id="L254">					break;</span>
+				case 1:
+<span class="fc" id="L256">					out[outp++] = PDF417Data.PDF417_BITS[w][30 * x + z];</span>
+<span class="fc" id="L257">					break;</span>
+				case 2:
+<span class="fc" id="L259">					out[outp++] = PDF417Data.PDF417_BITS[w][30 * x + v];</span>
+					break;
+			}
+<span class="fc bfc" id="L262" title="All 2 branches covered.">			for (int i = 0; i &lt; DATACOLS; ++i) {</span>
+<span class="fc" id="L263">				out[outp++] = PDF417Data.PDF417_BITS[w][codes[inp++]];</span>
+			}
+<span class="pc bpc" id="L265" title="1 of 4 branches missed.">			switch (w) {</span>
+				case 0:
+<span class="fc" id="L267">					out[outp++] = PDF417Data.PDF417_BITS[w][30 * x + v];</span>
+<span class="fc" id="L268">					break;</span>
+				case 1:
+<span class="fc" id="L270">					out[outp++] = PDF417Data.PDF417_BITS[w][30 * x + y];</span>
+<span class="fc" id="L271">					break;</span>
+				case 2:
+<span class="fc" id="L273">					out[outp++] = PDF417Data.PDF417_BITS[w][30 * x + z];</span>
+					break;
+			}
+<span class="fc" id="L276">			out[outp++] = PDF417Data.PDF417_STOP;</span>
+		}
+<span class="fc" id="L278">		this.out = out;</span>
+<span class="fc" id="L279">		this.outlen = outlen;</span>
+<span class="fc" id="L280">	}</span>
+
+	private void encode(int[] data, int datarows, Output params) throws OutputException {
+		int bitpattern;
+<span class="fc" id="L284">		int row_height = 7;</span>
+<span class="fc" id="L285">		int npix = 2;</span>
+<span class="fc" id="L286">		wsize = ((DATACOLS + 4) * 17 + barWidth + 4) * npix;</span>
+
+		/* Top quiet zone */
+<span class="fc bfc" id="L289" title="All 2 branches covered.">		for (int i = 0; i &lt; 2 * npix; i++) {</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">			for (int j = 0; j &lt; ((DATACOLS + 4) * 17 + 1 + 4) * npix; j++) {</span>
+<span class="fc" id="L291">				outbit(0, params);</span>
+			}
+		}
+
+<span class="fc bfc" id="L295" title="All 2 branches covered.">		for (int i = 0; i &lt; datarows; i++) {</span>
+<span class="fc bfc" id="L296" title="All 2 branches covered.">			for (int k = 0; k &lt; row_height; k++) {</span>
+
+				/* Left quiet zone */
+<span class="fc bfc" id="L299" title="All 2 branches covered.">				for (int pixn = 0; pixn &lt; 2 * npix; pixn++) {</span>
+<span class="fc" id="L300">					outbit(0, params);</span>
+				}
+
+<span class="fc bfc" id="L303" title="All 2 branches covered.">				for (int j = 0; j &lt; (DATACOLS + 4); j++) {</span>
+<span class="fc" id="L304">					bitpattern = data[(DATACOLS + 4) * i + j];</span>
+
+<span class="fc bfc" id="L306" title="All 2 branches covered.">					for (int bitm = 16; bitm &gt;= 0; bitm--) {</span>
+<span class="fc bfc" id="L307" title="All 2 branches covered.">						for (int pixn = 0; pixn &lt; npix; pixn++) {</span>
+
+<span class="fc bfc" id="L309" title="All 2 branches covered.">							if ((bitpattern &amp; (1 &lt;&lt; bitm)) != 0) {</span>
+<span class="fc" id="L310">								outbit(1, params);</span>
+							} else {
+<span class="fc" id="L312">								outbit(0, params);</span>
+							}
+						}
+					}
+				}
+
+<span class="fc bfc" id="L318" title="All 2 branches covered.">				for (int pixn = 0; pixn &lt; npix; pixn++) {</span>
+<span class="fc" id="L319">					outbit(1, params);</span>
+				}
+
+				/* Right quiet zone */
+<span class="fc bfc" id="L323" title="All 2 branches covered.">				for (int pixn = 0; pixn &lt; 2 * npix; pixn++) {</span>
+<span class="fc" id="L324">					outbit(0, params);</span>
+				}
+			}
+		}
+
+		/* Bottom quiet zone */
+<span class="fc bfc" id="L330" title="All 2 branches covered.">		for (int i = 0; i &lt; 2 * npix; ++i) {</span>
+<span class="fc bfc" id="L331" title="All 2 branches covered.">			for (int j = 0; j &lt; ((DATACOLS + 4) * 17 + 1 + 4) * npix; ++j) {</span>
+<span class="fc" id="L332">				outbit(0, params);</span>
+			}
+		}
+<span class="fc" id="L335">	}</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

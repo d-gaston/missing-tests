@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>IllegalThrowsCheck.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">checkstyle$java_in_checkstyle.exec</a> &gt; <a href="index.source.html" class="el_package">com.puppycrawl.tools.checkstyle.checks.coding</a> &gt; <span class="el_source">IllegalThrowsCheck.java</span></div><h1>IllegalThrowsCheck.java</h1><pre class="source lang-java linenums">////////////////////////////////////////////////////////////////////////////////
+// checkstyle: Checks Java source code for adherence to a set of rules.
+// Copyright (C) 2001-2019 the original author or authors.
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+////////////////////////////////////////////////////////////////////////////////
+
+package com.puppycrawl.tools.checkstyle.checks.coding;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import com.puppycrawl.tools.checkstyle.StatelessCheck;
+import com.puppycrawl.tools.checkstyle.api.AbstractCheck;
+import com.puppycrawl.tools.checkstyle.api.DetailAST;
+import com.puppycrawl.tools.checkstyle.api.FullIdent;
+import com.puppycrawl.tools.checkstyle.api.TokenTypes;
+import com.puppycrawl.tools.checkstyle.utils.AnnotationUtil;
+import com.puppycrawl.tools.checkstyle.utils.CheckUtil;
+
+/**
+ * &lt;p&gt;
+ * This check can be used to ensure that types are not declared to be thrown.
+ * Declaring that a method throws {@code java.lang.Error} or
+ * {@code java.lang.RuntimeException} is almost never acceptable.
+ * &lt;/p&gt;
+ * &lt;ul&gt;
+ * &lt;li&gt;
+ * Property {@code illegalClassNames} - Specify throw class names to reject.
+ * Default value is {@code Error, RuntimeException, Throwable, java.lang.Error,
+ * java.lang.RuntimeException, java.lang.Throwable}.
+ * &lt;/li&gt;
+ * &lt;li&gt;
+ * Property {@code ignoredMethodNames} - Specify names of methods to ignore.
+ * Default value is {@code finalize}.
+ * &lt;/li&gt;
+ * &lt;li&gt;
+ * Property {@code ignoreOverriddenMethods} - allow to ignore checking overridden methods
+ * (marked with {@code Override} or {@code java.lang.Override} annotation).
+ * Default value is {@code true}.
+ * &lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;
+ * To configure the check:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * &amp;lt;module name=&quot;IllegalThrows&quot;/&amp;gt;
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * To configure the check rejecting throws NullPointerException from methods:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * &amp;lt;module name=&quot;IllegalThrows&quot;&amp;gt;
+ *   &amp;lt;property name=&quot;illegalClassNames&quot; value=&quot;NullPointerException&quot;/&amp;gt;
+ * &amp;lt;/module&amp;gt;
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * To configure the check ignoring method named &quot;foo()&quot;:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * &amp;lt;module name=&quot;IllegalThrows&quot;&amp;gt;
+ *   &amp;lt;property name=&quot;ignoredMethodNames&quot; value=&quot;foo&quot;/&amp;gt;
+ * &amp;lt;/module&amp;gt;
+ * &lt;/pre&gt;
+ * &lt;p&gt;
+ * To configure the check to warn on overridden methods:
+ * &lt;/p&gt;
+ * &lt;pre&gt;
+ * &amp;lt;module name=&amp;quot;IllegalThrows&amp;quot;&amp;gt;
+ *   &amp;lt;property name=&amp;quot;ignoreOverriddenMethods&amp;quot; value=&amp;quot;false&amp;quot;/&amp;gt;
+ * &amp;lt;/module&amp;gt;
+ * &lt;/pre&gt;
+ *
+ * @since 4.0
+ */
+@StatelessCheck
+<span class="fc" id="L91">public final class IllegalThrowsCheck extends AbstractCheck {</span>
+
+    /**
+     * A key is pointing to the warning message text in &quot;messages.properties&quot;
+     * file.
+     */
+    public static final String MSG_KEY = &quot;illegal.throw&quot;;
+
+    /** Specify names of methods to ignore. */
+<span class="fc" id="L100">    private final Set&lt;String&gt; ignoredMethodNames =</span>
+<span class="fc" id="L101">        Arrays.stream(new String[] {&quot;finalize&quot;, }).collect(Collectors.toSet());</span>
+
+    /** Specify throw class names to reject. */
+<span class="fc" id="L104">    private final Set&lt;String&gt; illegalClassNames = Arrays.stream(</span>
+        new String[] {&quot;Error&quot;, &quot;RuntimeException&quot;, &quot;Throwable&quot;, &quot;java.lang.Error&quot;,
+                      &quot;java.lang.RuntimeException&quot;, &quot;java.lang.Throwable&quot;, })
+<span class="fc" id="L107">        .collect(Collectors.toSet());</span>
+
+    /**
+     * Allow to ignore checking overridden methods (marked with {@code Override}
+     * or {@code java.lang.Override} annotation).
+     */
+<span class="fc" id="L113">    private boolean ignoreOverriddenMethods = true;</span>
+
+    /**
+     * Setter to specify throw class names to reject.
+     *
+     * @param classNames
+     *            array of illegal exception classes
+     */
+    public void setIllegalClassNames(final String... classNames) {
+<span class="fc" id="L122">        illegalClassNames.clear();</span>
+<span class="fc" id="L123">        illegalClassNames.addAll(</span>
+<span class="fc" id="L124">                CheckUtil.parseClassNames(classNames));</span>
+<span class="fc" id="L125">    }</span>
+
+    @Override
+    public int[] getDefaultTokens() {
+<span class="fc" id="L129">        return getRequiredTokens();</span>
+    }
+
+    @Override
+    public int[] getRequiredTokens() {
+<span class="fc" id="L134">        return new int[] {TokenTypes.LITERAL_THROWS};</span>
+    }
+
+    @Override
+    public int[] getAcceptableTokens() {
+<span class="fc" id="L139">        return getRequiredTokens();</span>
+    }
+
+    @Override
+    public void visitToken(DetailAST detailAST) {
+<span class="fc" id="L144">        final DetailAST methodDef = detailAST.getParent();</span>
+        // Check if the method with the given name should be ignored.
+<span class="fc bfc" id="L146" title="All 2 branches covered.">        if (!isIgnorableMethod(methodDef)) {</span>
+<span class="fc" id="L147">            DetailAST token = detailAST.getFirstChild();</span>
+<span class="fc bfc" id="L148" title="All 2 branches covered.">            while (token != null) {</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">                if (token.getType() != TokenTypes.COMMA) {</span>
+<span class="fc" id="L150">                    final FullIdent ident = FullIdent.createFullIdent(token);</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">                    if (illegalClassNames.contains(ident.getText())) {</span>
+<span class="fc" id="L152">                        log(token, MSG_KEY, ident.getText());</span>
+                    }
+                }
+<span class="fc" id="L155">                token = token.getNextSibling();</span>
+            }
+        }
+<span class="fc" id="L158">    }</span>
+
+    /**
+     * Checks if current method is ignorable due to Check's properties.
+     * @param methodDef {@link TokenTypes#METHOD_DEF METHOD_DEF}
+     * @return true if method is ignorable.
+     */
+    private boolean isIgnorableMethod(DetailAST methodDef) {
+<span class="fc bfc" id="L166" title="All 4 branches covered.">        return shouldIgnoreMethod(methodDef.findFirstToken(TokenTypes.IDENT).getText())</span>
+            || ignoreOverriddenMethods
+<span class="fc bfc" id="L168" title="All 2 branches covered.">               &amp;&amp; (AnnotationUtil.containsAnnotation(methodDef, &quot;Override&quot;)</span>
+<span class="fc bfc" id="L169" title="All 2 branches covered.">                  || AnnotationUtil.containsAnnotation(methodDef, &quot;java.lang.Override&quot;));</span>
+    }
+
+    /**
+     * Check if the method is specified in the ignore method list.
+     * @param name the name to check
+     * @return whether the method with the passed name should be ignored
+     */
+    private boolean shouldIgnoreMethod(String name) {
+<span class="fc" id="L178">        return ignoredMethodNames.contains(name);</span>
+    }
+
+    /**
+     * Setter to specify names of methods to ignore.
+     * @param methodNames array of ignored method names
+     */
+    public void setIgnoredMethodNames(String... methodNames) {
+<span class="fc" id="L186">        ignoredMethodNames.clear();</span>
+<span class="fc" id="L187">        Collections.addAll(ignoredMethodNames, methodNames);</span>
+<span class="fc" id="L188">    }</span>
+
+    /**
+     * Setter to allow to ignore checking overridden methods
+     * (marked with {@code Override} or {@code java.lang.Override} annotation).
+     * @param ignoreOverriddenMethods Check's property.
+     */
+    public void setIgnoreOverriddenMethods(boolean ignoreOverriddenMethods) {
+<span class="fc" id="L196">        this.ignoreOverriddenMethods = ignoreOverriddenMethods;</span>
+<span class="fc" id="L197">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

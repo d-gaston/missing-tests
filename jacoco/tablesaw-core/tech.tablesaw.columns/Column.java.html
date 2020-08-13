@@ -1,0 +1,663 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Column.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.columns</a> &gt; <span class="el_source">Column.java</span></div><h1>Column.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.columns;
+
+import static tech.tablesaw.selection.Selection.selectNRowsAtRandom;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import tech.tablesaw.api.ColumnType;
+import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
+import tech.tablesaw.interpolation.Interpolator;
+import tech.tablesaw.selection.Selection;
+import tech.tablesaw.table.RollingColumn;
+import tech.tablesaw.util.StringUtils;
+
+/**
+ * The general interface for columns.
+ *
+ * &lt;p&gt;Columns can either exist on their own or be a part of a table. All the data in a single column
+ * is of a particular type.
+ */
+public interface Column&lt;T&gt; extends Iterable&lt;T&gt;, Comparator&lt;T&gt; {
+
+  int size();
+
+  Table summary();
+
+  T[] asObjectArray();
+
+  /**
+   * Returns the count of missing values in this column.
+   *
+   * @return missing values as int
+   */
+  int countMissing();
+
+  /**
+   * Returns the count of unique values in this column.
+   *
+   * @return unique values as int
+   */
+  default int countUnique() {
+<span class="nc" id="L63">    return unique().size();</span>
+  }
+
+  /**
+   * Returns the column's name.
+   *
+   * @return name as String
+   */
+  String name();
+
+  /**
+   * Returns this column's ColumnType
+   *
+   * @return {@link ColumnType}
+   */
+  ColumnType type();
+
+  /**
+   * Returns a string representation of the value at the given row.
+   *
+   * @param row The index of the row.
+   * @return value as String
+   */
+  String getString(int row);
+
+  T get(int row);
+
+  /**
+   * Reduction with binary operator and initial value
+   *
+   * @param initial initial value
+   * @param op the operator
+   * @return the result of reducing initial value and all rows with operator
+   */
+  default T reduce(T initial, BinaryOperator&lt;T&gt; op) {
+<span class="fc" id="L98">    T acc = initial;</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    for (T t : this) {</span>
+<span class="fc" id="L100">      acc = op.apply(acc, t);</span>
+<span class="fc" id="L101">    }</span>
+<span class="fc" id="L102">    return acc;</span>
+  }
+
+  /**
+   * Reduction with binary operator
+   *
+   * @param op the operator
+   * @return Optional with the result of reducing all rows with operator
+   */
+  default Optional&lt;T&gt; reduce(BinaryOperator&lt;T&gt; op) {
+<span class="fc" id="L112">    boolean first = true;</span>
+<span class="fc" id="L113">    T acc = null;</span>
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    for (T t : this) {</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">      if (first) {</span>
+<span class="fc" id="L116">        acc = t;</span>
+<span class="fc" id="L117">        first = false;</span>
+      } else {
+<span class="fc" id="L119">        acc = op.apply(acc, t);</span>
+      }
+<span class="fc" id="L121">    }</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">    return (first ? Optional.empty() : Optional.of(acc));</span>
+  }
+
+  void clear();
+
+  void sortAscending();
+
+  void sortDescending();
+
+  /**
+   * Returns true if the column has no data
+   *
+   * @return true if empty, false if not
+   */
+  boolean isEmpty();
+
+  IntComparator rowComparator();
+
+  default String title() {
+<span class="fc" id="L141">    return &quot;Column: &quot; + name() + System.lineSeparator();</span>
+  }
+
+  Selection isMissing();
+
+  Selection isNotMissing();
+
+  /**
+   * Returns the width of a cell in this column, in bytes.
+   *
+   * @return width in bytes
+   */
+  int byteSize();
+
+  /**
+   * Returns the contents of the cell at rowNumber as a byte[].
+   *
+   * @param rowNumber index of the row
+   * @return content as byte[]
+   */
+  byte[] asBytes(int rowNumber);
+
+  default RollingColumn rolling(final int windowSize) {
+<span class="fc" id="L164">    return new RollingColumn(this, windowSize);</span>
+  }
+
+  String getUnformattedString(int r);
+
+  boolean isMissing(int rowNumber);
+
+  /** TODO(lwhite): Print n from the top and bottom, like a table; */
+  default String print() {
+<span class="fc" id="L173">    final StringBuilder builder = new StringBuilder();</span>
+<span class="fc" id="L174">    builder.append(title());</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L176">      builder.append(getString(i));</span>
+<span class="fc" id="L177">      builder.append(System.lineSeparator());</span>
+    }
+<span class="fc" id="L179">    return builder.toString();</span>
+  }
+
+  /** Returns the width of the column in characters, for printing */
+  default int columnWidth() {
+
+<span class="fc" id="L185">    int width = name().length();</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">    for (int rowNum = 0; rowNum &lt; size(); rowNum++) {</span>
+<span class="fc" id="L187">      width = Math.max(width, StringUtils.length(getString(rowNum)));</span>
+    }
+<span class="fc" id="L189">    return width;</span>
+  }
+
+  /**
+   * Returns a list of all the elements in this column
+   *
+   * &lt;p&gt;Note, if a value in the column is missing, a {@code null} is added in it's place
+   */
+  default List&lt;T&gt; asList() {
+<span class="fc" id="L198">    List&lt;T&gt; results = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    for (int i = 0; i &lt; this.size(); i++) {</span>
+<span class="pc bpc" id="L200" title="1 of 2 branches missed.">      if (isMissing(i)) {</span>
+<span class="nc" id="L201">        results.add(null);</span>
+      } else {
+<span class="fc" id="L203">        results.add(get(i));</span>
+      }
+    }
+<span class="fc" id="L206">    return results;</span>
+  }
+
+  /**
+   * Returns {@code true} if the given object appears in this column, and false otherwise
+   *
+   * &lt;p&gt;TODO override in column subtypes for performance
+   */
+  default boolean contains(T object) {
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    for (int i = 0; i &lt; this.size(); i++) {</span>
+<span class="pc bpc" id="L216" title="1 of 2 branches missed.">      if (object != null) {</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">        if (object.equals(get(i))) {</span>
+<span class="fc" id="L218">          return true;</span>
+        }
+      } else {
+<span class="nc bnc" id="L221" title="All 2 branches missed.">        if (get(i) == null) return true;</span>
+      }
+    }
+<span class="fc" id="L224">    return false;</span>
+  }
+
+  // functional methods corresponding to those in Stream
+
+  /**
+   * Counts the number of rows satisfying predicate, but only upto the max value
+   *
+   * @param test the predicate
+   * @param max the maximum number of rows to count
+   * @return the number of rows satisfying the predicate
+   */
+  default int count(Predicate&lt;? super T&gt; test, int max) {
+<span class="fc" id="L237">    int count = 0;</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">    for (T t : this) {</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">      if (test.test(t)) {</span>
+<span class="fc" id="L240">        count++;</span>
+<span class="pc bpc" id="L241" title="1 of 4 branches missed.">        if (max &gt; 0 &amp;&amp; count &gt;= max) {</span>
+<span class="fc" id="L242">          return count;</span>
+        }
+      }
+<span class="fc" id="L245">    }</span>
+<span class="fc" id="L246">    return count;</span>
+  }
+
+  /**
+   * Counts the number of rows satisfying predicate
+   *
+   * @param test the predicate
+   * @return the number of rows satisfying the predicate
+   */
+  default int count(Predicate&lt;? super T&gt; test) {
+<span class="fc" id="L256">    return count(test, size());</span>
+  }
+
+  /**
+   * Returns true if all rows satisfy the predicate, false otherwise
+   *
+   * @param test the predicate
+   * @return true if all rows satisfy the predicate, false otherwise
+   */
+  default boolean allMatch(Predicate&lt;? super T&gt; test) {
+<span class="fc bfc" id="L266" title="All 2 branches covered.">    return count(test.negate(), 1) == 0;</span>
+  }
+
+  /**
+   * Returns true if any row satisfies the predicate, false otherwise
+   *
+   * @param test the predicate
+   * @return true if any rows satisfies the predicate, false otherwise
+   */
+  default boolean anyMatch(Predicate&lt;? super T&gt; test) {
+<span class="fc bfc" id="L276" title="All 2 branches covered.">    return count(test, 1) &gt; 0;</span>
+  }
+
+  /**
+   * Returns true if no row satisfies the predicate, false otherwise
+   *
+   * @param test the predicate
+   * @return true if no row satisfies the predicate, false otherwise
+   */
+  default boolean noneMatch(Predicate&lt;? super T&gt; test) {
+<span class="fc bfc" id="L286" title="All 2 branches covered.">    return count(test, 1) == 0;</span>
+  }
+
+  /**
+   * Returns the maximum row according to the provided Comparator
+   *
+   * @param comp
+   * @return the maximum row
+   */
+  default Optional&lt;T&gt; max(Comparator&lt;? super T&gt; comp) {
+<span class="nc" id="L296">    boolean first = true;</span>
+<span class="nc" id="L297">    T o1 = null;</span>
+<span class="nc bnc" id="L298" title="All 2 branches missed.">    for (T o2 : this) {</span>
+<span class="nc bnc" id="L299" title="All 2 branches missed.">      if (first) {</span>
+<span class="nc" id="L300">        o1 = o2;</span>
+<span class="nc" id="L301">        first = false;</span>
+<span class="nc bnc" id="L302" title="All 2 branches missed.">      } else if (comp.compare(o1, o2) &lt; 0) {</span>
+<span class="nc" id="L303">        o1 = o2;</span>
+      }
+<span class="nc" id="L305">    }</span>
+<span class="nc bnc" id="L306" title="All 2 branches missed.">    return (first ? Optional.&lt;T&gt;empty() : Optional.&lt;T&gt;of(o1));</span>
+  }
+
+  /**
+   * Returns the minimum row according to the provided Comparator
+   *
+   * @param comp
+   * @return the minimum row
+   */
+  default Optional&lt;T&gt; min(Comparator&lt;? super T&gt; comp) {
+<span class="nc" id="L316">    boolean first = true;</span>
+<span class="nc" id="L317">    T o1 = null;</span>
+<span class="nc bnc" id="L318" title="All 2 branches missed.">    for (T o2 : this) {</span>
+<span class="nc bnc" id="L319" title="All 2 branches missed.">      if (first) {</span>
+<span class="nc" id="L320">        o1 = o2;</span>
+<span class="nc" id="L321">        first = false;</span>
+<span class="nc bnc" id="L322" title="All 2 branches missed.">      } else if (comp.compare(o1, o2) &gt; 0) {</span>
+<span class="nc" id="L323">        o1 = o2;</span>
+      }
+<span class="nc" id="L325">    }</span>
+<span class="nc bnc" id="L326" title="All 2 branches missed.">    return (first ? Optional.&lt;T&gt;empty() : Optional.&lt;T&gt;of(o1));</span>
+  }
+
+  /**
+   * Maps the function across all rows, storing the results into the provided Column.
+   *
+   * &lt;p&gt;The target column must have at least the same number of rows.
+   *
+   * @param fun function to map
+   * @param into Column into which results are set
+   * @return the provided Column
+   */
+  default &lt;R, C extends Column&lt;R&gt;&gt; C mapInto(Function&lt;? super T, ? extends R&gt; fun, C into) {
+<span class="fc bfc" id="L339" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="pc bpc" id="L340" title="1 of 2 branches missed.">      if (isMissing(i)) {</span>
+<span class="nc" id="L341">        into.setMissing(i);</span>
+      } else {
+<span class="fc" id="L343">        into.set(i, fun.apply(get(i)));</span>
+      }
+    }
+<span class="fc" id="L346">    return into;</span>
+  }
+
+  /**
+   * Maps the function across all rows, appending the results to the created Column.
+   *
+   * &lt;p&gt;Example:
+   *
+   * &lt;pre&gt;
+   * DoubleColumn d;
+   * StringColumn s = d.map(String::valueOf, StringColumn::create);
+   * &lt;/pre&gt;
+   *
+   * @param fun function to map
+   * @param creator the creator of the Column. Its String argument will be the name of the current
+   *     column (see {@link #name()})
+   * @return the Column with the results
+   */
+  default &lt;R, C extends Column&lt;R&gt;&gt; C map(
+      Function&lt;? super T, ? extends R&gt; fun, Function&lt;String, C&gt; creator) {
+<span class="fc" id="L366">    C into = creator.apply(name());</span>
+<span class="fc bfc" id="L367" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="pc bpc" id="L368" title="1 of 2 branches missed.">      if (isMissing(i)) {</span>
+<span class="nc" id="L369">        into.appendMissing();</span>
+      } else {
+<span class="fc" id="L371">        into.append(fun.apply(get(i)));</span>
+      }
+    }
+<span class="fc" id="L374">    return into;</span>
+  }
+
+  Column&lt;T&gt; setMissing(int i);
+
+  /**
+   * Sets the value of any missing data in the column to newValue and returns the same column
+   *
+   * @param newValue the value to be used for all missing data in this column
+   * @return the column updated
+   */
+  default Column&lt;T&gt; setMissingTo(T newValue) {
+<span class="fc bfc" id="L386" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">      if (isMissing(i)) {</span>
+<span class="fc" id="L388">        set(i, newValue);</span>
+      }
+    }
+<span class="fc" id="L391">    return this;</span>
+  }
+
+  /**
+   * Returns a new Column of the same type with only those rows satisfying the predicate
+   *
+   * @param test the predicate
+   * @return a new Column of the same type with only those rows satisfying the predicate
+   */
+  default Column&lt;T&gt; filter(Predicate&lt;? super T&gt; test) {
+<span class="fc" id="L401">    Column&lt;T&gt; result = emptyCopy();</span>
+<span class="fc bfc" id="L402" title="All 2 branches covered.">    for (T t : this) {</span>
+<span class="fc bfc" id="L403" title="All 2 branches covered.">      if (test.test(t)) {</span>
+<span class="fc" id="L404">        result.append(t);</span>
+      }
+<span class="fc" id="L406">    }</span>
+<span class="fc" id="L407">    return result;</span>
+  }
+
+  default Column&lt;T&gt; subset(int[] rows) {
+<span class="fc" id="L411">    final Column&lt;T&gt; c = this.emptyCopy();</span>
+<span class="fc bfc" id="L412" title="All 2 branches covered.">    for (final int row : rows) {</span>
+<span class="fc" id="L413">      c.appendObj(get(row));</span>
+    }
+<span class="fc" id="L415">    return c;</span>
+  }
+
+  /**
+   * Returns a new Column of the same type sorted according to the provided Comparator
+   *
+   * @param comp the Comparator
+   * @return a sorted Column
+   */
+  default Column&lt;T&gt; sorted(Comparator&lt;? super T&gt; comp) {
+<span class="fc" id="L425">    List&lt;T&gt; list = asList();</span>
+<span class="fc" id="L426">    list.sort(comp);</span>
+<span class="fc" id="L427">    Column&lt;T&gt; result = emptyCopy();</span>
+<span class="fc bfc" id="L428" title="All 2 branches covered.">    for (T t : list) {</span>
+<span class="fc" id="L429">      result.append(t);</span>
+<span class="fc" id="L430">    }</span>
+<span class="fc" id="L431">    return result;</span>
+  }
+
+  /**
+   * Returns a copy of the receiver with no data. The column name and type are the same.
+   *
+   * @return a empty copy of {@link Column}
+   */
+  Column&lt;T&gt; emptyCopy();
+
+  /**
+   * Returns a deep copy of the receiver
+   *
+   * @return a {@link Column}
+   */
+  Column&lt;T&gt; copy();
+
+  /**
+   * Returns an empty copy of the receiver, with its internal storage initialized to the given row
+   * size.
+   *
+   * @param rowSize the initial row size
+   * @return a {@link Column}
+   */
+  Column&lt;T&gt; emptyCopy(int rowSize);
+
+  /**
+   * Maps the function across all rows, appending the results to a new Column of the same type
+   *
+   * @param fun function to map
+   * @return the Column with the results
+   */
+  default Column&lt;T&gt; map(Function&lt;? super T, ? extends T&gt; fun) {
+<span class="fc" id="L464">    return mapInto(fun, emptyCopy(size()));</span>
+  }
+
+  /**
+   * Returns a column containing the element-wise min between this column and other column
+   *
+   * &lt;p&gt;TODO(lwhite) Override in column subtypes for better performance
+   */
+  default Column&lt;T&gt; min(Column&lt;T&gt; other) {
+<span class="pc bpc" id="L473" title="1 of 2 branches missed.">    Preconditions.checkArgument(size() == other.size());</span>
+<span class="fc" id="L474">    Column&lt;T&gt; newCol = emptyCopy();</span>
+<span class="fc bfc" id="L475" title="All 2 branches covered.">    for (int i = 0; i &lt; this.size(); i++) {</span>
+<span class="pc bpc" id="L476" title="2 of 4 branches missed.">      if (isMissing(i) || other.isMissing(i)) {</span>
+<span class="nc" id="L477">        newCol.appendMissing();</span>
+      } else {
+<span class="fc" id="L479">        T thisValue = get(i);</span>
+<span class="fc" id="L480">        T otherValue = other.get(i);</span>
+<span class="fc" id="L481">        int result = compare(thisValue, otherValue);</span>
+<span class="fc bfc" id="L482" title="All 2 branches covered.">        newCol.append(result &lt;= 0 ? thisValue : otherValue);</span>
+      }
+    }
+<span class="fc" id="L485">    return newCol;</span>
+  }
+
+  /**
+   * Returns a column containing the element-wise min between this column and other column
+   *
+   * &lt;p&gt;TODO(lwhite) Override in column subtypes for better performance
+   */
+  default Column&lt;T&gt; max(Column&lt;T&gt; other) {
+<span class="pc bpc" id="L494" title="1 of 2 branches missed.">    Preconditions.checkArgument(size() == other.size());</span>
+<span class="fc" id="L495">    Column&lt;T&gt; newCol = emptyCopy();</span>
+<span class="fc bfc" id="L496" title="All 2 branches covered.">    for (int i = 0; i &lt; this.size(); i++) {</span>
+<span class="pc bpc" id="L497" title="2 of 4 branches missed.">      if (isMissing(i) || other.isMissing(i)) {</span>
+<span class="nc" id="L498">        newCol.appendMissing();</span>
+      } else {
+<span class="fc" id="L500">        T thisValue = get(i);</span>
+<span class="fc" id="L501">        T otherValue = other.get(i);</span>
+<span class="fc" id="L502">        int result = compare(thisValue, otherValue);</span>
+<span class="fc bfc" id="L503" title="All 2 branches covered.">        newCol.append(result &gt;= 0 ? thisValue : otherValue);</span>
+      }
+    }
+<span class="fc" id="L506">    return newCol;</span>
+  }
+
+  /**
+   * Updates this column where values matching the selection are replaced with the corresponding
+   * value from the given column
+   */
+  default Column&lt;T&gt; set(Predicate&lt;T&gt; condition, Column&lt;T&gt; other) {
+<span class="nc bnc" id="L514" title="All 2 branches missed.">    for (int row = 0; row &lt; size(); row++) {</span>
+<span class="nc bnc" id="L515" title="All 2 branches missed.">      if (condition.test(get(row))) {</span>
+<span class="nc" id="L516">        set(row, other.get(row));</span>
+      }
+    }
+<span class="nc" id="L519">    return this;</span>
+  }
+
+  /**
+   * Updates this column where values matching the selection are replaced with the corresponding
+   * value from the given column
+   */
+  default Column&lt;T&gt; set(Selection condition, Column&lt;T&gt; other) {
+<span class="fc bfc" id="L527" title="All 2 branches covered.">    for (int row : condition) {</span>
+<span class="fc" id="L528">      set(row, other.get(row));</span>
+<span class="fc" id="L529">    }</span>
+<span class="fc" id="L530">    return this;</span>
+  }
+
+  /**
+   * Returns a column of the same type as the receiver, containing the receivers values offset -n
+   * For example if you lead a column containing 2, 3, 4 by 1, you get a column containing 3, 4, NA.
+   */
+  default Column&lt;T&gt; lead(final int n) {
+<span class="nc" id="L538">    return lag(-n);</span>
+  }
+
+  /**
+   * Conditionally update this column, replacing current values with newValue for all rows where the
+   * current value matches the selection criteria
+   */
+  default Column&lt;T&gt; set(Selection rowSelection, T newValue) {
+<span class="fc bfc" id="L546" title="All 2 branches covered.">    for (int row : rowSelection) {</span>
+<span class="fc" id="L547">      set(row, newValue);</span>
+<span class="fc" id="L548">    }</span>
+<span class="fc" id="L549">    return this;</span>
+  }
+
+  /**
+   * Returns a column of the same type and size as the receiver, containing the receivers values
+   * offset by n.
+   *
+   * &lt;p&gt;For example if you lag a column containing 2, 3, 4 by 1, you get a column containing NA, 2,
+   * 3
+   */
+  Column&lt;T&gt; lag(int n);
+
+  Column&lt;T&gt; appendCell(String stringValue);
+
+  Column&lt;T&gt; appendCell(String stringValue, AbstractColumnParser&lt;?&gt; parser);
+
+  Column&lt;T&gt; set(int row, T value);
+
+  Column&lt;T&gt; set(int row, Column&lt;T&gt; sourceColumn, int sourceRow);
+
+  Column&lt;T&gt; append(T value);
+
+  Column&lt;T&gt; append(Column&lt;T&gt; column);
+
+  Column&lt;T&gt; append(Column&lt;T&gt; column, int row);
+
+  Column&lt;T&gt; appendObj(Object value);
+
+  /** Appends a missing value appropriate to the column */
+  Column&lt;T&gt; appendMissing();
+
+  Column&lt;T&gt; where(Selection selection);
+
+  Column&lt;T&gt; removeMissing();
+
+  /**
+   * Returns a column of the same type as the receiver, containing only the unique values of the
+   * receiver.
+   *
+   * @return a {@link Column}
+   */
+  Column&lt;T&gt; unique();
+
+  default Column&lt;T&gt; first(final int numRows) {
+<span class="fc" id="L593">    int newRowCount = Math.min(numRows, size());</span>
+<span class="fc" id="L594">    return inRange(0, newRowCount);</span>
+  }
+
+  default Column&lt;T&gt; last(final int numRows) {
+<span class="fc" id="L598">    int newRowCount = Math.min(numRows, size());</span>
+<span class="fc" id="L599">    return inRange(size() - newRowCount, size());</span>
+  }
+
+  /**
+   * Sets the columns name to the given string
+   *
+   * @param name The new name MUST be unique for any table containing this column
+   * @return this Column to allow method chaining
+   */
+  Column&lt;T&gt; setName(String name);
+
+  /**
+   * Returns a column containing the rows in this column beginning with start inclusive, and ending
+   * with end exclusive
+   */
+  default Column&lt;T&gt; inRange(int start, int end) {
+<span class="pc bpc" id="L615" title="1 of 2 branches missed.">    Preconditions.checkArgument(start &lt; end);</span>
+<span class="pc bpc" id="L616" title="1 of 2 branches missed.">    Preconditions.checkArgument(end &lt;= size());</span>
+<span class="fc" id="L617">    return where(Selection.withRange(start, end));</span>
+  }
+
+  /**
+   * Returns a column containing a random sample of the values in this column
+   *
+   * @param n the number of values to select
+   * @return A column of the same type as the receiver
+   */
+  default Column&lt;T&gt; sampleN(int n) {
+<span class="nc bnc" id="L627" title="All 2 branches missed.">    Preconditions.checkArgument(</span>
+<span class="nc bnc" id="L628" title="All 2 branches missed.">        n &gt; 0 &amp;&amp; n &lt; size(),</span>
+        &quot;The number of rows sampled must be greater than 0 and less than the number of rows in the table.&quot;);
+<span class="nc" id="L630">    return where(selectNRowsAtRandom(n, size()));</span>
+  }
+
+  /**
+   * Returns a table consisting of randomly selected values from this column. The sample size is
+   * based on the given proportion of the total number of cells in this column
+   *
+   * @param proportion The proportion to go in the sample
+   */
+  default Column&lt;T&gt; sampleX(double proportion) {
+<span class="nc bnc" id="L640" title="All 4 branches missed.">    Preconditions.checkArgument(</span>
+        proportion &lt;= 1 &amp;&amp; proportion &gt;= 0, &quot;The sample proportion must be between 0 and 1&quot;);
+
+<span class="nc" id="L643">    int tableSize = (int) Math.round(size() * proportion);</span>
+<span class="nc" id="L644">    return where(selectNRowsAtRandom(tableSize, size()));</span>
+  }
+
+  /**
+   * Provides the ability to create a new column with missing cells filled based off the value of
+   * nearby cells.
+   */
+  default Interpolator&lt;T&gt; interpolate() {
+<span class="nc" id="L652">    return new Interpolator&lt;T&gt;(this);</span>
+  }
+
+  /**
+   * Returns a StringColumn consisting of the (unformatted) String representation of this column
+   * values
+   *
+   * @return a {@link StringColumn} built using the column {@link #getUnformattedString} method
+   */
+  StringColumn asStringColumn();
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

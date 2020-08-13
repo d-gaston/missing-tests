@@ -1,0 +1,1075 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Profiler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.util.debug</a> &gt; <span class="el_source">Profiler.java</span></div><h1>Profiler.java</h1><pre class="source lang-java linenums">package org.threadly.util.debug;
+
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE1;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE2;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER1;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER2;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_PRIORITY_SCHEDULE1;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_PRIORITY_SCHEDULE2;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR1;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR2;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER1;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER2;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_ARRAY_QUEUE;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_LINKED_QUEUE;
+import static org.threadly.util.debug.CommonStacktraces.IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_SYNCHRONOUS_QUEUE;
+
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
+
+import org.threadly.concurrent.SameThreadSubmitterExecutor;
+import org.threadly.concurrent.future.ListenableFuture;
+import org.threadly.concurrent.future.SettableListenableFuture;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+import org.threadly.util.ExceptionUtils;
+import org.threadly.util.Pair;
+import org.threadly.util.StringUtils;
+
+/**
+ * Tool for profiling a running java application to get an idea of where the slow points 
+ * (either because of lock contention, or because of high computational demand).
+ * &lt;p&gt;
+ * This tool definitely incurs some load within the system, so it should only be used while 
+ * debugging, and not as general use.  In addition if it is left running without being reset, it 
+ * will continue to consume more and more memory.
+ * 
+ * @since 1.0.0
+ */
+public class Profiler {
+  protected static final short DEFAULT_POLL_INTERVAL_IN_MILLIS = 100;
+  protected static final short NUMBER_TARGET_LINE_LENGTH = 8;
+  protected static final String FUNCTION_BY_NET_HEADER;
+  protected static final String FUNCTION_BY_COUNT_HEADER;
+  private static final short DEFAULT_MAP_INITIAL_SIZE = 16;
+  private static final Set&lt;String&gt; BLACKLIST_THREAD_NAMES;
+  
+  static {
+<span class="fc" id="L66">    String prefix = &quot;functions by &quot;;</span>
+<span class="fc" id="L67">    String columns = &quot;(total, top, name)&quot;;</span>
+<span class="fc" id="L68">    FUNCTION_BY_NET_HEADER = prefix + &quot;top count: &quot; + columns;</span>
+<span class="fc" id="L69">    FUNCTION_BY_COUNT_HEADER = prefix + &quot;total count: &quot; + columns;</span>
+<span class="fc" id="L70">    Set&lt;String&gt; blacklistThreadNames = new HashSet&lt;&gt;(4);</span>
+<span class="fc" id="L71">    blacklistThreadNames.add(&quot;Threadly clock updater&quot;);</span>
+<span class="fc" id="L72">    blacklistThreadNames.add(&quot;Reference Handler&quot;);</span>
+<span class="fc" id="L73">    blacklistThreadNames.add(&quot;Finalizer&quot;);</span>
+<span class="fc" id="L74">    BLACKLIST_THREAD_NAMES = Collections.unmodifiableSet(blacklistThreadNames);</span>
+    
+<span class="fc" id="L76">    CommonStacktraces.init();</span>
+<span class="fc" id="L77">  }</span>
+  
+  protected final Object startStopLock;
+  protected final ProfileStorage pStore;
+  protected final List&lt;WeakReference&lt;SettableListenableFuture&lt;String&gt;&gt;&gt; stopFutures; // guarded by startStopLock
+  
+  /**
+   * Constructs a new profiler instance.  The only way to get results from this instance is to 
+   * call {@link #dump()} with a provided output stream to get the results to.  
+   * &lt;p&gt;
+   * This uses a default poll interval of 100 milliseconds.
+   */
+  public Profiler() {
+<span class="fc" id="L90">    this(DEFAULT_POLL_INTERVAL_IN_MILLIS);</span>
+<span class="fc" id="L91">  }</span>
+  
+  /**
+   * Constructs a new profiler instance.  The only way to get results from this instance is to 
+   * call {@link #dump()} with a provided output stream to get the results to.
+   * 
+   * @param pollIntervalInMs frequency to check running threads
+   */
+  public Profiler(int pollIntervalInMs) {
+<span class="fc" id="L100">    this(new ProfileStorage(pollIntervalInMs));</span>
+<span class="fc" id="L101">  }</span>
+  
+  /**
+   * This constructor allows extending classes to provide their own implementation of the 
+   * {@link ProfileStorage}.  Ultimately all constructors will default to this one.
+   * 
+   * @param outputFile file to dump results to on stop (or {@code null} to not dump on stop)
+   * @param pStore Storage to be used for holding profile results and getting the Iterator for threads
+   */
+<span class="fc" id="L110">  protected Profiler(ProfileStorage pStore) {</span>
+<span class="fc" id="L111">    this.startStopLock = new Object();</span>
+<span class="fc" id="L112">    this.pStore = pStore;</span>
+<span class="fc" id="L113">    this.stopFutures = new ArrayList&lt;&gt;(2);</span>
+<span class="fc" id="L114">  }</span>
+  
+  /**
+   * Change how long the profiler waits before getting additional thread stacks.  This value must 
+   * be greater than or equal to 0.
+   * 
+   * @param pollIntervalInMs time in milliseconds to wait between thread data dumps
+   */
+  public void setPollInterval(int pollIntervalInMs) {
+<span class="fc" id="L123">    ArgumentVerifier.assertNotNegative(pollIntervalInMs, &quot;pollIntervalInMs&quot;);</span>
+    
+<span class="fc" id="L125">    this.pStore.pollIntervalInMs = pollIntervalInMs;</span>
+<span class="fc" id="L126">  }</span>
+  
+  /**
+   * Call to get the currently set profile interval.  This is the amount of time the profiler 
+   * waits between collecting thread data.
+   * 
+   * @return returns the profile interval in milliseconds
+   */
+  public int getPollInterval() {
+<span class="fc" id="L135">    return pStore.pollIntervalInMs;</span>
+  }
+  
+  /**
+   * Call to get an estimate on how many times the profiler has collected a sample of the thread 
+   * stacks.  This number may be lower than the actual sample quantity, but should never be 
+   * higher.  It can be used to ensure a minimum level of accuracy from within the profiler.
+   * 
+   * @return the number of times since the start or last reset we have sampled the threads
+   */
+  public int getCollectedSampleQty() {
+<span class="fc" id="L146">    return pStore.collectedSamples.intValue();</span>
+  }
+  
+  /**
+   * Reset the current stored statistics.  The statistics will continue to grow in memory until 
+   * the profiler is either stopped, or until this is called.
+   */
+  public void reset() {
+<span class="fc" id="L154">    pStore.threadTraces.clear();</span>
+<span class="fc" id="L155">    pStore.collectedSamples.reset();</span>
+<span class="fc" id="L156">  }</span>
+  
+  /**
+   * Call to check weather the profile is currently running/started.
+   * 
+   * @return {@code true} if there is a thread currently collecting statistics.
+   */
+  public boolean isRunning() {
+<span class="fc bfc" id="L164" title="All 2 branches covered.">    return pStore.collectorThread.get() != null;</span>
+  }
+  
+  /**
+   * Starts the profiler running in a new thread.  
+   * &lt;p&gt;
+   * If this profiler had previously ran, and is now sitting in a stopped state again.  The 
+   * statistics from the previous run will still be included in this run.  If you wish to clear 
+   * out previous runs you must call {@link #reset()} first.
+   */
+  public void start() {
+<span class="fc" id="L175">    start(null, -1, null);</span>
+<span class="fc" id="L176">  }</span>
+  
+  /**
+   * Starts the profiler running in a new thread.  
+   * &lt;p&gt;
+   * If this profiler had previously ran, and is now sitting in a stopped state again.  The 
+   * statistics from the previous run will still be included in this run.  If you wish to clear 
+   * out previous runs you must call {@link #reset()} first.
+   * &lt;p&gt;
+   * If an executor is provided, this call will block until the the profiler has been started on 
+   * the provided executor.
+   * 
+   * @param executor executor to execute on, or {@code null} if new thread should be created
+   */
+  public void start(Executor executor) {
+<span class="fc" id="L191">    start(executor, -1, null);</span>
+<span class="fc" id="L192">  }</span>
+  
+  /**
+   * Starts the profiler running in a new thread.  
+   * &lt;p&gt;
+   * If this profiler had previously ran, and is now sitting in a stopped state again.  The 
+   * statistics from the previous run will still be included in this run.  If you wish to clear 
+   * out previous runs you must call {@link #reset()} first.  
+   * &lt;p&gt;
+   * If {@code sampleDurationInMillis} is greater than zero the Profiler will invoke 
+   * {@link #stop()} in that many milliseconds.  
+   * &lt;p&gt;
+   * The returned {@link ListenableFuture} will be provided the dump when {@link #stop()} is 
+   * invoked next.  Either from a timeout provided to this call, or a manual invocation of 
+   * {@link #stop()}.
+   * 
+   * @param sampleDurationInMillis if greater than {@code 0} the profiler will only run for this many milliseconds
+   * @return Future that will be completed with the dump string when the profiler is stopped
+   */
+  public ListenableFuture&lt;String&gt; start(long sampleDurationInMillis) {
+<span class="fc" id="L212">    return start(null, sampleDurationInMillis);</span>
+  }
+  
+  /**
+   * Starts the profiler running in a new thread.  
+   * &lt;p&gt;
+   * If this profiler had previously ran, and is now sitting in a stopped state again.  The 
+   * statistics from the previous run will still be included in this run.  If you wish to clear 
+   * out previous runs you must call {@link #reset()} first.  
+   * &lt;p&gt;
+   * If an executor is provided, this call will block until the the profiler has been started on 
+   * the provided executor.
+   * &lt;p&gt;
+   * If {@code sampleDurationInMillis} is greater than zero the Profiler will invoke 
+   * {@link #stop()} in that many milliseconds.
+   * &lt;p&gt;
+   * The returned {@link ListenableFuture} will be provided the dump when {@link #stop()} is 
+   * invoked next.  Either from a timeout provided to this call, or a manual invocation of 
+   * {@link #stop()}.
+   * 
+   * @param executor executor to execute on, or {@code null} if new thread should be created
+   * @param sampleDurationInMillis if greater than {@code 0} the profiler will only run for this many milliseconds
+   * @return Future that will be completed with the dump string when the profiler is stopped
+   */
+  public ListenableFuture&lt;String&gt; start(Executor executor, long sampleDurationInMillis) {
+<span class="fc" id="L237">    SettableListenableFuture&lt;String&gt; result = new SettableListenableFuture&lt;&gt;();</span>
+<span class="fc" id="L238">    start(executor, sampleDurationInMillis, result);</span>
+<span class="fc" id="L239">    return result;</span>
+  }
+  
+  /**
+   * The ultimate start call for the profiler.  This handles all possible start permutations.  
+   * If an {@link Executor} is provided, that will be used to run the profiler thread.  If there 
+   * is a duration provided &gt; 0, a thread will be started to perform profiler shutdown.  If 
+   * {@code sampleDurationInMillis} is greater than {@code 0} and the profiler is already running, 
+   * it will be stopped and restarted.
+   * 
+   * @param executor Executor or scheduler to use for execution as possible
+   * @param sampleDurationInMillis if greater than {@code 0} an automatic stop will occur after that many milliseconds 
+   * @param completionFuture If not {@code null} future will be called once the next {@link #stop()} is invoked
+   */
+  private void start(Executor executor, final long sampleDurationInMillis, 
+                     SettableListenableFuture&lt;String&gt; completionFuture) {
+<span class="fc" id="L255">    final ProfilerRunner pr = new ProfilerRunner(pStore);</span>
+<span class="fc" id="L256">    boolean runInCallingThread = false;</span>
+<span class="fc" id="L257">    Thread callingThread = null;</span>
+<span class="fc" id="L258">    synchronized (startStopLock) {</span>
+<span class="fc bfc" id="L259" title="All 2 branches covered.">      if (sampleDurationInMillis &gt; 0) {</span>
+        // stop in case it's running, this allows us to simplify our start logic
+<span class="fc" id="L261">        stop();</span>
+      }
+<span class="fc bfc" id="L263" title="All 2 branches covered.">      if (completionFuture != null) {</span>
+<span class="fc" id="L264">        stopFutures.add(new WeakReference&lt;&gt;(completionFuture));</span>
+      }
+<span class="pc bpc" id="L266" title="1 of 2 branches missed.">      if (pStore.collectorThread.get() == null) {</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">        if (executor == null) {</span>
+          // no executor, so we simply create our own thread
+<span class="fc" id="L269">          Thread thread = new Thread(pr);</span>
+          
+<span class="fc" id="L271">          pStore.collectorThread.set(thread);</span>
+          
+<span class="fc" id="L273">          thread.setName(&quot;Threadly Profiler data collector&quot;);</span>
+<span class="fc" id="L274">          thread.setPriority(Thread.MAX_PRIORITY);</span>
+<span class="fc" id="L275">          thread.start();</span>
+<span class="pc bpc" id="L276" title="1 of 4 branches missed.">        } else if (executor == SameThreadSubmitterExecutor.instance() || </span>
+                   executor instanceof SameThreadSubmitterExecutor) {
+          // I don't really like having special logic if the goal is to profile on the invoking 
+          // thread like this, but anything else might complicate the logic below (or at least it's 
+          // not obvious what a clean way to adjust the below logic is).  Despite the use of an 
+          // AtomicReference for the collectorThread reference, if we allow the thread to be set 
+          // outside of the lock we risk a case where the profiler was started, started, then 
+          // stopped.  If the second start task was able to submit to the pool, but not execute till 
+          // after the stop, then a profiler would continue to run (maybe forever)  
+<span class="fc" id="L285">          callingThread = Thread.currentThread();</span>
+<span class="fc" id="L286">          pStore.collectorThread.set(callingThread);</span>
+<span class="fc" id="L287">          runInCallingThread = true;</span>
+        } else {
+<span class="fc" id="L289">          final SettableListenableFuture&lt;?&gt; runningThreadFuture = new SettableListenableFuture&lt;&gt;();</span>
+          
+<span class="fc" id="L291">          executor.execute(new ExecutorRunnerTask(pStore, runningThreadFuture, pr));</span>
+          
+          // now block till collectorThread has been set and profiler has started on the executor
+          try {
+<span class="fc" id="L295">            runningThreadFuture.get();</span>
+<span class="nc" id="L296">          } catch (InterruptedException e) {</span>
+<span class="nc" id="L297">            Thread.currentThread().interrupt();</span>
+<span class="nc" id="L298">            return;</span>
+<span class="nc" id="L299">          } catch (ExecutionException e) {</span>
+<span class="nc" id="L300">            throw ExceptionUtils.makeRuntime(e.getCause());</span>
+<span class="fc" id="L301">          }</span>
+        }
+        // start or schedule to handle run time limit
+<span class="fc bfc" id="L304" title="All 2 branches covered.">        if (sampleDurationInMillis &gt; 0) {</span>
+<span class="fc" id="L305">          pStore.dumpLoopRun = new Runnable() {</span>
+<span class="fc" id="L306">            private final long startTime = Clock.accurateForwardProgressingMillis();</span>
+            
+            @Override
+            public void run() {
+<span class="fc bfc" id="L310" title="All 2 branches covered.">              if (Clock.lastKnownForwardProgressingMillis() - startTime &gt; sampleDurationInMillis) {</span>
+<span class="fc" id="L311">                pStore.dumpLoopRun = null;</span>
+<span class="fc" id="L312">                stop();</span>
+              }
+<span class="fc" id="L314">            }</span>
+          };
+        }
+      }
+<span class="fc" id="L318">    }</span>
+<span class="fc bfc" id="L319" title="All 2 branches covered.">    if (runInCallingThread) {</span>
+<span class="fc" id="L320">      int origPriority = callingThread.getPriority();</span>
+      try {
+<span class="pc bpc" id="L322" title="1 of 2 branches missed.">        if (origPriority &lt; Thread.MAX_PRIORITY) {</span>
+<span class="fc" id="L323">          callingThread.setPriority(Thread.MAX_PRIORITY);</span>
+        }
+<span class="fc" id="L325">        pr.run();</span>
+      } finally {
+<span class="pc bpc" id="L327" title="1 of 2 branches missed.">        if (origPriority &lt; Thread.MAX_PRIORITY) {</span>
+<span class="fc" id="L328">          callingThread.setPriority(origPriority);</span>
+        }
+      }
+<span class="fc" id="L331">      Thread.interrupted(); // reset interrupted status incase that is what caused us to unblock</span>
+    }
+<span class="fc" id="L333">  }</span>
+  
+  /**
+   * Stops the profiler from collecting more statistics.  If a file was provided at construction, 
+   * the results will be written to that file.  It is possible to request the results using the 
+   * {@link #dump()} call after it has stopped.
+   */
+  public void stop() {
+<span class="fc" id="L341">    synchronized (startStopLock) {</span>
+<span class="fc" id="L342">      Thread runningThread = pStore.collectorThread.get();</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">      if (runningThread != null) {</span>
+<span class="fc" id="L344">        runningThread.interrupt();</span>
+<span class="fc" id="L345">        pStore.collectorThread.set(null);</span>
+        
+<span class="fc bfc" id="L347" title="All 2 branches covered.">        if (! stopFutures.isEmpty()) {</span>
+<span class="fc" id="L348">          String result = null;</span>
+<span class="fc" id="L349">          Iterator&lt;WeakReference&lt;SettableListenableFuture&lt;String&gt;&gt;&gt; it = stopFutures.iterator();</span>
+<span class="fc bfc" id="L350" title="All 2 branches covered.">          while (it.hasNext()) {</span>
+<span class="fc" id="L351">            SettableListenableFuture&lt;String&gt; slf = it.next().get();</span>
+<span class="pc bpc" id="L352" title="1 of 2 branches missed.">            if (slf != null) {</span>
+<span class="pc bpc" id="L353" title="1 of 2 branches missed.">              if (result == null) {</span>
+<span class="fc" id="L354">                result = dump();</span>
+              }
+<span class="fc" id="L356">              slf.setResult(result);</span>
+            }
+<span class="fc" id="L358">          }</span>
+<span class="fc" id="L359">          stopFutures.clear();</span>
+        }
+      }
+<span class="fc" id="L362">    }</span>
+<span class="fc" id="L363">  }</span>
+  
+  /**
+   * Output all the currently collected statistics to the provided output stream.
+   * 
+   * @return The dumped results as a single String
+   */
+  public String dump() {
+<span class="fc" id="L371">    return dump(true);</span>
+  }
+  
+  /**
+   * Output all the currently collected statistics to the provided output stream.
+   * 
+   * @return The dumped results as a single String
+   * @param dumpIndividualThreads If {@code true} then a report of stacks seen for individual threads is also dumped
+   */
+  public String dump(boolean dumpIndividualThreads) {
+<span class="fc" id="L381">    ByteArrayOutputStream baos = new ByteArrayOutputStream();</span>
+<span class="fc" id="L382">    dump(new BufferedOutputStream(baos), dumpIndividualThreads);</span>
+    
+<span class="fc" id="L384">    return baos.toString();</span>
+  }
+  
+  /**
+   * Output all the currently collected statistics to the provided output stream.
+   * 
+   * @param out OutputStream to write results to
+   */
+  public void dump(OutputStream out) {
+<span class="fc" id="L393">    dump(out, true);</span>
+<span class="fc" id="L394">  }</span>
+  
+  /**
+   * Output all the currently collected statistics to the provided output stream.
+   * 
+   * @param out OutputStream to write results to
+   * @param dumpIndividualThreads If {@code true} then a report of stacks seen for individual threads is also dumped
+   */
+  public void dump(OutputStream out, boolean dumpIndividualThreads) {
+<span class="fc" id="L403">    dump(new PrintStream(out, false), dumpIndividualThreads);</span>
+<span class="fc" id="L404">  }</span>
+  
+  /**
+   * Output all the currently collected statistics to the provided output stream.
+   * 
+   * @param ps PrintStream to write results to
+   */
+  public void dump(PrintStream ps) {
+<span class="nc" id="L412">    dump(ps, true);</span>
+<span class="nc" id="L413">  }</span>
+  
+  /**
+   * Output all the currently collected statistics to the provided output stream.
+   * 
+   * @param ps PrintStream to write results to
+   * @param dumpIndividualThreads If {@code true} then a report of stacks seen for individual threads is also dumped
+   */
+  public void dump(PrintStream ps, boolean dumpIndividualThreads) {
+<span class="fc" id="L422">    pStore.dumpingThread = Thread.currentThread();</span>
+    try {
+<span class="fc" id="L424">      Map&lt;Trace, Integer&gt; globalTraces = new HashMap&lt;&gt;();</span>
+      // create a local copy so the stats wont change while we are dumping them
+      // convert to a pair list so we can sort by name
+<span class="fc" id="L427">      List&lt;Pair&lt;ThreadIdentifier, ThreadSamples&gt;&gt; threadSamples = Pair.convertMap(pStore.threadTraces);</span>
+<span class="fc" id="L428">      Collections.sort(threadSamples, </span>
+<span class="fc" id="L429">                       (p1, p2) -&gt; p1.getRight().threadNames().compareTo(p2.getRight().threadNames()));</span>
+<span class="fc" id="L430">      Iterator&lt;Pair&lt;ThreadIdentifier, ThreadSamples&gt;&gt; it = threadSamples.iterator();</span>
+<span class="fc bfc" id="L431" title="All 2 branches covered.">      while (it.hasNext()) {</span>
+<span class="fc" id="L432">        Pair&lt;ThreadIdentifier, ThreadSamples&gt; entry = it.next();</span>
+<span class="fc bfc" id="L433" title="All 2 branches covered.">        if (dumpIndividualThreads) {</span>
+<span class="fc" id="L434">          ps.println(&quot;Profile for thread: &quot; + </span>
+<span class="fc" id="L435">                        entry.getRight().threadNames() + ';' + entry.getLeft().threadId);</span>
+<span class="fc" id="L436">          dumpTraces(entry.getRight().traceSet(), null, ps);</span>
+        }
+        
+        // add in this threads trace data to the global trace map
+<span class="fc" id="L440">        Iterator&lt;Trace&gt; traceIt = entry.getRight().traceSet().iterator();</span>
+<span class="fc bfc" id="L441" title="All 2 branches covered.">        while (traceIt.hasNext()) {</span>
+<span class="fc" id="L442">          globalTraces.compute(traceIt.next(), </span>
+<span class="fc bfc" id="L443" title="All 2 branches covered.">                               (k, v) -&gt; v == null ? k.getThreadCount() : v + k.getThreadCount());</span>
+        }
+
+<span class="fc bfc" id="L446" title="All 2 branches covered.">        if (dumpIndividualThreads) {</span>
+<span class="fc" id="L447">          ps.println(&quot;--------------------------------------------------&quot;);</span>
+<span class="fc" id="L448">          ps.println();</span>
+        }
+<span class="fc" id="L450">      }</span>
+        
+      // log out global data
+<span class="fc bfc" id="L453" title="All 4 branches covered.">      if (globalTraces.size() &gt; 1 || ! dumpIndividualThreads) {</span>
+<span class="fc" id="L454">        ps.println(&quot;Combined profile for all threads....&quot;);</span>
+<span class="fc" id="L455">        dumpTraces(globalTraces.keySet(), globalTraces, ps);</span>
+      }
+      
+<span class="fc" id="L458">      ps.flush();</span>
+    } finally {
+<span class="fc" id="L460">      pStore.dumpingThread = null;</span>
+    }
+<span class="fc" id="L462">  }</span>
+  
+  /**
+   * Dumps the traces in the provided set to the provided output stream.
+   * 
+   * @param traces Set to examine traces to dump statistics about
+   * @param globalCount {@code true} to examine the global counts of the traces
+   * @param out Output to dump results to
+   */
+  private static void dumpTraces(Set&lt;Trace&gt; traces, 
+                                 final Map&lt;Trace, Integer&gt; globalCounts, PrintStream out) {
+<span class="fc" id="L473">    Map&lt;Function, Function&gt; methods = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L474">    Trace[] traceArray = traces.toArray(new Trace[traces.size()]);</span>
+<span class="fc" id="L475">    int total = 0;</span>
+<span class="fc" id="L476">    int nativeCount = 0;</span>
+    
+<span class="fc bfc" id="L478" title="All 2 branches covered.">    for (Trace t: traceArray) {</span>
+<span class="fc bfc" id="L479" title="All 2 branches covered.">      if (globalCounts != null) {</span>
+<span class="fc" id="L480">        total += globalCounts.get(t);</span>
+      } else {
+<span class="fc" id="L482">        total += t.getThreadCount();</span>
+      }
+      
+<span class="pc bpc" id="L485" title="1 of 4 branches missed.">      if (t.elements.length &gt; 0 &amp;&amp; t.elements[0].isNativeMethod()) {</span>
+<span class="fc bfc" id="L486" title="All 2 branches covered.">        if (globalCounts != null) {</span>
+<span class="fc" id="L487">          nativeCount += globalCounts.get(t);</span>
+        } else {
+<span class="fc" id="L489">          nativeCount += t.getThreadCount();</span>
+        }
+      }
+      
+<span class="fc bfc" id="L493" title="All 2 branches covered.">      for (int i = 0; i &lt; t.elements.length; ++i) {</span>
+<span class="fc" id="L494">        Function n = new Function(t.elements[i].getClassName(), t.elements[i].getMethodName());</span>
+<span class="fc" id="L495">        Function f = methods.get(n);</span>
+<span class="fc bfc" id="L496" title="All 2 branches covered.">        if (f == null) {</span>
+<span class="fc" id="L497">          methods.put(n, n);</span>
+<span class="fc" id="L498">          f = n;</span>
+        }
+<span class="fc bfc" id="L500" title="All 2 branches covered.">        if (globalCounts != null) {</span>
+<span class="fc bfc" id="L501" title="All 2 branches covered.">          f.incrementCount(globalCounts.get(t), i &gt; 0);</span>
+        } else {
+<span class="fc bfc" id="L503" title="All 2 branches covered.">          f.incrementCount(t.getThreadCount(), i &gt; 0);</span>
+        }
+      }
+    }
+    
+<span class="fc" id="L508">    Function[] methodArray = methods.keySet().toArray(new Function[methods.size()]);</span>
+    
+<span class="fc" id="L510">    out.println(&quot; total count: &quot; + StringUtils.padStart(Integer.toString(total), </span>
+                                                        NUMBER_TARGET_LINE_LENGTH, ' '));
+<span class="fc" id="L512">    out.println(&quot;native count: &quot; + StringUtils.padStart(Integer.toString(nativeCount), </span>
+                                                        NUMBER_TARGET_LINE_LENGTH, ' '));
+    
+<span class="fc" id="L515">    out.println();</span>
+<span class="fc" id="L516">    out.println(FUNCTION_BY_NET_HEADER);</span>
+<span class="fc" id="L517">    out.println();</span>
+    
+<span class="fc" id="L519">    Arrays.sort(methodArray, (a, b) -&gt; b.getStackTopCount() - a.getStackTopCount());</span>
+    
+<span class="fc bfc" id="L521" title="All 2 branches covered.">    for (int i = 0; i &lt; methodArray.length; i++) {</span>
+<span class="fc" id="L522">      dumpFunction(methodArray[i], out);</span>
+    }
+    
+<span class="fc" id="L525">    out.println();</span>
+<span class="fc" id="L526">    out.println(FUNCTION_BY_COUNT_HEADER);</span>
+<span class="fc" id="L527">    out.println();</span>
+    
+<span class="fc" id="L529">    Arrays.sort(methodArray, (a, b) -&gt; b.getCount() - a.getCount());</span>
+    
+<span class="fc bfc" id="L531" title="All 2 branches covered.">    for (int i = 0; i &lt; methodArray.length; i++) {</span>
+<span class="fc" id="L532">      dumpFunction(methodArray[i], out);</span>
+    }
+    
+<span class="fc" id="L535">    out.println();</span>
+<span class="fc" id="L536">    out.println(&quot;traces by count:&quot;);</span>
+<span class="fc" id="L537">    out.println();</span>
+    
+<span class="fc bfc" id="L539" title="All 2 branches covered.">    if (globalCounts != null) {</span>
+<span class="fc" id="L540">      Arrays.sort(traceArray, (a, b) -&gt; globalCounts.get(b) - globalCounts.get(a));</span>
+    } else {
+<span class="fc" id="L542">      Arrays.sort(traceArray, (a, b) -&gt; b.getThreadCount() - a.getThreadCount());</span>
+    }
+    
+<span class="fc bfc" id="L545" title="All 2 branches covered.">    for (int i = 0; i &lt; traceArray.length; i++) {</span>
+<span class="fc" id="L546">      Trace t = traceArray[i];</span>
+      int count;
+<span class="fc bfc" id="L548" title="All 2 branches covered.">      if (globalCounts != null) {</span>
+<span class="fc" id="L549">        count = globalCounts.get(t);</span>
+      } else {
+<span class="fc" id="L551">        count = t.getThreadCount();</span>
+      }
+<span class="fc" id="L553">      out.println(count + &quot; time(s):&quot;);</span>
+
+<span class="fc bfc" id="L555" title="All 2 branches covered.">      if (IDLE_THREAD_TRACE_PRIORITY_SCHEDULE1.equals(t)) {</span>
+<span class="fc" id="L556">        out.println(&quot;\tPriorityScheduler idle thread (stack 1)\n&quot;);</span>
+<span class="fc bfc" id="L557" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_PRIORITY_SCHEDULE2.equals(t)) {</span>
+<span class="fc" id="L558">        out.println(&quot;\tPriorityScheduler idle thread (stack 2)\n&quot;);</span>
+<span class="fc bfc" id="L559" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE1.equals(t)) {</span>
+<span class="fc" id="L560">        out.println(&quot;\tPriorityScheduler with ExceptionHandler idle thread (stack 1)\n&quot;);</span>
+<span class="fc bfc" id="L561" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE2.equals(t)) {</span>
+<span class="fc" id="L562">        out.println(&quot;\tPriorityScheduler with ExceptionHandler idle thread (stack 2)\n&quot;);</span>
+<span class="fc bfc" id="L563" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER1.equals(t)) {</span>
+<span class="fc" id="L564">        out.println(&quot;\tSingleThreadScheduler idle thread (stack 1)\n&quot;);</span>
+<span class="fc bfc" id="L565" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER2.equals(t)) {</span>
+<span class="fc" id="L566">        out.println(&quot;\tSingleThreadScheduler idle thread (stack 2)\n&quot;);</span>
+<span class="fc bfc" id="L567" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER1.equals(t)) {</span>
+<span class="fc" id="L568">        out.println(&quot;\tSingleThreadScheduler with ExceptionHandler idle thread (stack 1)\n&quot;);</span>
+<span class="fc bfc" id="L569" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER2.equals(t)) {</span>
+<span class="fc" id="L570">        out.println(&quot;\tSingleThreadScheduler with ExceptionHandler idle thread (stack 2)\n&quot;);</span>
+<span class="fc bfc" id="L571" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_SYNCHRONOUS_QUEUE.equals(t)) {</span>
+<span class="fc" id="L572">        out.println(&quot;\tThreadPoolExecutor SynchronousQueue idle thread\n&quot;);</span>
+<span class="fc bfc" id="L573" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_ARRAY_QUEUE.equals(t)) {</span>
+<span class="fc" id="L574">        out.println(&quot;\tThreadPoolExecutor ArrayBlockingQueue idle thread\n&quot;);</span>
+<span class="fc bfc" id="L575" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_LINKED_QUEUE.equals(t)) {</span>
+<span class="fc" id="L576">        out.println(&quot;\tThreadPoolExecutor LinkedBlockingQueue idle thread\n&quot;);</span>
+<span class="fc bfc" id="L577" title="All 2 branches covered.">      } else if (IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR1.equals(t)) {</span>
+<span class="fc" id="L578">        out.println(&quot;\tScheduledThreadPoolExecutor idle thread (stack 1)\n&quot;);</span>
+<span class="pc bpc" id="L579" title="1 of 2 branches missed.">      } else if (IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR2.equals(t)) {</span>
+<span class="nc" id="L580">        out.println(&quot;\tScheduledThreadPoolExecutor idle thread (stack 2)\n&quot;);</span>
+      } else {
+<span class="fc" id="L582">        out.println(ExceptionUtils.stackToString(t.elements));</span>
+      }
+    }
+<span class="fc" id="L585">  }</span>
+  
+  /**
+   * Dumps the output for a given function to the provided PrintStream.
+   * 
+   * @param f Function to format for
+   * @param out PrintStream to print out to
+   */
+  private static void dumpFunction(Function f, PrintStream out) {
+<span class="fc" id="L594">    out.print(StringUtils.padStart(Integer.toString(f.getCount()), </span>
+                                   NUMBER_TARGET_LINE_LENGTH, ' '));
+<span class="fc" id="L596">    out.print(StringUtils.padStart(Integer.toString(f.getStackTopCount()), </span>
+                                   NUMBER_TARGET_LINE_LENGTH, ' '));
+<span class="fc" id="L598">    out.print(' ');</span>
+<span class="fc" id="L599">    out.print(f.className);</span>
+<span class="fc" id="L600">    out.print('.');</span>
+<span class="fc" id="L601">    out.println(f.function);</span>
+<span class="fc" id="L602">  }</span>
+  
+  @Override
+  protected void finalize() {
+    // stop collection thread if running so that stored data can be GC'ed
+<span class="nc" id="L607">    stop();</span>
+<span class="nc" id="L608">  }</span>
+  
+  /**
+   * A small interface to represent and provide access to details for a sampled thread.
+   * 
+   * @since 3.8.0
+   */
+  protected interface ThreadSample {
+    /**
+     * Get the reference to the thread which is to be sampled.  No attempt should be made to get 
+     * the stack trace directly from that thread, instead {@link #getStackTrace()} will be used.
+     * 
+     * @return Thread reference that the provided stack trace originated from
+     */
+    public Thread getThread();
+    
+    /**
+     * Returns the stack trace to be used for sampling.  This stack trace may have been generated 
+     * previously (for example at constructor), or may have been generated lazily at the time of 
+     * invocation.
+     * 
+     * @return Array of stack trace elements representing the threads state
+     */
+    public StackTraceElement[] getStackTrace();
+  }
+  
+  /**
+   * An iterator which will enumerate all the running threads within the VM.  It is expected that 
+   * this iterator is NOT called in parallel.  This is also a single use object, once iteration is 
+   * complete it should be allowed to be garbage collected.
+   * 
+   * @since 3.4.0
+   */
+  protected static class ThreadIterator implements Iterator&lt;ThreadSample&gt; {
+    protected final Iterator&lt;Map.Entry&lt;Thread, StackTraceElement[]&gt;&gt; it;
+    private Map.Entry&lt;Thread, StackTraceElement[]&gt; next;
+    
+<span class="fc" id="L645">    protected ThreadIterator() {</span>
+<span class="fc" id="L646">      it = Thread.getAllStackTraces().entrySet().iterator();</span>
+<span class="fc" id="L647">      next = it.next();</span>
+<span class="fc" id="L648">    }</span>
+    
+    @Override
+    public boolean hasNext() {
+<span class="fc bfc" id="L652" title="All 2 branches covered.">      return next != null;</span>
+    }
+
+    @Override
+    public ThreadSample next() {
+<span class="fc bfc" id="L657" title="All 2 branches covered.">      if (next == null) {</span>
+<span class="fc" id="L658">        throw new NoSuchElementException();</span>
+      }
+      
+<span class="fc" id="L661">      final Map.Entry&lt;Thread, StackTraceElement[]&gt; entry = next;</span>
+      // update to our next entry if there is one
+<span class="fc bfc" id="L663" title="All 2 branches covered.">      if (it.hasNext()) {</span>
+<span class="fc" id="L664">        next = it.next();</span>
+<span class="fc bfc" id="L665" title="All 2 branches covered.">        while (BLACKLIST_THREAD_NAMES.contains(next.getKey().getName())) {</span>
+<span class="pc bpc" id="L666" title="1 of 2 branches missed.">          if (it.hasNext()) {</span>
+<span class="fc" id="L667">            next = it.next();</span>
+          } else {
+<span class="nc" id="L669">            next = null;</span>
+<span class="nc" id="L670">            break;</span>
+          }
+        }
+      } else {
+<span class="fc" id="L674">        next = null;</span>
+      }
+      
+<span class="fc" id="L677">      return new ThreadSample() {</span>
+        @Override
+        public Thread getThread() {
+<span class="fc" id="L680">          return entry.getKey();</span>
+        }
+        
+        @Override
+        public StackTraceElement[] getStackTrace() {
+<span class="fc" id="L685">          return entry.getValue();</span>
+        }
+      };
+    }
+
+    @Override
+    public void remove() {
+<span class="fc" id="L692">      throw new UnsupportedOperationException();</span>
+    }
+  }
+  
+  /**
+   * Collection of classes and data structures for data used in profiling threads.  This 
+   * represents the shared memory between the collection thread and the threads which 
+   * start/stop/dump the profiler statistics.
+   * 
+   * @since 3.5.0
+   */
+  protected static class ProfileStorage {
+    protected final AtomicReference&lt;Thread&gt; collectorThread;
+    protected final Map&lt;ThreadIdentifier, ThreadSamples&gt; threadTraces;
+    protected final LongAdder collectedSamples;
+    protected volatile int pollIntervalInMs;
+    protected volatile Thread dumpingThread;
+    protected volatile Runnable dumpLoopRun;
+    
+<span class="fc" id="L711">    public ProfileStorage(int pollIntervalInMs) {</span>
+<span class="fc" id="L712">      ArgumentVerifier.assertNotNegative(pollIntervalInMs, &quot;pollIntervalInMs&quot;);</span>
+      
+<span class="fc" id="L714">      collectorThread = new AtomicReference&lt;&gt;(null);</span>
+<span class="fc" id="L715">      threadTraces = new ConcurrentHashMap&lt;&gt;(DEFAULT_MAP_INITIAL_SIZE);</span>
+<span class="fc" id="L716">      collectedSamples = new LongAdder();</span>
+<span class="fc" id="L717">      this.pollIntervalInMs = pollIntervalInMs;</span>
+<span class="fc" id="L718">      dumpingThread = null;</span>
+<span class="fc" id="L719">      dumpLoopRun = null;</span>
+<span class="fc" id="L720">    }</span>
+    
+    /**
+     * A small call to get an iterator of threads that should be examined for this profiler cycle.  
+     * &lt;p&gt;
+     * This is a protected call, so it can be overridden to implement other profilers that want to 
+     * control which threads are being profiled.
+     * &lt;p&gt;
+     * It is guaranteed that this will be called in a single threaded manner.
+     * 
+     * @return an {@link Iterator} of {@link ThreadSample} to examine and add data for our profile
+     */
+    protected Iterator&lt;? extends ThreadSample&gt; getProfileThreadsIterator() {
+<span class="fc" id="L733">      return new ThreadIterator();</span>
+    }
+  }
+  
+  /**
+   * Class for executing the {@ilnk ProfilerRunner} on a {@link Executor}.  This normally would be 
+   * a lambda or anonymous inner class.  But having it defined like this ensures we don't hold a 
+   * reference to our parent class (allowing finalization stops to work correctly).
+   * 
+   * @since 5.25
+   */
+  protected static class ExecutorRunnerTask implements Runnable {
+    private final ProfileStorage pStore;
+    private final SettableListenableFuture&lt;?&gt; runningThreadFuture;
+    private final ProfilerRunner pr;
+    
+    public ExecutorRunnerTask(ProfileStorage pStore, 
+                              SettableListenableFuture&lt;?&gt; runningThreadFuture, 
+<span class="fc" id="L751">                              ProfilerRunner pr) {</span>
+<span class="fc" id="L752">      this.pStore = pStore;</span>
+<span class="fc" id="L753">      this.runningThreadFuture = runningThreadFuture;</span>
+<span class="fc" id="L754">      this.pr = pr;</span>
+<span class="fc" id="L755">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L759">      Thread currentThread = Thread.currentThread();</span>
+      try {
+        // if collector thread can't be set, then some other thread has taken over
+<span class="pc bpc" id="L762" title="1 of 2 branches missed.">        if (! pStore.collectorThread.compareAndSet(null, currentThread)) {</span>
+<span class="nc" id="L763">          return;</span>
+        }
+      } finally {
+<span class="fc" id="L766">        runningThreadFuture.setResult(null);</span>
+      }
+      
+<span class="fc" id="L769">      String originalName = currentThread.getName();</span>
+<span class="fc" id="L770">      int origPriority = currentThread.getPriority();</span>
+      try {
+<span class="pc bpc" id="L772" title="1 of 2 branches missed.">        if (origPriority &lt; Thread.MAX_PRIORITY) {</span>
+<span class="fc" id="L773">          currentThread.setPriority(Thread.MAX_PRIORITY);</span>
+        }
+<span class="fc" id="L775">        currentThread.setName(&quot;Threadly Profiler data collector[&quot; + originalName + &quot;]&quot;);</span>
+<span class="fc" id="L776">        pr.run();</span>
+      } finally {
+<span class="pc bpc" id="L778" title="1 of 2 branches missed.">        if (origPriority &lt; Thread.MAX_PRIORITY) {</span>
+<span class="fc" id="L779">          currentThread.setPriority(origPriority);</span>
+        }
+<span class="fc" id="L781">        currentThread.setName(originalName);</span>
+      }
+<span class="fc" id="L783">    }</span>
+    
+  }
+  
+  /**
+   * Class which runs, collecting statistics for the profiler to later analyze.
+   * 
+   * @since 1.0.0
+   */
+  protected static class ProfilerRunner implements Runnable {
+    private final ProfileStorage pStore;
+    
+<span class="fc" id="L795">    protected ProfilerRunner(ProfileStorage pStore) {</span>
+<span class="fc" id="L796">      this.pStore = pStore;</span>
+<span class="fc" id="L797">    }</span>
+    
+    @Override
+    public void run() {
+<span class="fc" id="L801">      Thread runningThread = Thread.currentThread();</span>
+<span class="fc bfc" id="L802" title="All 2 branches covered.">      while (pStore.collectorThread.get() == runningThread) {</span>
+<span class="fc" id="L803">        boolean storedSample = false;</span>
+<span class="fc" id="L804">        Iterator&lt;? extends ThreadSample&gt; it = pStore.getProfileThreadsIterator();</span>
+<span class="fc bfc" id="L805" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L806">          ThreadSample threadSample = it.next();</span>
+          
+          // we skip the Profiler threads (collector thread, and dumping thread if one exists)
+<span class="fc bfc" id="L809" title="All 2 branches covered.">          if (threadSample.getThread() != runningThread &amp; </span>
+<span class="fc bfc" id="L810" title="All 4 branches covered.">              threadSample.getThread() != pStore.dumpingThread) {</span>
+<span class="fc" id="L811">            StackTraceElement[] threadStack = threadSample.getStackTrace();</span>
+<span class="fc bfc" id="L812" title="All 2 branches covered.">            if (threadStack.length &gt; 0) {</span>
+<span class="fc" id="L813">              storedSample = true;</span>
+              
+<span class="fc" id="L815">              pStore.threadTraces</span>
+<span class="fc" id="L816">                    .computeIfAbsent(new ThreadIdentifier(threadSample.getThread()), </span>
+<span class="fc" id="L817">                                     (k) -&gt; new ThreadSamples())</span>
+<span class="fc" id="L818">                    .recordSample(new Trace(threadStack), threadSample.getThread().getName());</span>
+            }
+          }
+<span class="fc" id="L821">        }</span>
+        
+<span class="fc bfc" id="L823" title="All 2 branches covered.">        if (storedSample) {</span>
+<span class="fc" id="L824">          pStore.collectedSamples.increment();</span>
+        }
+        try {
+<span class="fc" id="L827">          Thread.sleep(pStore.pollIntervalInMs);</span>
+<span class="fc" id="L828">        } catch (InterruptedException e) {</span>
+<span class="fc" id="L829">          pStore.collectorThread.compareAndSet(runningThread, null);</span>
+<span class="fc" id="L830">          Thread.currentThread().interrupt(); // reset status</span>
+<span class="fc" id="L831">          return;</span>
+<span class="fc" id="L832">        }</span>
+<span class="fc" id="L833">        Runnable toRun = pStore.dumpLoopRun;</span>
+<span class="fc bfc" id="L834" title="All 2 branches covered.">        if (toRun != null) {</span>
+          try {
+<span class="fc" id="L836">            toRun.run();</span>
+<span class="nc" id="L837">          } catch (Throwable t) {</span>
+<span class="nc" id="L838">            ExceptionUtils.handleException(t);</span>
+<span class="fc" id="L839">          }</span>
+        }
+<span class="fc" id="L841">      }</span>
+<span class="fc" id="L842">    }</span>
+  }
+  
+  /**
+   * Storage for samples from a thread.  This can include more than just the stack traces (for 
+   * example the thread names as well).
+   * 
+   * @since 5.25
+   */
+<span class="fc" id="L851">  protected static class ThreadSamples {</span>
+<span class="fc" id="L852">    private final Map&lt;Trace, Trace&gt; traces = new ConcurrentHashMap&lt;&gt;(DEFAULT_MAP_INITIAL_SIZE);</span>
+<span class="fc" id="L853">    private final Set&lt;String&gt; threadNames = ConcurrentHashMap.newKeySet(1);</span>
+<span class="fc" id="L854">    private volatile String cachedThreadNames = null;</span>
+    
+    public void recordSample(Trace trace, String threadName) {
+<span class="fc bfc" id="L857" title="All 2 branches covered.">      if (threadNames.add(threadName)) {</span>
+<span class="fc" id="L858">        cachedThreadNames = null;</span>
+      }
+      
+<span class="fc" id="L861">      Trace existingTrace = traces.get(trace);</span>
+<span class="fc bfc" id="L862" title="All 2 branches covered.">      if (existingTrace == null) {</span>
+        // this is really cheap to de-duplicate, so might as well
+<span class="fc bfc" id="L864" title="All 2 branches covered.">        if (IDLE_THREAD_TRACE_PRIORITY_SCHEDULE1.equals(trace)) {</span>
+<span class="fc" id="L865">          trace = new Trace(IDLE_THREAD_TRACE_PRIORITY_SCHEDULE1.elements);</span>
+<span class="fc bfc" id="L866" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_PRIORITY_SCHEDULE2.equals(trace)) {</span>
+<span class="fc" id="L867">          trace = new Trace(IDLE_THREAD_TRACE_PRIORITY_SCHEDULE2.elements);</span>
+<span class="fc bfc" id="L868" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE1.equals(trace)) {</span>
+<span class="fc" id="L869">          trace = new Trace(IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE1.elements);</span>
+<span class="fc bfc" id="L870" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE2.equals(trace)) {</span>
+<span class="fc" id="L871">          trace = new Trace(IDLE_THREAD_TRACE_EXCEPTION_HANDLER_PRIORITY_SCHEDULE2.elements);</span>
+<span class="fc bfc" id="L872" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER1.equals(trace)) {</span>
+<span class="fc" id="L873">          trace = new Trace(IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER1.elements);</span>
+<span class="fc bfc" id="L874" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER2.equals(trace)) {</span>
+<span class="fc" id="L875">          trace = new Trace(IDLE_THREAD_TRACE_SINGLE_THREAD_SCHEDULER2.elements);</span>
+<span class="fc bfc" id="L876" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER1.equals(trace)) {</span>
+<span class="fc" id="L877">          trace = new Trace(IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER1.elements);</span>
+<span class="fc bfc" id="L878" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER2.equals(trace)) {</span>
+<span class="fc" id="L879">          trace = new Trace(IDLE_THREAD_TRACE_EXCEPTION_HANDLER_SINGLE_THREAD_SCHEDULER2.elements);</span>
+<span class="fc bfc" id="L880" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_SYNCHRONOUS_QUEUE.equals(trace)) {</span>
+<span class="fc" id="L881">          trace = new Trace(IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_SYNCHRONOUS_QUEUE.elements);</span>
+<span class="fc bfc" id="L882" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_ARRAY_QUEUE.equals(trace)) {</span>
+<span class="fc" id="L883">          trace = new Trace(IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_ARRAY_QUEUE.elements);</span>
+<span class="fc bfc" id="L884" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_LINKED_QUEUE.equals(trace)) {</span>
+<span class="fc" id="L885">          trace = new Trace(IDLE_THREAD_TRACE_THREAD_POOL_EXECUTOR_LINKED_QUEUE.elements);</span>
+<span class="fc bfc" id="L886" title="All 2 branches covered.">        } else if (IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR1.equals(trace)) {</span>
+<span class="fc" id="L887">          trace = new Trace(IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR1.elements);</span>
+<span class="pc bpc" id="L888" title="1 of 2 branches missed.">        } else if (IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR2.equals(trace)) {</span>
+<span class="nc" id="L889">          trace = new Trace(IDLE_THREAD_TRACE_SCHEDULED_THREAD_POOL_EXECUTOR2.elements);</span>
+        }
+        
+<span class="fc" id="L892">        traces.put(trace, trace);</span>
+      } else {
+<span class="fc" id="L894">        existingTrace.incrementThreadCount();</span>
+      }
+<span class="fc" id="L896">    }</span>
+
+    public String threadNames() {
+<span class="fc" id="L899">      String cachedThreadNames = this.cachedThreadNames;</span>
+<span class="fc bfc" id="L900" title="All 2 branches covered.">      if (cachedThreadNames != null) {</span>
+<span class="fc" id="L901">        return cachedThreadNames;</span>
+<span class="pc bpc" id="L902" title="1 of 2 branches missed.">      } else if (threadNames.size() == 1) {</span>
+<span class="fc" id="L903">        return this.cachedThreadNames = threadNames.iterator().next();</span>
+<span class="nc bnc" id="L904" title="All 2 branches missed.">      } else if (threadNames.isEmpty()) {</span>
+<span class="nc" id="L905">        throw new IllegalStateException(&quot;No samples recorded for thread&quot;);</span>
+      } else {
+        // we want names in a consistent order
+<span class="nc" id="L908">        List&lt;String&gt; nameCopy = new ArrayList&lt;&gt;(threadNames);</span>
+<span class="nc" id="L909">        Collections.sort(nameCopy);</span>
+<span class="nc" id="L910">        return this.cachedThreadNames = nameCopy.toString();</span>
+      }
+    }
+
+    public Set&lt;Trace&gt; traceSet() {
+<span class="fc" id="L915">      return traces.keySet();</span>
+    }
+  }
+  
+  /**
+   * Small class to store referencing to thread.  This is designed to be more memory efficient 
+   * than just using a string.  It also tries to delay the expensive storage aspect until we know 
+   * we know we will need to store it long term.
+   * 
+   * @since 4.9.0
+   */
+  protected static class ThreadIdentifier {
+    private final long threadId;
+    private final int hashCode;
+    
+    /**
+     * Construct a new identifier which can be used for hash and equals comparison.
+     * 
+     * @param t Thread to be referenced
+     */
+<span class="fc" id="L935">    public ThreadIdentifier(Thread t) {</span>
+<span class="fc" id="L936">      this.threadId = t.getId();</span>
+<span class="fc" id="L937">      this.hashCode = t.hashCode();</span>
+<span class="fc" id="L938">    }</span>
+    
+    @Override
+    public String toString() {
+<span class="nc" id="L942">      return &quot;ThreadId:&quot; + threadId;</span>
+    }
+    
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L947" title="1 of 2 branches missed.">      if (this == o) {</span>
+<span class="nc" id="L948">        return true;</span>
+      } else {
+        try {
+<span class="fc" id="L951">          ThreadIdentifier t = (ThreadIdentifier)o;</span>
+<span class="pc bpc" id="L952" title="2 of 4 branches missed.">          return t.threadId == threadId &amp;&amp; t.hashCode == hashCode;</span>
+<span class="nc" id="L953">        } catch (ClassCastException e) {</span>
+<span class="nc" id="L954">          return false;</span>
+        }
+      }
+    }
+    
+    @Override
+    public int hashCode() {
+<span class="fc" id="L961">      return hashCode;</span>
+    }
+  }
+  
+  /**
+   * Class which represents a stack trace.  The is used so we can track how many times a given 
+   * stack is seen.
+   * &lt;p&gt;
+   * This stack trace reference will be specific to a single thread.
+   * 
+   * @since 1.0.0
+   */
+  protected static class Trace extends ComparableTrace {
+    /* threadSeenCount is how many times this trace has been seen in a specific thread.  It should 
+     * only be incremented by a single thread, but can be read from any thread.
+     */
+<span class="fc" id="L977">    private volatile int threadSeenCount = 1;</span>
+    
+    public Trace(StackTraceElement[] elements) {
+<span class="fc" id="L980">      super(elements);</span>
+<span class="fc" id="L981">    }</span>
+    
+    /**
+     * Increments the internally tracked thread seen count by one.
+     */
+    protected void incrementThreadCount() {
+      // this should only be incremented from a single thread
+<span class="fc" id="L988">      threadSeenCount++;</span>
+<span class="fc" id="L989">    }</span>
+    
+    /**
+     * Getter for the current thread seen count.
+     * 
+     * @return a result of how many times {@link #incrementThreadCount()} has been called
+     */
+    protected int getThreadCount() {
+<span class="fc" id="L997">      return threadSeenCount;</span>
+    }
+  }
+  
+  /**
+   * Class to represent a specific function call.  This is used so we can track how many times we 
+   * see a given function.
+   * 
+   * @since 1.0.0
+   */
+  protected static class Function {
+    protected final String className;
+    protected final String function;
+    protected final int hashCode;
+    private int count;
+    private int childCount;
+    
+<span class="fc" id="L1014">    public Function(String className, String funtion) {</span>
+<span class="fc" id="L1015">      this.className = className;</span>
+<span class="fc" id="L1016">      this.function = funtion;</span>
+<span class="fc" id="L1017">      this.hashCode = className.hashCode() ^ function.hashCode();</span>
+<span class="fc" id="L1018">    }</span>
+    
+    /**
+     * Increments the internal stored seen count.
+     * 
+     * @param count amount to increment count by
+     * @param child {@code true} if the stack position not the head position
+     */
+    protected void incrementCount(int count, boolean child) {
+<span class="fc" id="L1027">      this.count += count;</span>
+<span class="fc bfc" id="L1028" title="All 2 branches covered.">      if (child) {</span>
+<span class="fc" id="L1029">        childCount += count;</span>
+      }
+<span class="fc" id="L1031">    }</span>
+    
+    /**
+     * Get the total count this function has been seen.
+     * 
+     * @return returns the value summed from calls to {@link #incrementCount(int, boolean)}
+     */
+    protected int getCount() {
+<span class="fc" id="L1039">      return count;</span>
+    }
+    
+    /**
+     * Returns the number of times this function has been seen as the top of the stack.  This 
+     * value is incremented when {@link #incrementCount(int, boolean)} is called with a 
+     * {@code false}.
+     *  
+     * @return The summed value of this function seen as the top of the stack
+     */
+    protected int getStackTopCount() {
+<span class="fc" id="L1050">      return count - childCount;</span>
+    }
+    
+    @Override
+    public int hashCode() {
+<span class="fc" id="L1055">      return hashCode;</span>
+    }
+    
+    @Override
+    public boolean equals(Object o) {
+<span class="fc bfc" id="L1060" title="All 2 branches covered.">      if (this == o) {</span>
+<span class="fc" id="L1061">        return true;</span>
+      } else {
+        try {
+<span class="fc" id="L1064">          Function m = (Function) o;</span>
+<span class="fc bfc" id="L1065" title="All 2 branches covered.">          return m.hashCode == hashCode &amp;&amp; </span>
+<span class="fc bfc" id="L1066" title="All 2 branches covered.">                   m.className.equals(className) &amp;&amp; </span>
+<span class="pc bpc" id="L1067" title="1 of 2 branches missed.">                   m.function.equals(function);</span>
+<span class="fc" id="L1068">        } catch (ClassCastException e) {</span>
+<span class="fc" id="L1069">          return false;</span>
+        }
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

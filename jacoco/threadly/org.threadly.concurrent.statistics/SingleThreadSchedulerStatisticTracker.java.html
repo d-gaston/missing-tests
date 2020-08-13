@@ -1,0 +1,455 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SingleThreadSchedulerStatisticTracker.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.statistics</a> &gt; <span class="el_source">SingleThreadSchedulerStatisticTracker.java</span></div><h1>SingleThreadSchedulerStatisticTracker.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.statistics;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+
+import org.threadly.concurrent.ConfigurableThreadFactory;
+import org.threadly.concurrent.SingleThreadScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.statistics.PriorityStatisticManager.TaskStatWrapper;
+import org.threadly.util.Pair;
+
+/**
+ * An implementation of {@link SingleThreadScheduler} which tracks run and usage statistics.  This 
+ * is designed for testing and troubleshooting.  It has a little more overhead from the normal 
+ * {@link SingleThreadScheduler}.
+ * &lt;p&gt;
+ * It helps give insight in how long tasks are running, how well the thread pool is being 
+ * utilized, as well as execution frequency.
+ * 
+ * @since 4.5.0 (earlier forms existed since 1.0.0)
+ */
+public class SingleThreadSchedulerStatisticTracker extends SingleThreadScheduler 
+                                                   implements StatisticPriorityScheduler {
+  private final NoThreadSchedulerStatisticTracker statisticTracker;
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   */
+  public SingleThreadSchedulerStatisticTracker() {
+<span class="fc" id="L39">    this((TaskPriority)null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS);</span>
+<span class="fc" id="L40">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L55">    this(defaultPriority, maxWaitForLowPriorityInMs, true);</span>
+<span class="fc" id="L56">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   */
+  public SingleThreadSchedulerStatisticTracker(boolean daemonThread) {
+<span class="fc" id="L69">    this((TaskPriority)null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, daemonThread);</span>
+<span class="fc" id="L70">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, 
+                                               boolean daemonThread) {
+<span class="fc" id="L87">    this(defaultPriority, maxWaitForLowPriorityInMs, daemonThread, 1000);</span>
+<span class="fc" id="L88">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param threadFactory factory to make thread for scheduler
+   */
+  public SingleThreadSchedulerStatisticTracker(ThreadFactory threadFactory) {
+<span class="nc" id="L101">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, threadFactory);</span>
+<span class="nc" id="L102">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param threadFactory factory to make thread for scheduler
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, 
+                                               ThreadFactory threadFactory) {
+<span class="fc" id="L119">    this(defaultPriority, maxWaitForLowPriorityInMs, threadFactory, 1000);</span>
+<span class="fc" id="L120">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public SingleThreadSchedulerStatisticTracker(int maxStatisticWindowSize) {
+<span class="fc" id="L133">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, maxStatisticWindowSize);</span>
+<span class="fc" id="L134">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, 
+                                               int maxStatisticWindowSize) {
+<span class="fc" id="L151">    this(defaultPriority, maxWaitForLowPriorityInMs, true, maxStatisticWindowSize);</span>
+<span class="fc" id="L152">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public SingleThreadSchedulerStatisticTracker(boolean daemonThread, int maxStatisticWindowSize) {
+<span class="fc" id="L166">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, daemonThread, maxStatisticWindowSize);</span>
+<span class="fc" id="L167">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, boolean daemonThread, 
+                                               int maxStatisticWindowSize) {
+<span class="fc" id="L185">    this(defaultPriority, maxWaitForLowPriorityInMs, daemonThread, maxStatisticWindowSize, false);</span>
+<span class="fc" id="L186">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param threadFactory factory to make thread for scheduler
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public SingleThreadSchedulerStatisticTracker(ThreadFactory threadFactory, 
+                                               int maxStatisticWindowSize) {
+<span class="nc" id="L201">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, threadFactory, maxStatisticWindowSize);</span>
+<span class="nc" id="L202">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param threadFactory factory to make thread for scheduler
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, 
+                                               ThreadFactory threadFactory, 
+                                               int maxStatisticWindowSize) {
+<span class="fc" id="L221">    this(defaultPriority, maxWaitForLowPriorityInMs, threadFactory, maxStatisticWindowSize, false);</span>
+<span class="fc" id="L222">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.
+   * 
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public SingleThreadSchedulerStatisticTracker(int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L232">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, maxStatisticWindowSize, accurateTime);</span>
+<span class="fc" id="L233">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.  This defaults to using a daemon thread for the scheduler.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, 
+                                               int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L247">    this(defaultPriority, maxWaitForLowPriorityInMs, true, maxStatisticWindowSize, accurateTime);</span>
+<span class="fc" id="L248">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public SingleThreadSchedulerStatisticTracker(boolean daemonThread, int maxStatisticWindowSize, 
+                                               boolean accurateTime) {
+<span class="fc" id="L260">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, </span>
+         daemonThread, maxStatisticWindowSize, accurateTime);
+<span class="fc" id="L262">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param daemonThread {@code true} if scheduler thread should be a daemon thread
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, boolean daemonThread, 
+                                               int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L277">    this(defaultPriority, maxWaitForLowPriorityInMs, </span>
+<span class="fc" id="L278">         new ConfigurableThreadFactory(SingleThreadScheduler.class.getSimpleName() + &quot;-&quot;,</span>
+                                       true, daemonThread, Thread.NORM_PRIORITY, null, null), 
+         maxStatisticWindowSize, accurateTime);
+<span class="fc" id="L281">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param threadFactory factory to make thread for scheduler
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public SingleThreadSchedulerStatisticTracker(ThreadFactory threadFactory, 
+                                               int maxStatisticWindowSize, boolean accurateTime) {
+<span class="nc" id="L293">    this(null, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, threadFactory, maxStatisticWindowSize, accurateTime);</span>
+<span class="nc" id="L294">  }</span>
+  
+  /**
+   * Constructs a new {@link SingleThreadScheduler}.  No threads will start until the first task 
+   * is provided.
+   * 
+   * @param defaultPriority Default priority for tasks which are submitted without any specified priority
+   * @param maxWaitForLowPriorityInMs time low priority tasks to wait if there are high priority tasks ready to run
+   * @param threadFactory factory to make thread for scheduler
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public SingleThreadSchedulerStatisticTracker(TaskPriority defaultPriority, 
+                                               long maxWaitForLowPriorityInMs, 
+                                               ThreadFactory threadFactory, 
+                                               int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L310">    super(defaultPriority, </span>
+          new StatisticTrackerSchedulerManager(defaultPriority, 
+                                               maxWaitForLowPriorityInMs, threadFactory, 
+                                               maxStatisticWindowSize, accurateTime));
+    
+<span class="fc" id="L315">    this.statisticTracker = ((StatisticTrackerSchedulerManager)super.sManager).getStatisticTracker();</span>
+<span class="fc" id="L316">  }</span>
+  
+  @Override
+  public List&lt;Runnable&gt; shutdownNow() {
+    // we must unwrap our statistic tracker runnables
+<span class="fc" id="L321">    List&lt;Runnable&gt; wrappedRunnables = super.shutdownNow();</span>
+<span class="fc" id="L322">    List&lt;Runnable&gt; result = new ArrayList&lt;&gt;(wrappedRunnables.size());</span>
+    
+<span class="fc" id="L324">    Iterator&lt;Runnable&gt; it = wrappedRunnables.iterator();</span>
+<span class="fc bfc" id="L325" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L326">      Runnable r = it.next();</span>
+<span class="pc bpc" id="L327" title="1 of 2 branches missed.">      if (r instanceof TaskStatWrapper) {</span>
+<span class="fc" id="L328">        TaskStatWrapper tw = (TaskStatWrapper)r;</span>
+<span class="pc bpc" id="L329" title="3 of 4 branches missed.">        if (! (tw.task instanceof Future) || ! ((Future&lt;?&gt;)tw.task).isCancelled()) {</span>
+<span class="fc" id="L330">          result.add(tw.task);</span>
+        }
+<span class="fc" id="L332">      } else {</span>
+        // this typically happens in unit tests, but could happen by an extending class
+<span class="nc" id="L334">        result.add(r);</span>
+      }
+<span class="fc" id="L336">    }</span>
+    
+<span class="fc" id="L338">    return result;</span>
+  }
+
+  @Override
+  public List&lt;Long&gt; getExecutionDelaySamples() {
+<span class="fc" id="L343">    return statisticTracker.getExecutionDelaySamples();</span>
+  }
+  
+  @Override
+  public List&lt;Long&gt; getExecutionDelaySamples(TaskPriority priority) {
+<span class="fc" id="L348">    return statisticTracker.getExecutionDelaySamples(priority);</span>
+  }
+
+  @Override
+  public double getAverageExecutionDelay() {
+<span class="nc" id="L353">    return statisticTracker.getAverageExecutionDelay();</span>
+  }
+
+  @Override
+  public double getAverageExecutionDelay(TaskPriority priority) {
+<span class="fc" id="L358">    return statisticTracker.getAverageExecutionDelay(priority);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(double... percentiles) {
+<span class="fc" id="L363">    return statisticTracker.getExecutionDelayPercentiles(percentiles);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(TaskPriority priority, 
+                                                        double... percentiles) {
+<span class="nc" id="L369">    return statisticTracker.getExecutionDelayPercentiles(priority, percentiles);</span>
+  }
+
+  @Override
+  public List&lt;Long&gt; getExecutionDurationSamples() {
+<span class="fc" id="L374">    return statisticTracker.getExecutionDurationSamples();</span>
+  }
+
+  @Override
+  public List&lt;Long&gt; getExecutionDurationSamples(TaskPriority priority) {
+<span class="nc" id="L379">    return statisticTracker.getExecutionDurationSamples(priority);</span>
+  }
+
+  @Override
+  public double getAverageExecutionDuration() {
+<span class="fc" id="L384">    return statisticTracker.getAverageExecutionDuration();</span>
+  }
+
+  @Override
+  public double getAverageExecutionDuration(TaskPriority priority) {
+<span class="fc" id="L389">    return statisticTracker.getAverageExecutionDuration(priority);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(double... percentiles) {
+<span class="fc" id="L394">    return statisticTracker.getExecutionDurationPercentiles(percentiles);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(TaskPriority priority, 
+                                                           double... percentiles) {
+<span class="fc" id="L400">    return statisticTracker.getExecutionDurationPercentiles(priority, percentiles);</span>
+  }
+
+  @Override
+  public List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; getLongRunningTasks(long durationLimitMillis) {
+<span class="fc" id="L405">    return statisticTracker.getLongRunningTasks(durationLimitMillis);</span>
+  }
+
+  @Override
+  public int getLongRunningTasksQty(long durationLimitMillis) {
+<span class="fc" id="L410">    return statisticTracker.getLongRunningTasksQty(durationLimitMillis);</span>
+  }
+  
+  @Override
+  public void resetCollectedStats() {
+<span class="fc" id="L415">    statisticTracker.resetCollectedStats();</span>
+<span class="fc" id="L416">  }</span>
+  
+  @Override
+  public long getTotalExecutionCount() {
+<span class="fc" id="L420">    return statisticTracker.getTotalExecutionCount();</span>
+  }
+
+  @Override
+  public long getTotalExecutionCount(TaskPriority priority) {
+<span class="fc" id="L425">    return statisticTracker.getTotalExecutionCount(priority);</span>
+  }
+  
+  /**
+   * Implementation of {@link SchedulerManager} which uses a 
+   * {@link NoThreadSchedulerStatisticTracker} internally, and can be queried for a reference of 
+   * this tracker.  Allowing easy access to the internal statistics.
+   * 
+   * @since 4.5.0
+   */
+  protected static class StatisticTrackerSchedulerManager extends SchedulerManager {
+    public StatisticTrackerSchedulerManager(TaskPriority defaultPriority, 
+                                            long maxWaitForLowPriorityInMs, 
+                                            ThreadFactory threadFactory, 
+                                            int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L440">      super(new NoThreadSchedulerStatisticTracker(defaultPriority, maxWaitForLowPriorityInMs, </span>
+                                                  maxStatisticWindowSize, accurateTime), 
+            threadFactory);
+<span class="fc" id="L443">    }</span>
+    
+    /**
+     * Get instance of internal {@link NoThreadSchedulerStatisticTracker}.
+     * 
+     * @return Statistic tracker instance that is used for task management and tracking.
+     */
+    public NoThreadSchedulerStatisticTracker getStatisticTracker() {
+<span class="fc" id="L451">      return (NoThreadSchedulerStatisticTracker)super.scheduler;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

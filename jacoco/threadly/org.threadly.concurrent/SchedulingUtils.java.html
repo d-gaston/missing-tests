@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SchedulingUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">SchedulingUtils.java</span></div><h1>SchedulingUtils.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.Calendar;
+import java.util.concurrent.TimeUnit;
+
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.Clock;
+
+/**
+ * Class for helping calculate the offset for scheduling tasks.  For example if you want a task to 
+ * run at 10 minutes after the hour, every hour, you can use {@link #getDelayTillMinute(int)} to 
+ * calculate the initial delay needed when scheduling with 
+ * {@link SubmitterScheduler#scheduleAtFixedRate(Runnable, long, long)}, and then provide 1 hour 
+ * in milliseconds for the &quot;period&quot;.
+ * 
+ * @since 3.5.0
+ */
+<span class="nc" id="L18">public class SchedulingUtils {</span>
+<span class="fc" id="L19">  protected static volatile int cachedHourShift = Integer.MIN_VALUE;</span>
+  
+  /**
+   * Call to calculate how many milliseconds until the provided minute.  If we are past the 
+   * provided minute, it will be the milliseconds until we reach that minute with the NEXT hour.  
+   * &lt;p&gt;
+   * Because of use of {@link Clock#lastKnownTimeMillis()}, this calculation will only be accurate 
+   * within about 100 milliseconds.  Of course if provided to a scheduler, depending on it's work 
+   * load that variation may be greater.
+   * 
+   * @param minute Minute to calculate too, can not be negative and must be less than 60
+   * @return Time in milliseconds till that minute is reached
+   */
+  public static long getDelayTillMinute(int minute) {
+<span class="fc" id="L33">    ArgumentVerifier.assertLessThan(minute, TimeUnit.HOURS.toMinutes(1), &quot;minute&quot;);</span>
+<span class="nc" id="L34">    ArgumentVerifier.assertNotNegative(minute, &quot;minute&quot;);</span>
+
+<span class="nc" id="L36">    return getDelayTillMinute(Clock.lastKnownTimeMillis(), minute);</span>
+  }
+
+  /**
+   * Call to calculate how many milliseconds until the provided minute,  If we are past the 
+   * provided minute, it will be the milliseconds until we reach that minute with the NEXT hour.  
+   * &lt;p&gt;
+   * Because of use of {@link Clock#lastKnownTimeMillis()}, this calculation will only be accurate 
+   * within about 100 milliseconds.  Of course if provided to a scheduler, depending on it's work 
+   * load that variation may be greater.
+   * 
+   * @param now Current time in milliseconds since epoc
+   * @param minute Minute to calculate too, can not be negative and must be less than 60
+   * @return Time in milliseconds till that minute is reached
+   */
+  protected static long getDelayTillMinute(long now, int minute) {
+<span class="fc" id="L52">    long currentMin = TimeUnit.MILLISECONDS.toMinutes(now % TimeUnit.HOURS.toMillis(1));</span>
+    
+<span class="fc" id="L54">    long minutesToWait = 0;</span>
+<span class="fc bfc" id="L55" title="All 2 branches covered.">    if (minute &gt; currentMin) {</span>
+<span class="fc" id="L56">      minutesToWait = minute - currentMin;</span>
+<span class="pc bpc" id="L57" title="1 of 2 branches missed.">    } else if (minute &lt;= currentMin) {</span>
+<span class="fc" id="L58">      minutesToWait = TimeUnit.HOURS.toMinutes(1) - currentMin + minute;</span>
+    }
+    
+    // subtract seconds that have passed in current minute
+<span class="fc" id="L62">    long offset = now % TimeUnit.MINUTES.toMillis(1);</span>
+<span class="fc" id="L63">    return TimeUnit.MINUTES.toMillis(minutesToWait) - offset;</span>
+  }
+  
+  /**
+   * Call to calculate how many milliseconds until the provided time.  If we are past the 
+   * provided hour/minute, it will be the milliseconds until we reach that time with the NEXT day.  
+   * &lt;p&gt;
+   * It is important to note that the time zone for this hour is UTC.  If you want to use this for 
+   * local time, just pass the hour through {@link #shiftLocalHourToUTC(int)}.  This will convert 
+   * a local time's hour to UTC so that it can be used in this invocation.  
+   * &lt;p&gt;
+   * Because of use of {@link Clock#lastKnownTimeMillis()}, this calculation will only be accurate 
+   * within about 100 milliseconds.  Of course if provided to a scheduler, depending on it's work 
+   * load that variation may be greater.
+   * 
+   * @param hour Hour in the 24 hour format, can not be negative and must be less than 24
+   * @param minute Minute to calculate too, can not be negative and must be less than 60
+   * @return Time in milliseconds till provided time is reached
+   */
+  public static long getDelayTillHour(int hour, int minute) {
+<span class="fc" id="L83">    ArgumentVerifier.assertLessThan(hour, TimeUnit.DAYS.toHours(1), &quot;hour&quot;);</span>
+<span class="fc" id="L84">    ArgumentVerifier.assertNotNegative(hour, &quot;hour&quot;);</span>
+<span class="fc" id="L85">    ArgumentVerifier.assertLessThan(minute, TimeUnit.HOURS.toMinutes(1), &quot;minute&quot;);</span>
+<span class="nc" id="L86">    ArgumentVerifier.assertNotNegative(minute, &quot;minute&quot;);</span>
+    
+<span class="nc" id="L88">    return getDelayTillHour(Clock.lastKnownTimeMillis(), hour, minute);</span>
+  }
+  
+  /**
+   * Call to calculate how many milliseconds until the provided time.  If we are past the 
+   * provided hour/minute, it will be the milliseconds until we reach that time with the NEXT day.  
+   * &lt;p&gt;
+   * It is important to note that the time zone for this hour is UTC.  If you want to use this for 
+   * local time, just pass the hour through {@link #shiftLocalHourToUTC(int)}.  This will convert 
+   * a local time's hour to UTC so that it can be used in this invocation.  
+   * &lt;p&gt;
+   * Because of use of {@link Clock#lastKnownTimeMillis()}, this calculation will only be accurate 
+   * within about 100 milliseconds.  Of course if provided to a scheduler, depending on it's work 
+   * load that variation may be greater.
+   * 
+   * @param now Current time in milliseconds since epoc
+   * @param hour Hour in the 24 hour format, can not be negative and must be less than 24
+   * @param minute Minute to calculate too, can not be negative and must be less than 60
+   * @return Time in milliseconds till provided time is reached
+   */
+  protected static long getDelayTillHour(long now, int hour, int minute) {
+<span class="fc" id="L109">    long delayInMillis = TimeUnit.MINUTES.toMillis(minute);</span>
+<span class="fc" id="L110">    long currentHour = TimeUnit.MILLISECONDS.toHours(now % TimeUnit.DAYS.toMillis(1));</span>
+    
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    if (hour &gt; currentHour) {</span>
+<span class="fc" id="L113">      delayInMillis += TimeUnit.HOURS.toMillis(hour - currentHour);</span>
+<span class="pc bpc" id="L114" title="1 of 2 branches missed.">    } else if (hour &lt; currentHour) {</span>
+<span class="fc" id="L115">      delayInMillis += TimeUnit.HOURS.toMillis(TimeUnit.DAYS.toHours(1) - currentHour + hour);</span>
+    } else {
+<span class="nc" id="L117">      long result = getDelayTillMinute(Clock.lastKnownTimeMillis(), minute);</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">      if (TimeUnit.MILLISECONDS.toMinutes(result) &lt;= minute) {</span>
+<span class="nc" id="L119">        return result;</span>
+      } else {
+        // here we have to add the time to forward us to the next day
+<span class="nc" id="L122">        return result + TimeUnit.HOURS.toMillis(TimeUnit.DAYS.toHours(1) - 1);</span>
+      }
+    }
+
+    // subtract minutes, seconds, and milliseconds that have passed
+<span class="fc" id="L127">    long offset = now % TimeUnit.HOURS.toMillis(1);</span>
+<span class="fc" id="L128">    return delayInMillis - offset;</span>
+  }
+  
+  /**
+   * This will shift an hour from the local time zone to UTC.  This shift will take into account 
+   * the current local state of daylight savings time.  The primary usage of this is so that 
+   * {@link #getDelayTillHour(int, int)} can be used with a local time zone hour.
+   * 
+   * @param hour Hour to be shifted in the local time zone in 24 hour format
+   * @return Hour shifted to the UTC time zone in 24 hour format
+   */
+  public static int shiftLocalHourToUTC(int hour) {
+<span class="fc" id="L140">    ArgumentVerifier.assertLessThan(hour, TimeUnit.DAYS.toHours(1), &quot;hour&quot;);</span>
+<span class="fc" id="L141">    ArgumentVerifier.assertNotNegative(hour, &quot;hour&quot;);</span>
+    
+<span class="pc bpc" id="L143" title="1 of 2 branches missed.">    if (cachedHourShift == Integer.MIN_VALUE) {</span>
+<span class="nc" id="L144">      Calendar calendar = Calendar.getInstance();</span>
+<span class="nc" id="L145">      int shiftInMillis = calendar.get(Calendar.ZONE_OFFSET) + calendar.get(Calendar.DST_OFFSET);</span>
+<span class="nc" id="L146">      cachedHourShift = (int)(shiftInMillis / TimeUnit.HOURS.toMillis(1));</span>
+    }
+
+<span class="fc" id="L149">    hour -= cachedHourShift;</span>
+<span class="fc bfc" id="L150" title="All 2 branches covered.">    if (hour &gt; TimeUnit.DAYS.toHours(1) - 1) {</span>
+<span class="fc" id="L151">      hour %= TimeUnit.DAYS.toHours(1);</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">    } else if (hour &lt; 0) {</span>
+<span class="fc" id="L153">      hour += TimeUnit.DAYS.toHours(1);</span>
+    }
+    
+<span class="fc" id="L156">    return hour;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

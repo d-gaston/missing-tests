@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AlignmentPatternFinder.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.qrcode.detector</a> &gt; <span class="el_source">AlignmentPatternFinder.java</span></div><h1>AlignmentPatternFinder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.qrcode.detector;
+
+import com.google.zxing.NotFoundException;
+import com.google.zxing.ResultPointCallback;
+import com.google.zxing.common.BitMatrix;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * &lt;p&gt;This class attempts to find alignment patterns in a QR Code. Alignment patterns look like finder
+ * patterns but are smaller and appear at regular intervals throughout the image.&lt;/p&gt;
+ *
+ * &lt;p&gt;At the moment this only looks for the bottom-right alignment pattern.&lt;/p&gt;
+ *
+ * &lt;p&gt;This is mostly a simplified copy of {@link FinderPatternFinder}. It is copied,
+ * pasted and stripped down here for maximum performance but does unfortunately duplicate
+ * some code.&lt;/p&gt;
+ *
+ * &lt;p&gt;This class is thread-safe but not reentrant. Each thread must allocate its own object.&lt;/p&gt;
+ *
+ * @author Sean Owen
+ */
+final class AlignmentPatternFinder {
+
+  private final BitMatrix image;
+  private final List&lt;AlignmentPattern&gt; possibleCenters;
+  private final int startX;
+  private final int startY;
+  private final int width;
+  private final int height;
+  private final float moduleSize;
+  private final int[] crossCheckStateCount;
+  private final ResultPointCallback resultPointCallback;
+
+  /**
+   * &lt;p&gt;Creates a finder that will look in a portion of the whole image.&lt;/p&gt;
+   *
+   * @param image image to search
+   * @param startX left column from which to start searching
+   * @param startY top row from which to start searching
+   * @param width width of region to search
+   * @param height height of region to search
+   * @param moduleSize estimated module size so far
+   */
+  AlignmentPatternFinder(BitMatrix image,
+                         int startX,
+                         int startY,
+                         int width,
+                         int height,
+                         float moduleSize,
+<span class="fc" id="L68">                         ResultPointCallback resultPointCallback) {</span>
+<span class="fc" id="L69">    this.image = image;</span>
+<span class="fc" id="L70">    this.possibleCenters = new ArrayList&lt;&gt;(5);</span>
+<span class="fc" id="L71">    this.startX = startX;</span>
+<span class="fc" id="L72">    this.startY = startY;</span>
+<span class="fc" id="L73">    this.width = width;</span>
+<span class="fc" id="L74">    this.height = height;</span>
+<span class="fc" id="L75">    this.moduleSize = moduleSize;</span>
+<span class="fc" id="L76">    this.crossCheckStateCount = new int[3];</span>
+<span class="fc" id="L77">    this.resultPointCallback = resultPointCallback;</span>
+<span class="fc" id="L78">  }</span>
+
+  /**
+   * &lt;p&gt;This method attempts to find the bottom-right alignment pattern in the image. It is a bit messy since
+   * it's pretty performance-critical and so is written to be fast foremost.&lt;/p&gt;
+   *
+   * @return {@link AlignmentPattern} if found
+   * @throws NotFoundException if not found
+   */
+  AlignmentPattern find() throws NotFoundException {
+<span class="fc" id="L88">    int startX = this.startX;</span>
+<span class="fc" id="L89">    int height = this.height;</span>
+<span class="fc" id="L90">    int maxJ = startX + width;</span>
+<span class="fc" id="L91">    int middleI = startY + (height / 2);</span>
+    // We are looking for black/white/black modules in 1:1:1 ratio;
+    // this tracks the number of black/white/black modules seen so far
+<span class="fc" id="L94">    int[] stateCount = new int[3];</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    for (int iGen = 0; iGen &lt; height; iGen++) {</span>
+      // Search from middle outwards
+<span class="fc bfc" id="L97" title="All 2 branches covered.">      int i = middleI + ((iGen &amp; 0x01) == 0 ? (iGen + 1) / 2 : -((iGen + 1) / 2));</span>
+<span class="fc" id="L98">      stateCount[0] = 0;</span>
+<span class="fc" id="L99">      stateCount[1] = 0;</span>
+<span class="fc" id="L100">      stateCount[2] = 0;</span>
+<span class="fc" id="L101">      int j = startX;</span>
+      // Burn off leading white pixels before anything else; if we start in the middle of
+      // a white run, it doesn't make sense to count its length, since we don't know if the
+      // white run continued to the left of the start point
+<span class="fc bfc" id="L105" title="All 4 branches covered.">      while (j &lt; maxJ &amp;&amp; !image.get(j, i)) {</span>
+<span class="fc" id="L106">        j++;</span>
+      }
+<span class="fc" id="L108">      int currentState = 0;</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">      while (j &lt; maxJ) {</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">        if (image.get(j, i)) {</span>
+          // Black pixel
+<span class="fc bfc" id="L112" title="All 2 branches covered.">          if (currentState == 1) { // Counting black pixels</span>
+<span class="fc" id="L113">            stateCount[1]++;</span>
+          } else { // Counting white pixels
+<span class="fc bfc" id="L115" title="All 2 branches covered.">            if (currentState == 2) { // A winner?</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">              if (foundPatternCross(stateCount)) { // Yes</span>
+<span class="fc" id="L117">                AlignmentPattern confirmed = handlePossibleCenter(stateCount, i, j);</span>
+<span class="fc bfc" id="L118" title="All 2 branches covered.">                if (confirmed != null) {</span>
+<span class="fc" id="L119">                  return confirmed;</span>
+                }
+              }
+<span class="fc" id="L122">              stateCount[0] = stateCount[2];</span>
+<span class="fc" id="L123">              stateCount[1] = 1;</span>
+<span class="fc" id="L124">              stateCount[2] = 0;</span>
+<span class="fc" id="L125">              currentState = 1;</span>
+            } else {
+<span class="fc" id="L127">              stateCount[++currentState]++;</span>
+            }
+          }
+        } else { // White pixel
+<span class="fc bfc" id="L131" title="All 2 branches covered.">          if (currentState == 1) { // Counting black pixels</span>
+<span class="fc" id="L132">            currentState++;</span>
+          }
+<span class="fc" id="L134">          stateCount[currentState]++;</span>
+        }
+<span class="fc" id="L136">        j++;</span>
+      }
+<span class="fc bfc" id="L138" title="All 2 branches covered.">      if (foundPatternCross(stateCount)) {</span>
+<span class="fc" id="L139">        AlignmentPattern confirmed = handlePossibleCenter(stateCount, i, maxJ);</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">        if (confirmed != null) {</span>
+<span class="fc" id="L141">          return confirmed;</span>
+        }
+      }
+
+    }
+
+    // Hmm, nothing we saw was observed and confirmed twice. If we had
+    // any guess at all, return it.
+<span class="fc bfc" id="L149" title="All 2 branches covered.">    if (!possibleCenters.isEmpty()) {</span>
+<span class="fc" id="L150">      return possibleCenters.get(0);</span>
+    }
+
+<span class="fc" id="L153">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+  /**
+   * Given a count of black/white/black pixels just seen and an end position,
+   * figures the location of the center of this black/white/black run.
+   */
+  private static float centerFromEnd(int[] stateCount, int end) {
+<span class="fc" id="L161">    return (end - stateCount[2]) - stateCount[1] / 2.0f;</span>
+  }
+
+  /**
+   * @param stateCount count of black/white/black pixels just read
+   * @return true iff the proportions of the counts is close enough to the 1/1/1 ratios
+   *         used by alignment patterns to be considered a match
+   */
+  private boolean foundPatternCross(int[] stateCount) {
+<span class="fc" id="L170">    float moduleSize = this.moduleSize;</span>
+<span class="fc" id="L171">    float maxVariance = moduleSize / 2.0f;</span>
+<span class="fc bfc" id="L172" title="All 2 branches covered.">    for (int i = 0; i &lt; 3; i++) {</span>
+<span class="fc bfc" id="L173" title="All 2 branches covered.">      if (Math.abs(moduleSize - stateCount[i]) &gt;= maxVariance) {</span>
+<span class="fc" id="L174">        return false;</span>
+      }
+    }
+<span class="fc" id="L177">    return true;</span>
+  }
+
+  /**
+   * &lt;p&gt;After a horizontal scan finds a potential alignment pattern, this method
+   * &quot;cross-checks&quot; by scanning down vertically through the center of the possible
+   * alignment pattern to see if the same proportion is detected.&lt;/p&gt;
+   *
+   * @param startI row where an alignment pattern was detected
+   * @param centerJ center of the section that appears to cross an alignment pattern
+   * @param maxCount maximum reasonable number of modules that should be
+   * observed in any reading state, based on the results of the horizontal scan
+   * @return vertical center of alignment pattern, or {@link Float#NaN} if not found
+   */
+  private float crossCheckVertical(int startI, int centerJ, int maxCount,
+      int originalStateCountTotal) {
+<span class="fc" id="L193">    BitMatrix image = this.image;</span>
+
+<span class="fc" id="L195">    int maxI = image.getHeight();</span>
+<span class="fc" id="L196">    int[] stateCount = crossCheckStateCount;</span>
+<span class="fc" id="L197">    stateCount[0] = 0;</span>
+<span class="fc" id="L198">    stateCount[1] = 0;</span>
+<span class="fc" id="L199">    stateCount[2] = 0;</span>
+
+    // Start counting up from center
+<span class="fc" id="L202">    int i = startI;</span>
+<span class="pc bpc" id="L203" title="1 of 6 branches missed.">    while (i &gt;= 0 &amp;&amp; image.get(centerJ, i) &amp;&amp; stateCount[1] &lt;= maxCount) {</span>
+<span class="fc" id="L204">      stateCount[1]++;</span>
+<span class="fc" id="L205">      i--;</span>
+    }
+    // If already too many modules in this state or ran off the edge:
+<span class="pc bpc" id="L208" title="1 of 4 branches missed.">    if (i &lt; 0 || stateCount[1] &gt; maxCount) {</span>
+<span class="fc" id="L209">      return Float.NaN;</span>
+    }
+<span class="pc bpc" id="L211" title="1 of 6 branches missed.">    while (i &gt;= 0 &amp;&amp; !image.get(centerJ, i) &amp;&amp; stateCount[0] &lt;= maxCount) {</span>
+<span class="fc" id="L212">      stateCount[0]++;</span>
+<span class="fc" id="L213">      i--;</span>
+    }
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    if (stateCount[0] &gt; maxCount) {</span>
+<span class="fc" id="L216">      return Float.NaN;</span>
+    }
+
+    // Now also count down from center
+<span class="fc" id="L220">    i = startI + 1;</span>
+<span class="fc bfc" id="L221" title="All 6 branches covered.">    while (i &lt; maxI &amp;&amp; image.get(centerJ, i) &amp;&amp; stateCount[1] &lt;= maxCount) {</span>
+<span class="fc" id="L222">      stateCount[1]++;</span>
+<span class="fc" id="L223">      i++;</span>
+    }
+<span class="fc bfc" id="L225" title="All 4 branches covered.">    if (i == maxI || stateCount[1] &gt; maxCount) {</span>
+<span class="fc" id="L226">      return Float.NaN;</span>
+    }
+<span class="fc bfc" id="L228" title="All 6 branches covered.">    while (i &lt; maxI &amp;&amp; !image.get(centerJ, i) &amp;&amp; stateCount[2] &lt;= maxCount) {</span>
+<span class="fc" id="L229">      stateCount[2]++;</span>
+<span class="fc" id="L230">      i++;</span>
+    }
+<span class="fc bfc" id="L232" title="All 2 branches covered.">    if (stateCount[2] &gt; maxCount) {</span>
+<span class="fc" id="L233">      return Float.NaN;</span>
+    }
+
+<span class="fc" id="L236">    int stateCountTotal = stateCount[0] + stateCount[1] + stateCount[2];</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">    if (5 * Math.abs(stateCountTotal - originalStateCountTotal) &gt;= 2 * originalStateCountTotal) {</span>
+<span class="fc" id="L238">      return Float.NaN;</span>
+    }
+
+<span class="fc bfc" id="L241" title="All 2 branches covered.">    return foundPatternCross(stateCount) ? centerFromEnd(stateCount, i) : Float.NaN;</span>
+  }
+
+  /**
+   * &lt;p&gt;This is called when a horizontal scan finds a possible alignment pattern. It will
+   * cross check with a vertical scan, and if successful, will see if this pattern had been
+   * found on a previous horizontal scan. If so, we consider it confirmed and conclude we have
+   * found the alignment pattern.&lt;/p&gt;
+   *
+   * @param stateCount reading state module counts from horizontal scan
+   * @param i row where alignment pattern may be found
+   * @param j end of possible alignment pattern in row
+   * @return {@link AlignmentPattern} if we have found the same pattern twice, or null if not
+   */
+  private AlignmentPattern handlePossibleCenter(int[] stateCount, int i, int j) {
+<span class="fc" id="L256">    int stateCountTotal = stateCount[0] + stateCount[1] + stateCount[2];</span>
+<span class="fc" id="L257">    float centerJ = centerFromEnd(stateCount, j);</span>
+<span class="fc" id="L258">    float centerI = crossCheckVertical(i, (int) centerJ, 2 * stateCount[1], stateCountTotal);</span>
+<span class="fc bfc" id="L259" title="All 2 branches covered.">    if (!Float.isNaN(centerI)) {</span>
+<span class="fc" id="L260">      float estimatedModuleSize = (stateCount[0] + stateCount[1] + stateCount[2]) / 3.0f;</span>
+<span class="fc bfc" id="L261" title="All 2 branches covered.">      for (AlignmentPattern center : possibleCenters) {</span>
+        // Look for about the same center and module size:
+<span class="fc bfc" id="L263" title="All 2 branches covered.">        if (center.aboutEquals(estimatedModuleSize, centerI, centerJ)) {</span>
+<span class="fc" id="L264">          return center.combineEstimate(centerI, centerJ, estimatedModuleSize);</span>
+        }
+<span class="fc" id="L266">      }</span>
+      // Hadn't found this before; save it
+<span class="fc" id="L268">      AlignmentPattern point = new AlignmentPattern(centerJ, centerI, estimatedModuleSize);</span>
+<span class="fc" id="L269">      possibleCenters.add(point);</span>
+<span class="pc bpc" id="L270" title="1 of 2 branches missed.">      if (resultPointCallback != null) {</span>
+<span class="nc" id="L271">        resultPointCallback.foundPossibleResultPoint(point);</span>
+      }
+    }
+<span class="fc" id="L274">    return null;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

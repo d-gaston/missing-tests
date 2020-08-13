@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TestFieldProblemHandler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.ode</a> &gt; <span class="el_source">TestFieldProblemHandler.java</span></div><h1>TestFieldProblemHandler.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.commons.math4.ode;
+
+import org.apache.commons.math4.RealFieldElement;
+import org.apache.commons.math4.exception.MaxCountExceededException;
+import org.apache.commons.math4.ode.sampling.FieldStepHandler;
+import org.apache.commons.math4.ode.sampling.FieldStepInterpolator;
+import org.apache.commons.math4.util.MathUtils;
+
+/**
+ * This class is used to handle steps for the test problems
+ * integrated during the junit tests for the ODE integrators.
+ * @param &lt;T&gt; the type of the field elements
+ */
+public class TestFieldProblemHandler&lt;T extends RealFieldElement&lt;T&gt;&gt;
+    implements FieldStepHandler&lt;T&gt; {
+
+    /** Associated problem. */
+    private TestFieldProblemAbstract&lt;T&gt; problem;
+
+    /** Maximal errors encountered during the integration. */
+    private T maxValueError;
+    private T maxTimeError;
+
+    /** Error at the end of the integration. */
+    private T lastError;
+
+    /** Time at the end of integration. */
+    private T lastTime;
+
+    /** ODE solver used. */
+    private FirstOrderFieldIntegrator&lt;T&gt; integrator;
+
+    /** Expected start for step. */
+    private T expectedStepStart;
+
+    /**
+     * Simple constructor.
+     * @param problem problem for which steps should be handled
+     * @param integrator ODE solver used
+     */
+<span class="fc" id="L58">    public TestFieldProblemHandler(TestFieldProblemAbstract&lt;T&gt; problem, FirstOrderFieldIntegrator&lt;T&gt; integrator) {</span>
+<span class="fc" id="L59">        this.problem      = problem;</span>
+<span class="fc" id="L60">        this.integrator   = integrator;</span>
+<span class="fc" id="L61">        maxValueError     = problem.getField().getZero();</span>
+<span class="fc" id="L62">        maxTimeError      = problem.getField().getZero();</span>
+<span class="fc" id="L63">        lastError         = problem.getField().getZero();</span>
+<span class="fc" id="L64">        expectedStepStart = null;</span>
+<span class="fc" id="L65">    }</span>
+
+    @Override
+    public void init(FieldODEStateAndDerivative&lt;T&gt; state0, T t) {
+<span class="fc" id="L69">        maxValueError     = problem.getField().getZero();</span>
+<span class="fc" id="L70">        maxTimeError      = problem.getField().getZero();</span>
+<span class="fc" id="L71">        lastError         = problem.getField().getZero();</span>
+<span class="fc" id="L72">        expectedStepStart = null;</span>
+<span class="fc" id="L73">    }</span>
+
+    @Override
+    public void handleStep(FieldStepInterpolator&lt;T&gt; interpolator, boolean isLast) throws MaxCountExceededException {
+
+<span class="fc" id="L78">        T start = integrator.getCurrentStepStart().getTime();</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">        if (start.subtract(problem.getInitialState().getTime()).divide(integrator.getCurrentSignedStepsize()).abs().getReal() &gt; 0.001) {</span>
+            // multistep integrators do not handle the first steps themselves
+            // so we have to make sure the integrator we look at has really started its work
+<span class="fc bfc" id="L82" title="All 2 branches covered.">            if (expectedStepStart != null) {</span>
+                // the step should either start at the end of the integrator step
+                // or at an event if the step is split into several substeps
+<span class="fc" id="L85">                T stepError = MathUtils.max(maxTimeError, start.subtract(expectedStepStart).abs());</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">                for (T eventTime : problem.getTheoreticalEventsTimes()) {</span>
+<span class="fc" id="L87">                    stepError = MathUtils.min(stepError, start.subtract(eventTime).abs());</span>
+                }
+<span class="fc" id="L89">                maxTimeError = MathUtils.max(maxTimeError, stepError);</span>
+            }
+<span class="fc" id="L91">            expectedStepStart = start.add(integrator.getCurrentSignedStepsize());</span>
+        }
+
+<span class="fc" id="L94">        T pT = interpolator.getPreviousState().getTime();</span>
+<span class="fc" id="L95">        T cT = interpolator.getCurrentState().getTime();</span>
+<span class="fc" id="L96">        T[] errorScale = problem.getErrorScale();</span>
+
+        // store the error at the last step
+<span class="fc bfc" id="L99" title="All 2 branches covered.">        if (isLast) {</span>
+<span class="fc" id="L100">            T[] interpolatedY = interpolator.getInterpolatedState(cT).getState();</span>
+<span class="fc" id="L101">            T[] theoreticalY  = problem.computeTheoreticalState(cT);</span>
+<span class="fc bfc" id="L102" title="All 2 branches covered.">            for (int i = 0; i &lt; interpolatedY.length; ++i) {</span>
+<span class="fc" id="L103">                T error = interpolatedY[i].subtract(theoreticalY[i]).abs();</span>
+<span class="fc" id="L104">                lastError = MathUtils.max(error, lastError);</span>
+            }
+<span class="fc" id="L106">            lastTime = cT;</span>
+        }
+
+        // walk through the step
+<span class="fc bfc" id="L110" title="All 2 branches covered.">        for (int k = 0; k &lt;= 20; ++k) {</span>
+
+<span class="fc" id="L112">            T time = pT.add(cT.subtract(pT).multiply(k).divide(20));</span>
+<span class="fc" id="L113">            T[] interpolatedY = interpolator.getInterpolatedState(time).getState();</span>
+<span class="fc" id="L114">            T[] theoreticalY  = problem.computeTheoreticalState(time);</span>
+
+            // update the errors
+<span class="fc bfc" id="L117" title="All 2 branches covered.">            for (int i = 0; i &lt; interpolatedY.length; ++i) {</span>
+<span class="fc" id="L118">                T error = errorScale[i].multiply(interpolatedY[i].subtract(theoreticalY[i]).abs());</span>
+<span class="fc" id="L119">                maxValueError = MathUtils.max(error, maxValueError);</span>
+            }
+        }
+<span class="fc" id="L122">    }</span>
+
+    /**
+     * Get the maximal value error encountered during integration.
+     * @return maximal value error
+     */
+    public T getMaximalValueError() {
+<span class="fc" id="L129">        return maxValueError;</span>
+    }
+
+    /**
+     * Get the maximal time error encountered during integration.
+     * @return maximal time error
+     */
+    public T getMaximalTimeError() {
+<span class="fc" id="L137">        return maxTimeError;</span>
+    }
+
+    /**
+     * Get the error at the end of the integration.
+     * @return error at the end of the integration
+     */
+    public T getLastError() {
+<span class="fc" id="L145">        return lastError;</span>
+    }
+
+    /**
+     * Get the time at the end of the integration.
+     * @return time at the end of the integration.
+     */
+    public T getLastTime() {
+<span class="fc" id="L153">        return lastTime;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

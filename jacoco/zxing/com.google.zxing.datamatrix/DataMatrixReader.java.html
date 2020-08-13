@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DataMatrixReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.datamatrix</a> &gt; <span class="el_source">DataMatrixReader.java</span></div><h1>DataMatrixReader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2007 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.datamatrix;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.ChecksumException;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.FormatException;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.Reader;
+import com.google.zxing.Result;
+import com.google.zxing.ResultMetadataType;
+import com.google.zxing.ResultPoint;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.DecoderResult;
+import com.google.zxing.common.DetectorResult;
+import com.google.zxing.datamatrix.decoder.Decoder;
+import com.google.zxing.datamatrix.detector.Detector;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * This implementation can detect and decode Data Matrix codes in an image.
+ *
+ * @author bbrown@google.com (Brian Brown)
+ */
+<span class="fc" id="L43">public final class DataMatrixReader implements Reader {</span>
+
+<span class="fc" id="L45">  private static final ResultPoint[] NO_POINTS = new ResultPoint[0];</span>
+
+<span class="fc" id="L47">  private final Decoder decoder = new Decoder();</span>
+
+  /**
+   * Locates and decodes a Data Matrix code in an image.
+   *
+   * @return a String representing the content encoded by the Data Matrix code
+   * @throws NotFoundException if a Data Matrix code cannot be found
+   * @throws FormatException if a Data Matrix code cannot be decoded
+   * @throws ChecksumException if error correction fails
+   */
+  @Override
+  public Result decode(BinaryBitmap image) throws NotFoundException, ChecksumException, FormatException {
+<span class="nc" id="L59">    return decode(image, null);</span>
+  }
+
+  @Override
+  public Result decode(BinaryBitmap image, Map&lt;DecodeHintType,?&gt; hints)
+      throws NotFoundException, ChecksumException, FormatException {
+    DecoderResult decoderResult;
+    ResultPoint[] points;
+<span class="fc bfc" id="L67" title="All 4 branches covered.">    if (hints != null &amp;&amp; hints.containsKey(DecodeHintType.PURE_BARCODE)) {</span>
+<span class="fc" id="L68">      BitMatrix bits = extractPureBits(image.getBlackMatrix());</span>
+<span class="fc" id="L69">      decoderResult = decoder.decode(bits);</span>
+<span class="fc" id="L70">      points = NO_POINTS;</span>
+<span class="fc" id="L71">    } else {</span>
+<span class="fc" id="L72">      DetectorResult detectorResult = new Detector(image.getBlackMatrix()).detect();</span>
+<span class="fc" id="L73">      decoderResult = decoder.decode(detectorResult.getBits());</span>
+<span class="fc" id="L74">      points = detectorResult.getPoints();</span>
+    }
+<span class="fc" id="L76">    Result result = new Result(decoderResult.getText(), decoderResult.getRawBytes(), points,</span>
+        BarcodeFormat.DATA_MATRIX);
+<span class="fc" id="L78">    List&lt;byte[]&gt; byteSegments = decoderResult.getByteSegments();</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">    if (byteSegments != null) {</span>
+<span class="fc" id="L80">      result.putMetadata(ResultMetadataType.BYTE_SEGMENTS, byteSegments);</span>
+    }
+<span class="fc" id="L82">    String ecLevel = decoderResult.getECLevel();</span>
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">    if (ecLevel != null) {</span>
+<span class="nc" id="L84">      result.putMetadata(ResultMetadataType.ERROR_CORRECTION_LEVEL, ecLevel);</span>
+    }
+<span class="fc" id="L86">    return result;</span>
+  }
+
+  @Override
+  public void reset() {
+    // do nothing
+<span class="nc" id="L92">  }</span>
+
+  /**
+   * This method detects a code in a &quot;pure&quot; image -- that is, pure monochrome image
+   * which contains only an unrotated, unskewed, image of a code, with some white border
+   * around it. This is a specialized method that works exceptionally fast in this special
+   * case.
+   */
+  private static BitMatrix extractPureBits(BitMatrix image) throws NotFoundException {
+
+<span class="fc" id="L102">    int[] leftTopBlack = image.getTopLeftOnBit();</span>
+<span class="fc" id="L103">    int[] rightBottomBlack = image.getBottomRightOnBit();</span>
+<span class="pc bpc" id="L104" title="2 of 4 branches missed.">    if (leftTopBlack == null || rightBottomBlack == null) {</span>
+<span class="nc" id="L105">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc" id="L108">    int moduleSize = moduleSize(leftTopBlack, image);</span>
+
+<span class="fc" id="L110">    int top = leftTopBlack[1];</span>
+<span class="fc" id="L111">    int bottom = rightBottomBlack[1];</span>
+<span class="fc" id="L112">    int left = leftTopBlack[0];</span>
+<span class="fc" id="L113">    int right = rightBottomBlack[0];</span>
+
+<span class="fc" id="L115">    int matrixWidth = (right - left + 1) / moduleSize;</span>
+<span class="fc" id="L116">    int matrixHeight = (bottom - top + 1) / moduleSize;</span>
+<span class="fc bfc" id="L117" title="All 4 branches covered.">    if (matrixWidth &lt;= 0 || matrixHeight &lt;= 0) {</span>
+<span class="fc" id="L118">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+    // Push in the &quot;border&quot; by half the module width so that we start
+    // sampling in the middle of the module. Just in case the image is a
+    // little off, this will help recover.
+<span class="fc" id="L124">    int nudge = moduleSize / 2;</span>
+<span class="fc" id="L125">    top += nudge;</span>
+<span class="fc" id="L126">    left += nudge;</span>
+
+    // Now just read off the bits
+<span class="fc" id="L129">    BitMatrix bits = new BitMatrix(matrixWidth, matrixHeight);</span>
+<span class="fc bfc" id="L130" title="All 2 branches covered.">    for (int y = 0; y &lt; matrixHeight; y++) {</span>
+<span class="fc" id="L131">      int iOffset = top + y * moduleSize;</span>
+<span class="fc bfc" id="L132" title="All 2 branches covered.">      for (int x = 0; x &lt; matrixWidth; x++) {</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">        if (image.get(left + x * moduleSize, iOffset)) {</span>
+<span class="fc" id="L134">          bits.set(x, y);</span>
+        }
+      }
+    }
+<span class="fc" id="L138">    return bits;</span>
+  }
+
+  private static int moduleSize(int[] leftTopBlack, BitMatrix image) throws NotFoundException {
+<span class="fc" id="L142">    int width = image.getWidth();</span>
+<span class="fc" id="L143">    int x = leftTopBlack[0];</span>
+<span class="fc" id="L144">    int y = leftTopBlack[1];</span>
+<span class="fc bfc" id="L145" title="All 4 branches covered.">    while (x &lt; width &amp;&amp; image.get(x, y)) {</span>
+<span class="fc" id="L146">      x++;</span>
+    }
+<span class="fc bfc" id="L148" title="All 2 branches covered.">    if (x == width) {</span>
+<span class="fc" id="L149">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+
+<span class="fc" id="L152">    int moduleSize = x - leftTopBlack[0];</span>
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">    if (moduleSize == 0) {</span>
+<span class="nc" id="L154">      throw NotFoundException.getNotFoundInstance();</span>
+    }
+<span class="fc" id="L156">    return moduleSize;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

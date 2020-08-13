@@ -1,0 +1,1490 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ConcurrentArrayList.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.collections</a> &gt; <span class="el_source">ConcurrentArrayList.java</span></div><h1>ConcurrentArrayList.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.collections;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.NoSuchElementException;
+import java.util.RandomAccess;
+
+import org.threadly.util.ArgumentVerifier;
+
+/**
+ * A thread safe list implementation with an array back end.  Make sure to read the javadocs 
+ * carefully, as several functions behave subtly different from the java.util.List definition.
+ * &lt;p&gt;
+ * The design of this implementation is NOT to completely avoid synchronization.  We have a hybrid 
+ * implementation of volatile and synchronized to allow for cheaper reading, but keeping high 
+ * consistency.  It works with the idea that the internal data is immutable.  Each read has an 
+ * immutable version of the data.  Thus making writes more expensive (almost like a 
+ * {@link java.util.concurrent.CopyOnWriteArrayList}).
+ * &lt;p&gt;
+ * There are several differences between this and a CopyOnWriteArrayList.  The first being that we 
+ * don't have to copy the structure on every write operation.  By setting the front and/or rear 
+ * padding, we can add items to the front or end of the list while avoiding a copy operation.  In 
+ * addition removals also do not require a copy operation.  Furthermore, this implementation 
+ * differs from  a CopyOnWriteArrayList is that it does allow some synchronization.  Which can 
+ * give higher consistency guarantees for some operations by allowing you to synchronize on the 
+ * modification lock to perform multiple atomic operations.
+ * &lt;p&gt;
+ * The main motivation in implementing this was to avoid array copies as much as possible (which 
+ * for large lists can be costly).  But also the implementation to cheaply reposition an item in 
+ * the list was necessary for other performance benefits.
+ * &lt;p&gt;
+ * A couple notable points is that subList calls are very cheap, but modifications to sublist are 
+ * completely independent from their source list.
+ * &lt;p&gt;
+ * Unlike CopyOnWriteArrayList, Iterators can attempt to modify the state of the backing structure 
+ * (assuming it still makes sense to do so).  Although unlike CopyOnWriteArrayList iterators, once 
+ * an Iterator is created it will never see updates to the structure.  For that reason it is 
+ * impossible to have a {@code ConcurrentModificationExcception}.
+ * 
+ * @since 1.0.0
+ * @param &lt;T&gt; type of object to retain
+ */
+public class ConcurrentArrayList&lt;T&gt; implements List&lt;T&gt;, Deque&lt;T&gt;, RandomAccess {
+  private static final short HASH_CODE_PRIME_NUMBER = 31;
+<span class="fc" id="L49">  private static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];</span>
+  
+  protected static &lt;E&gt; DataSet&lt;E&gt; makeEmptyDataSet(int frontPadding, int rearPadding) {
+<span class="fc" id="L52">    ArgumentVerifier.assertNotNegative(frontPadding, &quot;frontPadding&quot;);</span>
+<span class="fc" id="L53">    ArgumentVerifier.assertNotNegative(rearPadding, &quot;rearPadding&quot;);</span>
+    
+<span class="fc" id="L55">    return new DataSet&lt;&gt;(EMPTY_OBJECT_ARRAY, 0, 0, frontPadding, rearPadding);</span>
+  }
+  
+  protected final Object modificationLock;
+  protected volatile DataSet&lt;T&gt; currentData;
+  
+  /**
+   * Constructs a new {@link ConcurrentArrayList} with a new internal NativeLock implementation.
+   */
+  public ConcurrentArrayList() {
+<span class="fc" id="L65">    this(0, 0);</span>
+<span class="fc" id="L66">  }</span>
+  
+  /**
+   * Constructs a new {@link ConcurrentArrayList} with specific padding.  Specifying the padding 
+   * amounts can optimize this implementation more for the specific use case.  If there is space 
+   * in the array for adds to the front or end, then we are able to avoid an array copy.
+   * 
+   * @param frontPadding padding to add to front of array to possible avoid array copies
+   * @param rearPadding padding to add to end of array to possible avoid array copies
+   */
+  public ConcurrentArrayList(int frontPadding, int rearPadding) {
+<span class="fc" id="L77">    this(null, frontPadding, rearPadding);</span>
+<span class="fc" id="L78">  }</span>
+
+  /**
+   * Constructs a new {@link ConcurrentArrayList} with a provided lock object.  This is the lock 
+   * used to guard modifications, and is returned from {@link #getModificationLock()}.
+   * 
+   * @param modificationLock lock to synchronize on internally
+   */
+  protected ConcurrentArrayList(Object modificationLock) {
+<span class="fc" id="L87">    this(modificationLock, 0, 0);</span>
+<span class="fc" id="L88">  }</span>
+
+  /**
+   * Constructs a new {@link ConcurrentArrayList} with a provided lock object.  This is the lock 
+   * used to guard modifications, and is returned from {@link #getModificationLock()}.  Specifying 
+   * the padding amounts can optimize this implementation more for the specific use case.  If 
+   * there is space in the array for adds to the front or end, then we are able to avoid an array 
+   * copy.
+   * 
+   * @param modificationLock lock to synchronize on internally
+   * @param frontPadding padding to add to front of array to possible avoid array copies
+   * @param rearPadding padding to add to end of array to possible avoid array copies
+   */
+  protected ConcurrentArrayList(Object modificationLock, int frontPadding, int rearPadding) {
+<span class="fc" id="L102">    this(ConcurrentArrayList.&lt;T&gt;makeEmptyDataSet(frontPadding, rearPadding), modificationLock);</span>
+<span class="fc" id="L103">  }</span>
+  
+  /**
+   * Internal constructor which provides the modification lock and the initial {@link DataSet}.  
+   * This is used for constructing sub-lists, but may also be useful to extending classes.
+   * 
+   * @param startSet {@link DataSet} to use internally
+   * @param modificationLock lock to synchronize on internally
+   */
+<span class="fc" id="L112">  protected ConcurrentArrayList(DataSet&lt;T&gt; startSet, Object modificationLock) {</span>
+<span class="fc" id="L113">    ArgumentVerifier.assertNotNull(startSet, &quot;startSet&quot;);</span>
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    if (modificationLock == null) {</span>
+<span class="fc" id="L115">      modificationLock = new Object();</span>
+    }
+    
+<span class="fc" id="L118">    this.modificationLock = modificationLock;</span>
+<span class="fc" id="L119">    currentData = startSet;</span>
+<span class="fc" id="L120">  }</span>
+  
+  /**
+   * If you want to chain multiple calls together and ensure that no threads modify the structure 
+   * during that time you can get the lock to prevent additional modifications.  
+   * &lt;p&gt;
+   * This lock should be synchronized on to prevent modifications.
+   * 
+   * @return lock used internally
+   */
+  public Object getModificationLock() {
+<span class="fc" id="L131">    return modificationLock;</span>
+  }
+  
+  /**
+   * This changes the configuration for the front padding amount for future modification 
+   * operations.
+   * 
+   * @param frontPadding New value to over allocate the front of new buffers
+   */
+  public void setFrontPadding(int frontPadding) {
+<span class="fc" id="L141">    ArgumentVerifier.assertNotNegative(frontPadding, &quot;frontPadding&quot;);</span>
+    
+<span class="fc" id="L143">    synchronized (modificationLock) {</span>
+<span class="fc" id="L144">      currentData.frontPadding = frontPadding;</span>
+<span class="fc" id="L145">    }</span>
+<span class="fc" id="L146">  }</span>
+
+  /**
+   * This changes the configuration for the rear padding amount for future modification operations.
+   * 
+   * @param rearPadding New value to over allocate the rear of new buffers
+   */
+  public void setRearPadding(int rearPadding) {
+<span class="fc" id="L154">    ArgumentVerifier.assertNotNegative(rearPadding, &quot;rearPadding&quot;);</span>
+
+<span class="fc" id="L156">    synchronized (modificationLock) {</span>
+<span class="fc" id="L157">      currentData.rearPadding = rearPadding;</span>
+<span class="fc" id="L158">    }</span>
+<span class="fc" id="L159">  }</span>
+  
+  /**
+   * Getter for current amount to added padding to the front of new buffers.
+   * 
+   * @return current amount to added padding to the front of new buffers
+   */
+  public int getFrontPadding() {
+<span class="fc" id="L167">    return currentData.frontPadding;</span>
+  }
+
+  /**
+   * Getter for current amount to added padding to the rear of new buffers.
+   * 
+   * @return current amount to added padding to the rear of new buffers
+   */
+  public int getRearPadding() {
+<span class="fc" id="L176">    return currentData.rearPadding;</span>
+  }
+
+  /**
+   * Trims the internally array to discard any unused storage.  It is good to invoke this if 
+   * future adds are unlikely, and it is desired to keep memory usage minimal.  This does not 
+   * adjust the set front or rear padding, so additional modifications will expand the array based 
+   * off those set values.  To make sure additional modifications do not expand the array any more 
+   * than necessary invoke {@link #setFrontPadding(int)} and {@link #setRearPadding(int)} with 
+   * {@code 0}.
+   */
+  public void trimToSize() {
+<span class="fc" id="L188">    synchronized (modificationLock) {</span>
+<span class="fc" id="L189">      currentData = currentData.trimToSize();</span>
+<span class="fc" id="L190">    }</span>
+<span class="fc" id="L191">  }</span>
+
+  @Override
+  public int size() {
+<span class="fc" id="L195">    return currentData.size;</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="fc bfc" id="L200" title="All 2 branches covered.">    return currentData.size == 0;</span>
+  }
+  
+  @Override
+  public T get(int index) {
+    try {
+<span class="fc" id="L206">      return currentData.get(index);</span>
+<span class="fc" id="L207">    } catch (ArrayIndexOutOfBoundsException e) {</span>
+      // translate to the expected exception type
+<span class="fc" id="L209">      throw new IndexOutOfBoundsException();</span>
+    }
+  }
+
+  @Override
+  public int indexOf(Object o) {
+<span class="fc" id="L215">    return currentData.indexOf(o);</span>
+  }
+
+  @Override
+  public int lastIndexOf(Object o) {
+<span class="fc" id="L220">    return currentData.lastIndexOf(o);</span>
+  }
+
+  @Override
+  public boolean contains(Object o) {
+<span class="fc bfc" id="L225" title="All 2 branches covered.">    return currentData.indexOf(o) &gt;= 0;</span>
+  }
+
+  @Override
+  public boolean containsAll(Collection&lt;?&gt; c) {
+<span class="pc bpc" id="L230" title="1 of 4 branches missed.">    if (c == null || c.isEmpty()) {</span>
+<span class="fc" id="L231">      return true;</span>
+    }
+    
+<span class="fc" id="L234">    DataSet&lt;T&gt; workingSet = currentData;</span>
+<span class="fc" id="L235">    Iterator&lt;?&gt; it = c.iterator();</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">      if (workingSet.indexOf(it.next()) &lt; 0) {</span>
+<span class="fc" id="L238">        return false;</span>
+      }
+    }
+    
+<span class="fc" id="L242">    return true;</span>
+  }
+
+  @Override
+  public Object[] toArray() {
+<span class="fc" id="L247">    DataSet&lt;T&gt; workingSet = currentData;</span>
+
+<span class="fc" id="L249">    return Arrays.copyOfRange(workingSet.dataArray, </span>
+                              workingSet.dataStartIndex, workingSet.dataEndIndex);
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Override
+  public &lt;E&gt; E[] toArray(E[] a) {
+<span class="fc" id="L256">    DataSet&lt;T&gt; workingSet = currentData;</span>
+    
+<span class="fc bfc" id="L258" title="All 2 branches covered.">    if (a.length &lt; workingSet.size) {</span>
+<span class="fc" id="L259">      return (E[])Arrays.copyOfRange(workingSet.dataArray, </span>
+                                     workingSet.dataStartIndex, 
+                                     workingSet.dataEndIndex, 
+<span class="fc" id="L262">                                     a.getClass());</span>
+    } else {
+<span class="fc" id="L264">      System.arraycopy(workingSet.dataArray, workingSet.dataStartIndex, a, 0, workingSet.size);</span>
+      
+<span class="fc" id="L266">      return a;</span>
+    }
+  }
+
+  @Override
+  public boolean add(T e) {
+<span class="fc bfc" id="L272" title="All 2 branches covered.">    if (e == null) {</span>
+<span class="fc" id="L273">      return false;</span>
+    }
+    
+<span class="fc" id="L276">    synchronized (modificationLock) {</span>
+<span class="fc" id="L277">      currentData = currentData.addToEnd(e);</span>
+<span class="fc" id="L278">    }</span>
+    
+<span class="fc" id="L280">    return true;</span>
+  }
+
+  @Override
+  public boolean addAll(Collection&lt;? extends T&gt; c) {
+<span class="pc bpc" id="L285" title="1 of 4 branches missed.">    if (c == null || c.isEmpty()) {</span>
+<span class="fc" id="L286">      return false;</span>
+    }
+    
+<span class="fc" id="L289">    Iterator&lt;? extends T&gt; it = c.iterator();</span>
+<span class="fc bfc" id="L290" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="pc bpc" id="L291" title="1 of 2 branches missed.">      if (it.next() == null) {</span>
+<span class="nc" id="L292">        throw new IllegalArgumentException(&quot;Can not store null values&quot;);</span>
+      }
+    }
+
+<span class="fc" id="L296">    synchronized (modificationLock) {</span>
+<span class="fc" id="L297">      currentData = currentData.addAll(c);</span>
+<span class="fc" id="L298">    }</span>
+    
+<span class="fc" id="L300">    return true;</span>
+  }
+
+  @Override
+  public boolean addAll(int index, Collection&lt;? extends T&gt; c) {
+<span class="fc bfc" id="L305" title="All 2 branches covered.">    if (index &lt; 0) {</span>
+<span class="fc" id="L306">      throw new IndexOutOfBoundsException(&quot;Index can not be negative&quot;);</span>
+<span class="pc bpc" id="L307" title="1 of 2 branches missed.">    } else if (c == null) {</span>
+<span class="nc" id="L308">      return false;</span>
+    }
+    
+<span class="fc" id="L311">    Iterator&lt;? extends T&gt; it = c.iterator();</span>
+<span class="fc bfc" id="L312" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="pc bpc" id="L313" title="1 of 2 branches missed.">      if (it.next() == null) {</span>
+<span class="nc" id="L314">        it.remove();</span>
+      }
+    }
+<span class="fc bfc" id="L317" title="All 2 branches covered.">    if (c.isEmpty()) {</span>
+<span class="fc" id="L318">      return false;</span>
+    }
+
+<span class="fc" id="L321">    synchronized (modificationLock) {</span>
+<span class="fc bfc" id="L322" title="All 2 branches covered.">      if (index &gt; currentData.size) {</span>
+<span class="fc" id="L323">        throw new IndexOutOfBoundsException(&quot;Index is beyond the array size: &quot; + index);</span>
+      }
+      
+<span class="fc" id="L326">      currentData = currentData.addAll(index, c);</span>
+<span class="fc" id="L327">    }</span>
+    
+<span class="fc" id="L329">    return true;</span>
+  }
+
+  @Override
+  public boolean retainAll(Collection&lt;?&gt; c) {
+<span class="fc bfc" id="L334" title="All 2 branches covered.">    if (c == this) {</span>
+<span class="fc" id="L335">      return false;</span>
+<span class="pc bpc" id="L336" title="1 of 4 branches missed.">    } else if (c == null || c.isEmpty()) {</span>
+<span class="fc bfc" id="L337" title="All 2 branches covered.">      if (isEmpty()) {</span>
+<span class="fc" id="L338">        return false;</span>
+      } else {
+<span class="fc" id="L340">        clear();</span>
+        
+<span class="fc" id="L342">        return true;</span>
+      }
+    }
+    
+    DataSet&lt;T&gt; originalSet;
+    DataSet&lt;T&gt; resultSet;
+<span class="fc" id="L348">    synchronized (modificationLock) {</span>
+<span class="fc" id="L349">      originalSet = currentData;</span>
+<span class="fc" id="L350">      currentData = resultSet = currentData.retainAll(c);</span>
+<span class="fc" id="L351">    }</span>
+    
+<span class="fc bfc" id="L353" title="All 2 branches covered.">    return ! resultSet.equalsExactly(originalSet);</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="fc" id="L358">    synchronized (modificationLock) {</span>
+<span class="fc" id="L359">      currentData = makeEmptyDataSet(currentData.frontPadding, currentData.rearPadding);</span>
+<span class="fc" id="L360">    }</span>
+<span class="fc" id="L361">  }</span>
+  
+  @Override
+  public void addFirst(T e) {
+    // nulls can't be accepted because of how we attempt to prevent array copies
+<span class="pc bpc" id="L366" title="1 of 2 branches missed.">    if (e == null) {</span>
+<span class="nc" id="L367">      throw new UnsupportedOperationException(&quot;This structure can not accept nulls&quot;);</span>
+    }
+    
+<span class="fc" id="L370">    synchronized (modificationLock) {</span>
+<span class="fc" id="L371">      currentData = currentData.addToFront(e);</span>
+<span class="fc" id="L372">    }</span>
+<span class="fc" id="L373">  }</span>
+
+  @Override
+  public void addLast(T e) {
+    // nulls can't be accepted because of how we attempt to prevent array copies
+<span class="pc bpc" id="L378" title="1 of 2 branches missed.">    if (e == null) {</span>
+<span class="nc" id="L379">      throw new UnsupportedOperationException(&quot;This structure can not accept nulls&quot;);</span>
+    }
+    
+<span class="fc" id="L382">    synchronized (modificationLock) {</span>
+<span class="fc" id="L383">      currentData = currentData.addToEnd(e);</span>
+<span class="fc" id="L384">    }</span>
+<span class="fc" id="L385">  }</span>
+
+  @Override
+  public boolean offerFirst(T e) {
+<span class="fc" id="L389">    addFirst(e);</span>
+      
+    // this implementation has no capacity limit
+<span class="fc" id="L392">    return true;</span>
+  }
+
+  @Override
+  public boolean offerLast(T e) {
+<span class="fc" id="L397">    addLast(e);</span>
+      
+    // this implementation has no capacity limit
+<span class="fc" id="L400">    return true;</span>
+  }
+
+  @Override
+  public T removeFirst() {
+<span class="fc" id="L405">    T result = pollFirst();</span>
+<span class="fc bfc" id="L406" title="All 2 branches covered.">    if (result == null) {</span>
+<span class="fc" id="L407">      throw new NoSuchElementException();</span>
+    }
+    
+<span class="fc" id="L410">    return result;</span>
+  }
+
+  @Override
+  public T removeLast() {
+<span class="fc" id="L415">    T result = pollLast();</span>
+<span class="fc bfc" id="L416" title="All 2 branches covered.">    if (result == null) {</span>
+<span class="fc" id="L417">      throw new NoSuchElementException();</span>
+    }
+    
+<span class="fc" id="L420">    return result;</span>
+  }
+
+  @Override
+  public T pollFirst() {
+<span class="fc" id="L425">    synchronized (modificationLock) {</span>
+<span class="fc" id="L426">      T result = peekFirst();</span>
+<span class="fc bfc" id="L427" title="All 2 branches covered.">      if (result != null) {</span>
+<span class="fc" id="L428">        currentData = currentData.remove(0);</span>
+      }
+      
+<span class="fc" id="L431">      return result;</span>
+    }
+  }
+
+  @Override
+  public T pollLast() {
+<span class="fc" id="L437">    synchronized (modificationLock) {</span>
+<span class="fc" id="L438">      T result = peekLast();</span>
+<span class="fc bfc" id="L439" title="All 2 branches covered.">      if (result != null) {</span>
+<span class="fc" id="L440">        currentData = currentData.remove(currentData.size - 1);</span>
+      }
+      
+<span class="fc" id="L443">      return result;</span>
+    }
+  }
+
+  @Override
+  public T getFirst() {
+<span class="fc" id="L449">    T result = peekFirst();</span>
+<span class="fc bfc" id="L450" title="All 2 branches covered.">    if (result == null) {</span>
+<span class="fc" id="L451">      throw new NoSuchElementException();</span>
+    }
+    
+<span class="fc" id="L454">    return result;</span>
+  }
+
+  @Override
+  public T getLast() {
+<span class="fc" id="L459">    T result = peekLast();</span>
+<span class="fc bfc" id="L460" title="All 2 branches covered.">    if (result == null) {</span>
+<span class="fc" id="L461">      throw new NoSuchElementException();</span>
+    }
+    
+<span class="fc" id="L464">    return result;</span>
+  }
+
+  @Override
+  public T peek() {
+<span class="fc" id="L469">    return peekFirst();</span>
+  }
+
+  @Override
+  public T peekFirst() {
+<span class="fc" id="L474">    DataSet&lt;T&gt; set = currentData;</span>
+<span class="fc bfc" id="L475" title="All 2 branches covered.">    if (set.size &gt; 0) {</span>
+<span class="fc" id="L476">      return set.get(0);</span>
+    } else {
+<span class="fc" id="L478">      return null;</span>
+    }
+  }
+
+  @Override
+  public T peekLast() {
+<span class="fc" id="L484">    DataSet&lt;T&gt; set = currentData;</span>
+<span class="fc bfc" id="L485" title="All 2 branches covered.">    if (set.size &gt; 0) {</span>
+<span class="fc" id="L486">      return set.get(set.size - 1);</span>
+    } else {
+<span class="fc" id="L488">      return null;</span>
+    }
+  }
+
+  @Override
+  public boolean removeAll(Collection&lt;?&gt; c) {
+<span class="pc bpc" id="L494" title="1 of 4 branches missed.">    if (c == null || c.isEmpty()) {</span>
+<span class="fc" id="L495">      return false;</span>
+    }
+
+    DataSet&lt;T&gt; originalSet;
+    DataSet&lt;T&gt; resultSet;
+<span class="fc" id="L500">    synchronized (modificationLock) {</span>
+<span class="fc" id="L501">      originalSet = currentData;</span>
+<span class="fc" id="L502">      currentData = resultSet = currentData.removeAll(c);</span>
+<span class="fc" id="L503">    }</span>
+    
+<span class="fc bfc" id="L505" title="All 2 branches covered.">    return ! resultSet.equalsExactly(originalSet);</span>
+  }
+
+  protected boolean remove(Object o, boolean searchBackwards) {
+<span class="fc bfc" id="L509" title="All 2 branches covered.">    if (o == null) {</span>
+<span class="fc" id="L510">      return false;</span>
+    }
+    
+<span class="fc" id="L513">    synchronized (modificationLock) {</span>
+      int index;
+<span class="fc bfc" id="L515" title="All 2 branches covered.">      if (searchBackwards) {</span>
+<span class="fc" id="L516">        index = currentData.lastIndexOf(o);</span>
+      } else {
+<span class="fc" id="L518">        index = currentData.indexOf(o);</span>
+      }
+<span class="fc bfc" id="L520" title="All 2 branches covered.">      if (index &lt; 0) {</span>
+<span class="fc" id="L521">        return false;</span>
+      } else {
+<span class="fc" id="L523">        currentData = currentData.remove(index);</span>
+<span class="fc" id="L524">        return true;</span>
+      }
+    }
+  }
+
+  @Override
+  public boolean removeFirstOccurrence(Object o) {
+<span class="fc" id="L531">    return remove(o, false);</span>
+  }
+
+  @Override
+  public boolean removeLastOccurrence(Object o) {
+<span class="fc" id="L536">    return remove(o, true);</span>
+  }
+
+  @Override
+  public boolean remove(Object o) {
+<span class="fc" id="L541">    return removeFirstOccurrence(o);</span>
+  }
+
+  @Override
+  public T remove(int index) {
+<span class="fc bfc" id="L546" title="All 2 branches covered.">    if (index &lt; 0) {</span>
+<span class="fc" id="L547">      throw new IndexOutOfBoundsException(&quot;Index can not be negative&quot;);</span>
+    }
+    
+    DataSet&lt;T&gt; originalSet;
+<span class="fc" id="L551">    synchronized (modificationLock) {</span>
+<span class="fc bfc" id="L552" title="All 2 branches covered.">      if (index &gt; currentData.size - 1) {</span>
+<span class="fc" id="L553">        throw new IndexOutOfBoundsException(&quot;Index is beyond the array max index: &quot; + index);</span>
+      }
+      
+<span class="fc" id="L556">      originalSet = currentData;</span>
+<span class="fc" id="L557">      currentData = currentData.remove(index);</span>
+<span class="fc" id="L558">    }</span>
+    
+<span class="fc" id="L560">    return originalSet.get(index);</span>
+  }
+
+  @Override
+  public boolean offer(T e) {
+<span class="fc" id="L565">    return offerLast(e);</span>
+  }
+
+  @Override
+  public T remove() {
+<span class="fc" id="L570">    return removeFirst();</span>
+  }
+
+  @Override
+  public T poll() {
+<span class="fc" id="L575">    return pollFirst();</span>
+  }
+
+  @Override
+  public T element() {
+<span class="fc" id="L580">    return getFirst();</span>
+  }
+
+  @Override
+  public void push(T e) {
+<span class="fc" id="L585">    addFirst(e);</span>
+<span class="fc" id="L586">  }</span>
+
+  @Override
+  public T pop() {
+<span class="fc" id="L590">    return removeFirst();</span>
+  }
+
+  @Override
+  public T set(int index, T element) {
+<span class="fc bfc" id="L595" title="All 2 branches covered.">    if (index &lt; 0) {</span>
+<span class="fc" id="L596">      throw new IndexOutOfBoundsException(&quot;Index can not be negative&quot;);</span>
+    }
+    
+    DataSet&lt;T&gt; originalSet;
+<span class="fc" id="L600">    synchronized (modificationLock) {</span>
+<span class="fc bfc" id="L601" title="All 2 branches covered.">      if (index &gt; currentData.size - 1) {</span>
+<span class="fc" id="L602">        throw new IndexOutOfBoundsException(&quot;Index is beyond the array max index: &quot; + index);</span>
+      }
+      
+<span class="fc" id="L605">      originalSet = currentData;</span>
+<span class="fc" id="L606">      currentData = currentData.set(index, element);</span>
+<span class="fc" id="L607">    }</span>
+    
+<span class="fc" id="L609">    return originalSet.get(index);</span>
+  }
+
+  @Override
+  public void add(int index, T element) {
+<span class="fc bfc" id="L614" title="All 2 branches covered.">    if (index &lt; 0) {</span>
+<span class="fc" id="L615">      throw new IndexOutOfBoundsException(&quot;Index can not be negative&quot;);</span>
+    }
+    
+<span class="fc" id="L618">    synchronized (modificationLock) {</span>
+<span class="fc bfc" id="L619" title="All 2 branches covered.">      if (index &gt; currentData.size) {</span>
+<span class="fc" id="L620">        throw new IndexOutOfBoundsException(&quot;Index is beyond the array size: &quot; + index);</span>
+      }
+      
+<span class="fc" id="L623">      currentData = currentData.add(index, element);</span>
+<span class="fc" id="L624">    }</span>
+<span class="fc" id="L625">  }</span>
+  
+  /**
+   * Move a stored item to a new index.  By default a forward search will happen to find the item.
+   * 
+   * @param item item to be moved
+   * @param newIndex new index for placement
+   */
+  public void reposition(T item, int newIndex) {
+<span class="nc" id="L634">    reposition(item, newIndex, false);</span>
+<span class="nc" id="L635">  }</span>
+  
+  /**
+   * Move a stored item to a new index.  If you have an idea if it is closer to the start or end of 
+   * the list you can specify which end to start the search on.
+   * 
+   * @param item item to be moved
+   * @param newIndex new index for placement
+   * @param searchBackwards true to start from the end and search backwards
+   */
+  public void reposition(T item, int newIndex, boolean searchBackwards) {
+<span class="fc bfc" id="L646" title="All 2 branches covered.">    if (newIndex &lt; 0) {</span>
+<span class="fc" id="L647">      throw new IndexOutOfBoundsException(&quot;New index can not be negative&quot;);</span>
+    }
+    
+<span class="fc" id="L650">    synchronized (modificationLock) {</span>
+<span class="fc bfc" id="L651" title="All 2 branches covered.">      if (newIndex &gt; currentData.size) {</span>
+<span class="fc" id="L652">        throw new IndexOutOfBoundsException(newIndex + &quot; is beyond the array's size: &quot; + </span>
+                                              currentData.size);
+      }
+      
+<span class="fc bfc" id="L656" title="All 2 branches covered.">      int index = searchBackwards ? lastIndexOf(item) : indexOf(item);</span>
+<span class="fc bfc" id="L657" title="All 2 branches covered.">      if (index &lt; 0) {</span>
+<span class="fc" id="L658">        throw new NoSuchElementException(&quot;Could not find item: &quot; + item);</span>
+<span class="fc bfc" id="L659" title="All 2 branches covered.">      } else if (index == newIndex) {</span>
+<span class="fc" id="L660">        return;</span>
+      }
+
+<span class="fc" id="L663">      currentData = currentData.reposition(index, newIndex);</span>
+<span class="fc" id="L664">    }</span>
+<span class="fc" id="L665">  }</span>
+  
+  /**
+   * Move a stored item located at an index to a new index.  Provide the size for newIndex to move 
+   * the item to the end of the list.  Otherwise all items after the new index will be shifted 
+   * right.
+   * 
+   * @param originalIndex index for item to be moved to.
+   * @param newIndex new index location for item.
+   */
+  public void reposition(int originalIndex, int newIndex) {
+<span class="fc bfc" id="L676" title="All 2 branches covered.">    if (newIndex &lt; 0) {</span>
+<span class="fc" id="L677">      throw new IndexOutOfBoundsException(&quot;new index can not be negative&quot;);</span>
+<span class="fc bfc" id="L678" title="All 2 branches covered.">    } else if (originalIndex &lt; 0) {</span>
+<span class="fc" id="L679">      throw new IndexOutOfBoundsException(&quot;original index can not be negative&quot;);</span>
+    }
+    
+<span class="fc bfc" id="L682" title="All 2 branches covered.">    if (originalIndex == newIndex) {</span>
+<span class="fc" id="L683">      return;</span>
+    }
+    
+<span class="fc" id="L686">    synchronized (modificationLock) {</span>
+<span class="fc bfc" id="L687" title="All 2 branches covered.">      if (newIndex &gt; currentData.size) {</span>
+<span class="fc" id="L688">        throw new IndexOutOfBoundsException(&quot;new index &quot; + newIndex + </span>
+                                              &quot; is beyond the array's length: &quot; + currentData.size);
+<span class="fc bfc" id="L690" title="All 2 branches covered.">      } else if (originalIndex &gt; currentData.size) {</span>
+<span class="fc" id="L691">        throw new IndexOutOfBoundsException(&quot;original index &quot; + originalIndex + </span>
+                                              &quot; is beyond the array's length: &quot; + currentData.size);
+      }
+      
+<span class="fc" id="L695">      currentData = currentData.reposition(originalIndex, newIndex);</span>
+<span class="fc" id="L696">    }</span>
+<span class="fc" id="L697">  }</span>
+
+  @Override
+  public Iterator&lt;T&gt; iterator() {
+<span class="fc" id="L701">    return listIterator(0);</span>
+  }
+
+  @Override
+  public ListIterator&lt;T&gt; listIterator() {
+<span class="fc" id="L706">    return listIterator(0);</span>
+  }
+
+  @Override
+  public ListIterator&lt;T&gt; listIterator(int index) {
+<span class="fc" id="L711">    return new DataSetListIterator(currentData, index);</span>
+  }
+
+  @Override
+  public Iterator&lt;T&gt; descendingIterator() {
+<span class="fc" id="L716">    final ListIterator&lt;T&gt; li = listIterator(currentData.size);</span>
+<span class="fc" id="L717">    return new Iterator&lt;T&gt;() {</span>
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L720">        return li.hasPrevious();</span>
+      }
+
+      @Override
+      public T next() {
+<span class="fc" id="L725">        return li.previous();</span>
+      }
+
+      @Override
+      public void remove() {
+<span class="nc" id="L730">        li.remove();</span>
+<span class="nc" id="L731">      }</span>
+    };
+  }
+
+  /**
+   * This returns a sub list from the current list.  The initial call is very cheap because it 
+   * uses the current data backing to produce (no copying necessary).
+   * &lt;p&gt;
+   * This differers from other subList implementations in that any modifications to this list 
+   * will be treated as a completely new list, and wont ever reflect on the source list.  This is 
+   * very different from other java.util.List implementations, and should be noted carefully.
+   * 
+   * @param fromIndex start index (inclusive) for new list to include
+   * @param toIndex end index (exclusive) to be included in new list
+   * @return new independent list
+   */
+  @Override
+  public List&lt;T&gt; subList(int fromIndex, int toIndex) {
+<span class="fc" id="L749">    DataSet&lt;T&gt; workingData = currentData;</span>
+    
+<span class="fc bfc" id="L751" title="All 2 branches covered.">    if (fromIndex &lt; 0) {</span>
+<span class="fc" id="L752">      throw new IndexOutOfBoundsException(&quot;from index can not be negative&quot;);</span>
+<span class="fc bfc" id="L753" title="All 2 branches covered.">    } else if (fromIndex &gt; workingData.size) {</span>
+<span class="fc" id="L754">      throw new IndexOutOfBoundsException(&quot;from index must be &lt;= size: &quot; + workingData.size);</span>
+<span class="fc bfc" id="L755" title="All 2 branches covered.">    } else if (toIndex &gt; workingData.size) {</span>
+<span class="fc" id="L756">      throw new IndexOutOfBoundsException(&quot;to index must be &lt;= size: &quot; + workingData.size);</span>
+<span class="fc bfc" id="L757" title="All 2 branches covered.">    } else if (toIndex &lt;= fromIndex) {</span>
+<span class="fc" id="L758">      throw new IndexOutOfBoundsException(&quot;fromIndex must be &lt; toIndex&quot;);</span>
+    }
+    
+<span class="fc" id="L761">    DataSet&lt;T&gt; newSet = new DataSet&lt;&gt;(workingData.dataArray, </span>
+                                      workingData.dataStartIndex + fromIndex, 
+                                      workingData.dataEndIndex - 
+                                        (workingData.dataEndIndex - toIndex), 
+<span class="fc" id="L765">                                      currentData.frontPadding, currentData.rearPadding);</span>
+    
+<span class="fc" id="L767">    return new ConcurrentArrayList&lt;&gt;(newSet, modificationLock);</span>
+  }
+  
+  @Override
+  public String toString() {
+<span class="fc" id="L772">    return currentData.toString();</span>
+  }
+  
+  @SuppressWarnings(&quot;rawtypes&quot;)
+  @Override
+  public boolean equals(Object o) {
+<span class="fc bfc" id="L778" title="All 2 branches covered.">    if (o == this) {</span>
+<span class="fc" id="L779">      return true;</span>
+<span class="pc bpc" id="L780" title="1 of 2 branches missed.">    } else if (o instanceof ConcurrentArrayList) {</span>
+<span class="nc" id="L781">      ConcurrentArrayList cal = (ConcurrentArrayList)o;</span>
+<span class="nc" id="L782">      return currentData.equalsEquivelent(cal.currentData);</span>
+<span class="fc bfc" id="L783" title="All 2 branches covered.">    } else if (o instanceof List) {</span>
+<span class="fc" id="L784">      List list = (List)o;</span>
+<span class="fc bfc" id="L785" title="All 2 branches covered.">      if (list.size() != this.size()) {</span>
+<span class="fc" id="L786">        return false;</span>
+      }
+<span class="fc" id="L788">      Iterator thisIt = this.iterator();</span>
+<span class="fc" id="L789">      Iterator listIt = list.iterator();</span>
+<span class="pc bpc" id="L790" title="1 of 4 branches missed.">      while (thisIt.hasNext() &amp;&amp; listIt.hasNext()) {</span>
+<span class="pc bpc" id="L791" title="1 of 2 branches missed.">        if (! thisIt.next().equals(listIt.next())) {</span>
+<span class="nc" id="L792">          return false;</span>
+        }
+      }
+<span class="pc bpc" id="L795" title="2 of 4 branches missed.">      if (thisIt.hasNext() || listIt.hasNext()) {</span>
+<span class="nc" id="L796">        return false;</span>
+      }
+<span class="fc" id="L798">      return true;</span>
+    } else {
+<span class="fc" id="L800">      return false;</span>
+    }
+  }
+  
+  @Override
+  public int hashCode() {
+<span class="fc" id="L806">    return currentData.hashCode();</span>
+  }
+  
+  /**
+   * This is an iterator implementation that is designed to iterate over a given dataSet.  
+   * Modifiable actions will attempt to make changes to the parent class.
+   * 
+   * @since 1.0.0
+   */
+  protected class DataSetListIterator implements ListIterator&lt;T&gt; {
+    private DataSet&lt;T&gt; dataSet;
+    private int nextIndex;
+
+<span class="fc" id="L819">    public DataSetListIterator(DataSet&lt;T&gt; dataSet, int index) {</span>
+<span class="fc" id="L820">      this.dataSet = dataSet;</span>
+<span class="fc" id="L821">      nextIndex = index;</span>
+<span class="fc" id="L822">    }</span>
+
+    @Override
+    public boolean hasNext() {
+<span class="fc bfc" id="L826" title="All 2 branches covered.">      return nextIndex &lt; dataSet.size;</span>
+    }
+
+    @Override
+    public T next() {
+<span class="fc" id="L831">      verifyPosition();</span>
+      
+<span class="fc" id="L833">      return dataSet.get(nextIndex++);</span>
+    }
+
+    @Override
+    public boolean hasPrevious() {
+<span class="fc bfc" id="L838" title="All 2 branches covered.">      return nextIndex - 1 &gt;= 0;</span>
+    }
+
+    @Override
+    public T previous() {
+<span class="fc" id="L843">      nextIndex--;</span>
+      
+<span class="fc" id="L845">      verifyPosition();</span>
+      
+<span class="fc" id="L847">      return dataSet.get(nextIndex);</span>
+    }
+    
+    private void verifyPosition() {
+<span class="fc bfc" id="L851" title="All 4 branches covered.">      if (nextIndex &lt; 0 || nextIndex &gt;= dataSet.size) {</span>
+<span class="fc" id="L852">        throw new NoSuchElementException();</span>
+      }
+<span class="fc" id="L854">    }</span>
+
+    @Override
+    public int nextIndex() {
+<span class="fc" id="L858">      return nextIndex;</span>
+    }
+
+    @Override
+    public int previousIndex() {
+<span class="fc" id="L863">      return nextIndex - 1;</span>
+    }
+
+    @Override
+    public void remove() {
+<span class="fc" id="L868">      synchronized (modificationLock) {</span>
+        // you can not cause concurrent modification exceptions with this implementation
+<span class="pc bpc" id="L870" title="1 of 2 branches missed.">        if (currentData == dataSet) {</span>
+<span class="fc" id="L871">          ConcurrentArrayList.this.remove(--nextIndex);</span>
+          
+<span class="fc" id="L873">          dataSet = currentData;</span>
+        } else {
+<span class="nc" id="L875">          int globalIndex = ConcurrentArrayList.this.indexOf(dataSet.get(nextIndex - 1));</span>
+<span class="nc bnc" id="L876" title="All 2 branches missed.">          if (globalIndex &gt;= 0) {</span>
+<span class="nc" id="L877">            ConcurrentArrayList.this.remove(globalIndex);</span>
+          }
+        }
+<span class="fc" id="L880">      }</span>
+<span class="fc" id="L881">    }</span>
+
+    @Override
+    public void set(T e) {
+<span class="fc" id="L885">      synchronized (modificationLock) {</span>
+<span class="pc bpc" id="L886" title="1 of 2 branches missed.">        if (currentData == dataSet) {</span>
+<span class="fc" id="L887">          ConcurrentArrayList.this.set(nextIndex - 1, e);</span>
+          
+<span class="fc" id="L889">          dataSet = currentData;</span>
+        } else {
+<span class="nc" id="L891">          int globalIndex = ConcurrentArrayList.this.indexOf(dataSet.get(nextIndex - 1));</span>
+<span class="nc bnc" id="L892" title="All 2 branches missed.">          if (globalIndex &gt;= 0) {</span>
+<span class="nc" id="L893">            ConcurrentArrayList.this.set(globalIndex, e);</span>
+          }
+        }
+<span class="fc" id="L896">      }</span>
+<span class="fc" id="L897">    }</span>
+
+    @Override
+    public void add(T e) {
+<span class="fc" id="L901">      synchronized (modificationLock) {</span>
+<span class="pc bpc" id="L902" title="1 of 2 branches missed.">        if (currentData == dataSet) {</span>
+<span class="fc" id="L903">          ConcurrentArrayList.this.add(nextIndex, e);</span>
+          
+<span class="fc" id="L905">          nextIndex++;</span>
+          
+<span class="fc" id="L907">          dataSet = currentData;</span>
+        } else {
+<span class="nc" id="L909">          int globalIndex = ConcurrentArrayList.this.indexOf(dataSet.get(nextIndex - 1));</span>
+<span class="nc bnc" id="L910" title="All 2 branches missed.">          if (globalIndex &gt;= 0) {</span>
+<span class="nc" id="L911">            ConcurrentArrayList.this.add(globalIndex + 1, e);</span>
+          }
+        }
+<span class="fc" id="L914">      }</span>
+<span class="fc" id="L915">    }</span>
+  }
+  
+  /**
+   * This is designed to be an immutable version of the list.  Modifiable actions will return a 
+   * new instance that is based off this one.  Because the array may change in areas outside of 
+   * the scope of this dataArray, it is expected that the modificationLock is held while any 
+   * modifiable operations are happening.
+   * 
+   * @since 1.0.0
+   * @param &lt;T&gt; type of object that is held
+   */
+  protected static class DataSet&lt;T&gt; {
+    protected final Object[] dataArray;
+    protected final int dataStartIndex; // inclusive
+    protected final int dataEndIndex;   // exclusive
+    protected final int size;
+    private int frontPadding; // locked around modificationLock
+    private int rearPadding; // locked around modificationLock
+    
+    protected DataSet(Object[] dataArray, int frontPadding, int rearPadding) {
+<span class="fc" id="L936">      this(dataArray, frontPadding, dataArray.length - rearPadding, frontPadding, rearPadding);</span>
+<span class="fc" id="L937">    }</span>
+
+    protected DataSet(Object[] dataArray, 
+                      int dataStartIndex, int dataEndIndex, 
+<span class="fc" id="L941">                      int frontPadding, int rearPadding) {</span>
+<span class="fc" id="L942">      this.dataArray = dataArray;</span>
+<span class="fc" id="L943">      this.dataStartIndex = dataStartIndex;</span>
+<span class="fc" id="L944">      this.dataEndIndex = dataEndIndex;</span>
+<span class="fc" id="L945">      this.size = dataEndIndex - dataStartIndex;</span>
+<span class="fc" id="L946">      this.frontPadding = frontPadding;</span>
+<span class="fc" id="L947">      this.rearPadding = rearPadding;</span>
+<span class="fc" id="L948">    }</span>
+    
+    /**
+     * Returns a new {@link DataSet} that contains only relevant and active items in the data 
+     * array.  The returned DataSet has the same set front and rear padding, so additional 
+     * modifications will expand the array based off those set values.
+     * 
+     * @return New trimmed {@link DataSet}, or {@code this} if already trimmed
+     */
+    public DataSet&lt;T&gt; trimToSize() {
+<span class="pc bpc" id="L958" title="1 of 4 branches missed.">      if (dataStartIndex == 0 &amp;&amp; dataEndIndex == dataArray.length) {</span>
+<span class="fc" id="L959">        return this;</span>
+      } else {
+<span class="fc" id="L961">        Object[] newData = new Object[size];</span>
+<span class="fc" id="L962">        System.arraycopy(dataArray, dataStartIndex, newData, 0, size);</span>
+<span class="fc" id="L963">        return new DataSet&lt;&gt;(newData, 0, size, frontPadding, rearPadding);</span>
+      }
+    }
+
+    /**
+     * Call to reposition one index to a new index.
+     * 
+     * @param origCurrentIndex original index to move
+     * @param origNewIndex new index position
+     * @return a new {@link DataSet} which represents the change (or the same reference if the inputs are a no-op)
+     */
+    public DataSet&lt;T&gt; reposition(int origCurrentIndex, int origNewIndex) {
+<span class="pc bpc" id="L975" title="1 of 2 branches missed.">      if (size == 1) {</span>
+        // no-op, moving single item to same position
+<span class="nc" id="L977">        return this;</span>
+<span class="fc bfc" id="L978" title="All 4 branches covered.">      } else if (origNewIndex == size &amp;&amp; origCurrentIndex == size - 1) {</span>
+        // no-op, moving end item to end
+<span class="fc" id="L980">        return this;</span>
+      }
+      
+<span class="fc" id="L983">      int currentIndex = origCurrentIndex + dataStartIndex;</span>
+<span class="fc" id="L984">      int newIndex = origNewIndex + dataStartIndex;</span>
+      
+<span class="fc bfc" id="L986" title="All 2 branches covered.">      if (newIndex &gt; currentIndex) {  // move right</span>
+        Object[] newData; // will not be allocated till necessary
+        
+<span class="fc bfc" id="L989" title="All 2 branches covered.">        if (newIndex == dataEndIndex) {</span>
+<span class="fc bfc" id="L990" title="All 6 branches covered.">          if (currentIndex == dataStartIndex &amp;&amp; </span>
+              dataArray.length - 1 &gt; dataEndIndex &amp;&amp; 
+              dataArray[dataEndIndex] == null) {
+            // reposition front item to end without an array copy
+<span class="fc" id="L994">            dataArray[dataEndIndex] = dataArray[currentIndex];</span>
+            
+<span class="fc" id="L996">            return new DataSet&lt;&gt;(dataArray, dataStartIndex + 1, dataEndIndex + 1, </span>
+                                 frontPadding, rearPadding);
+          } else {
+<span class="fc" id="L999">            newData = new Object[size + frontPadding + rearPadding];</span>
+            
+            // moving to end can be done with two array copies at most
+<span class="fc" id="L1002">            System.arraycopy(dataArray, dataStartIndex, </span>
+                             newData, frontPadding, origCurrentIndex);
+<span class="fc" id="L1004">            System.arraycopy(dataArray, currentIndex + 1, </span>
+                             newData, frontPadding + origCurrentIndex, 
+                             size - origCurrentIndex - 1);
+          }
+        } else {
+<span class="fc" id="L1009">          newData = new Object[size + frontPadding + rearPadding];</span>
+          
+          // work backwards
+<span class="fc" id="L1012">          System.arraycopy(dataArray, newIndex,   // write from new position to end</span>
+                           newData, frontPadding + origNewIndex, 
+                           size - origNewIndex);
+<span class="fc" id="L1015">          System.arraycopy(dataArray, currentIndex + 1, // write from removed position to new position</span>
+                           newData, frontPadding + origCurrentIndex, 
+                           origNewIndex - origCurrentIndex);
+<span class="fc" id="L1018">          System.arraycopy(dataArray, dataStartIndex, // write from start to removed position</span>
+                           newData, frontPadding, 
+                           origCurrentIndex);
+        }
+        
+<span class="fc" id="L1023">        newData[frontPadding + origNewIndex - 1] = dataArray[currentIndex];</span>
+        
+<span class="fc" id="L1025">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+<span class="fc bfc" id="L1026" title="All 2 branches covered.">      } else if (newIndex &lt; currentIndex) { // move left</span>
+        Object[] newData; // will not be allocated till necessary
+        
+<span class="fc bfc" id="L1029" title="All 2 branches covered.">        if (newIndex == dataStartIndex) {</span>
+<span class="fc bfc" id="L1030" title="All 6 branches covered.">          if (dataStartIndex &gt; 0 &amp;&amp; </span>
+              currentIndex == dataEndIndex - 1 &amp;&amp; 
+              dataArray[dataStartIndex - 1] == null) {
+            // reposition the end item to the front without an array copy
+<span class="fc" id="L1034">            dataArray[dataStartIndex - 1] = dataArray[currentIndex];</span>
+            
+<span class="fc" id="L1036">            return new DataSet&lt;&gt;(dataArray, dataStartIndex - 1, dataEndIndex - 1, </span>
+                                 frontPadding, rearPadding);
+          } else {
+<span class="fc" id="L1039">            newData = new Object[size + frontPadding + rearPadding];</span>
+            
+            // moving to front can be done with two array copies at most
+<span class="fc" id="L1042">            System.arraycopy(dataArray, dataStartIndex, </span>
+                             newData, frontPadding + 1, origCurrentIndex);
+<span class="fc" id="L1044">            System.arraycopy(dataArray, currentIndex + 1, </span>
+                             newData, frontPadding + origCurrentIndex + 1, 
+                             dataEndIndex - currentIndex - 1);
+          }
+        } else {
+<span class="fc" id="L1049">          newData = new Object[size + frontPadding + rearPadding];</span>
+          
+          // work forward
+<span class="fc" id="L1052">          System.arraycopy(dataArray, dataStartIndex,   // write from start to new position</span>
+                           newData, frontPadding, origNewIndex);
+<span class="fc" id="L1054">          System.arraycopy(dataArray, newIndex,   // write from new position to current position</span>
+                           newData, frontPadding + origNewIndex + 1, 
+                           origCurrentIndex - origNewIndex);
+<span class="fc bfc" id="L1057" title="All 2 branches covered.">          if (origCurrentIndex &lt; size - 1) {</span>
+<span class="fc" id="L1058">            System.arraycopy(dataArray, currentIndex + 1, // write from current position to end</span>
+                             newData, frontPadding + origCurrentIndex + 1, 
+                             size - origCurrentIndex - 1);
+          }
+        }
+        
+<span class="fc" id="L1064">        newData[frontPadding + origNewIndex] = dataArray[currentIndex];</span>
+        
+<span class="fc" id="L1066">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      } else {
+        // no-op, moving to same position
+<span class="fc" id="L1069">        return this;</span>
+      }
+    }
+    
+    /**
+     * Used to get a newly sized array which copies the beginning items till the new size is 
+     * reached (or all items if the newSize is larger).  The newly created array will also respect 
+     * the front and rear padding, which is NOT included in the {@code newSize} provided.
+     * 
+     * @param newSize size for data within the new array
+     * @return a new array
+     */
+    private Object[] getArrayCopy(int newSize) {
+<span class="fc" id="L1082">      Object[] newData = new Object[newSize + frontPadding + rearPadding];</span>
+
+<span class="fc" id="L1084">      System.arraycopy(dataArray, dataStartIndex, </span>
+<span class="fc" id="L1085">                       newData, frontPadding, Math.min(size, newSize));</span>
+      
+<span class="fc" id="L1087">      return newData;</span>
+    }
+
+    /**
+     * Returns the item at a given index, this function handles the front padding for you.
+     * 
+     * @param index index of item
+     * @return stored item
+     */
+    @SuppressWarnings(&quot;unchecked&quot;)
+    public T get(int index) {
+<span class="fc" id="L1098">      return (T)dataArray[index + dataStartIndex];</span>
+    }
+
+    /**
+     * Call to check for the index of a given item.  The return index has already had the front 
+     * padding removed from the actual index.
+     * 
+     * @param o Object to search for
+     * @return index of item, or -1 if not found
+     */
+    public int indexOf(Object o) {
+<span class="fc bfc" id="L1109" title="All 2 branches covered.">      for (int i = dataStartIndex; i &lt; dataEndIndex; i++) {</span>
+<span class="fc bfc" id="L1110" title="All 2 branches covered.">        if (dataArray[i].equals(o)) {</span>
+<span class="fc" id="L1111">          return i - dataStartIndex;</span>
+        }
+      }
+      
+<span class="fc" id="L1115">      return -1;</span>
+    }
+
+    /**
+     * Call to check for the last index of a given item.  The return index has already had the 
+     * front padding removed from the actual index.
+     * 
+     * @param o Object to search for
+     * @return index of item, or -1 if not found
+     */
+    public int lastIndexOf(Object o) {
+<span class="fc bfc" id="L1126" title="All 2 branches covered.">      for (int i = dataEndIndex - 1; i &gt;= dataStartIndex; i--) {</span>
+<span class="fc bfc" id="L1127" title="All 2 branches covered.">        if (dataArray[i].equals(o)) {</span>
+<span class="fc" id="L1128">          return i - dataStartIndex;</span>
+        }
+      }
+      
+<span class="fc" id="L1132">      return -1;</span>
+    }
+
+    /**
+     * Sets a specific index with a given element.
+     * 
+     * @param index index to set the item at
+     * @param element element to place in the array
+     * @return a new {@link DataSet} which represents the change
+     */
+    public DataSet&lt;T&gt; set(int index, T element) {
+<span class="fc bfc" id="L1143" title="All 2 branches covered.">      if (index == size) {</span>
+<span class="fc" id="L1144">        return addToEnd(element);</span>
+      } else {
+<span class="fc" id="L1146">        Object[] newData = getArrayCopy(size);</span>
+<span class="fc" id="L1147">        newData[index + frontPadding] = element;</span>
+      
+<span class="fc" id="L1149">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      }
+    }
+
+    /**
+     * Adds an item to the front of the structure.
+     * 
+     * @param e item to be added
+     * @return a new {@link DataSet} which represents the change
+     */
+    public DataSet&lt;T&gt; addToFront(T e) {
+<span class="pc bpc" id="L1160" title="1 of 4 branches missed.">      if (dataStartIndex &gt; 0 &amp;&amp; dataArray[dataStartIndex - 1] == null) {</span>
+        // there is space in the current array
+<span class="nc" id="L1162">        dataArray[dataStartIndex - 1] = e;</span>
+        
+<span class="nc" id="L1164">        return new DataSet&lt;&gt;(dataArray, </span>
+                             dataStartIndex - 1, dataEndIndex, 
+                             frontPadding, rearPadding);
+      } else {
+<span class="fc" id="L1168">        Object[] newData = new Object[size + 1 + frontPadding + rearPadding];</span>
+        
+<span class="fc" id="L1170">        newData[frontPadding] = e;</span>
+<span class="fc" id="L1171">        System.arraycopy(dataArray, dataStartIndex, newData, frontPadding + 1, size);</span>
+        
+<span class="fc" id="L1173">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      }
+    }
+    
+    /**
+     * Adds an item to the end of the structure.
+     * 
+     * @param e item to be added
+     * @return a new {@link DataSet} which represents the change
+     */
+    public DataSet&lt;T&gt; addToEnd(T e) {
+<span class="fc bfc" id="L1184" title="All 4 branches covered.">      if (dataArray.length - 1 &gt;= dataEndIndex &amp;&amp; dataArray[dataEndIndex] == null) {</span>
+        // there is space in the current array
+<span class="fc" id="L1186">        dataArray[dataEndIndex] = e;</span>
+        
+<span class="fc" id="L1188">        return new DataSet&lt;&gt;(dataArray, dataStartIndex, dataEndIndex + 1, frontPadding, rearPadding);</span>
+      } else {
+<span class="fc" id="L1190">        Object[] newData = getArrayCopy(size + 1);</span>
+<span class="fc" id="L1191">        newData[size + frontPadding] = e;</span>
+        
+<span class="fc" id="L1193">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      }
+    }
+
+    /**
+     * Adds an item at a specific index within the structure.
+     * 
+     * @param origIndex index to place the item
+     * @param element item to be added
+     * @return a new {@link DataSet} which represents the change
+     */
+    public DataSet&lt;T&gt; add(int origIndex, T element) {
+<span class="fc bfc" id="L1205" title="All 2 branches covered.">      if (origIndex == 0) { // add to front</span>
+<span class="fc" id="L1206">        return addToFront(element);</span>
+<span class="fc bfc" id="L1207" title="All 2 branches covered.">      } else if (origIndex == size) { // add to end</span>
+<span class="fc" id="L1208">        return addToEnd(element);</span>
+      } else {  // add into middle
+<span class="fc" id="L1210">        Object[] newData = new Object[size + 1 + frontPadding + rearPadding];</span>
+<span class="fc" id="L1211">        System.arraycopy(dataArray, dataStartIndex, newData, frontPadding, origIndex);</span>
+<span class="fc" id="L1212">        newData[frontPadding + origIndex] = element;</span>
+<span class="fc" id="L1213">        System.arraycopy(dataArray, dataStartIndex + origIndex, </span>
+                         newData, frontPadding + origIndex + 1, size - origIndex);
+        
+<span class="fc" id="L1216">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      }
+    }
+
+    /**
+     * Adds all items within the collection to the end of the structure.
+     * 
+     * @param c collection to add items from
+     * @return a new {@link DataSet} which represents the change, or this reference if the collection is empty
+     */
+    public DataSet&lt;T&gt; addAll(Collection&lt;? extends T&gt; c) {
+<span class="fc" id="L1227">      return addAll(size, c);</span>
+    }
+
+    /**
+     * Adds all items within the collection at a given index.
+     * 
+     * @param origIndex index to start insertion at
+     * @param c collection to add items from
+     * @return a new {@link DataSet} which represents the change, or this reference if the collection is empty
+     */
+    public DataSet&lt;T&gt; addAll(int origIndex, Collection&lt;? extends T&gt; c) {
+<span class="pc bpc" id="L1238" title="2 of 4 branches missed.">      if (c == null || c.isEmpty()) {</span>
+<span class="nc" id="L1239">        return this;</span>
+      }
+      
+<span class="fc" id="L1242">      Object[] toAdd = c.toArray();</span>
+<span class="fc bfc" id="L1243" title="All 2 branches covered.">      if (origIndex == 0) {</span>
+        // add to front
+<span class="pc bpc" id="L1245" title="1 of 4 branches missed.">        if (toAdd.length &lt;= dataStartIndex &amp;&amp; </span>
+            dataArray[dataStartIndex - 1] == null) {  // if previous one is null, all previous ones are null
+          // we can copy the new items in, without copying our existing array
+<span class="fc" id="L1248">          System.arraycopy(toAdd, 0, dataArray, dataStartIndex - toAdd.length, toAdd.length);</span>
+          
+<span class="fc" id="L1250">          return new DataSet&lt;&gt;(dataArray, </span>
+                               dataStartIndex - toAdd.length, dataEndIndex, 
+                               frontPadding, rearPadding);
+        } else {
+<span class="fc" id="L1254">          Object[] newData = new Object[size + toAdd.length + frontPadding + rearPadding];</span>
+          
+<span class="fc" id="L1256">          System.arraycopy(toAdd, 0, newData, frontPadding, toAdd.length);</span>
+<span class="fc" id="L1257">          System.arraycopy(dataArray, dataStartIndex, </span>
+                           newData, frontPadding + toAdd.length, size);
+          
+<span class="fc" id="L1260">          return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+        }
+<span class="fc bfc" id="L1262" title="All 2 branches covered.">      } else if (origIndex == size) {</span>
+        // add to end
+<span class="pc bpc" id="L1264" title="1 of 4 branches missed.">        if (dataEndIndex + toAdd.length &lt;= dataArray.length &amp;&amp; </span>
+            dataArray[dataEndIndex] == null) {  // if next one is null, all future ones should be
+          // we can copy the new items in, without copying our existing array
+<span class="fc" id="L1267">          System.arraycopy(toAdd, 0, dataArray, dataEndIndex, toAdd.length);</span>
+
+<span class="fc" id="L1269">          return new DataSet&lt;&gt;(dataArray, </span>
+                               dataStartIndex, dataEndIndex + toAdd.length, 
+                               frontPadding, rearPadding);
+        } else {
+<span class="fc" id="L1273">          Object[] newData = getArrayCopy(size + toAdd.length);</span>
+          
+<span class="fc" id="L1275">          System.arraycopy(toAdd, 0, newData, size + frontPadding, toAdd.length);</span>
+          
+<span class="fc" id="L1277">          return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+        }
+      } else {
+        // add in middle
+<span class="fc" id="L1281">        Object[] newData = new Object[size + toAdd.length + frontPadding + rearPadding];</span>
+        
+<span class="fc" id="L1283">        System.arraycopy(dataArray, dataStartIndex, newData, frontPadding, origIndex);</span>
+<span class="fc" id="L1284">        System.arraycopy(toAdd, 0, newData, frontPadding + origIndex, toAdd.length);</span>
+<span class="fc" id="L1285">        System.arraycopy(dataArray, dataStartIndex + origIndex, </span>
+                         newData, frontPadding + origIndex + toAdd.length, size - origIndex);
+        
+<span class="fc" id="L1288">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      }
+    }
+    
+    /**
+     * Removes a specific index from the collection.
+     * 
+     * @param origIndex index to remove from
+     * @return a new {@link DataSet} which represents the change
+     */
+    public DataSet&lt;T&gt; remove(int origIndex) {
+<span class="fc" id="L1299">      int index = origIndex + dataStartIndex;</span>
+      
+<span class="fc bfc" id="L1301" title="All 2 branches covered.">      if (index == dataStartIndex) {  // remove from front without copy</span>
+<span class="fc" id="L1302">        return new DataSet&lt;&gt;(dataArray, </span>
+                             dataStartIndex + 1, dataEndIndex, 
+                             frontPadding, rearPadding);
+<span class="fc bfc" id="L1305" title="All 2 branches covered.">      } else if (index == dataEndIndex - 1) {  // remove from end without copy</span>
+<span class="fc" id="L1306">        return new DataSet&lt;&gt;(dataArray, </span>
+                             dataStartIndex, dataEndIndex - 1, 
+                             frontPadding, rearPadding);
+      } else {  // remove from middle
+<span class="fc" id="L1310">        Object[] newData = new Object[size - 1 + frontPadding + rearPadding];</span>
+        
+<span class="fc" id="L1312">        System.arraycopy(dataArray, dataStartIndex, newData, frontPadding, origIndex);</span>
+<span class="fc" id="L1313">        System.arraycopy(dataArray, index + 1, </span>
+                         newData, frontPadding + origIndex, size - origIndex - 1);
+        
+<span class="fc" id="L1316">        return new DataSet&lt;&gt;(newData, frontPadding, rearPadding);</span>
+      }
+    }
+
+    /**
+     * Removes a specific index from the collection.
+     * 
+     * @param c Collection which contains items to be removed
+     * @return a new {@link DataSet} which represents the change, or the same reference if no modification was necessary
+     */
+    public DataSet&lt;T&gt; removeAll(Collection&lt;?&gt; c) {
+<span class="fc" id="L1327">      Object[] resultArray = null;  // will only be allocated once modification occurs</span>
+      
+<span class="fc" id="L1329">      int i = frontPadding;</span>
+<span class="fc bfc" id="L1330" title="All 2 branches covered.">      for (int currentIndex = 0; currentIndex &lt; size; currentIndex++) {</span>
+<span class="fc" id="L1331">        Object currItem = this.get(currentIndex);</span>
+<span class="fc bfc" id="L1332" title="All 2 branches covered.">        if (! c.contains(currItem)) {</span>
+<span class="fc bfc" id="L1333" title="All 2 branches covered.">          if (resultArray != null) {</span>
+<span class="fc" id="L1334">            resultArray[i++] = currItem;</span>
+          } else {
+            /* if result array has not been created yet, we will do a single array copy
+             * once a modification occurs. 
+             */
+<span class="fc" id="L1339">            i++;</span>
+          }
+        } else {
+          // modification occurred, create array and copy
+<span class="fc bfc" id="L1343" title="All 2 branches covered.">          if (resultArray == null) {</span>
+<span class="fc" id="L1344">            resultArray = new Object[size + frontPadding + rearPadding];</span>
+<span class="fc" id="L1345">            System.arraycopy(dataArray, dataStartIndex, resultArray, frontPadding, i);</span>
+          }
+        }
+      }
+      
+<span class="fc bfc" id="L1350" title="All 2 branches covered.">      if (resultArray != null) {</span>
+<span class="fc" id="L1351">        return new DataSet&lt;&gt;(resultArray, frontPadding, i, frontPadding, rearPadding);</span>
+      } else {
+<span class="fc" id="L1353">        return this;</span>
+      }
+    }
+
+    /**
+     * Keeps only the items in the provided collection.
+     * 
+     * @param c Collection to examine for items to retain
+     * @return a new {@link DataSet} which represents the change, or the same reference if no modification was necessary
+     */
+    public DataSet&lt;T&gt; retainAll(Collection&lt;?&gt; c) {
+<span class="fc" id="L1364">      Object[] resultArray = null;  // will only be allocated once modification occurs</span>
+      
+<span class="fc" id="L1366">      int i = frontPadding;</span>
+<span class="fc bfc" id="L1367" title="All 2 branches covered.">      for (int currentIndex = 0; currentIndex &lt; size; currentIndex++) {</span>
+<span class="fc" id="L1368">        Object currItem = this.get(currentIndex);</span>
+<span class="fc bfc" id="L1369" title="All 2 branches covered.">        if (c.contains(currItem)) {</span>
+<span class="pc bpc" id="L1370" title="1 of 2 branches missed.">          if (resultArray != null) {</span>
+<span class="nc" id="L1371">            resultArray[i++] = currItem;</span>
+          } else {
+<span class="fc" id="L1373">            i++;</span>
+          }
+        } else {
+          // modification occurred, create array and copy
+<span class="fc bfc" id="L1377" title="All 2 branches covered.">          if (resultArray == null) {</span>
+<span class="fc" id="L1378">            resultArray = new Object[size + frontPadding + rearPadding];</span>
+<span class="fc" id="L1379">            System.arraycopy(dataArray, dataStartIndex, resultArray, frontPadding, i);</span>
+          }
+        }
+      }
+      
+<span class="fc bfc" id="L1384" title="All 2 branches covered.">      if (resultArray != null) {</span>
+<span class="fc" id="L1385">        return new DataSet&lt;&gt;(resultArray, frontPadding, i, frontPadding, rearPadding);</span>
+      } else {
+<span class="fc" id="L1387">        return this;</span>
+      }
+    }
+    
+    @Override
+    public boolean equals(Object o) {
+<span class="fc bfc" id="L1393" title="All 2 branches covered.">      if (this == o) {</span>
+<span class="fc" id="L1394">        return true;</span>
+<span class="fc bfc" id="L1395" title="All 2 branches covered.">      } else if (o instanceof DataSet) {</span>
+        @SuppressWarnings(&quot;rawtypes&quot;)
+<span class="fc" id="L1397">        DataSet ds = (DataSet)o;</span>
+<span class="fc" id="L1398">        return equalsEquivelent(ds);</span>
+      } else {
+<span class="fc" id="L1400">        return false;</span>
+      }
+    }
+    
+    /**
+     * Call to see if the lists are equivalently equal, meaning that they have the same items in 
+     * the same order.  This is what most equals operations for lists expect.
+     * 
+     * @param ds Other DataSet to compare against (can't be {@code null})
+     * @return {@code true} if they are equal
+     */
+    @SuppressWarnings(&quot;rawtypes&quot;)
+    public boolean equalsEquivelent(DataSet ds) {
+<span class="fc bfc" id="L1413" title="All 2 branches covered.">      if (this.size != ds.size) {</span>
+<span class="fc" id="L1414">        return false;</span>
+      }
+      
+<span class="fc bfc" id="L1417" title="All 2 branches covered.">      for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L1418">        Object thisItem = this.get(i);</span>
+<span class="fc" id="L1419">        Object thatItem = ds.get(i);</span>
+<span class="pc bpc" id="L1420" title="4 of 6 branches missed.">        if ((thisItem == null &amp;&amp; thatItem != null) || </span>
+<span class="pc bpc" id="L1421" title="1 of 2 branches missed.">            (thisItem != null &amp;&amp; ! thisItem.equals(thatItem))) {</span>
+<span class="nc" id="L1422">          return false;</span>
+        }
+      }
+<span class="fc" id="L1425">      return true;</span>
+    }
+    
+    /**
+     * This is a call to check if the DataSet is exactly equal.  This is unique for the design of 
+     * this collection.  This can be a quicker check, but may result in saying DataSet's are not 
+     * equal, when they basically are equal.
+     * 
+     * @param ds Other DataSet to compare against (can't be null)
+     * @return {@code true} if they are equal
+     */
+    @SuppressWarnings(&quot;rawtypes&quot;)
+    public boolean equalsExactly(DataSet ds) {
+<span class="fc bfc" id="L1438" title="All 2 branches covered.">      if (this == ds) {</span>
+<span class="fc" id="L1439">        return true;</span>
+      } else {
+<span class="fc bfc" id="L1441" title="All 6 branches covered.">        if (dataStartIndex != ds.dataStartIndex || </span>
+            dataEndIndex != ds.dataEndIndex || 
+            dataArray.length != ds.dataArray.length) {
+<span class="fc" id="L1444">          return false;</span>
+        } else {
+<span class="fc bfc" id="L1446" title="All 2 branches covered.">          for (int i = 0; i &lt; dataArray.length; i++) {</span>
+<span class="pc bpc" id="L1447" title="4 of 6 branches missed.">            if ((dataArray[i] == null &amp;&amp; ds.dataArray[i] != null) || </span>
+<span class="fc bfc" id="L1448" title="All 2 branches covered.">                (dataArray[i] != null &amp;&amp; ! dataArray[i].equals(ds.dataArray[i]))) {</span>
+<span class="fc" id="L1449">              return false;</span>
+            }
+          }
+<span class="fc" id="L1452">          return true;</span>
+        }
+      }
+    }
+    
+    @Override
+    public int hashCode() {
+<span class="fc" id="L1459">      int hashCode = 1;</span>
+<span class="fc bfc" id="L1460" title="All 2 branches covered.">      for (int i = dataStartIndex; i &lt; dataEndIndex; i++) {</span>
+<span class="fc" id="L1461">        hashCode = HASH_CODE_PRIME_NUMBER * hashCode + dataArray[i].hashCode();</span>
+      }
+      
+<span class="fc" id="L1464">      return hashCode;</span>
+    }
+    
+    @Override
+    public String toString() {
+<span class="fc" id="L1469">      StringBuilder result = new StringBuilder();</span>
+      
+<span class="fc" id="L1471">      result.append('[');</span>
+<span class="fc bfc" id="L1472" title="All 2 branches covered.">      for (int i = 0; i &lt; dataArray.length; i++) {</span>
+<span class="pc bpc" id="L1473" title="1 of 2 branches missed.">        if (i != 0) {</span>
+<span class="nc" id="L1474">          result.append(&quot;, &quot;);</span>
+        }
+<span class="pc bpc" id="L1476" title="1 of 2 branches missed.">        if (i == dataStartIndex) {</span>
+<span class="fc" id="L1477">          result.append('S');</span>
+        }
+<span class="fc" id="L1479">        result.append(i).append('-').append(dataArray[i]);</span>
+<span class="pc bpc" id="L1480" title="1 of 2 branches missed.">        if (i == dataEndIndex - 1) {</span>
+<span class="fc" id="L1481">          result.append('E');</span>
+        }
+      }
+<span class="fc" id="L1484">      result.append(']');</span>
+      
+<span class="fc" id="L1486">      return result.toString();</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

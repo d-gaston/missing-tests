@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>EAN13Reader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">core$All_in_core.exec</a> &gt; <a href="index.source.html" class="el_package">com.google.zxing.oned</a> &gt; <span class="el_source">EAN13Reader.java</span></div><h1>EAN13Reader.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2008 ZXing authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.zxing.oned;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.common.BitArray;
+
+/**
+ * &lt;p&gt;Implements decoding of the EAN-13 format.&lt;/p&gt;
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ * @author Sean Owen
+ * @author alasdair@google.com (Alasdair Mackintosh)
+ */
+public final class EAN13Reader extends UPCEANReader {
+
+  // For an EAN-13 barcode, the first digit is represented by the parities used
+  // to encode the next six digits, according to the table below. For example,
+  // if the barcode is 5 123456 789012 then the value of the first digit is
+  // signified by using odd for '1', even for '2', even for '3', odd for '4',
+  // odd for '5', and even for '6'. See http://en.wikipedia.org/wiki/EAN-13
+  //
+  //                Parity of next 6 digits
+  //    Digit   0     1     2     3     4     5
+  //       0    Odd   Odd   Odd   Odd   Odd   Odd
+  //       1    Odd   Odd   Even  Odd   Even  Even
+  //       2    Odd   Odd   Even  Even  Odd   Even
+  //       3    Odd   Odd   Even  Even  Even  Odd
+  //       4    Odd   Even  Odd   Odd   Even  Even
+  //       5    Odd   Even  Even  Odd   Odd   Even
+  //       6    Odd   Even  Even  Even  Odd   Odd
+  //       7    Odd   Even  Odd   Even  Odd   Even
+  //       8    Odd   Even  Odd   Even  Even  Odd
+  //       9    Odd   Even  Even  Odd   Even  Odd
+  //
+  // Note that the encoding for '0' uses the same parity as a UPC barcode. Hence
+  // a UPC barcode can be converted to an EAN-13 barcode by prepending a 0.
+  //
+  // The encoding is represented by the following array, which is a bit pattern
+  // using Odd = 0 and Even = 1. For example, 5 is represented by:
+  //
+  //              Odd Even Even Odd Odd Even
+  // in binary:
+  //                0    1    1   0   0    1   == 0x19
+  //
+<span class="fc" id="L61">  static final int[] FIRST_DIGIT_ENCODINGS = {</span>
+      0x00, 0x0B, 0x0D, 0xE, 0x13, 0x19, 0x1C, 0x15, 0x16, 0x1A
+  };
+
+  private final int[] decodeMiddleCounters;
+
+<span class="fc" id="L67">  public EAN13Reader() {</span>
+<span class="fc" id="L68">    decodeMiddleCounters = new int[4];</span>
+<span class="fc" id="L69">  }</span>
+
+  @Override
+  protected int decodeMiddle(BitArray row,
+                             int[] startRange,
+                             StringBuilder resultString) throws NotFoundException {
+<span class="fc" id="L75">    int[] counters = decodeMiddleCounters;</span>
+<span class="fc" id="L76">    counters[0] = 0;</span>
+<span class="fc" id="L77">    counters[1] = 0;</span>
+<span class="fc" id="L78">    counters[2] = 0;</span>
+<span class="fc" id="L79">    counters[3] = 0;</span>
+<span class="fc" id="L80">    int end = row.getSize();</span>
+<span class="fc" id="L81">    int rowOffset = startRange[1];</span>
+
+<span class="fc" id="L83">    int lgPatternFound = 0;</span>
+
+<span class="pc bpc" id="L85" title="1 of 4 branches missed.">    for (int x = 0; x &lt; 6 &amp;&amp; rowOffset &lt; end; x++) {</span>
+<span class="fc" id="L86">      int bestMatch = decodeDigit(row, counters, rowOffset, L_AND_G_PATTERNS);</span>
+<span class="fc" id="L87">      resultString.append((char) ('0' + bestMatch % 10));</span>
+<span class="fc bfc" id="L88" title="All 2 branches covered.">      for (int counter : counters) {</span>
+<span class="fc" id="L89">        rowOffset += counter;</span>
+      }
+<span class="fc bfc" id="L91" title="All 2 branches covered.">      if (bestMatch &gt;= 10) {</span>
+<span class="fc" id="L92">        lgPatternFound |= 1 &lt;&lt; (5 - x);</span>
+      }
+    }
+
+<span class="fc" id="L96">    determineFirstDigit(resultString, lgPatternFound);</span>
+
+<span class="fc" id="L98">    int[] middleRange = findGuardPattern(row, rowOffset, true, MIDDLE_PATTERN);</span>
+<span class="fc" id="L99">    rowOffset = middleRange[1];</span>
+
+<span class="fc bfc" id="L101" title="All 4 branches covered.">    for (int x = 0; x &lt; 6 &amp;&amp; rowOffset &lt; end; x++) {</span>
+<span class="fc" id="L102">      int bestMatch = decodeDigit(row, counters, rowOffset, L_PATTERNS);</span>
+<span class="fc" id="L103">      resultString.append((char) ('0' + bestMatch));</span>
+<span class="fc bfc" id="L104" title="All 2 branches covered.">      for (int counter : counters) {</span>
+<span class="fc" id="L105">        rowOffset += counter;</span>
+      }
+    }
+
+<span class="fc" id="L109">    return rowOffset;</span>
+  }
+
+  @Override
+  BarcodeFormat getBarcodeFormat() {
+<span class="fc" id="L114">    return BarcodeFormat.EAN_13;</span>
+  }
+
+  /**
+   * Based on pattern of odd-even ('L' and 'G') patterns used to encoded the explicitly-encoded
+   * digits in a barcode, determines the implicitly encoded first digit and adds it to the
+   * result string.
+   *
+   * @param resultString string to insert decoded first digit into
+   * @param lgPatternFound int whose bits indicates the pattern of odd/even L/G patterns used to
+   *  encode digits
+   * @throws NotFoundException if first digit cannot be determined
+   */
+  private static void determineFirstDigit(StringBuilder resultString, int lgPatternFound)
+      throws NotFoundException {
+<span class="fc bfc" id="L129" title="All 2 branches covered.">    for (int d = 0; d &lt; 10; d++) {</span>
+<span class="fc bfc" id="L130" title="All 2 branches covered.">      if (lgPatternFound == FIRST_DIGIT_ENCODINGS[d]) {</span>
+<span class="fc" id="L131">        resultString.insert(0, (char) ('0' + d));</span>
+<span class="fc" id="L132">        return;</span>
+      }
+    }
+<span class="fc" id="L135">    throw NotFoundException.getNotFoundInstance();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

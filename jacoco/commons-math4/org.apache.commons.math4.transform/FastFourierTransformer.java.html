@@ -1,0 +1,417 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FastFourierTransformer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.transform</a> &gt; <span class="el_source">FastFourierTransformer.java</span></div><h1>FastFourierTransformer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.transform;
+
+import java.io.Serializable;
+import org.apache.commons.numbers.complex.Complex;
+import org.apache.commons.numbers.core.ArithmeticUtils;
+import org.apache.commons.math4.analysis.FunctionUtils;
+import org.apache.commons.math4.analysis.UnivariateFunction;
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.MathIllegalArgumentException;
+import org.apache.commons.math4.exception.MathIllegalStateException;
+import org.apache.commons.math4.exception.util.LocalizedFormats;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.MathArrays;
+
+/**
+ * Implements the Fast Fourier Transform for transformation of one-dimensional
+ * real or complex data sets. For reference, see &lt;em&gt;Applied Numerical Linear
+ * Algebra&lt;/em&gt;, ISBN 0898713897, chapter 6.
+ * &lt;p&gt;
+ * There are several variants of the discrete Fourier transform, with various
+ * normalization conventions, which are specified by the parameter
+ * {@link DftNormalization}.
+ * &lt;p&gt;
+ * The current implementation of the discrete Fourier transform as a fast
+ * Fourier transform requires the length of the data set to be a power of 2.
+ * This greatly simplifies and speeds up the code. Users can pad the data with
+ * zeros to meet this requirement. There are other flavors of FFT, for
+ * reference, see S. Winograd,
+ * &lt;i&gt;On computing the discrete Fourier transform&lt;/i&gt;, Mathematics of
+ * Computation, 32 (1978), 175 - 199.
+ *
+ * @see DftNormalization
+ * @since 1.2
+ */
+<span class="pc bpc" id="L51" title="1 of 2 branches missed.">public class FastFourierTransformer implements Serializable {</span>
+    /** Serializable version identifier. */
+    static final long serialVersionUID = 20120210L;
+
+    /**
+     * {@code W_SUB_N_R[i]} is the real part of
+     * {@code exp(- 2 * i * pi / n)}:
+     * {@code W_SUB_N_R[i] = cos(2 * pi/ n)}, where {@code n = 2^i}.
+     */
+<span class="fc" id="L60">    private static final double[] W_SUB_N_R =</span>
+            {  0x1.0p0, -0x1.0p0, 0x1.1a62633145c07p-54, 0x1.6a09e667f3bcdp-1
+            , 0x1.d906bcf328d46p-1, 0x1.f6297cff75cbp-1, 0x1.fd88da3d12526p-1, 0x1.ff621e3796d7ep-1
+            , 0x1.ffd886084cd0dp-1, 0x1.fff62169b92dbp-1, 0x1.fffd8858e8a92p-1, 0x1.ffff621621d02p-1
+            , 0x1.ffffd88586ee6p-1, 0x1.fffff62161a34p-1, 0x1.fffffd8858675p-1, 0x1.ffffff621619cp-1
+            , 0x1.ffffffd885867p-1, 0x1.fffffff62161ap-1, 0x1.fffffffd88586p-1, 0x1.ffffffff62162p-1
+            , 0x1.ffffffffd8858p-1, 0x1.fffffffff6216p-1, 0x1.fffffffffd886p-1, 0x1.ffffffffff621p-1
+            , 0x1.ffffffffffd88p-1, 0x1.fffffffffff62p-1, 0x1.fffffffffffd9p-1, 0x1.ffffffffffff6p-1
+            , 0x1.ffffffffffffep-1, 0x1.fffffffffffffp-1, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0, 0x1.0p0
+            , 0x1.0p0, 0x1.0p0, 0x1.0p0 };
+
+    /**
+     * {@code W_SUB_N_I[i]} is the imaginary part of
+     * {@code exp(- 2 * i * pi / n)}:
+     * {@code W_SUB_N_I[i] = -sin(2 * pi/ n)}, where {@code n = 2^i}.
+     */
+<span class="fc" id="L83">    private static final double[] W_SUB_N_I =</span>
+            {  0x1.1a62633145c07p-52, -0x1.1a62633145c07p-53, -0x1.0p0, -0x1.6a09e667f3bccp-1
+            , -0x1.87de2a6aea963p-2, -0x1.8f8b83c69a60ap-3, -0x1.917a6bc29b42cp-4, -0x1.91f65f10dd814p-5
+            , -0x1.92155f7a3667ep-6, -0x1.921d1fcdec784p-7, -0x1.921f0fe670071p-8, -0x1.921f8becca4bap-9
+            , -0x1.921faaee6472dp-10, -0x1.921fb2aecb36p-11, -0x1.921fb49ee4ea6p-12, -0x1.921fb51aeb57bp-13
+            , -0x1.921fb539ecf31p-14, -0x1.921fb541ad59ep-15, -0x1.921fb5439d73ap-16, -0x1.921fb544197ap-17
+            , -0x1.921fb544387bap-18, -0x1.921fb544403c1p-19, -0x1.921fb544422c2p-20, -0x1.921fb54442a83p-21
+            , -0x1.921fb54442c73p-22, -0x1.921fb54442cefp-23, -0x1.921fb54442d0ep-24, -0x1.921fb54442d15p-25
+            , -0x1.921fb54442d17p-26, -0x1.921fb54442d18p-27, -0x1.921fb54442d18p-28, -0x1.921fb54442d18p-29
+            , -0x1.921fb54442d18p-30, -0x1.921fb54442d18p-31, -0x1.921fb54442d18p-32, -0x1.921fb54442d18p-33
+            , -0x1.921fb54442d18p-34, -0x1.921fb54442d18p-35, -0x1.921fb54442d18p-36, -0x1.921fb54442d18p-37
+            , -0x1.921fb54442d18p-38, -0x1.921fb54442d18p-39, -0x1.921fb54442d18p-40, -0x1.921fb54442d18p-41
+            , -0x1.921fb54442d18p-42, -0x1.921fb54442d18p-43, -0x1.921fb54442d18p-44, -0x1.921fb54442d18p-45
+            , -0x1.921fb54442d18p-46, -0x1.921fb54442d18p-47, -0x1.921fb54442d18p-48, -0x1.921fb54442d18p-49
+            , -0x1.921fb54442d18p-50, -0x1.921fb54442d18p-51, -0x1.921fb54442d18p-52, -0x1.921fb54442d18p-53
+            , -0x1.921fb54442d18p-54, -0x1.921fb54442d18p-55, -0x1.921fb54442d18p-56, -0x1.921fb54442d18p-57
+            , -0x1.921fb54442d18p-58, -0x1.921fb54442d18p-59, -0x1.921fb54442d18p-60 };
+
+    /** The type of DFT to be performed. */
+    private final DftNormalization normalization;
+
+    /**
+     * Creates a new instance of this class, with various normalization
+     * conventions.
+     *
+     * @param normalization the type of normalization to be applied to the
+     * transformed data
+     */
+<span class="fc" id="L111">    public FastFourierTransformer(final DftNormalization normalization) {</span>
+<span class="fc" id="L112">        this.normalization = normalization;</span>
+<span class="fc" id="L113">    }</span>
+
+    /**
+     * Performs identical index bit reversal shuffles on two arrays of identical
+     * size. Each element in the array is swapped with another element based on
+     * the bit-reversal of the index. For example, in an array with length 16,
+     * item at binary index 0011 (decimal 3) would be swapped with the item at
+     * binary index 1100 (decimal 12).
+     *
+     * @param a the first array to be shuffled
+     * @param b the second array to be shuffled
+     */
+    private static void bitReversalShuffle2(double[] a, double[] b) {
+<span class="fc" id="L126">        final int n = a.length;</span>
+<span class="pc bpc" id="L127" title="2 of 4 branches missed.">        assert b.length == n;</span>
+<span class="fc" id="L128">        final int halfOfN = n &gt;&gt; 1;</span>
+
+<span class="fc" id="L130">        int j = 0;</span>
+<span class="fc bfc" id="L131" title="All 2 branches covered.">        for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc bfc" id="L132" title="All 2 branches covered.">            if (i &lt; j) {</span>
+                // swap indices i &amp; j
+<span class="fc" id="L134">                double temp = a[i];</span>
+<span class="fc" id="L135">                a[i] = a[j];</span>
+<span class="fc" id="L136">                a[j] = temp;</span>
+
+<span class="fc" id="L138">                temp = b[i];</span>
+<span class="fc" id="L139">                b[i] = b[j];</span>
+<span class="fc" id="L140">                b[j] = temp;</span>
+            }
+
+<span class="fc" id="L143">            int k = halfOfN;</span>
+<span class="fc bfc" id="L144" title="All 4 branches covered.">            while (k &lt;= j &amp;&amp; k &gt; 0) {</span>
+<span class="fc" id="L145">                j -= k;</span>
+<span class="fc" id="L146">                k &gt;&gt;= 1;</span>
+            }
+<span class="fc" id="L148">            j += k;</span>
+        }
+<span class="fc" id="L150">    }</span>
+
+    /**
+     * Applies the proper normalization to the specified transformed data.
+     *
+     * @param dataRI the unscaled transformed data
+     * @param normalization the normalization to be applied
+     * @param type the type of transform (forward, inverse) which resulted in the specified data
+     */
+    private static void normalizeTransformedData(final double[][] dataRI,
+        final DftNormalization normalization, final TransformType type) {
+
+<span class="fc" id="L162">        final double[] dataR = dataRI[0];</span>
+<span class="fc" id="L163">        final double[] dataI = dataRI[1];</span>
+<span class="fc" id="L164">        final int n = dataR.length;</span>
+<span class="pc bpc" id="L165" title="2 of 4 branches missed.">        assert dataI.length == n;</span>
+
+<span class="pc bpc" id="L167" title="1 of 3 branches missed.">        switch (normalization) {</span>
+            case STANDARD:
+<span class="fc bfc" id="L169" title="All 2 branches covered.">                if (type == TransformType.INVERSE) {</span>
+<span class="fc" id="L170">                    final double scaleFactor = 1.0 / ((double) n);</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">                    for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L172">                        dataR[i] *= scaleFactor;</span>
+<span class="fc" id="L173">                        dataI[i] *= scaleFactor;</span>
+                    }
+<span class="fc" id="L175">                }</span>
+                break;
+            case UNITARY:
+<span class="fc" id="L178">                final double scaleFactor = 1.0 / FastMath.sqrt(n);</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">                for (int i = 0; i &lt; n; i++) {</span>
+<span class="fc" id="L180">                    dataR[i] *= scaleFactor;</span>
+<span class="fc" id="L181">                    dataI[i] *= scaleFactor;</span>
+                }
+<span class="fc" id="L183">                break;</span>
+            default:
+                /*
+                 * This should never occur in normal conditions. However this
+                 * clause has been added as a safeguard if other types of
+                 * normalizations are ever implemented, and the corresponding
+                 * test is forgotten in the present switch.
+                 */
+<span class="nc" id="L191">                throw new MathIllegalStateException();</span>
+        }
+<span class="fc" id="L193">    }</span>
+
+    /**
+     * Computes the standard transform of the specified complex data. The
+     * computation is done in place. The input data is laid out as follows
+     * &lt;ul&gt;
+     *   &lt;li&gt;{@code dataRI[0][i]} is the real part of the {@code i}-th data point,&lt;/li&gt;
+     *   &lt;li&gt;{@code dataRI[1][i]} is the imaginary part of the {@code i}-th data point.&lt;/li&gt;
+     * &lt;/ul&gt;
+     *
+     * @param dataRI the two dimensional array of real and imaginary parts of the data
+     * @param normalization the normalization to be applied to the transformed data
+     * @param type the type of transform (forward, inverse) to be performed
+     * @throws DimensionMismatchException if the number of rows of the specified
+     *   array is not two, or the array is not rectangular
+     * @throws MathIllegalArgumentException if the number of data points is not
+     *   a power of two
+     */
+    public static void transformInPlace(final double[][] dataRI,
+        final DftNormalization normalization, final TransformType type) {
+
+<span class="pc bpc" id="L214" title="1 of 2 branches missed.">        if (dataRI.length != 2) {</span>
+<span class="nc" id="L215">            throw new DimensionMismatchException(dataRI.length, 2);</span>
+        }
+<span class="fc" id="L217">        final double[] dataR = dataRI[0];</span>
+<span class="fc" id="L218">        final double[] dataI = dataRI[1];</span>
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">        if (dataR.length != dataI.length) {</span>
+<span class="nc" id="L220">            throw new DimensionMismatchException(dataI.length, dataR.length);</span>
+        }
+
+<span class="fc" id="L223">        final int n = dataR.length;</span>
+<span class="fc bfc" id="L224" title="All 2 branches covered.">        if (!ArithmeticUtils.isPowerOfTwo(n)) {</span>
+<span class="fc" id="L225">            throw new MathIllegalArgumentException(</span>
+                LocalizedFormats.NOT_POWER_OF_TWO_CONSIDER_PADDING,
+<span class="fc" id="L227">                Integer.valueOf(n));</span>
+        }
+
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">        if (n == 1) {</span>
+<span class="nc" id="L231">            return;</span>
+<span class="fc bfc" id="L232" title="All 2 branches covered.">        } else if (n == 2) {</span>
+<span class="fc" id="L233">            final double srcR0 = dataR[0];</span>
+<span class="fc" id="L234">            final double srcI0 = dataI[0];</span>
+<span class="fc" id="L235">            final double srcR1 = dataR[1];</span>
+<span class="fc" id="L236">            final double srcI1 = dataI[1];</span>
+
+            // X_0 = x_0 + x_1
+<span class="fc" id="L239">            dataR[0] = srcR0 + srcR1;</span>
+<span class="fc" id="L240">            dataI[0] = srcI0 + srcI1;</span>
+            // X_1 = x_0 - x_1
+<span class="fc" id="L242">            dataR[1] = srcR0 - srcR1;</span>
+<span class="fc" id="L243">            dataI[1] = srcI0 - srcI1;</span>
+
+<span class="fc" id="L245">            normalizeTransformedData(dataRI, normalization, type);</span>
+<span class="fc" id="L246">            return;</span>
+        }
+
+<span class="fc" id="L249">        bitReversalShuffle2(dataR, dataI);</span>
+
+        // Do 4-term DFT.
+<span class="fc bfc" id="L252" title="All 2 branches covered.">        if (type == TransformType.INVERSE) {</span>
+<span class="fc bfc" id="L253" title="All 2 branches covered.">            for (int i0 = 0; i0 &lt; n; i0 += 4) {</span>
+<span class="fc" id="L254">                final int i1 = i0 + 1;</span>
+<span class="fc" id="L255">                final int i2 = i0 + 2;</span>
+<span class="fc" id="L256">                final int i3 = i0 + 3;</span>
+
+<span class="fc" id="L258">                final double srcR0 = dataR[i0];</span>
+<span class="fc" id="L259">                final double srcI0 = dataI[i0];</span>
+<span class="fc" id="L260">                final double srcR1 = dataR[i2];</span>
+<span class="fc" id="L261">                final double srcI1 = dataI[i2];</span>
+<span class="fc" id="L262">                final double srcR2 = dataR[i1];</span>
+<span class="fc" id="L263">                final double srcI2 = dataI[i1];</span>
+<span class="fc" id="L264">                final double srcR3 = dataR[i3];</span>
+<span class="fc" id="L265">                final double srcI3 = dataI[i3];</span>
+
+                // 4-term DFT
+                // X_0 = x_0 + x_1 + x_2 + x_3
+<span class="fc" id="L269">                dataR[i0] = srcR0 + srcR1 + srcR2 + srcR3;</span>
+<span class="fc" id="L270">                dataI[i0] = srcI0 + srcI1 + srcI2 + srcI3;</span>
+                // X_1 = x_0 - x_2 + j * (x_3 - x_1)
+<span class="fc" id="L272">                dataR[i1] = srcR0 - srcR2 + (srcI3 - srcI1);</span>
+<span class="fc" id="L273">                dataI[i1] = srcI0 - srcI2 + (srcR1 - srcR3);</span>
+                // X_2 = x_0 - x_1 + x_2 - x_3
+<span class="fc" id="L275">                dataR[i2] = srcR0 - srcR1 + srcR2 - srcR3;</span>
+<span class="fc" id="L276">                dataI[i2] = srcI0 - srcI1 + srcI2 - srcI3;</span>
+                // X_3 = x_0 - x_2 + j * (x_1 - x_3)
+<span class="fc" id="L278">                dataR[i3] = srcR0 - srcR2 + (srcI1 - srcI3);</span>
+<span class="fc" id="L279">                dataI[i3] = srcI0 - srcI2 + (srcR3 - srcR1);</span>
+            }
+        } else {
+<span class="fc bfc" id="L282" title="All 2 branches covered.">            for (int i0 = 0; i0 &lt; n; i0 += 4) {</span>
+<span class="fc" id="L283">                final int i1 = i0 + 1;</span>
+<span class="fc" id="L284">                final int i2 = i0 + 2;</span>
+<span class="fc" id="L285">                final int i3 = i0 + 3;</span>
+
+<span class="fc" id="L287">                final double srcR0 = dataR[i0];</span>
+<span class="fc" id="L288">                final double srcI0 = dataI[i0];</span>
+<span class="fc" id="L289">                final double srcR1 = dataR[i2];</span>
+<span class="fc" id="L290">                final double srcI1 = dataI[i2];</span>
+<span class="fc" id="L291">                final double srcR2 = dataR[i1];</span>
+<span class="fc" id="L292">                final double srcI2 = dataI[i1];</span>
+<span class="fc" id="L293">                final double srcR3 = dataR[i3];</span>
+<span class="fc" id="L294">                final double srcI3 = dataI[i3];</span>
+
+                // 4-term DFT
+                // X_0 = x_0 + x_1 + x_2 + x_3
+<span class="fc" id="L298">                dataR[i0] = srcR0 + srcR1 + srcR2 + srcR3;</span>
+<span class="fc" id="L299">                dataI[i0] = srcI0 + srcI1 + srcI2 + srcI3;</span>
+                // X_1 = x_0 - x_2 + j * (x_3 - x_1)
+<span class="fc" id="L301">                dataR[i1] = srcR0 - srcR2 + (srcI1 - srcI3);</span>
+<span class="fc" id="L302">                dataI[i1] = srcI0 - srcI2 + (srcR3 - srcR1);</span>
+                // X_2 = x_0 - x_1 + x_2 - x_3
+<span class="fc" id="L304">                dataR[i2] = srcR0 - srcR1 + srcR2 - srcR3;</span>
+<span class="fc" id="L305">                dataI[i2] = srcI0 - srcI1 + srcI2 - srcI3;</span>
+                // X_3 = x_0 - x_2 + j * (x_1 - x_3)
+<span class="fc" id="L307">                dataR[i3] = srcR0 - srcR2 + (srcI3 - srcI1);</span>
+<span class="fc" id="L308">                dataI[i3] = srcI0 - srcI2 + (srcR1 - srcR3);</span>
+            }
+        }
+
+<span class="fc" id="L312">        int lastN0 = 4;</span>
+<span class="fc" id="L313">        int lastLogN0 = 2;</span>
+<span class="fc bfc" id="L314" title="All 2 branches covered.">        while (lastN0 &lt; n) {</span>
+<span class="fc" id="L315">            int n0 = lastN0 &lt;&lt; 1;</span>
+<span class="fc" id="L316">            int logN0 = lastLogN0 + 1;</span>
+<span class="fc" id="L317">            double wSubN0R = W_SUB_N_R[logN0];</span>
+<span class="fc" id="L318">            double wSubN0I = W_SUB_N_I[logN0];</span>
+<span class="fc bfc" id="L319" title="All 2 branches covered.">            if (type == TransformType.INVERSE) {</span>
+<span class="fc" id="L320">                wSubN0I = -wSubN0I;</span>
+            }
+
+            // Combine even/odd transforms of size lastN0 into a transform of size N0 (lastN0 * 2).
+<span class="fc bfc" id="L324" title="All 2 branches covered.">            for (int destEvenStartIndex = 0; destEvenStartIndex &lt; n; destEvenStartIndex += n0) {</span>
+<span class="fc" id="L325">                int destOddStartIndex = destEvenStartIndex + lastN0;</span>
+
+<span class="fc" id="L327">                double wSubN0ToRR = 1;</span>
+<span class="fc" id="L328">                double wSubN0ToRI = 0;</span>
+
+<span class="fc bfc" id="L330" title="All 2 branches covered.">                for (int r = 0; r &lt; lastN0; r++) {</span>
+<span class="fc" id="L331">                    double grR = dataR[destEvenStartIndex + r];</span>
+<span class="fc" id="L332">                    double grI = dataI[destEvenStartIndex + r];</span>
+<span class="fc" id="L333">                    double hrR = dataR[destOddStartIndex + r];</span>
+<span class="fc" id="L334">                    double hrI = dataI[destOddStartIndex + r];</span>
+
+                    // dest[destEvenStartIndex + r] = Gr + WsubN0ToR * Hr
+<span class="fc" id="L337">                    dataR[destEvenStartIndex + r] = grR + wSubN0ToRR * hrR - wSubN0ToRI * hrI;</span>
+<span class="fc" id="L338">                    dataI[destEvenStartIndex + r] = grI + wSubN0ToRR * hrI + wSubN0ToRI * hrR;</span>
+                    // dest[destOddStartIndex + r] = Gr - WsubN0ToR * Hr
+<span class="fc" id="L340">                    dataR[destOddStartIndex + r] = grR - (wSubN0ToRR * hrR - wSubN0ToRI * hrI);</span>
+<span class="fc" id="L341">                    dataI[destOddStartIndex + r] = grI - (wSubN0ToRR * hrI + wSubN0ToRI * hrR);</span>
+
+                    // WsubN0ToR *= WsubN0R
+<span class="fc" id="L344">                    double nextWsubN0ToRR = wSubN0ToRR * wSubN0R - wSubN0ToRI * wSubN0I;</span>
+<span class="fc" id="L345">                    double nextWsubN0ToRI = wSubN0ToRR * wSubN0I + wSubN0ToRI * wSubN0R;</span>
+<span class="fc" id="L346">                    wSubN0ToRR = nextWsubN0ToRR;</span>
+<span class="fc" id="L347">                    wSubN0ToRI = nextWsubN0ToRI;</span>
+                }
+            }
+
+<span class="fc" id="L351">            lastN0 = n0;</span>
+<span class="fc" id="L352">            lastLogN0 = logN0;</span>
+<span class="fc" id="L353">        }</span>
+
+<span class="fc" id="L355">        normalizeTransformedData(dataRI, normalization, type);</span>
+<span class="fc" id="L356">    }</span>
+
+    /**
+     * Returns the (forward, inverse) transform of the specified real data set.
+     *
+     * @param f the real data array to be transformed
+     * @param type the type of transform (forward, inverse) to be performed
+     * @return the complex transformed array
+     * @throws MathIllegalArgumentException if the length of the data array is not a power of two
+     */
+    public Complex[] transform(final double[] f, final TransformType type) {
+<span class="fc" id="L367">        final double[][] dataRI = new double[][] {</span>
+<span class="fc" id="L368">            MathArrays.copyOf(f, f.length), new double[f.length]</span>
+        };
+
+<span class="fc" id="L371">        transformInPlace(dataRI, normalization, type);</span>
+
+<span class="fc" id="L373">        return TransformUtils.createComplexArray(dataRI);</span>
+    }
+
+    /**
+     * Returns the (forward, inverse) transform of the specified real function,
+     * sampled on the specified interval.
+     *
+     * @param f the function to be sampled and transformed
+     * @param min the (inclusive) lower bound for the interval
+     * @param max the (exclusive) upper bound for the interval
+     * @param n the number of sample points
+     * @param type the type of transform (forward, inverse) to be performed
+     * @return the complex transformed array
+     * @throws org.apache.commons.math4.exception.NumberIsTooLargeException
+     *   if the lower bound is greater than, or equal to the upper bound
+     * @throws org.apache.commons.math4.exception.NotStrictlyPositiveException
+     *   if the number of sample points {@code n} is negative
+     * @throws MathIllegalArgumentException if the number of sample points
+     *   {@code n} is not a power of two
+     */
+    public Complex[] transform(final UnivariateFunction f,
+                               final double min, final double max, final int n,
+                               final TransformType type) {
+
+<span class="fc" id="L397">        final double[] data = FunctionUtils.sample(f, min, max, n);</span>
+<span class="fc" id="L398">        return transform(data, type);</span>
+    }
+
+    /**
+     * Returns the (forward, inverse) transform of the specified complex data set.
+     *
+     * @param f the complex data array to be transformed
+     * @param type the type of transform (forward, inverse) to be performed
+     * @return the complex transformed array
+     * @throws MathIllegalArgumentException if the length of the data array is not a power of two
+     */
+    public Complex[] transform(final Complex[] f, final TransformType type) {
+<span class="fc" id="L410">        final double[][] dataRI = TransformUtils.createRealImaginaryArray(f);</span>
+
+<span class="fc" id="L412">        transformInPlace(dataRI, normalization, type);</span>
+
+<span class="fc" id="L414">        return TransformUtils.createComplexArray(dataRI);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

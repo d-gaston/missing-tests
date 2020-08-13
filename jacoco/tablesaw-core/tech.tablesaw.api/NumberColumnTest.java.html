@@ -1,0 +1,857 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>NumberColumnTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">NumberColumnTest.java</span></div><h1>NumberColumnTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import static java.lang.Double.NaN;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static tech.tablesaw.aggregate.AggregateFunctions.median;
+import static tech.tablesaw.aggregate.AggregateFunctions.percentile;
+import static tech.tablesaw.aggregate.AggregateFunctions.percentile90;
+import static tech.tablesaw.aggregate.AggregateFunctions.percentile95;
+import static tech.tablesaw.aggregate.AggregateFunctions.percentile99;
+import static tech.tablesaw.aggregate.AggregateFunctions.quartile1;
+import static tech.tablesaw.aggregate.AggregateFunctions.quartile3;
+import static tech.tablesaw.columns.numbers.NumberPredicates.isMissing;
+
+import com.google.common.base.Stopwatch;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.DoubleBinaryOperator;
+import java.util.function.DoubleFunction;
+import java.util.function.DoublePredicate;
+import org.apache.commons.lang3.RandomUtils;
+import org.apache.commons.math3.stat.StatUtils;
+import org.apache.commons.math3.stat.correlation.KendallsCorrelation;
+import org.apache.commons.math3.stat.correlation.PearsonsCorrelation;
+import org.apache.commons.math3.stat.correlation.SpearmansCorrelation;
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.numbers.DoubleColumnType;
+import tech.tablesaw.columns.numbers.NumberColumnFormatter;
+import tech.tablesaw.columns.strings.StringColumnType;
+import tech.tablesaw.selection.Selection;
+
+/** Unit tests for the NumberColumn class */
+<span class="fc" id="L55">public class NumberColumnTest {</span>
+
+<span class="fc" id="L57">  private static final double MISSING = DoubleColumnType.missingValueIndicator();</span>
+<span class="fc bfc" id="L58" title="All 4 branches covered.">  private static final DoublePredicate isPositiveOrZeroD = d -&gt; d &gt;= 0, isNegativeD = d -&gt; d &lt; 0;</span>
+<span class="fc" id="L59">  private static final DoubleFunction&lt;String&gt; toStringD = d -&gt; String.valueOf(d);</span>
+<span class="fc" id="L60">  private static final DoubleBinaryOperator sumD = (d1, d2) -&gt; d1 + d2;</span>
+
+  @Disabled
+  @Test
+  public void testApplyFilter() {
+
+<span class="nc" id="L66">    Table table = Table.create(&quot;t&quot;);</span>
+<span class="nc" id="L67">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;, 100_000_000);</span>
+    // BooleanColumn booleanColumn = BooleanColumn.create(&quot;bools&quot;, 1_000_000_000);
+<span class="nc" id="L69">    table.addColumns(numberColumn);</span>
+    // table.addColumns(booleanColumn);
+<span class="nc bnc" id="L71" title="All 2 branches missed.">    for (int i = 0; i &lt; 100_000_000; i++) {</span>
+<span class="nc" id="L72">      numberColumn.append(Math.random());</span>
+      //  booleanColumn.append(fairy.baseProducer().trueOrFalse());
+    }
+<span class="nc" id="L75">    Stopwatch stopwatch = Stopwatch.createStarted();</span>
+<span class="nc" id="L76">    table.sortOn(&quot;test&quot;);</span>
+<span class="nc" id="L77">    System.out.println(&quot;Sort time in ms = &quot; + stopwatch.elapsed(TimeUnit.MILLISECONDS));</span>
+<span class="nc" id="L78">    stopwatch.reset().start();</span>
+<span class="nc" id="L79">    System.out.println(numberColumn.summary());</span>
+<span class="nc" id="L80">    stopwatch.reset().start();</span>
+<span class="nc" id="L81">    numberColumn.isLessThan(.5f);</span>
+<span class="nc" id="L82">    System.out.println(&quot;Search time in ms = &quot; + stopwatch.elapsed(TimeUnit.MILLISECONDS));</span>
+<span class="nc" id="L83">  }</span>
+
+  @Test
+  public void testPercentiles() {
+<span class="fc" id="L87">    IntColumn c = IntColumn.indexColumn(&quot;t&quot;, 99, 1);</span>
+<span class="fc" id="L88">    IntColumn c2 = c.copy();</span>
+<span class="fc" id="L89">    c2.appendCell(&quot;&quot;);</span>
+<span class="fc" id="L90">    assertEquals(50, c.median(), 0.00001);</span>
+<span class="fc" id="L91">    assertEquals(50, c2.median(), 0.00001);</span>
+<span class="fc" id="L92">    assertEquals(50, median.summarize(c), 0.00001);</span>
+
+<span class="fc" id="L94">    assertEquals(25, c.quartile1(), 0.00001);</span>
+<span class="fc" id="L95">    assertEquals(25, c2.quartile1(), 0.00001);</span>
+<span class="fc" id="L96">    assertEquals(25, quartile1.summarize(c), 0.00001);</span>
+
+<span class="fc" id="L98">    assertEquals(75, c.quartile3(), 0.00001);</span>
+<span class="fc" id="L99">    assertEquals(75, c2.quartile3(), 0.00001);</span>
+<span class="fc" id="L100">    assertEquals(75, quartile3.summarize(c), 0.00001);</span>
+
+<span class="fc" id="L102">    assertEquals(90, percentile90.summarize(c), 0.00001);</span>
+
+<span class="fc" id="L104">    assertEquals(5, c2.percentile(5), 0.00001);</span>
+<span class="fc" id="L105">    assertEquals(5, c.percentile(5), 0.00001);</span>
+<span class="fc" id="L106">    assertEquals(5, percentile(c, 5.0), 0.00001);</span>
+
+<span class="fc" id="L108">    assertEquals(95, percentile95.summarize(c), 0.00001);</span>
+<span class="fc" id="L109">    assertEquals(99, percentile99.summarize(c), 0.00001);</span>
+<span class="fc" id="L110">  }</span>
+
+  @Test
+  public void testSummarize() {
+<span class="fc" id="L114">    IntColumn c = IntColumn.indexColumn(&quot;t&quot;, 99, 1);</span>
+<span class="fc" id="L115">    IntColumn c2 = c.copy();</span>
+<span class="fc" id="L116">    c2.appendCell(&quot;&quot;);</span>
+<span class="fc" id="L117">    double c2Variance = c2.variance();</span>
+<span class="fc" id="L118">    double cVariance = StatUtils.variance(c.asDoubleArray());</span>
+<span class="fc" id="L119">    assertEquals(cVariance, c2Variance, 0.00001);</span>
+<span class="fc" id="L120">    assertEquals(StatUtils.sumLog(c.asDoubleArray()), c2.sumOfLogs(), 0.00001);</span>
+<span class="fc" id="L121">    assertEquals(StatUtils.sumSq(c.asDoubleArray()), c2.sumOfSquares(), 0.00001);</span>
+<span class="fc" id="L122">    assertEquals(StatUtils.geometricMean(c.asDoubleArray()), c2.geometricMean(), 0.00001);</span>
+<span class="fc" id="L123">    assertEquals(StatUtils.product(c.asDoubleArray()), c2.product(), 0.00001);</span>
+<span class="fc" id="L124">    assertEquals(StatUtils.populationVariance(c.asDoubleArray()), c2.populationVariance(), 0.00001);</span>
+<span class="fc" id="L125">    assertEquals(</span>
+<span class="fc" id="L126">        new DescriptiveStatistics(c.asDoubleArray()).getQuadraticMean(),</span>
+<span class="fc" id="L127">        c2.quadraticMean(),</span>
+        0.00001);
+<span class="fc" id="L129">    assertEquals(</span>
+<span class="fc" id="L130">        new DescriptiveStatistics(c.asDoubleArray()).getStandardDeviation(),</span>
+<span class="fc" id="L131">        c2.standardDeviation(),</span>
+        0.00001);
+<span class="fc" id="L133">    assertEquals(</span>
+<span class="fc" id="L134">        new DescriptiveStatistics(c.asDoubleArray()).getKurtosis(), c2.kurtosis(), 0.00001);</span>
+<span class="fc" id="L135">    assertEquals(</span>
+<span class="fc" id="L136">        new DescriptiveStatistics(c.asDoubleArray()).getSkewness(), c2.skewness(), 0.00001);</span>
+
+<span class="fc" id="L138">    assertEquals(StatUtils.variance(c.asDoubleArray()), c.variance(), 0.00001);</span>
+<span class="fc" id="L139">    assertEquals(StatUtils.sumLog(c.asDoubleArray()), c.sumOfLogs(), 0.00001);</span>
+<span class="fc" id="L140">    assertEquals(StatUtils.sumSq(c.asDoubleArray()), c.sumOfSquares(), 0.00001);</span>
+<span class="fc" id="L141">    assertEquals(StatUtils.geometricMean(c.asDoubleArray()), c.geometricMean(), 0.00001);</span>
+<span class="fc" id="L142">    assertEquals(StatUtils.product(c.asDoubleArray()), c.product(), 0.00001);</span>
+<span class="fc" id="L143">    assertEquals(StatUtils.populationVariance(c.asDoubleArray()), c.populationVariance(), 0.00001);</span>
+<span class="fc" id="L144">    assertEquals(</span>
+<span class="fc" id="L145">        new DescriptiveStatistics(c.asDoubleArray()).getQuadraticMean(),</span>
+<span class="fc" id="L146">        c.quadraticMean(),</span>
+        0.00001);
+<span class="fc" id="L148">    assertEquals(</span>
+<span class="fc" id="L149">        new DescriptiveStatistics(c.asDoubleArray()).getStandardDeviation(),</span>
+<span class="fc" id="L150">        c.standardDeviation(),</span>
+        0.00001);
+<span class="fc" id="L152">    assertEquals(new DescriptiveStatistics(c.asDoubleArray()).getKurtosis(), c.kurtosis(), 0.00001);</span>
+<span class="fc" id="L153">    assertEquals(new DescriptiveStatistics(c.asDoubleArray()).getSkewness(), c.skewness(), 0.00001);</span>
+<span class="fc" id="L154">  }</span>
+
+  @Disabled
+  @Test
+  public void testSortAndApplyFilter1() {
+
+<span class="nc" id="L160">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;, 1_000_000_000);</span>
+<span class="nc bnc" id="L161" title="All 2 branches missed.">    for (int i = 0; i &lt; 1_000_000_000; i++) {</span>
+<span class="nc" id="L162">      numberColumn.append(Math.random());</span>
+    }
+<span class="nc" id="L164">    Stopwatch stopwatch = Stopwatch.createStarted();</span>
+<span class="nc" id="L165">    System.out.println(numberColumn.sum());</span>
+<span class="nc" id="L166">    System.out.println(stopwatch.elapsed(TimeUnit.MILLISECONDS));</span>
+<span class="nc" id="L167">    stopwatch.reset().start();</span>
+<span class="nc" id="L168">    numberColumn.sortAscending();</span>
+<span class="nc" id="L169">    System.out.println(&quot;Sort time in ms = &quot; + stopwatch.elapsed(TimeUnit.MILLISECONDS));</span>
+
+<span class="nc" id="L171">    stopwatch.reset().start();</span>
+<span class="nc" id="L172">    numberColumn.isLessThan(.5f);</span>
+<span class="nc" id="L173">    System.out.println(&quot;Search time in ms = &quot; + stopwatch.elapsed(TimeUnit.MILLISECONDS));</span>
+<span class="nc" id="L174">  }</span>
+
+  @Test
+  public void createFromNumbers() {
+<span class="fc" id="L178">    List&lt;Number&gt; numberList = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L179">    numberList.add(4);</span>
+<span class="fc" id="L180">    DoubleColumn column = DoubleColumn.create(&quot;test&quot;, numberList);</span>
+<span class="fc" id="L181">    assertEquals(4.0, column.get(0), 0.001);</span>
+
+<span class="fc" id="L183">    DoubleColumn column1 =</span>
+<span class="fc" id="L184">        DoubleColumn.create(&quot;T&quot;, numberList.toArray(new Number[numberList.size()]));</span>
+<span class="fc" id="L185">    assertEquals(4.0, column1.get(0), 0.001);</span>
+
+<span class="fc" id="L187">    float[] floats = new float[1];</span>
+<span class="fc" id="L188">    floats[0] = 4.0f;</span>
+<span class="fc" id="L189">    DoubleColumn column2 = DoubleColumn.create(&quot;T&quot;, floats);</span>
+<span class="fc" id="L190">    assertEquals(4.0, column2.get(0), 0.001);</span>
+
+<span class="fc" id="L192">    int[] ints = new int[1];</span>
+<span class="fc" id="L193">    ints[0] = 4;</span>
+<span class="fc" id="L194">    DoubleColumn column3 = DoubleColumn.create(&quot;T&quot;, ints);</span>
+<span class="fc" id="L195">    assertEquals(4.0, column3.get(0), 0.001);</span>
+
+<span class="fc" id="L197">    long[] longs = new long[1];</span>
+<span class="fc" id="L198">    longs[0] = 4_000_000_000L;</span>
+<span class="fc" id="L199">    DoubleColumn column4 = DoubleColumn.create(&quot;T&quot;, longs);</span>
+<span class="fc" id="L200">    assertEquals(4_000_000_000.0, column4.get(0), 0.001);</span>
+<span class="fc" id="L201">  }</span>
+
+  @Test
+  public void testDoubleIsIn() {
+<span class="fc" id="L205">    int[] originalValues = new int[] {32, 42, 40, 57, 52, -2};</span>
+<span class="fc" id="L206">    double[] inValues = new double[] {10, -2, 57, -5};</span>
+
+<span class="fc" id="L208">    DoubleColumn initial = DoubleColumn.create(&quot;Test&quot;, originalValues.length);</span>
+<span class="fc" id="L209">    Table t = Table.create(&quot;t&quot;, initial);</span>
+
+<span class="fc bfc" id="L211" title="All 2 branches covered.">    for (int value : originalValues) {</span>
+<span class="fc" id="L212">      initial.append(value);</span>
+    }
+
+<span class="fc" id="L215">    Selection filter = t.numberColumn(&quot;Test&quot;).isIn(inValues);</span>
+<span class="fc" id="L216">    Table result = t.where(filter);</span>
+<span class="fc" id="L217">    assertNotNull(result);</span>
+<span class="fc" id="L218">  }</span>
+
+  @Test
+  public void testCorrelation() {
+<span class="fc" id="L222">    double[] x = new double[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};</span>
+<span class="fc" id="L223">    double[] y = new double[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};</span>
+
+<span class="fc" id="L225">    DoubleColumn xCol = DoubleColumn.create(&quot;x&quot;, x);</span>
+<span class="fc" id="L226">    DoubleColumn yCol = DoubleColumn.create(&quot;y&quot;, y);</span>
+
+<span class="fc" id="L228">    double resultP = xCol.pearsons(yCol);</span>
+<span class="fc" id="L229">    double resultS = xCol.spearmans(yCol);</span>
+<span class="fc" id="L230">    double resultK = xCol.kendalls(yCol);</span>
+<span class="fc" id="L231">    assertEquals(new PearsonsCorrelation().correlation(x, y), resultP, 0.0001);</span>
+<span class="fc" id="L232">    assertEquals(new SpearmansCorrelation().correlation(x, y), resultS, 0.0001);</span>
+<span class="fc" id="L233">    assertEquals(new KendallsCorrelation().correlation(x, y), resultK, 0.0001);</span>
+<span class="fc" id="L234">  }</span>
+
+  @Test
+  public void testCorrelation2() {
+<span class="fc" id="L238">    double[] x = new double[] {1, 2, 3, 4, 5, 6, 7, NaN, 9, 10};</span>
+<span class="fc" id="L239">    double[] y = new double[] {1, 2, 3, NaN, 5, 6, 7, 8, 9, 10};</span>
+
+<span class="fc" id="L241">    DoubleColumn xCol = DoubleColumn.create(&quot;x&quot;, x);</span>
+<span class="fc" id="L242">    DoubleColumn yCol = DoubleColumn.create(&quot;y&quot;, y);</span>
+
+<span class="fc" id="L244">    double resultP = xCol.pearsons(yCol);</span>
+<span class="fc" id="L245">    double resultK = xCol.kendalls(yCol);</span>
+<span class="fc" id="L246">    assertEquals(new PearsonsCorrelation().correlation(x, y), resultP, 0.0001);</span>
+<span class="fc" id="L247">    assertEquals(new KendallsCorrelation().correlation(x, y), resultK, 0.0001);</span>
+<span class="fc" id="L248">  }</span>
+
+  @Test
+  public void testBetweenExclusive() {
+<span class="fc" id="L252">    int[] originalValues = new int[] {32, 42, 40, 57, 52, -2};</span>
+
+<span class="fc" id="L254">    IntColumn initial = IntColumn.create(&quot;Test&quot;, originalValues);</span>
+<span class="fc" id="L255">    Table t = Table.create(&quot;t&quot;, initial);</span>
+
+<span class="fc" id="L257">    Selection filter = t.numberColumn(&quot;Test&quot;).isBetweenExclusive(42, 57);</span>
+<span class="fc" id="L258">    Table result = t.where(filter);</span>
+<span class="fc" id="L259">    assertEquals(1, result.rowCount());</span>
+<span class="fc" id="L260">    assertEquals(&quot;52&quot;, result.getString(0, &quot;Test&quot;));</span>
+<span class="fc" id="L261">  }</span>
+
+  @Disabled
+  @Test
+  public void testSort1() {
+<span class="nc" id="L266">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;, 1_000_000_000);</span>
+<span class="nc" id="L267">    System.out.println(&quot;Adding doubles to column&quot;);</span>
+<span class="nc bnc" id="L268" title="All 2 branches missed.">    for (int i = 0; i &lt; 100_000_000; i++) {</span>
+<span class="nc" id="L269">      numberColumn.append(Math.random());</span>
+    }
+<span class="nc" id="L271">    System.out.println(&quot;Sorting&quot;);</span>
+<span class="nc" id="L272">    Stopwatch stopwatch = Stopwatch.createStarted();</span>
+<span class="nc" id="L273">    numberColumn.sortAscending();</span>
+<span class="nc" id="L274">    System.out.println(&quot;Sort time in ms = &quot; + stopwatch.elapsed(TimeUnit.MILLISECONDS));</span>
+<span class="nc" id="L275">  }</span>
+
+  @Test
+  public void testIsLessThan() {
+<span class="fc" id="L279">    int size = 1_000_000;</span>
+<span class="fc" id="L280">    Table table = Table.create(&quot;t&quot;);</span>
+<span class="fc" id="L281">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;, size);</span>
+<span class="fc" id="L282">    table.addColumns(numberColumn);</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L284">      numberColumn.set(i, Math.random());</span>
+    }
+<span class="fc" id="L286">    Selection results = numberColumn.isLessThan(.5f);</span>
+<span class="fc" id="L287">    int count = 0;</span>
+<span class="fc bfc" id="L288" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc bfc" id="L289" title="All 2 branches covered.">      if (results.contains(i)) {</span>
+<span class="fc" id="L290">        count++;</span>
+      }
+    }
+    // Probabilistic answer.
+<span class="pc bpc" id="L294" title="1 of 2 branches missed.">    assertTrue(count &lt; 575_000);</span>
+<span class="pc bpc" id="L295" title="1 of 2 branches missed.">    assertTrue(count &gt; 425_000);</span>
+<span class="fc" id="L296">  }</span>
+
+  @Test
+  public void testNumberFormat1() {
+<span class="fc" id="L300">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L301">    numberColumn.append(48392.2932);</span>
+<span class="fc" id="L302">    numberColumn.setPrintFormatter(NumberColumnFormatter.currency(&quot;en&quot;, &quot;US&quot;));</span>
+<span class="fc" id="L303">    assertEquals(&quot;$48,392.29&quot;, numberColumn.getString(0));</span>
+<span class="fc" id="L304">  }</span>
+
+  @Test
+  public void testNumberFormat2() {
+<span class="fc" id="L308">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L309">    numberColumn.append(48392.2932);</span>
+<span class="fc" id="L310">    numberColumn.setPrintFormatter(NumberColumnFormatter.intsWithGrouping());</span>
+<span class="fc" id="L311">    assertEquals(&quot;48,392&quot;, numberColumn.getString(0));</span>
+<span class="fc" id="L312">  }</span>
+
+  @Test
+  public void testAsString() {
+<span class="fc" id="L316">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L317">    numberColumn.append(48392.2932);</span>
+<span class="fc" id="L318">    StringColumn sc = numberColumn.asStringColumn();</span>
+<span class="fc" id="L319">    assertEquals(&quot;test strings&quot;, sc.name());</span>
+<span class="fc" id="L320">    assertEquals(&quot;48392.2932&quot;, sc.get(0));</span>
+<span class="fc" id="L321">  }</span>
+
+  @Test
+  public void testDoubleColumnAsStringWithMissing() {
+<span class="fc" id="L325">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L326">    numberColumn.append(48392.2932);</span>
+<span class="fc" id="L327">    numberColumn.appendMissing();</span>
+<span class="fc" id="L328">    StringColumn sc = numberColumn.asStringColumn();</span>
+<span class="fc" id="L329">    assertEquals(&quot;test strings&quot;, sc.name());</span>
+<span class="fc" id="L330">    assertEquals(&quot;48392.2932&quot;, sc.get(0));</span>
+<span class="fc" id="L331">    assertEquals(StringColumnType.missingValueIndicator(), sc.get(1));</span>
+<span class="fc" id="L332">  }</span>
+
+  @Test
+  public void testIntegerColumnAsStringWithMissing() {
+<span class="fc" id="L336">    IntColumn numberColumn = IntColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L337">    numberColumn.append(48392);</span>
+<span class="fc" id="L338">    numberColumn.appendMissing();</span>
+<span class="fc" id="L339">    StringColumn sc = numberColumn.asStringColumn();</span>
+<span class="fc" id="L340">    assertEquals(&quot;test strings&quot;, sc.name());</span>
+<span class="fc" id="L341">    assertEquals(&quot;48392&quot;, sc.get(0));</span>
+<span class="fc" id="L342">    assertEquals(StringColumnType.missingValueIndicator(), sc.get(1));</span>
+<span class="fc" id="L343">  }</span>
+
+  @Test
+  public void testNumberFormat3() {
+<span class="fc" id="L347">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L348">    numberColumn.append(48392.2932);</span>
+<span class="fc" id="L349">    numberColumn.setPrintFormatter(NumberColumnFormatter.ints());</span>
+<span class="fc" id="L350">    assertEquals(&quot;48392&quot;, numberColumn.getString(0));</span>
+<span class="fc" id="L351">  }</span>
+
+  @Test
+  public void testNumberFormat4() {
+<span class="fc" id="L355">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L356">    numberColumn.append(48392.2932);</span>
+<span class="fc" id="L357">    numberColumn.setPrintFormatter(NumberColumnFormatter.fixedWithGrouping(3));</span>
+<span class="fc" id="L358">    assertEquals(&quot;48,392.293&quot;, numberColumn.getString(0));</span>
+<span class="fc" id="L359">  }</span>
+
+  @Test
+  public void testNumberFormat5() {
+<span class="fc" id="L363">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;);</span>
+<span class="fc" id="L364">    numberColumn.append(0.2932);</span>
+<span class="fc" id="L365">    numberColumn.setPrintFormatter(NumberColumnFormatter.percent(1));</span>
+<span class="fc" id="L366">    assertEquals(&quot;29.3%&quot;, numberColumn.getString(0));</span>
+<span class="fc" id="L367">  }</span>
+
+  @Test
+  public void testIndexColumn() {
+<span class="fc" id="L371">    IntColumn numberColumn = IntColumn.indexColumn(&quot;index&quot;, 12424, 0);</span>
+<span class="fc" id="L372">    assertEquals(&quot;12423&quot;, numberColumn.getString(numberColumn.size() - 1));</span>
+<span class="fc" id="L373">  }</span>
+
+  @Test
+  public void testIsGreaterThan() {
+<span class="fc" id="L377">    int size = 1_000_000;</span>
+<span class="fc" id="L378">    Table table = Table.create(&quot;t&quot;);</span>
+<span class="fc" id="L379">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;, size);</span>
+<span class="fc" id="L380">    table.addColumns(numberColumn);</span>
+<span class="fc bfc" id="L381" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L382">      numberColumn.set(i, Math.random());</span>
+    }
+<span class="fc" id="L384">    Selection results = numberColumn.isGreaterThan(.5f);</span>
+
+<span class="fc" id="L386">    int count = 0;</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc bfc" id="L388" title="All 2 branches covered.">      if (results.contains(i)) {</span>
+<span class="fc" id="L389">        count++;</span>
+      }
+    }
+    // Probabilistic answer.
+<span class="pc bpc" id="L393" title="1 of 2 branches missed.">    assertTrue(count &lt; 575_000);</span>
+<span class="pc bpc" id="L394" title="1 of 2 branches missed.">    assertTrue(count &gt; 425_000);</span>
+<span class="fc" id="L395">  }</span>
+
+  @Test
+  public void testSort() {
+<span class="fc" id="L399">    int records = 1_000_000;</span>
+<span class="fc" id="L400">    DoubleColumn numberColumn = DoubleColumn.create(&quot;test&quot;, records);</span>
+<span class="fc bfc" id="L401" title="All 2 branches covered.">    for (int i = 0; i &lt; records; i++) {</span>
+<span class="fc" id="L402">      numberColumn.set(i, Math.random());</span>
+    }
+<span class="fc" id="L404">    numberColumn.sortAscending();</span>
+<span class="fc" id="L405">    double last = Double.NEGATIVE_INFINITY;</span>
+<span class="fc bfc" id="L406" title="All 2 branches covered.">    for (double n : numberColumn) {</span>
+<span class="pc bpc" id="L407" title="1 of 2 branches missed.">      assertTrue(n &gt;= last);</span>
+<span class="fc" id="L408">      last = n;</span>
+<span class="fc" id="L409">    }</span>
+<span class="fc" id="L410">    numberColumn.sortDescending();</span>
+<span class="fc" id="L411">    last = Double.POSITIVE_INFINITY;</span>
+<span class="fc bfc" id="L412" title="All 2 branches covered.">    for (double n : numberColumn) {</span>
+<span class="pc bpc" id="L413" title="1 of 2 branches missed.">      assertTrue(n &lt;= last);</span>
+<span class="fc" id="L414">      last = n;</span>
+<span class="fc" id="L415">    }</span>
+<span class="fc" id="L416">    records = 10;</span>
+<span class="fc" id="L417">    numberColumn = DoubleColumn.create(&quot;test&quot;, records);</span>
+<span class="fc bfc" id="L418" title="All 2 branches covered.">    for (int i = 0; i &lt; records; i++) {</span>
+<span class="fc" id="L419">      numberColumn.set(i, Math.random());</span>
+    }
+<span class="fc" id="L421">    numberColumn.sortDescending();</span>
+<span class="fc" id="L422">    last = Double.POSITIVE_INFINITY;</span>
+<span class="fc bfc" id="L423" title="All 2 branches covered.">    for (double n : numberColumn) {</span>
+<span class="pc bpc" id="L424" title="1 of 2 branches missed.">      assertTrue(n &lt;= last);</span>
+<span class="fc" id="L425">      last = n;</span>
+<span class="fc" id="L426">    }</span>
+<span class="fc" id="L427">  }</span>
+
+  @Test
+  public void testMaxAndMin() {
+<span class="fc" id="L431">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;, 100);</span>
+<span class="fc bfc" id="L432" title="All 2 branches covered.">    for (int i = 0; i &lt; 100; i++) {</span>
+<span class="fc" id="L433">      doubles.set(i, RandomUtils.nextDouble(0, 10_000));</span>
+    }
+<span class="fc" id="L435">    NumericColumn&lt;?&gt; doubles1 = doubles.top(50);</span>
+<span class="fc" id="L436">    NumericColumn&lt;?&gt; doubles2 = doubles.bottom(50);</span>
+<span class="fc" id="L437">    double[] doublesA = new double[50];</span>
+<span class="fc" id="L438">    double[] doublesB = new double[50];</span>
+<span class="fc bfc" id="L439" title="All 2 branches covered.">    for (int i = 0; i &lt; doubles1.size(); i++) {</span>
+<span class="fc" id="L440">      doublesA[i] = doubles1.getDouble(i);</span>
+    }
+<span class="fc bfc" id="L442" title="All 2 branches covered.">    for (int i = 0; i &lt; doubles2.size(); i++) {</span>
+<span class="fc" id="L443">      doublesB[i] = doubles2.getDouble(i);</span>
+    }
+    // the smallest item in the max set is &gt;= the largest in the min set
+<span class="pc bpc" id="L446" title="1 of 2 branches missed.">    assertTrue(StatUtils.min(doublesA) &gt;= StatUtils.max(doublesB));</span>
+<span class="fc" id="L447">  }</span>
+
+  @Test
+  public void testClear() {
+<span class="fc" id="L451">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;, 100);</span>
+<span class="fc bfc" id="L452" title="All 2 branches covered.">    for (int i = 0; i &lt; 100; i++) {</span>
+<span class="fc" id="L453">      doubles.set(i, RandomUtils.nextDouble(0, 10_000));</span>
+    }
+<span class="fc" id="L455">    assertFalse(doubles.isEmpty());</span>
+<span class="fc" id="L456">    doubles.clear();</span>
+<span class="fc" id="L457">    assertTrue(doubles.isEmpty());</span>
+<span class="fc" id="L458">  }</span>
+
+  @Test
+  public void testCountMissing() {
+<span class="fc" id="L462">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;);</span>
+<span class="fc bfc" id="L463" title="All 2 branches covered.">    for (int i = 0; i &lt; 10; i++) {</span>
+<span class="fc" id="L464">      doubles.append(RandomUtils.nextDouble(0, 1_000));</span>
+    }
+<span class="fc" id="L466">    assertEquals(0, doubles.countMissing());</span>
+<span class="fc" id="L467">    doubles.clear();</span>
+<span class="fc bfc" id="L468" title="All 2 branches covered.">    for (int i = 0; i &lt; 10; i++) {</span>
+<span class="fc" id="L469">      doubles.append(MISSING);</span>
+    }
+<span class="fc" id="L471">    assertEquals(10, doubles.countMissing());</span>
+<span class="fc" id="L472">  }</span>
+
+  @Test
+  public void testCountUnique() {
+<span class="fc" id="L476">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;, 10);</span>
+<span class="fc" id="L477">    double[] uniques = {0.0f, 0.00000001f, -0.000001f, 92923.29340f, 24252, 23442f, 2252, 2342f};</span>
+<span class="fc bfc" id="L478" title="All 2 branches covered.">    for (double unique : uniques) {</span>
+<span class="fc" id="L479">      doubles.append(unique);</span>
+    }
+<span class="fc" id="L481">    assertEquals(uniques.length + 1, doubles.countUnique());</span>
+
+<span class="fc" id="L483">    doubles.clear();</span>
+<span class="fc" id="L484">    double[] notUniques = {</span>
+      0.0f, 0.00000001f, -0.000001f, 92923.29340f, 24252, 23442f, 2252, 2342f, 0f
+    };
+
+<span class="fc bfc" id="L488" title="All 2 branches covered.">    for (double notUnique : notUniques) {</span>
+<span class="fc" id="L489">      doubles.append(notUnique);</span>
+    }
+<span class="fc" id="L491">    assertEquals(notUniques.length - 1, doubles.countUnique());</span>
+<span class="fc" id="L492">  }</span>
+
+  @Test
+  public void testCountUniqueDouble() {
+<span class="fc" id="L496">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;);</span>
+<span class="fc" id="L497">    doubles.append(1.0);</span>
+<span class="fc" id="L498">    doubles.append(1.0);</span>
+<span class="fc" id="L499">    doubles.append(2.0);</span>
+<span class="fc" id="L500">    doubles.appendMissing();</span>
+
+<span class="fc" id="L502">    assertEquals(3, doubles.countUnique());</span>
+<span class="fc" id="L503">    assertEquals(3, doubles.unique().size());</span>
+<span class="fc" id="L504">  }</span>
+
+  @Test
+  public void testCountUniqueFloat() {
+<span class="fc" id="L508">    FloatColumn floats = FloatColumn.create(&quot;floats&quot;);</span>
+<span class="fc" id="L509">    floats.append(1f);</span>
+<span class="fc" id="L510">    floats.append(1f);</span>
+<span class="fc" id="L511">    floats.append(2f);</span>
+<span class="fc" id="L512">    floats.appendMissing();</span>
+
+<span class="fc" id="L514">    assertEquals(3, floats.countUnique());</span>
+<span class="fc" id="L515">    assertEquals(3, floats.unique().size());</span>
+<span class="fc" id="L516">  }</span>
+
+  @Test
+  public void testCountUniqueInteger() {
+<span class="fc" id="L520">    IntColumn ints = IntColumn.create(&quot;ints&quot;);</span>
+<span class="fc" id="L521">    ints.append(1);</span>
+<span class="fc" id="L522">    ints.append(1);</span>
+<span class="fc" id="L523">    ints.append(2);</span>
+<span class="fc" id="L524">    ints.appendMissing();</span>
+
+<span class="fc" id="L526">    assertEquals(3, ints.countUnique());</span>
+<span class="fc" id="L527">    assertEquals(3, ints.unique().size());</span>
+<span class="fc" id="L528">  }</span>
+
+  @Test
+  public void testCountUniqueLong() {
+<span class="fc" id="L532">    LongColumn longs = LongColumn.create(&quot;longs&quot;);</span>
+<span class="fc" id="L533">    longs.append(1L);</span>
+<span class="fc" id="L534">    longs.append(1L);</span>
+<span class="fc" id="L535">    longs.append(2L);</span>
+<span class="fc" id="L536">    longs.appendMissing();</span>
+
+<span class="fc" id="L538">    assertEquals(3, longs.countUnique());</span>
+<span class="fc" id="L539">    assertEquals(3, longs.unique().size());</span>
+<span class="fc" id="L540">  }</span>
+
+  @Test
+  public void testCountUniqueShort() {
+<span class="fc" id="L544">    ShortColumn shorts = ShortColumn.create(&quot;doubles&quot;);</span>
+<span class="fc" id="L545">    shorts.append((short) 1);</span>
+<span class="fc" id="L546">    shorts.append((short) 1);</span>
+<span class="fc" id="L547">    shorts.append((short) 2);</span>
+<span class="fc" id="L548">    shorts.appendMissing();</span>
+
+<span class="fc" id="L550">    assertEquals(3, shorts.countUnique());</span>
+<span class="fc" id="L551">    assertEquals(3, shorts.unique().size());</span>
+<span class="fc" id="L552">  }</span>
+
+  @Test
+  public void testUnique() {
+<span class="fc" id="L556">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;);</span>
+<span class="fc" id="L557">    double[] uniques = {0.0f, 0.00000001f, -0.000001f, 92923.29340f, 24252, 23442f, 2252, 2342f};</span>
+<span class="fc bfc" id="L558" title="All 2 branches covered.">    for (double unique : uniques) {</span>
+<span class="fc" id="L559">      doubles.append(unique);</span>
+    }
+<span class="fc" id="L561">    assertEquals(uniques.length, doubles.unique().size());</span>
+
+<span class="fc" id="L563">    doubles.clear();</span>
+<span class="fc" id="L564">    double[] notUniques = {</span>
+      0.0f, 0.00000001f, -0.000001f, 92923.29340f, 24252, 23442f, 2252, 2342f, 0f
+    };
+
+<span class="fc bfc" id="L568" title="All 2 branches covered.">    for (double notUnique : notUniques) {</span>
+<span class="fc" id="L569">      doubles.append(notUnique);</span>
+    }
+<span class="fc" id="L571">    assertEquals(notUniques.length - 1, doubles.unique().size());</span>
+<span class="fc" id="L572">  }</span>
+
+  @Test
+  public void testIsMissingAndIsNotMissing() {
+<span class="fc" id="L576">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;, 10);</span>
+<span class="fc bfc" id="L577" title="All 2 branches covered.">    for (int i = 0; i &lt; 10; i++) {</span>
+<span class="fc" id="L578">      doubles.set(i, RandomUtils.nextDouble(0, 1_000));</span>
+    }
+<span class="fc" id="L580">    assertEquals(0, doubles.isMissing().size());</span>
+<span class="fc" id="L581">    assertEquals(10, doubles.isNotMissing().size());</span>
+<span class="fc" id="L582">    doubles.clear();</span>
+<span class="fc bfc" id="L583" title="All 2 branches covered.">    for (int i = 0; i &lt; 10; i++) {</span>
+<span class="fc" id="L584">      doubles.append(MISSING);</span>
+    }
+<span class="fc" id="L586">    assertEquals(10, doubles.isMissing().size());</span>
+<span class="fc" id="L587">    assertEquals(0, doubles.isNotMissing().size());</span>
+<span class="fc" id="L588">  }</span>
+
+  @Test
+  public void testEmptyCopy() {
+<span class="fc" id="L592">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;, 100);</span>
+<span class="fc bfc" id="L593" title="All 2 branches covered.">    for (int i = 0; i &lt; 100; i++) {</span>
+<span class="fc" id="L594">      doubles.append(RandomUtils.nextDouble(0, 10_000));</span>
+    }
+<span class="fc" id="L596">    DoubleColumn empty = doubles.emptyCopy();</span>
+<span class="fc" id="L597">    assertTrue(empty.isEmpty());</span>
+<span class="fc" id="L598">    assertEquals(doubles.name(), empty.name());</span>
+<span class="fc" id="L599">  }</span>
+
+  @Test
+  public void appendObject() {
+<span class="fc" id="L603">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;);</span>
+<span class="fc" id="L604">    doubles.appendObj(BigDecimal.valueOf(1));</span>
+<span class="fc" id="L605">    assertEquals(1.0, doubles.get(0), 0.00001);</span>
+<span class="fc" id="L606">  }</span>
+
+  @Test
+  public void testSize() {
+<span class="fc" id="L610">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;);</span>
+<span class="fc" id="L611">    assertEquals(0, doubles.size());</span>
+<span class="fc bfc" id="L612" title="All 2 branches covered.">    for (int i = 0; i &lt; 100; i++) {</span>
+<span class="fc" id="L613">      doubles.append(RandomUtils.nextDouble(0, 10_000));</span>
+    }
+<span class="fc" id="L615">    assertEquals(100, doubles.size());</span>
+<span class="fc" id="L616">    doubles.clear();</span>
+<span class="fc" id="L617">    assertEquals(0, doubles.size());</span>
+<span class="fc" id="L618">  }</span>
+
+  @Test
+  public void testType() {
+<span class="fc" id="L622">    DoubleColumn doubles = DoubleColumn.create(&quot;doubles&quot;, 100);</span>
+<span class="fc" id="L623">    assertEquals(ColumnType.DOUBLE, doubles.type());</span>
+<span class="fc" id="L624">  }</span>
+
+  @Test
+  public void testDifference() {
+<span class="fc" id="L628">    double[] originalValues = new double[] {32, 42, 40, 57, 52};</span>
+<span class="fc" id="L629">    double[] expectedValues = new double[] {MISSING, 10, -2, 17, -5};</span>
+<span class="fc" id="L630">    assertTrue(computeAndValidateDifference(originalValues, expectedValues));</span>
+<span class="fc" id="L631">  }</span>
+
+  @Test
+  public void testDifferenceMissingValuesInColumn() {
+<span class="fc" id="L635">    double[] originalValues = new double[] {32, 42, MISSING, 57, 52};</span>
+<span class="fc" id="L636">    double[] expectedValues = new double[] {MISSING, 10, MISSING, MISSING, -5};</span>
+<span class="fc" id="L637">    assertTrue(computeAndValidateDifference(originalValues, expectedValues));</span>
+<span class="fc" id="L638">  }</span>
+
+  private boolean computeAndValidateDifference(double[] originalValues, double[] expectedValues) {
+<span class="fc" id="L641">    DoubleColumn initial = DoubleColumn.create(&quot;Test&quot;, originalValues);</span>
+<span class="fc" id="L642">    DoubleColumn difference = initial.difference();</span>
+<span class="fc" id="L643">    return validateEquality(expectedValues, difference);</span>
+  }
+
+  @Test
+  public void testDifferenceEmptyColumn() {
+<span class="fc" id="L648">    DoubleColumn initial = DoubleColumn.create(&quot;Test&quot;);</span>
+<span class="fc" id="L649">    DoubleColumn difference = initial.difference();</span>
+<span class="fc" id="L650">    assertEquals(0, difference.size(), &quot;Expecting empty data set.&quot;);</span>
+<span class="fc" id="L651">  }</span>
+
+  @Test
+  public void testCumSum() {
+<span class="fc" id="L655">    double[] originalValues = new double[] {32, 42, MISSING, 57, 52, -10, 0};</span>
+<span class="fc" id="L656">    double[] expectedValues = new double[] {32, 74, 74, 131, 183, 173, 173};</span>
+<span class="fc" id="L657">    DoubleColumn initial = DoubleColumn.create(&quot;Test&quot;, originalValues);</span>
+<span class="fc" id="L658">    DoubleColumn csum = initial.cumSum();</span>
+
+<span class="fc" id="L660">    assertEquals(expectedValues.length, csum.size(), &quot;Both sets of data should be the same size.&quot;);</span>
+
+<span class="fc bfc" id="L662" title="All 2 branches covered.">    for (int index = 0; index &lt; csum.size(); index++) {</span>
+<span class="fc" id="L663">      double actual = csum.get(index);</span>
+<span class="fc" id="L664">      assertEquals(</span>
+          expectedValues[index], actual, 0, &quot;cumSum() operation at index:&quot; + index + &quot; failed&quot;);
+    }
+<span class="fc" id="L667">  }</span>
+
+  @Test
+  public void testCumProd() {
+<span class="fc" id="L671">    double[] originalValues = new double[] {1, 2, MISSING, 3, 4};</span>
+<span class="fc" id="L672">    double[] expectedValues = new double[] {1, 2, 2, 6, 24};</span>
+<span class="fc" id="L673">    DoubleColumn initial = DoubleColumn.create(&quot;Test&quot;, originalValues);</span>
+<span class="fc" id="L674">    DoubleColumn cprod = initial.cumProd();</span>
+
+<span class="fc" id="L676">    assertEquals(expectedValues.length, cprod.size(), &quot;Both sets of data should be the same size.&quot;);</span>
+
+<span class="fc bfc" id="L678" title="All 2 branches covered.">    for (int index = 0; index &lt; cprod.size(); index++) {</span>
+<span class="fc" id="L679">      double actual = cprod.get(index);</span>
+<span class="fc" id="L680">      assertEquals(</span>
+          expectedValues[index], actual, 0, &quot;cumProd() operation at index:&quot; + index + &quot; failed&quot;);
+    }
+<span class="fc" id="L683">  }</span>
+
+  @Test
+  public void testSubtract2Columns() {
+<span class="fc" id="L687">    double[] col1Values = new double[] {32.5, MISSING, 42, 57, 52};</span>
+<span class="fc" id="L688">    double[] col2Values = new double[] {32, 42, 38.67, MISSING, 52.01};</span>
+<span class="fc" id="L689">    double[] expected = new double[] {0.5, MISSING, 3.33, MISSING, -.01};</span>
+
+<span class="fc" id="L691">    DoubleColumn col1 = DoubleColumn.create(&quot;1&quot;, col1Values);</span>
+<span class="fc" id="L692">    DoubleColumn col2 = DoubleColumn.create(&quot;2&quot;, col2Values);</span>
+
+<span class="fc" id="L694">    DoubleColumn difference = col1.subtract(col2);</span>
+<span class="fc" id="L695">    assertTrue(validateEquality(expected, difference));</span>
+
+    // change order to verify size of returned column
+<span class="fc" id="L698">    difference = col2.subtract(col1);</span>
+<span class="fc" id="L699">    expected = new double[] {-0.5, MISSING, -3.33, MISSING, .01};</span>
+<span class="fc" id="L700">    assertTrue(validateEquality(expected, difference));</span>
+<span class="fc" id="L701">  }</span>
+
+  @Test
+  public void testPctChange() {
+<span class="fc" id="L705">    double[] originalValues = new double[] {10, 12, 13};</span>
+<span class="fc" id="L706">    double[] expectedValues = new double[] {MISSING, 0.2, 0.083333};</span>
+<span class="fc" id="L707">    DoubleColumn initial = DoubleColumn.create(&quot;Test&quot;, originalValues);</span>
+<span class="fc" id="L708">    DoubleColumn pctChange = initial.pctChange();</span>
+
+<span class="fc" id="L710">    assertEquals(</span>
+<span class="fc" id="L711">        expectedValues.length, pctChange.size(), &quot;Both sets of data should be the same size.&quot;);</span>
+
+<span class="fc bfc" id="L713" title="All 2 branches covered.">    for (int index = 0; index &lt; pctChange.size(); index++) {</span>
+<span class="fc" id="L714">      double actual = pctChange.get(index);</span>
+<span class="fc" id="L715">      assertEquals(</span>
+          expectedValues[index],
+          actual,
+          0.0001,
+          &quot;pctChange() operation at index:&quot; + index + &quot; failed&quot;);
+    }
+<span class="fc" id="L721">  }</span>
+
+  private boolean validateEquality(double[] expectedValues, DoubleColumn col) {
+<span class="fc" id="L724">    assertEquals(expectedValues.length, col.size(), &quot;Both sets of data should be the same size.&quot;);</span>
+<span class="fc bfc" id="L725" title="All 2 branches covered.">    for (int index = 0; index &lt; col.size(); index++) {</span>
+<span class="fc" id="L726">      double actual = col.get(index);</span>
+<span class="fc" id="L727">      assertEquals(expectedValues[index], actual, 0.01, &quot;value mismatch at index:&quot; + index);</span>
+    }
+<span class="fc" id="L729">    return true;</span>
+  }
+
+  // Functional methods
+
+  @Test
+  public void testCountAtLeast() {
+<span class="fc" id="L736">    assertEquals(2, DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).count(isPositiveOrZeroD, 2));</span>
+<span class="fc" id="L737">    assertEquals(0, DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).count(isNegativeD, 2));</span>
+<span class="fc" id="L738">  }</span>
+
+  @Test
+  public void testCount() {
+<span class="fc" id="L742">    assertEquals(3, DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).count(isPositiveOrZeroD));</span>
+<span class="fc" id="L743">    assertEquals(0, DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).count(isNegativeD));</span>
+<span class="fc" id="L744">  }</span>
+
+  @Test
+  public void testAllMatch() {
+<span class="fc" id="L748">    assertTrue(DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).allMatch(isPositiveOrZeroD));</span>
+<span class="fc" id="L749">    assertFalse(DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).allMatch(isPositiveOrZeroD));</span>
+<span class="fc" id="L750">    assertFalse(DoubleColumn.create(&quot;t1&quot;, new double[] {1, 0, -1}).allMatch(isPositiveOrZeroD));</span>
+<span class="fc" id="L751">  }</span>
+
+  @Test
+  public void testAnyMatch() {
+<span class="fc" id="L755">    assertTrue(DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).anyMatch(isPositiveOrZeroD));</span>
+<span class="fc" id="L756">    assertTrue(DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, -1}).anyMatch(isPositiveOrZeroD));</span>
+<span class="fc" id="L757">    assertFalse(DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).anyMatch(isNegativeD));</span>
+<span class="fc" id="L758">  }</span>
+
+  @Test
+  public void noneMatch() {
+<span class="fc" id="L762">    assertTrue(DoubleColumn.create(&quot;t1&quot;, new double[] {0, 1, 2}).noneMatch(isNegativeD));</span>
+<span class="fc" id="L763">    assertFalse(DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).noneMatch(isNegativeD));</span>
+<span class="fc" id="L764">    assertFalse(DoubleColumn.create(&quot;t1&quot;, new double[] {1, 0, -1}).noneMatch(isNegativeD));</span>
+<span class="fc" id="L765">  }</span>
+
+  private &lt;T&gt; void assertColumnContentsEquals(T[] expected, Column&lt;T&gt; column) {
+<span class="fc" id="L768">    assertEquals(expected.length, column.size());</span>
+<span class="fc bfc" id="L769" title="All 2 branches covered.">    for (int i = 0; i &lt; expected.length; i++) {</span>
+<span class="fc" id="L770">      assertEquals(expected[i], column.get(i));</span>
+    }
+<span class="fc" id="L772">  }</span>
+
+  @Test
+  public void testFilter() {
+<span class="fc" id="L776">    Column&lt;Double&gt; filtered =</span>
+<span class="fc" id="L777">        DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).filter(isPositiveOrZeroD);</span>
+<span class="fc" id="L778">    assertColumnContentsEquals(new Double[] {0.0, 1.0}, filtered);</span>
+<span class="fc" id="L779">  }</span>
+
+  @Test
+  public void testMap() {
+<span class="fc" id="L783">    DoubleColumn mapped =</span>
+<span class="fc" id="L784">        DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).map(x -&gt; x * 2.0 + 1.0);</span>
+<span class="fc" id="L785">    assertColumnContentsEquals(new Double[] {-1.0, 1.0, 3.0}, mapped);</span>
+<span class="fc" id="L786">  }</span>
+
+  @Test
+  public void testMapInto() {
+<span class="fc" id="L790">    StringColumn mapped =</span>
+<span class="fc" id="L791">        DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1})</span>
+<span class="fc" id="L792">            .mapInto(toStringD, StringColumn.create(&quot;result&quot;));</span>
+<span class="fc" id="L793">    assertColumnContentsEquals(new String[] {&quot;-1.0&quot;, &quot;0.0&quot;, &quot;1.0&quot;}, mapped);</span>
+<span class="fc" id="L794">  }</span>
+
+  @Test
+  public void testMaxDoubleComparator() {
+<span class="fc" id="L798">    assertEquals(</span>
+<span class="fc" id="L799">        Double.valueOf(1.0),</span>
+<span class="fc" id="L800">        DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).max(Double::compare).get());</span>
+<span class="pc" id="L801">    assertFalse(DoubleColumn.create(&quot;t1&quot;).max((d1, d2) -&gt; (int) (d1 - d2)).isPresent());</span>
+<span class="fc" id="L802">  }</span>
+
+  @Test
+  public void testMinDoubleComparator() {
+<span class="fc" id="L806">    assertEquals(</span>
+<span class="fc" id="L807">        Double.valueOf(-1.0),</span>
+<span class="fc" id="L808">        DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).min(Double::compare).get());</span>
+<span class="pc" id="L809">    assertFalse(DoubleColumn.create(&quot;t1&quot;).min((d1, d2) -&gt; (int) (d1 - d2)).isPresent());</span>
+<span class="fc" id="L810">  }</span>
+
+  @Test
+  public void testReduceTDoubleBinaryOperator() {
+<span class="fc" id="L814">    assertEquals(1.0, DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).reduce(1.0, sumD), 0.0);</span>
+<span class="fc" id="L815">  }</span>
+
+  @Test
+  public void testReduceDoubleBinaryOperator() {
+<span class="fc" id="L819">    assertEquals(</span>
+<span class="fc" id="L820">        Double.valueOf(0.0), DoubleColumn.create(&quot;t1&quot;, new double[] {-1, 0, 1}).reduce(sumD).get());</span>
+<span class="fc" id="L821">    assertFalse(DoubleColumn.create(&quot;t1&quot;, new double[] {}).reduce(sumD).isPresent());</span>
+<span class="fc" id="L822">  }</span>
+
+  @Test
+  public void fillMissing_defaultValue() {
+<span class="fc" id="L826">    DoubleColumn col1 =</span>
+<span class="fc" id="L827">        DoubleColumn.create(</span>
+            &quot;col1&quot;,
+            new double[] {
+              0.0,
+              1.0,
+<span class="fc" id="L832">              DoubleColumnType.missingValueIndicator(),</span>
+              2.0,
+<span class="fc" id="L834">              DoubleColumnType.missingValueIndicator()</span>
+            });
+<span class="fc" id="L836">    DoubleColumn expected = DoubleColumn.create(&quot;expected&quot;, new double[] {0.0, 1.0, 7.0, 2.0, 7.0});</span>
+<span class="fc" id="L837">    assertArrayEquals(expected.asDoubleArray(), col1.set(isMissing, 7.0).asDoubleArray(), 0.0001);</span>
+<span class="fc" id="L838">  }</span>
+
+  @Test
+  public void fillMissing_columnArg() {
+<span class="fc" id="L842">    DoubleColumn col1 =</span>
+<span class="fc" id="L843">        DoubleColumn.create(</span>
+            &quot;col1&quot;,
+            new double[] {
+              0.0,
+              1.0,
+<span class="fc" id="L848">              DoubleColumnType.missingValueIndicator(),</span>
+              2.0,
+<span class="fc" id="L850">              DoubleColumnType.missingValueIndicator()</span>
+            });
+<span class="fc" id="L852">    DoubleColumn col2 = DoubleColumn.create(&quot;col1&quot;, new double[] {7.0, 7.0, 3.0, 7.0, 4.0});</span>
+<span class="fc" id="L853">    DoubleColumn expected = DoubleColumn.create(&quot;expected&quot;, new double[] {0.0, 1.0, 3.0, 2.0, 4.0});</span>
+<span class="fc" id="L854">    assertArrayEquals(expected.asDoubleArray(), col1.set(isMissing, col2).asDoubleArray(), 0.0001);</span>
+<span class="fc" id="L855">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

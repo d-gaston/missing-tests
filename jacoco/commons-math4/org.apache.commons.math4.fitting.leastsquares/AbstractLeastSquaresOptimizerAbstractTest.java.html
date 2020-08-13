@@ -1,0 +1,612 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AbstractLeastSquaresOptimizerAbstractTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.fitting.leastsquares</a> &gt; <span class="el_source">AbstractLeastSquaresOptimizerAbstractTest.java</span></div><h1>AbstractLeastSquaresOptimizerAbstractTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.fitting.leastsquares;
+
+import org.apache.commons.math4.analysis.MultivariateMatrixFunction;
+import org.apache.commons.math4.analysis.MultivariateVectorFunction;
+import org.apache.commons.math4.exception.ConvergenceException;
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.fitting.leastsquares.LeastSquaresBuilder;
+import org.apache.commons.math4.fitting.leastsquares.LeastSquaresOptimizer;
+import org.apache.commons.math4.fitting.leastsquares.LeastSquaresProblem;
+import org.apache.commons.math4.fitting.leastsquares.MultivariateJacobianFunction;
+import org.apache.commons.math4.fitting.leastsquares.LeastSquaresOptimizer.Optimum;
+import org.apache.commons.math4.fitting.leastsquares.LeastSquaresProblem.Evaluation;
+import org.apache.commons.math4.geometry.euclidean.twod.Cartesian2D;
+import org.apache.commons.math4.linear.Array2DRowRealMatrix;
+import org.apache.commons.math4.linear.ArrayRealVector;
+import org.apache.commons.math4.linear.BlockRealMatrix;
+import org.apache.commons.math4.linear.DiagonalMatrix;
+import org.apache.commons.math4.linear.RealMatrix;
+import org.apache.commons.math4.linear.RealVector;
+import org.apache.commons.math4.optim.ConvergenceChecker;
+import org.apache.commons.math4.optim.SimpleVectorValueChecker;
+import org.apache.commons.math4.util.FastMath;
+import org.apache.commons.math4.util.Pair;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.io.IOException;
+import java.util.Arrays;
+
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.sameInstance;
+
+/**
+ * Some of the unit tests are re-implementations of the MINPACK &lt;a
+ * href=&quot;http://www.netlib.org/minpack/ex/file17&quot;&gt;file17&lt;/a&gt; and &lt;a
+ * href=&quot;http://www.netlib.org/minpack/ex/file22&quot;&gt;file22&lt;/a&gt; test files. The
+ * redistribution policy for MINPACK is available &lt;a href=&quot;http://www.netlib.org/minpack/disclaimer&quot;&gt;here&lt;/a&gt;.
+ * &lt;p&gt;
+ * &lt;T&gt; Concrete implementation of an optimizer.
+ *
+ */
+<span class="fc" id="L59">public abstract class AbstractLeastSquaresOptimizerAbstractTest {</span>
+
+    /** default absolute tolerance of comparisons */
+    public static final double TOl = 1e-10;
+
+    public LeastSquaresBuilder base() {
+<span class="fc" id="L65">        return new LeastSquaresBuilder()</span>
+<span class="fc" id="L66">                .checkerPair(new SimpleVectorValueChecker(1e-6, 1e-6))</span>
+<span class="fc" id="L67">                .maxEvaluations(100)</span>
+<span class="fc" id="L68">                .maxIterations(getMaxIterations());</span>
+    }
+
+    public LeastSquaresBuilder builder(CircleVectorial c) {
+<span class="fc" id="L72">        final double[] weights = new double[c.getN()];</span>
+<span class="fc" id="L73">        Arrays.fill(weights, 1.0);</span>
+<span class="fc" id="L74">        return base()</span>
+<span class="fc" id="L75">                .model(c.getModelFunction(), c.getModelFunctionJacobian())</span>
+<span class="fc" id="L76">                .target(new double[c.getN()])</span>
+<span class="fc" id="L77">                .weight(new DiagonalMatrix(weights));</span>
+    }
+
+    public LeastSquaresBuilder builder(StatisticalReferenceDataset dataset) {
+<span class="fc" id="L81">        StatisticalReferenceDataset.LeastSquaresProblem problem</span>
+<span class="fc" id="L82">                = dataset.getLeastSquaresProblem();</span>
+<span class="fc" id="L83">        final double[] weights = new double[dataset.getNumObservations()];</span>
+<span class="fc" id="L84">        Arrays.fill(weights, 1.0);</span>
+<span class="fc" id="L85">        return base()</span>
+<span class="fc" id="L86">                .model(problem.getModelFunction(), problem.getModelFunctionJacobian())</span>
+<span class="fc" id="L87">                .target(dataset.getData()[1])</span>
+<span class="fc" id="L88">                .weight(new DiagonalMatrix(weights))</span>
+<span class="fc" id="L89">                .start(dataset.getStartingPoint(0));</span>
+    }
+
+    public void fail(LeastSquaresOptimizer optimizer) {
+<span class="nc" id="L93">        Assert.fail(&quot;Expected Exception from: &quot; + optimizer.toString());</span>
+<span class="nc" id="L94">    }</span>
+
+    /**
+     * Check the value of a vector.
+     * @param tolerance the absolute tolerance of comparisons
+     * @param actual the vector to test
+     * @param expected the expected values
+     */
+    public void assertEquals(double tolerance, RealVector actual, double... expected){
+<span class="fc bfc" id="L103" title="All 2 branches covered.">        for (int i = 0; i &lt; expected.length; i++) {</span>
+<span class="fc" id="L104">            Assert.assertEquals(expected[i], actual.getEntry(i), tolerance);</span>
+        }
+<span class="fc" id="L106">        Assert.assertEquals(expected.length, actual.getDimension());</span>
+<span class="fc" id="L107">    }</span>
+
+    /**
+     * @return the default number of allowed iterations (which will be used when not
+     *         specified otherwise).
+     */
+    public abstract int getMaxIterations();
+
+    /**
+     * Get an instance of the optimizer under test.
+     *
+     * @return the subject under test.
+     */
+    public abstract LeastSquaresOptimizer getOptimizer();
+
+    /**
+     * The subject under test.
+     */
+<span class="fc" id="L125">    public final LeastSquaresOptimizer optimizer = this.getOptimizer();</span>
+
+    @Test
+    public void testGetIterations() {
+<span class="fc" id="L129">        LeastSquaresProblem lsp = base()</span>
+<span class="fc" id="L130">                .target(new double[]{1})</span>
+<span class="fc" id="L131">                .weight(new DiagonalMatrix(new double[]{1}))</span>
+<span class="fc" id="L132">                .start(new double[]{3})</span>
+<span class="fc" id="L133">                .model(new MultivariateJacobianFunction() {</span>
+                    @Override
+                    public Pair&lt;RealVector, RealMatrix&gt; value(final RealVector point) {
+<span class="fc" id="L136">                        return new Pair&lt;RealVector, RealMatrix&gt;(</span>
+                                new ArrayRealVector(
+                                        new double[]{
+<span class="fc" id="L139">                                                FastMath.pow(point.getEntry(0), 4)</span>
+                                        },
+                                        false),
+                                new Array2DRowRealMatrix(
+                                        new double[][]{
+<span class="fc" id="L144">                                                {0.25 * FastMath.pow(point.getEntry(0), 3)}</span>
+                                        },
+                                        false)
+                        );
+                    }
+                })
+<span class="fc" id="L150">                .build();</span>
+
+<span class="fc" id="L152">        Optimum optimum = optimizer.optimize(lsp);</span>
+
+        //TODO more specific test? could pass with 'return 1;'
+<span class="pc bpc" id="L155" title="1 of 2 branches missed.">        Assert.assertTrue(optimum.getIterations() &gt; 0);</span>
+<span class="fc" id="L156">    }</span>
+
+    @Test
+    public void testTrivial() {
+<span class="fc" id="L160">        LinearProblem problem</span>
+                = new LinearProblem(new double[][]{{2}},
+                new double[]{3});
+<span class="fc" id="L163">        LeastSquaresProblem ls = problem.getBuilder().build();</span>
+
+<span class="fc" id="L165">        Optimum optimum = optimizer.optimize(ls);</span>
+
+<span class="fc" id="L167">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L168">        assertEquals(TOl, optimum.getPoint(), 1.5);</span>
+<span class="fc" id="L169">        Assert.assertEquals(0.0, optimum.getResiduals().getEntry(0), TOl);</span>
+<span class="fc" id="L170">    }</span>
+
+    @Test
+    public void testQRColumnsPermutation() {
+<span class="fc" id="L174">        LinearProblem problem</span>
+                = new LinearProblem(new double[][]{{1, -1}, {0, 2}, {1, -2}},
+                new double[]{4, 6, 1});
+
+<span class="fc" id="L178">        Optimum optimum = optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="fc" id="L180">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L181">        assertEquals(TOl, optimum.getPoint(), 7, 3);</span>
+<span class="fc" id="L182">        assertEquals(TOl, optimum.getResiduals(), 0, 0, 0);</span>
+<span class="fc" id="L183">    }</span>
+
+    @Test
+    public void testNoDependency() {
+<span class="fc" id="L187">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {2, 0, 0, 0, 0, 0},
+                {0, 2, 0, 0, 0, 0},
+                {0, 0, 2, 0, 0, 0},
+                {0, 0, 0, 2, 0, 0},
+                {0, 0, 0, 0, 2, 0},
+                {0, 0, 0, 0, 0, 2}
+        }, new double[]{0, 1.1, 2.2, 3.3, 4.4, 5.5});
+
+<span class="fc" id="L196">        Optimum optimum = optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="fc" id="L198">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">        for (int i = 0; i &lt; problem.target.length; ++i) {</span>
+<span class="fc" id="L200">            Assert.assertEquals(0.55 * i, optimum.getPoint().getEntry(i), TOl);</span>
+        }
+<span class="fc" id="L202">    }</span>
+
+    @Test
+    public void testOneSet() {
+<span class="fc" id="L206">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {1, 0, 0},
+                {-1, 1, 0},
+                {0, -1, 1}
+        }, new double[]{1, 1, 1});
+
+<span class="fc" id="L212">        Optimum optimum = optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="fc" id="L214">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L215">        assertEquals(TOl, optimum.getPoint(), 1, 2, 3);</span>
+<span class="fc" id="L216">    }</span>
+
+    @Test
+    public void testTwoSets() {
+<span class="fc" id="L220">        double epsilon = 1e-7;</span>
+<span class="fc" id="L221">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {2, 1, 0, 4, 0, 0},
+                {-4, -2, 3, -7, 0, 0},
+                {4, 1, -2, 8, 0, 0},
+                {0, -3, -12, -1, 0, 0},
+                {0, 0, 0, 0, epsilon, 1},
+                {0, 0, 0, 0, 1, 1}
+        }, new double[]{2, -9, 2, 2, 1 + epsilon * epsilon, 2});
+
+<span class="fc" id="L230">        Optimum optimum = optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="fc" id="L232">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L233">        assertEquals(TOl, optimum.getPoint(), 3, 4, -1, -2, 1 + epsilon, 1 - epsilon);</span>
+<span class="fc" id="L234">    }</span>
+
+    @Test
+    public void testNonInvertible() throws Exception {
+        try {
+<span class="fc" id="L239">            LinearProblem problem = new LinearProblem(new double[][]{</span>
+                    {1, 2, -3},
+                    {2, 1, 3},
+                    {-3, 0, -9}
+            }, new double[]{1, 1, 1});
+
+<span class="nc" id="L245">            optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="nc" id="L247">            fail(optimizer);</span>
+<span class="fc" id="L248">        } catch (ConvergenceException e) {</span>
+            //expected
+<span class="nc" id="L250">        }</span>
+<span class="fc" id="L251">    }</span>
+
+    @Test
+    public void testIllConditioned() {
+<span class="fc" id="L255">        LinearProblem problem1 = new LinearProblem(new double[][]{</span>
+                {10, 7, 8, 7},
+                {7, 5, 6, 5},
+                {8, 6, 10, 9},
+                {7, 5, 9, 10}
+        }, new double[]{32, 23, 33, 31});
+<span class="fc" id="L261">        final double[] start = {0, 1, 2, 3};</span>
+
+<span class="fc" id="L263">        Optimum optimum = optimizer</span>
+<span class="fc" id="L264">                .optimize(problem1.getBuilder().start(start).build());</span>
+
+<span class="fc" id="L266">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L267">        assertEquals(TOl, optimum.getPoint(), 1, 1, 1, 1);</span>
+
+<span class="fc" id="L269">        LinearProblem problem2 = new LinearProblem(new double[][]{</span>
+                {10.00, 7.00, 8.10, 7.20},
+                {7.08, 5.04, 6.00, 5.00},
+                {8.00, 5.98, 9.89, 9.00},
+                {6.99, 4.99, 9.00, 9.98}
+        }, new double[]{32, 23, 33, 31});
+
+<span class="fc" id="L276">        optimum = optimizer.optimize(problem2.getBuilder().start(start).build());</span>
+
+<span class="fc" id="L278">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L279">        assertEquals(1e-8, optimum.getPoint(), -81, 137, -34, 22);</span>
+<span class="fc" id="L280">    }</span>
+
+    @Test
+    public void testMoreEstimatedParametersSimple() {
+<span class="fc" id="L284">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {3, 2, 0, 0},
+                {0, 1, -1, 1},
+                {2, 0, 1, 0}
+        }, new double[]{7, 3, 5});
+
+<span class="fc" id="L290">        Optimum optimum = optimizer</span>
+<span class="fc" id="L291">                .optimize(problem.getBuilder().start(new double[]{7, 6, 5, 4}).build());</span>
+
+<span class="fc" id="L293">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L294">    }</span>
+
+    @Test
+    public void testMoreEstimatedParametersUnsorted() {
+<span class="fc" id="L298">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {1, 1, 0, 0, 0, 0},
+                {0, 0, 1, 1, 1, 0},
+                {0, 0, 0, 0, 1, -1},
+                {0, 0, -1, 1, 0, 1},
+                {0, 0, 0, -1, 1, 0}
+        }, new double[]{3, 12, -1, 7, 1});
+
+<span class="fc" id="L306">        Optimum optimum = optimizer.optimize(</span>
+<span class="fc" id="L307">                problem.getBuilder().start(new double[]{2, 2, 2, 2, 2, 2}).build());</span>
+
+<span class="fc" id="L309">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L310">        RealVector point = optimum.getPoint();</span>
+        //the first two elements are under constrained
+        //check first two elements obey the constraint: sum to 3
+<span class="fc" id="L313">        Assert.assertEquals(3, point.getEntry(0) + point.getEntry(1), TOl);</span>
+        //#constrains = #states fro the last 4 elements
+<span class="fc" id="L315">        assertEquals(TOl, point.getSubVector(2, 4), 3, 4, 5, 6);</span>
+<span class="fc" id="L316">    }</span>
+
+    @Test
+    public void testRedundantEquations() {
+<span class="fc" id="L320">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {1, 1},
+                {1, -1},
+                {1, 3}
+        }, new double[]{3, 1, 5});
+
+<span class="fc" id="L326">        Optimum optimum = optimizer</span>
+<span class="fc" id="L327">                .optimize(problem.getBuilder().start(new double[]{1, 1}).build());</span>
+
+<span class="fc" id="L329">        Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L330">        assertEquals(TOl, optimum.getPoint(), 2, 1);</span>
+<span class="fc" id="L331">    }</span>
+
+    @Test
+    public void testInconsistentEquations() {
+<span class="fc" id="L335">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {1, 1},
+                {1, -1},
+                {1, 3}
+        }, new double[]{3, 1, 4});
+
+<span class="fc" id="L341">        Optimum optimum = optimizer</span>
+<span class="fc" id="L342">                .optimize(problem.getBuilder().start(new double[]{1, 1}).build());</span>
+
+        //TODO what is this actually testing?
+<span class="pc bpc" id="L345" title="1 of 2 branches missed.">        Assert.assertTrue(optimum.getRMS() &gt; 0.1);</span>
+<span class="fc" id="L346">    }</span>
+
+    @Test
+    public void testInconsistentSizes1() {
+        try {
+<span class="fc" id="L351">            LinearProblem problem</span>
+                    = new LinearProblem(new double[][]{{1, 0},
+                    {0, 1}},
+                    new double[]{-1, 1});
+
+            //TODO why is this part here? hasn't it been tested already?
+<span class="fc" id="L357">            Optimum optimum = optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="fc" id="L359">            Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L360">            assertEquals(TOl, optimum.getPoint(), -1, 1);</span>
+
+            //TODO move to builder test
+<span class="pc" id="L363">            optimizer.optimize(</span>
+<span class="fc" id="L364">                    problem.getBuilder().weight(new DiagonalMatrix(new double[]{1})).build());</span>
+
+<span class="nc" id="L366">            fail(optimizer);</span>
+<span class="fc" id="L367">        } catch (DimensionMismatchException e) {</span>
+            //expected
+<span class="nc" id="L369">        }</span>
+<span class="fc" id="L370">    }</span>
+
+    @Test
+    public void testInconsistentSizes2() {
+        try {
+<span class="fc" id="L375">            LinearProblem problem</span>
+                    = new LinearProblem(new double[][]{{1, 0}, {0, 1}},
+                    new double[]{-1, 1});
+
+<span class="fc" id="L379">            Optimum optimum = optimizer.optimize(problem.getBuilder().build());</span>
+
+<span class="fc" id="L381">            Assert.assertEquals(0, optimum.getRMS(), TOl);</span>
+<span class="fc" id="L382">            assertEquals(TOl, optimum.getPoint(), -1, 1);</span>
+
+            //TODO move to builder test
+<span class="pc" id="L385">            optimizer.optimize(</span>
+<span class="fc" id="L386">                    problem.getBuilder()</span>
+<span class="fc" id="L387">                            .target(new double[]{1})</span>
+<span class="fc" id="L388">                            .weight(new DiagonalMatrix(new double[]{1}))</span>
+<span class="fc" id="L389">                            .build()</span>
+            );
+
+<span class="nc" id="L392">            fail(optimizer);</span>
+<span class="fc" id="L393">        } catch (DimensionMismatchException e) {</span>
+            //expected
+<span class="nc" id="L395">        }</span>
+<span class="fc" id="L396">    }</span>
+
+    @Test
+    public void testCircleFitting() {
+<span class="fc" id="L400">        CircleVectorial circle = new CircleVectorial();</span>
+<span class="fc" id="L401">        circle.addPoint(30, 68);</span>
+<span class="fc" id="L402">        circle.addPoint(50, -6);</span>
+<span class="fc" id="L403">        circle.addPoint(110, -20);</span>
+<span class="fc" id="L404">        circle.addPoint(35, 15);</span>
+<span class="fc" id="L405">        circle.addPoint(45, 97);</span>
+<span class="fc" id="L406">        final double[] start = {98.680, 47.345};</span>
+
+<span class="fc" id="L408">        Optimum optimum = optimizer.optimize(builder(circle).start(start).build());</span>
+
+<span class="pc bpc" id="L410" title="1 of 2 branches missed.">        Assert.assertTrue(optimum.getEvaluations() &lt; 10);</span>
+
+<span class="fc" id="L412">        double rms = optimum.getRMS();</span>
+<span class="fc" id="L413">        Assert.assertEquals(1.768262623567235, FastMath.sqrt(circle.getN()) * rms, TOl);</span>
+
+<span class="fc" id="L415">        Cartesian2D center = new Cartesian2D(optimum.getPoint().getEntry(0), optimum.getPoint().getEntry(1));</span>
+<span class="fc" id="L416">        Assert.assertEquals(69.96016176931406, circle.getRadius(center), 1e-6);</span>
+<span class="fc" id="L417">        Assert.assertEquals(96.07590211815305, center.getX(), 1e-6);</span>
+<span class="fc" id="L418">        Assert.assertEquals(48.13516790438953, center.getY(), 1e-6);</span>
+
+<span class="fc" id="L420">        double[][] cov = optimum.getCovariances(1e-14).getData();</span>
+<span class="fc" id="L421">        Assert.assertEquals(1.839, cov[0][0], 0.001);</span>
+<span class="fc" id="L422">        Assert.assertEquals(0.731, cov[0][1], 0.001);</span>
+<span class="fc" id="L423">        Assert.assertEquals(cov[0][1], cov[1][0], 1e-14);</span>
+<span class="fc" id="L424">        Assert.assertEquals(0.786, cov[1][1], 0.001);</span>
+
+        // add perfect measurements and check formal errors are reduced
+<span class="fc" id="L427">        double r = circle.getRadius(center);</span>
+<span class="fc bfc" id="L428" title="All 2 branches covered.">        for (double d = 0; d &lt; 2 * FastMath.PI; d += 0.01) {</span>
+<span class="fc" id="L429">            circle.addPoint(center.getX() + r * FastMath.cos(d), center.getY() + r * FastMath.sin(d));</span>
+        }
+
+<span class="fc" id="L432">        double[] weights = new double[circle.getN()];</span>
+<span class="fc" id="L433">        Arrays.fill(weights, 2);</span>
+
+<span class="fc" id="L435">        optimum = optimizer.optimize(</span>
+<span class="fc" id="L436">                builder(circle).weight(new DiagonalMatrix(weights)).start(start).build());</span>
+
+<span class="fc" id="L438">        cov = optimum.getCovariances(1e-14).getData();</span>
+<span class="fc" id="L439">        Assert.assertEquals(0.0016, cov[0][0], 0.001);</span>
+<span class="fc" id="L440">        Assert.assertEquals(3.2e-7, cov[0][1], 1e-9);</span>
+<span class="fc" id="L441">        Assert.assertEquals(cov[0][1], cov[1][0], 1e-14);</span>
+<span class="fc" id="L442">        Assert.assertEquals(0.0016, cov[1][1], 0.001);</span>
+<span class="fc" id="L443">    }</span>
+
+    @Test
+    public void testCircleFittingBadInit() {
+<span class="fc" id="L447">        CircleVectorial circle = new CircleVectorial();</span>
+<span class="fc" id="L448">        double[][] points = circlePoints;</span>
+<span class="fc" id="L449">        double[] weights = new double[points.length];</span>
+<span class="fc" id="L450">        final double[] start = {-12, -12};</span>
+<span class="fc" id="L451">        Arrays.fill(weights, 2);</span>
+<span class="fc bfc" id="L452" title="All 2 branches covered.">        for (int i = 0; i &lt; points.length; ++i) {</span>
+<span class="fc" id="L453">            circle.addPoint(points[i][0], points[i][1]);</span>
+        }
+
+<span class="fc" id="L456">        Optimum optimum = optimizer.optimize(builder(circle).weight(new DiagonalMatrix(weights)).start(start).build());</span>
+
+<span class="fc" id="L458">        Cartesian2D center = new Cartesian2D(optimum.getPoint().getEntry(0), optimum.getPoint().getEntry(1));</span>
+<span class="fc bfc" id="L459" title="All 2 branches covered.">        Assert.assertTrue(optimum.getEvaluations() &lt; 25);</span>
+<span class="fc" id="L460">        Assert.assertEquals(0.043, optimum.getRMS(), 1e-3);</span>
+<span class="fc" id="L461">        Assert.assertEquals(0.292235, circle.getRadius(center), 1e-6);</span>
+<span class="fc" id="L462">        Assert.assertEquals(-0.151738, center.getX(), 1e-6);</span>
+<span class="fc" id="L463">        Assert.assertEquals(0.2075001, center.getY(), 1e-6);</span>
+<span class="fc" id="L464">    }</span>
+
+    @Test
+    public void testCircleFittingGoodInit() {
+<span class="fc" id="L468">        CircleVectorial circle = new CircleVectorial();</span>
+<span class="fc" id="L469">        double[][] points = circlePoints;</span>
+<span class="fc" id="L470">        double[] weights = new double[points.length];</span>
+<span class="fc" id="L471">        Arrays.fill(weights, 2);</span>
+<span class="fc bfc" id="L472" title="All 2 branches covered.">        for (int i = 0; i &lt; points.length; ++i) {</span>
+<span class="fc" id="L473">            circle.addPoint(points[i][0], points[i][1]);</span>
+        }
+<span class="fc" id="L475">        final double[] start = {0, 0};</span>
+
+<span class="fc" id="L477">        Optimum optimum = optimizer.optimize(</span>
+<span class="fc" id="L478">                builder(circle).weight(new DiagonalMatrix(weights)).start(start).build());</span>
+
+<span class="fc" id="L480">        assertEquals(1e-6, optimum.getPoint(), -0.1517383071957963, 0.2074999736353867);</span>
+<span class="fc" id="L481">        Assert.assertEquals(0.04268731682389561, optimum.getRMS(), 1e-8);</span>
+<span class="fc" id="L482">    }</span>
+
+<span class="fc" id="L484">    private final double[][] circlePoints = new double[][]{</span>
+            {-0.312967, 0.072366}, {-0.339248, 0.132965}, {-0.379780, 0.202724},
+            {-0.390426, 0.260487}, {-0.361212, 0.328325}, {-0.346039, 0.392619},
+            {-0.280579, 0.444306}, {-0.216035, 0.470009}, {-0.149127, 0.493832},
+            {-0.075133, 0.483271}, {-0.007759, 0.452680}, {0.060071, 0.410235},
+            {0.103037, 0.341076}, {0.118438, 0.273884}, {0.131293, 0.192201},
+            {0.115869, 0.129797}, {0.072223, 0.058396}, {0.022884, 0.000718},
+            {-0.053355, -0.020405}, {-0.123584, -0.032451}, {-0.216248, -0.032862},
+            {-0.278592, -0.005008}, {-0.337655, 0.056658}, {-0.385899, 0.112526},
+            {-0.405517, 0.186957}, {-0.415374, 0.262071}, {-0.387482, 0.343398},
+            {-0.347322, 0.397943}, {-0.287623, 0.458425}, {-0.223502, 0.475513},
+            {-0.135352, 0.478186}, {-0.061221, 0.483371}, {0.003711, 0.422737},
+            {0.065054, 0.375830}, {0.108108, 0.297099}, {0.123882, 0.222850},
+            {0.117729, 0.134382}, {0.085195, 0.056820}, {0.029800, -0.019138},
+            {-0.027520, -0.072374}, {-0.102268, -0.091555}, {-0.200299, -0.106578},
+            {-0.292731, -0.091473}, {-0.356288, -0.051108}, {-0.420561, 0.014926},
+            {-0.471036, 0.074716}, {-0.488638, 0.182508}, {-0.485990, 0.254068},
+            {-0.463943, 0.338438}, {-0.406453, 0.404704}, {-0.334287, 0.466119},
+            {-0.254244, 0.503188}, {-0.161548, 0.495769}, {-0.075733, 0.495560},
+            {0.001375, 0.434937}, {0.082787, 0.385806}, {0.115490, 0.323807},
+            {0.141089, 0.223450}, {0.138693, 0.131703}, {0.126415, 0.049174},
+            {0.066518, -0.010217}, {-0.005184, -0.070647}, {-0.080985, -0.103635},
+            {-0.177377, -0.116887}, {-0.260628, -0.100258}, {-0.335756, -0.056251},
+            {-0.405195, -0.000895}, {-0.444937, 0.085456}, {-0.484357, 0.175597},
+            {-0.472453, 0.248681}, {-0.438580, 0.347463}, {-0.402304, 0.422428},
+            {-0.326777, 0.479438}, {-0.247797, 0.505581}, {-0.152676, 0.519380},
+            {-0.071754, 0.516264}, {0.015942, 0.472802}, {0.076608, 0.419077},
+            {0.127673, 0.330264}, {0.159951, 0.262150}, {0.153530, 0.172681},
+            {0.140653, 0.089229}, {0.078666, 0.024981}, {0.023807, -0.037022},
+            {-0.048837, -0.077056}, {-0.127729, -0.075338}, {-0.221271, -0.067526}
+    };
+
+    public void doTestStRD(final StatisticalReferenceDataset dataset,
+                           final LeastSquaresOptimizer optimizer,
+                           final double errParams,
+                           final double errParamsSd) {
+
+<span class="fc" id="L521">        final Optimum optimum = optimizer.optimize(builder(dataset).build());</span>
+
+<span class="fc" id="L523">        final RealVector actual = optimum.getPoint();</span>
+<span class="fc bfc" id="L524" title="All 2 branches covered.">        for (int i = 0; i &lt; actual.getDimension(); i++) {</span>
+<span class="fc" id="L525">            double expected = dataset.getParameter(i);</span>
+<span class="fc" id="L526">            double delta = FastMath.abs(errParams * expected);</span>
+<span class="fc" id="L527">            Assert.assertEquals(dataset.getName() + &quot;, param #&quot; + i,</span>
+<span class="fc" id="L528">                    expected, actual.getEntry(i), delta);</span>
+        }
+<span class="fc" id="L530">    }</span>
+
+    @Test
+    public void testKirby2() throws IOException {
+<span class="fc" id="L534">        doTestStRD(StatisticalReferenceDatasetFactory.createKirby2(), optimizer, 1E-7, 1E-7);</span>
+<span class="fc" id="L535">    }</span>
+
+    @Test
+    public void testHahn1() throws IOException {
+<span class="fc" id="L539">        doTestStRD(StatisticalReferenceDatasetFactory.createHahn1(), optimizer, 1E-7, 1E-4);</span>
+<span class="fc" id="L540">    }</span>
+
+    @Test
+    public void testPointCopy() {
+<span class="fc" id="L544">        LinearProblem problem = new LinearProblem(new double[][]{</span>
+                {1, 0, 0},
+                {-1, 1, 0},
+                {0, -1, 1}
+        }, new double[]{1, 1, 1});
+        //mutable boolean
+<span class="fc" id="L550">        final boolean[] checked = {false};</span>
+
+<span class="fc" id="L552">        final LeastSquaresBuilder builder = problem.getBuilder()</span>
+<span class="fc" id="L553">                .checker(new ConvergenceChecker&lt;Evaluation&gt;() {</span>
+                    @Override
+                    public boolean converged(int iteration, Evaluation previous, Evaluation current) {
+<span class="fc" id="L556">                        Assert.assertThat(</span>
+<span class="fc" id="L557">                                previous.getPoint(),</span>
+<span class="fc" id="L558">                                not(sameInstance(current.getPoint())));</span>
+<span class="fc" id="L559">                        Assert.assertArrayEquals(new double[3], previous.getPoint().toArray(), 0);</span>
+<span class="fc" id="L560">                        Assert.assertArrayEquals(new double[] {1, 2, 3}, current.getPoint().toArray(), TOl);</span>
+<span class="fc" id="L561">                        checked[0] = true;</span>
+<span class="fc" id="L562">                        return true;</span>
+                    }
+                });
+<span class="fc" id="L565">        optimizer.optimize(builder.build());</span>
+
+<span class="fc" id="L567">        Assert.assertThat(checked[0], is(true));</span>
+<span class="fc" id="L568">    }</span>
+
+    class LinearProblem {
+        private final RealMatrix factors;
+        private final double[] target;
+
+<span class="fc" id="L574">        public LinearProblem(double[][] factors, double[] target) {</span>
+<span class="fc" id="L575">            this.factors = new BlockRealMatrix(factors);</span>
+<span class="fc" id="L576">            this.target = target;</span>
+<span class="fc" id="L577">        }</span>
+
+        public double[] getTarget() {
+<span class="fc" id="L580">            return target;</span>
+        }
+
+        public MultivariateVectorFunction getModelFunction() {
+<span class="fc" id="L584">            return new MultivariateVectorFunction() {</span>
+                @Override
+                public double[] value(double[] params) {
+<span class="fc" id="L587">                    return factors.operate(params);</span>
+                }
+            };
+        }
+
+        public MultivariateMatrixFunction getModelFunctionJacobian() {
+<span class="fc" id="L593">            return new MultivariateMatrixFunction() {</span>
+                @Override
+                public double[][] value(double[] params) {
+<span class="fc" id="L596">                    return factors.getData();</span>
+                }
+            };
+        }
+
+        public LeastSquaresBuilder getBuilder() {
+<span class="fc" id="L602">            final double[] weights = new double[target.length];</span>
+<span class="fc" id="L603">            Arrays.fill(weights, 1.0);</span>
+<span class="fc" id="L604">            return base()</span>
+<span class="fc" id="L605">                    .model(getModelFunction(), getModelFunctionJacobian())</span>
+<span class="fc" id="L606">                    .target(target)</span>
+<span class="fc" id="L607">                    .weight(new DiagonalMatrix(weights))</span>
+<span class="fc" id="L608">                    .start(new double[factors.getColumnDimension()]);</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

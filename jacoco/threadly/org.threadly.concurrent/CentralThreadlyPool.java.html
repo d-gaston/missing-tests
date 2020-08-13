@@ -1,0 +1,850 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CentralThreadlyPool.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent</a> &gt; <span class="el_source">CentralThreadlyPool.java</span></div><h1>CentralThreadlyPool.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent;
+
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.LongAdder;
+
+import org.threadly.concurrent.wrapper.limiter.SchedulerServiceLimiter;
+import org.threadly.concurrent.wrapper.limiter.SingleThreadSchedulerSubPool;
+import org.threadly.concurrent.wrapper.priority.DefaultPriorityWrapper;
+import org.threadly.concurrent.wrapper.traceability.ThreadRenamingPriorityScheduler;
+import org.threadly.concurrent.wrapper.traceability.ThreadRenamingSchedulerService;
+import org.threadly.util.ArgumentVerifier;
+import org.threadly.util.StringUtils;
+
+/**
+ * Threadly's centrally provided pool manager.  This class is designed to avoid needing to 
+ * manage the thread pool lifecycle throughout your application.  Instead of needing to think about 
+ * how to manage a pools lifecycle you can instead just describe the needs of the tasks to be 
+ * submitted.
+ * &lt;p&gt;
+ * Internally this will delegate to a central or otherwise specific pool for your needs, while 
+ * minimizing thread creation / churn as much as possible.  In addition the returned pools do not 
+ * need to be shutdown, but instead you can allow to be garbage collected as you are done with 
+ * them.  There is no need to be concerned about allowing a returned pool to be garbage collected 
+ * before any submitted / scheduled / recurring tasks have completed.
+ * &lt;p&gt;
+ * Most users will find themselves sticking to the simple pools this provides:
+ * &lt;ul&gt;
+ * &lt;li&gt;{@link #computationPool()} for doing CPU bound computational tasks
+ * &lt;li&gt;{@link #lowPriorityPool(boolean)} for doing low priority maintenance tasks
+ * &lt;li&gt;{@link #singleThreadPool()} as a way to gain access to an efficient priority respected single thread pool
+ * &lt;li&gt;{@link #threadPool(int)} and {@link #threadPool(TaskPriority, int)} to have a multi-threaded pool
+ * &lt;li&gt;{@link #isolatedTaskPool()} For single / isolated tasks against the central pool
+ * &lt;/ul&gt;
+ * &lt;p&gt;
+ * More advanced users can attempt to further reduce thread chun by adding general purpose threads 
+ * with {@link #increaseGenericThreads(int)}.  You can then use 
+ * {@link #singleThreadPool(boolean)} with {@code false} to just depend on these general processing 
+ * threads.  And in addition {@link #rangedThreadPool(int, int)} and 
+ * {@link #rangedThreadPool(TaskPriority, int, int)} in order to specify how when guaranteed 
+ * threads need to be provided, and how much of the general processing threads the pool can take 
+ * advantage of.
+ * &lt;p&gt;
+ * Stats (like {@link SchedulerService#getActiveTaskCount()} and 
+ * {@link SchedulerService#getQueuedTaskCount()}, etc) from provided pools will always be 
+ * representative of the entire central pool rather than just relative to the returned pool.
+ * 
+ * @since 5.7
+ */
+<span class="nc" id="L49">public class CentralThreadlyPool {</span>
+  protected static final int LOW_PRIORITY_MAX_WAIT_IN_MS = 1000;
+  protected static final PoolResizeUpdater POOL_SIZE_UPDATER;
+  protected static final PriorityScheduler MASTER_SCHEDULER;
+  protected static final PrioritySchedulerService LOW_PRIORITY_MASTER_SCHEDULER;
+  protected static final PrioritySchedulerService STARVABLE_PRIORITY_MASTER_SCHEDULER;
+  protected static final SchedulerService COMPUTATION_POOL;
+  protected static final SchedulerService LOW_PRIORITY_POOL;
+  protected static final PrioritySchedulerService SINGLE_THREADED_LOW_PRIORITY_POOL;
+  protected static final PerTaskSizingSubmitterScheduler PER_TASK_SIZING_POOL;
+  private static volatile int genericThreadCount;
+  
+  static {
+<span class="fc" id="L62">    int cpuCount = Runtime.getRuntime().availableProcessors();</span>
+<span class="fc" id="L63">    genericThreadCount = 1; // must have at least one</span>
+<span class="fc" id="L64">    MASTER_SCHEDULER = // start with computation + 1 for interior management tasks and + 1 for shared use</span>
+        new PriorityScheduler(cpuCount + genericThreadCount + 1, 
+                              TaskPriority.High, LOW_PRIORITY_MAX_WAIT_IN_MS, 
+                              new ConfigurableThreadFactory(&quot;CentralThreadlyPool-&quot;, false, 
+                                                            true, Thread.NORM_PRIORITY, null, null));
+<span class="fc" id="L69">    LOW_PRIORITY_MASTER_SCHEDULER = </span>
+        new DefaultPriorityWrapper(MASTER_SCHEDULER, TaskPriority.Low);
+<span class="fc" id="L71">    STARVABLE_PRIORITY_MASTER_SCHEDULER = </span>
+        new DefaultPriorityWrapper(MASTER_SCHEDULER, TaskPriority.Starvable);
+    
+<span class="fc" id="L74">    POOL_SIZE_UPDATER = new PoolResizeUpdater(LOW_PRIORITY_MASTER_SCHEDULER);</span>
+    
+<span class="fc" id="L76">    COMPUTATION_POOL = new SchedulerServiceLimiter(MASTER_SCHEDULER, cpuCount);</span>
+<span class="fc" id="L77">    LOW_PRIORITY_POOL = new DynamicGenericThreadLimiter(TaskPriority.Low, 0, -1, </span>
+                                                        &quot;CentralThreadlyPool-LowPriority&quot;, true);
+<span class="fc" id="L79">    SINGLE_THREADED_LOW_PRIORITY_POOL = </span>
+        new SinglePriorityThreadSubPool(TaskPriority.Low, false, 
+                                        &quot;CentralThreadlyPool-SingleThreadLowPriority&quot;, true, 
+                                        Thread.MIN_PRIORITY);
+<span class="fc" id="L83">    PER_TASK_SIZING_POOL = new PerTaskSizingSubmitterScheduler();</span>
+<span class="fc" id="L84">  }</span>
+  
+  /**
+   * Increase available threads threads that can be shared across pools.
+   * 
+   * @param count A positive number of threads to make available to the central pool
+   */
+  public static void increaseGenericThreads(int count) {
+<span class="fc" id="L92">    ArgumentVerifier.assertGreaterThanZero(count, &quot;count&quot;);</span>
+    
+<span class="fc" id="L94">    synchronized (CentralThreadlyPool.class) {</span>
+<span class="fc" id="L95">      POOL_SIZE_UPDATER.adjustPoolSize(count);</span>
+<span class="fc" id="L96">      genericThreadCount += count;</span>
+<span class="fc" id="L97">    }</span>
+<span class="fc" id="L98">  }</span>
+  
+  /**
+   * This reports the number of threads currently available for processing across all pools where 
+   * the max thread count is {@code &gt;} the guaranteed thread count.
+   * 
+   * @return The number of threads currently available for general processing work
+   */
+  public static int getGenericThreadCount() {
+<span class="fc" id="L107">    return genericThreadCount;</span>
+  }
+
+  /**
+   * Thread pool well suited for running CPU intensive computations on the tasks thread.
+   * 
+   * @return Pool for CPU bound tasks
+   */
+  public static SchedulerService computationPool() {
+<span class="fc" id="L116">    return computationPool(null);</span>
+  }
+
+  /**
+   * Thread pool well suited for running CPU intensive computations on the tasks thread.
+   * 
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return Pool for CPU bound tasks
+   */
+  public static SchedulerService computationPool(String threadName) {
+<span class="fc bfc" id="L126" title="All 2 branches covered.">    if (StringUtils.isNullOrEmpty(threadName)) {</span>
+<span class="fc" id="L127">      return COMPUTATION_POOL;</span>
+    } else {
+<span class="fc" id="L129">      return new ThreadRenamingSchedulerService(COMPUTATION_POOL, threadName, false);</span>
+    }
+  }
+  
+  /**
+   * Low priority pool for scheduling cleanup or otherwise tasks which could be significantly 
+   * delayed.  This pool will only have one thread, so tasks should complete quickly or they might 
+   * block other tasks.
+   * 
+   * @return Single threaded pool for running or scheduling out low priority tasks
+   */
+  public static PrioritySchedulerService lowPrioritySingleThreadPool() {
+<span class="fc" id="L141">    return lowPrioritySingleThreadPool(null);</span>
+  }
+  
+  /**
+   * Low priority pool for scheduling cleanup or otherwise tasks which could be significantly 
+   * delayed.  This pool will only have one thread, so tasks should complete quickly or they might 
+   * block other tasks.
+   * 
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return Single threaded pool for running or scheduling out low priority tasks
+   */
+  public static PrioritySchedulerService lowPrioritySingleThreadPool(String threadName) {
+<span class="fc bfc" id="L153" title="All 2 branches covered.">    if (StringUtils.isNullOrEmpty(threadName)) {</span>
+<span class="fc" id="L154">      return SINGLE_THREADED_LOW_PRIORITY_POOL;</span>
+    } else {
+<span class="fc" id="L156">      return new ThreadRenamingPriorityScheduler(SINGLE_THREADED_LOW_PRIORITY_POOL, threadName, false);</span>
+    }
+  }
+  
+  /**
+   * Low priority pool for scheduling cleanup or otherwise tasks which could be significantly 
+   * delayed.  This pool will execute only on any general processing threads which are available.  
+   * By default there is only one, but it can be increased by invoking 
+   * {@link #increaseGenericThreads(int)}.
+   * 
+   * @return Pool for running or scheduling out low priority tasks
+   */
+  public static SchedulerService lowPriorityPool() {
+<span class="fc" id="L169">    return lowPriorityPool(null);</span>
+  }
+  
+  /**
+   * Low priority pool for scheduling cleanup or otherwise tasks which could be significantly 
+   * delayed.  This pool will execute only on any general processing threads which are available.  
+   * By default there is only one, but it can be increased by invoking 
+   * {@link #increaseGenericThreads(int)}.
+   * 
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return Pool for running or scheduling out low priority tasks
+   */
+  public static SchedulerService lowPriorityPool(String threadName) {
+<span class="fc bfc" id="L182" title="All 2 branches covered.">    if (StringUtils.isNullOrEmpty(threadName)) {</span>
+<span class="fc" id="L183">      return LOW_PRIORITY_POOL;</span>
+    } else {
+<span class="fc" id="L185">      return new ThreadRenamingSchedulerService(LOW_PRIORITY_POOL, threadName, false);</span>
+    }
+  }
+  
+  /**
+   * Low priority pool for scheduling cleanup or otherwise tasks which could be significantly 
+   * delayed.  If not single threaded this pool will execute only on any general processing threads 
+   * which are available.  By default there is only one, but it can be increased by invoking 
+   * {@link #increaseGenericThreads(int)}.
+   * 
+   * @deprecated use {@link #lowPrioritySingleThreadPool()} or {@link #lowPriorityPool()}
+   * 
+   * @param singleThreaded {@code true} indicates that being blocked by other low priority tasks is not a concern
+   * @return Pool for running or scheduling out low priority tasks
+   */
+  @Deprecated
+  public static SchedulerService lowPriorityPool(boolean singleThreaded) {
+<span class="nc" id="L202">    return lowPriorityPool(singleThreaded, null);</span>
+  }
+  
+  /**
+   * Low priority pool for scheduling cleanup or otherwise tasks which could be significantly 
+   * delayed.  If not single threaded this pool will execute only on any general processing threads 
+   * which are available.  By default there is only one, but it can be increased by invoking 
+   * {@link #increaseGenericThreads(int)}.
+   * 
+   * @deprecated use {@link #lowPrioritySingleThreadPool(String)} or {@link #lowPriorityPool(String)}
+   * 
+   * @param singleThreaded {@code true} indicates that being blocked by other low priority tasks is not a concern
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return Pool for running or scheduling out low priority tasks
+   */
+  @Deprecated
+  public static SchedulerService lowPriorityPool(boolean singleThreaded, String threadName) {
+<span class="nc bnc" id="L219" title="All 2 branches missed.">    SchedulerService scheduler = singleThreaded ? SINGLE_THREADED_LOW_PRIORITY_POOL : LOW_PRIORITY_POOL;</span>
+<span class="nc bnc" id="L220" title="All 2 branches missed.">    if (StringUtils.isNullOrEmpty(threadName)) {</span>
+<span class="nc" id="L221">      return scheduler;</span>
+    } else {
+<span class="nc" id="L223">      return new ThreadRenamingSchedulerService(scheduler, threadName, false);</span>
+    }
+  }
+
+  /**
+   * Return a single threaded pool.  This can be useful for submitting tasks on where you don't 
+   * want to worry about any concurrency or shared memory issues.  If you want a single threaded 
+   * pool which is forced to use the already established pool limits, consider using 
+   * {@link #singleThreadPool(boolean)} with {@code false} to ensure pool churn is reduced.
+   * &lt;p&gt;
+   * If returned pool will only be accepting one or two tasks, please see 
+   * {@link #isolatedTaskPool()} as an alternative.
+   * 
+   * @return Single threaded pool for running or scheduling tasks on
+   */
+  public static PrioritySchedulerService singleThreadPool() {
+<span class="fc" id="L239">    return singleThreadPool(true, null);</span>
+  }
+
+  /**
+   * Return a single threaded pool.  This can be useful for submitting tasks on where you don't 
+   * want to worry about any concurrency or shared memory issues.  If you want a single threaded 
+   * pool which is forced to use the already established pool limits, consider using 
+   * {@link #singleThreadPool(boolean)} with {@code false} to ensure pool churn is reduced.
+   * &lt;p&gt;
+   * If returned pool will only be accepting one or two tasks, please see 
+   * {@link #isolatedTaskPool(String)} as an alternative.
+   * 
+   * @return Single threaded pool for running or scheduling tasks on
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   */
+  public static PrioritySchedulerService singleThreadPool(String threadName) {
+<span class="nc" id="L255">    return singleThreadPool(true, threadName);</span>
+  }
+  
+  /**
+   * Return a single threaded pool.  This can be useful for submitting tasks on where you don't 
+   * want to worry about any concurrency or shared memory issues.
+   * &lt;p&gt;
+   * If wanting guaranteed thread, and returned pool will only be accepting one or two tasks, 
+   * please see {@link #isolatedTaskPool(String)} as an alternative.
+   * 
+   * @param threadGuaranteed {@code true} indicates that the pool manager needs to expand if necessary
+   * @return Single threaded pool for running or scheduling tasks on
+   */
+  public static PrioritySchedulerService singleThreadPool(boolean threadGuaranteed) {
+<span class="fc" id="L269">    return singleThreadPool(threadGuaranteed, null);</span>
+  }
+  
+  /**
+   * Return a single threaded pool.  This can be useful for submitting tasks on where you don't 
+   * want to worry about any concurrency or shared memory issues.
+   * &lt;p&gt;
+   * If wanting guaranteed thread, and returned pool will only be accepting one or two tasks, 
+   * please see {@link #isolatedTaskPool(String)} as an alternative.
+   * 
+   * @param threadGuaranteed {@code true} indicates that the pool manager needs to expand if necessary
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return Single threaded pool for running or scheduling tasks on
+   */
+  public static PrioritySchedulerService singleThreadPool(boolean threadGuaranteed, String threadName) {
+<span class="fc" id="L284">    return new SingleThreadSubPool(TaskPriority.High, threadGuaranteed, threadName, false);</span>
+  }
+  
+  /**
+   * Return a single threaded pool.  This can be useful for submitting tasks on where you don't 
+   * want to worry about any concurrency or shared memory issues.  This is similar to 
+   * {@link #singleThreadPool(boolean, String)} except that it optionally allows you to specify the 
+   * priority for the thread during task execution.  This priority should be inclusively between 
+   * {@link Thread#MIN_PRIORITY} and {@link Thread#MAX_PRIORITY}.  Typically 
+   * {@link #singleThreadPool(boolean, String)} will be a better option, but this may be useful in 
+   * certain cases.
+   * &lt;p&gt;
+   * If wanting guaranteed thread, and returned pool will only be accepting one or two tasks, 
+   * please see {@link #isolatedTaskPool(String)} as an alternative.
+   * 
+   * @param threadGuaranteed {@code true} indicates that the pool manager needs to expand if necessary
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @param threadPriority the priority the thread should run as while executing tasks
+   * @return Single threaded pool for running or scheduling tasks on
+   */
+  public static PrioritySchedulerService singleThreadPool(boolean threadGuaranteed, 
+                                                          String threadName, int threadPriority) {
+<span class="fc" id="L306">    return new SinglePriorityThreadSubPool(TaskPriority.High, threadGuaranteed, </span>
+                                           threadName, false, threadPriority);
+  }
+  
+  /**
+   * Requests a pool with a given size.  These threads are guaranteed to be available, but 
+   * general processing threads will not be available to any pools returned by this.  If you want 
+   * to be able to use part of the shared general processing threads use 
+   * {@link #rangedThreadPool(int, int)} with either a higher or negative value for 
+   * {@code maxThreads}.
+   * &lt;p&gt;
+   * If returned pool will only be accepting one or two tasks, please see 
+   * {@link #isolatedTaskPool()} as an alternative.
+   * 
+   * @param threadCount The number of threads that will be available to tasks submitted on the returned pool
+   * @return A pool with the requested threads available for task scheduling or execution
+   */
+  public static SchedulerService threadPool(int threadCount) {
+<span class="fc" id="L324">    return rangedThreadPool(TaskPriority.High, threadCount, threadCount, null);</span>
+  }
+  
+  /**
+   * Requests a pool with a given size.  These threads are guaranteed to be available, but 
+   * general processing threads will not be available to any pools returned by this.  If you want 
+   * to be able to use part of the shared general processing threads use 
+   * {@link #rangedThreadPool(int, int)} with either a higher or negative value for 
+   * {@code maxThreads}.
+   * &lt;p&gt;
+   * If returned pool will only be accepting one or two tasks, please see 
+   * {@link #isolatedTaskPool(String)} as an alternative.
+   * 
+   * @param threadCount The number of threads that will be available to tasks submitted on the returned pool
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return A pool with the requested threads available for task scheduling or execution
+   */
+  public static SchedulerService threadPool(int threadCount, String threadName) {
+<span class="fc" id="L342">    return rangedThreadPool(TaskPriority.High, threadCount, threadCount, threadName);</span>
+  }
+
+  /**
+   * Requests a pool with a given size.  These threads are guaranteed to be available, but 
+   * general processing threads will not be available to any pools returned by this.  If you want 
+   * to be able to use part of the shared general processing threads use 
+   * {@link #rangedThreadPool(TaskPriority, int, int)} with either a higher or negative value 
+   * for {@code maxThreads}.
+   * &lt;p&gt;
+   * If returned pool will only be accepting one or two tasks, please see 
+   * {@link #isolatedTaskPool()} as an alternative.
+   * 
+   * @param priority Priority for tasks submitted on returned scheduler service
+   * @param threadCount The number of threads that will be available to tasks submitted on the returned pool
+   * @return A pool with the requested threads available for task scheduling or execution
+   */
+  public static SchedulerService threadPool(TaskPriority priority, int threadCount) {
+<span class="nc" id="L360">    return rangedThreadPool(priority, threadCount, threadCount, null);</span>
+  }
+
+  /**
+   * Requests a pool with a given size.  These threads are guaranteed to be available, but 
+   * general processing threads will not be available to any pools returned by this.  If you want 
+   * to be able to use part of the shared general processing threads use 
+   * {@link #rangedThreadPool(TaskPriority, int, int)} with either a higher or negative value 
+   * for {@code maxThreads}.
+   * &lt;p&gt;
+   * If returned pool will only be accepting one or two tasks, please see 
+   * {@link #isolatedTaskPool(String)} as an alternative.
+   * 
+   * @param priority Priority for tasks submitted on returned scheduler service
+   * @param threadCount The number of threads that will be available to tasks submitted on the returned pool
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return A pool with the requested threads available for task scheduling or execution
+   */
+  public static SchedulerService threadPool(TaskPriority priority, int threadCount, 
+                                            String threadName) {
+<span class="nc" id="L380">    return rangedThreadPool(priority, threadCount, threadCount, threadName);</span>
+  }
+  
+  /**
+   * Requests a pool with a given range of threads.  Minimum threads are guaranteed to be available 
+   * to tasks submitted to the returned threads.  In addition to those minimum threads tasks 
+   * submitted may run on &quot;general processing&quot; threads (starts at {@code 1} but can be increased by 
+   * invoking {@link #increaseGenericThreads(int)}).  If {@code maxThreads} is 
+   * {@code &gt; 0} then that many shared threads in the central pool may be used, otherwise all shared 
+   * threads may be able to be used.
+   * &lt;p&gt;
+   * Different ranges may have minor different performance characteristics.  The most efficient 
+   * returned pool would be where {@code maxThreads == 1} (and single threaded pool).  For 
+   * multi-threaded pools the best option is where {@code maxThreads} is set less than or equal to
+   * {@code guaranteedThreads + getGeneralProcessingThreadCount()}.
+   * 
+   * @param guaranteedThreads Number of threads the provided pool should be guaranteed to have
+   * @param maxThreads Maximum number of threads to the returned pool can consume, or negative to use any available
+   * @return A pool with the requested specifications for task scheduling or execution
+   */
+  public static SchedulerService rangedThreadPool(int guaranteedThreads, int maxThreads) {
+<span class="fc" id="L401">    return rangedThreadPool(TaskPriority.High, guaranteedThreads, maxThreads, null);</span>
+  }
+  
+  /**
+   * Requests a pool with a given range of threads.  Minimum threads are guaranteed to be available 
+   * to tasks submitted to the returned threads.  In addition to those minimum threads tasks 
+   * submitted may run on &quot;general processing&quot; threads (starts at {@code 1} but can be increased by 
+   * invoking {@link #increaseGenericThreads(int)}).  If {@code maxThreads} is 
+   * {@code &gt; 0} then that many shared threads in the central pool may be used, otherwise all shared 
+   * threads may be able to be used.
+   * &lt;p&gt;
+   * Different ranges may have minor different performance characteristics.  The most efficient 
+   * returned pool would be where {@code maxThreads == 1} (and single threaded pool).  For 
+   * multi-threaded pools the best option is where {@code maxThreads} is set less than or equal to
+   * {@code guaranteedThreads + getGeneralProcessingThreadCount()}.
+   * 
+   * @param guaranteedThreads Number of threads the provided pool should be guaranteed to have
+   * @param maxThreads Maximum number of threads to the returned pool can consume, or negative to use any available
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return A pool with the requested specifications for task scheduling or execution
+   */
+  public static SchedulerService rangedThreadPool(int guaranteedThreads, int maxThreads, 
+                                                  String threadName) {
+<span class="fc" id="L424">    return rangedThreadPool(TaskPriority.High, guaranteedThreads, maxThreads, threadName);</span>
+  }
+  
+  /**
+   * Requests a pool with a given range of threads.  Minimum threads are guaranteed to be available 
+   * to tasks submitted to the returned threads.  In addition to those minimum threads tasks 
+   * submitted may run on &quot;general processing&quot; threads (starts at {@code 1} but can be increased by 
+   * invoking {@link #increaseGenericThreads(int)}).  If {@code maxThreads} is 
+   * {@code &gt; 0} then that many shared threads in the central pool may be used, otherwise all shared 
+   * threads may be able to be used.
+   * &lt;p&gt;
+   * Different ranges may have minor different performance characteristics.  The most efficient 
+   * returned pool would be where {@code maxThreads == 1} (and single threaded pool).  For 
+   * multi-threaded pools the best option is where {@code maxThreads} is set less than or equal to
+   * {@code guaranteedThreads + getGeneralProcessingThreadCount()}.
+   * 
+   * @param priority Priority for tasks submitted on returned scheduler service
+   * @param guaranteedThreads Number of threads the provided pool should be guaranteed to have
+   * @param maxThreads Maximum number of threads to the returned pool can consume, or negative to use any available
+   * @return A pool with the requested specifications for task scheduling or execution
+   */
+  public static SchedulerService rangedThreadPool(TaskPriority priority, 
+                                                  int guaranteedThreads, int maxThreads) {
+<span class="nc" id="L447">    return rangedThreadPool(priority, guaranteedThreads, maxThreads, null);</span>
+  }
+  
+  /**
+   * Requests a pool with a given range of threads.  Minimum threads are guaranteed to be available 
+   * to tasks submitted to the returned threads.  In addition to those minimum threads tasks 
+   * submitted may run on &quot;general processing&quot; threads (starts at {@code 1} but can be increased by 
+   * invoking {@link #increaseGenericThreads(int)}).  If {@code maxThreads} is 
+   * {@code &gt; 0} then that many shared threads in the central pool may be used, otherwise all shared 
+   * threads may be able to be used.
+   * &lt;p&gt;
+   * Different ranges may have minor different performance characteristics.  The most efficient 
+   * returned pool would be where {@code maxThreads == 1} (and single threaded pool).  For 
+   * multi-threaded pools the best option is where {@code maxThreads} is set less than or equal to
+   * {@code guaranteedThreads + getGeneralProcessingThreadCount()}.
+   * 
+   * @param priority Priority for tasks submitted on returned scheduler service
+   * @param guaranteedThreads Number of threads the provided pool should be guaranteed to have
+   * @param maxThreads Maximum number of threads to the returned pool can consume, or negative to use any available
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return A pool with the requested specifications for task scheduling or execution
+   */
+  public static SchedulerService rangedThreadPool(TaskPriority priority, 
+                                                  int guaranteedThreads, int maxThreads, 
+                                                  String threadName) {
+<span class="pc bpc" id="L472" title="1 of 4 branches missed.">    if (maxThreads == 1 &amp;&amp; priority == TaskPriority.High) {</span>
+      // This single thread implementation is more memory intensive, but better performing
+<span class="pc bpc" id="L474" title="1 of 2 branches missed.">      return singleThreadPool(guaranteedThreads &gt; 0, threadName);</span>
+<span class="pc bpc" id="L475" title="1 of 2 branches missed.">    } else if (maxThreads &gt; 0 &amp;&amp; </span>
+<span class="pc bpc" id="L476" title="1 of 2 branches missed.">               Math.max(0, guaranteedThreads) + genericThreadCount &gt;= maxThreads) {</span>
+      // specified max threads wont ever exceed general use count, so use more efficient scheduler
+<span class="fc" id="L478">      return new MasterSchedulerResizingLimiter(priority, guaranteedThreads, maxThreads, </span>
+                                                threadName, false);
+    } else {
+<span class="nc" id="L481">      return new DynamicGenericThreadLimiter(priority, guaranteedThreads, maxThreads, </span>
+                                             threadName, false);
+    }
+  }
+  
+  /**
+   * This returns a thread pool which is designed for an &quot;isolated&quot; task.  An isolated task is one 
+   * where there is not other scheduling needs in this area of code.  This is equivalent to 
+   * invoking {@link #singleThreadPool()} for every task submitted.  However that implementation is 
+   * better if you have a multiple tasks you need to execute, and this one is much better if you 
+   * have a single task to execute / schedule.
+   * &lt;p&gt;
+   * Implementation wise every task submitted on the returned pool will increase the pool size 
+   * (if necessary) to allow execution, and then decrease the size once execution completes.  
+   * Because of this, {@link #singleThreadPool()} is much better if you can reuse the pool (to 
+   * reduce size churn), and this is much better if you only have a single task (to reduce memory 
+   * overhead).
+   * 
+   * @return Pool which will ensure there is a thread available for every task executed on it
+   */
+  public static SchedulerService isolatedTaskPool() {
+<span class="fc" id="L502">    return isolatedTaskPool(null);</span>
+  }
+
+  /**
+   * This returns a thread pool which is designed for an &quot;isolated&quot; task.  An isolated task is one 
+   * where there is not other scheduling needs in this area of code.  This is equivalent to 
+   * invoking {@link #singleThreadPool()} for every task submitted.  However that implementation is 
+   * better if you have a multiple tasks you need to execute, and this one is much better if you 
+   * have a single task to execute / schedule.
+   * &lt;p&gt;
+   * Implementation wise every task submitted on the returned pool will increase the pool size 
+   * (if necessary) to allow execution, and then decrease the size once execution completes.  
+   * Because of this, {@link #singleThreadPool()} is much better if you can reuse the pool (to 
+   * reduce size churn), and this is much better if you only have a single task (to reduce memory 
+   * overhead).
+   * 
+   * @param threadName Name to prefix to thread while tasks on this pool execute, or {@code null}
+   * @return Pool which will ensure there is a thread available for every task executed on it
+   */
+  public static SchedulerService isolatedTaskPool(String threadName) {
+<span class="pc bpc" id="L522" title="1 of 2 branches missed.">    if (StringUtils.isNullOrEmpty(threadName)) {</span>
+<span class="fc" id="L523">      return PER_TASK_SIZING_POOL;</span>
+    } else {
+<span class="nc" id="L525">      return new ThreadRenamingSchedulerService(PER_TASK_SIZING_POOL, threadName, false);</span>
+    }
+  }
+  
+  /**
+   * Returns the master scheduler with a default priority requested.
+   * @param defaultPriority Default priority for tasks submitted to scheduler
+   * @param threadName if name should be set during execution
+   * 
+   * @return Master scheduler with the provided default priority
+   */
+  private static PrioritySchedulerService masterScheduler(TaskPriority defaultPriority, 
+                                                          String threadName, boolean replaceName) {
+    PrioritySchedulerService result;
+<span class="fc bfc" id="L539" title="All 2 branches covered.">    if (defaultPriority == TaskPriority.High) {</span>
+<span class="fc" id="L540">      result = MASTER_SCHEDULER;</span>
+<span class="pc bpc" id="L541" title="1 of 2 branches missed.">    } else if (defaultPriority ==  TaskPriority.Low) {</span>
+<span class="fc" id="L542">      result = LOW_PRIORITY_MASTER_SCHEDULER;</span>
+    } else {
+<span class="nc" id="L544">      result = STARVABLE_PRIORITY_MASTER_SCHEDULER;</span>
+    }
+<span class="fc bfc" id="L546" title="All 2 branches covered.">    if (StringUtils.isNullOrEmpty(threadName)) {</span>
+<span class="fc" id="L547">      return result;</span>
+    } else {
+<span class="fc" id="L549">      return new ThreadRenamingPriorityScheduler(result, threadName, replaceName);</span>
+    }
+  }
+  
+  /**
+   * Pool which is designed to resize the master pool for EACH individual task, rather than for the 
+   * lifetime of the pool itself.
+   */
+<span class="fc" id="L557">  protected static class PerTaskSizingSubmitterScheduler extends AbstractSubmitterScheduler </span>
+                                                         implements SchedulerService {
+    @Override
+    public void scheduleWithFixedDelay(Runnable task, long initialDelay, long recurringDelay) {
+<span class="nc" id="L561">      ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+      
+<span class="nc" id="L563">      MASTER_SCHEDULER.scheduleWithFixedDelay(new PoolResizingOnCollectionTask(task), </span>
+                                              initialDelay, recurringDelay, TaskPriority.High);
+<span class="nc" id="L565">    }</span>
+
+    @Override
+    public void scheduleAtFixedRate(Runnable task, long initialDelay, long period) {
+<span class="nc" id="L569">      ArgumentVerifier.assertNotNull(task, &quot;task&quot;);</span>
+      
+<span class="nc" id="L571">      MASTER_SCHEDULER.scheduleAtFixedRate(new PoolResizingOnCollectionTask(task), </span>
+                                           initialDelay, period, TaskPriority.High);
+<span class="nc" id="L573">    }</span>
+
+    @Override
+    protected void doSchedule(Runnable task, long delayInMillis) {
+<span class="fc" id="L577">      MASTER_SCHEDULER.doSchedule(new PoolResizingOnCompleteionTask(task), </span>
+                                  delayInMillis, TaskPriority.High);
+<span class="fc" id="L579">    }</span>
+
+    @Override
+    public boolean remove(Runnable task) {
+<span class="nc" id="L583">      return MASTER_SCHEDULER.remove(task);</span>
+    }
+
+    @Override
+    public boolean remove(Callable&lt;?&gt; task) {
+<span class="nc" id="L588">      return MASTER_SCHEDULER.remove(task);</span>
+    }
+
+    @Override
+    public int getActiveTaskCount() {
+<span class="nc" id="L593">      return MASTER_SCHEDULER.getActiveTaskCount();</span>
+    }
+
+    @Override
+    public int getQueuedTaskCount() {
+<span class="nc" id="L598">      return MASTER_SCHEDULER.getQueuedTaskCount();</span>
+    }
+
+    @Override
+    public int getWaitingForExecutionTaskCount() {
+<span class="nc" id="L603">      return MASTER_SCHEDULER.getWaitingForExecutionTaskCount();</span>
+    }
+
+    @Override
+    public boolean isShutdown() {
+<span class="nc" id="L608">      return MASTER_SCHEDULER.isShutdown();</span>
+    }
+
+    /**
+     * {@link Runnable} which expands the pool on construction, and will keep the pool expanded 
+     * till it can be garbage collected.  This is designed for tasks which run multiple times.
+     */
+    protected static class PoolResizingOnCollectionTask implements Runnable, RunnableContainer {
+      protected final Runnable task;
+      @SuppressWarnings(&quot;unused&quot;)
+      private final Object gcReference; // object just held on to track garbage collection
+      
+<span class="nc" id="L620">      public PoolResizingOnCollectionTask(Runnable task) {</span>
+<span class="nc" id="L621">        this.task = task;</span>
+<span class="nc" id="L622">        this.gcReference = new PoolResizer(1);</span>
+<span class="nc" id="L623">      }</span>
+
+      @Override
+      public void run() {
+<span class="nc" id="L627">        task.run();</span>
+<span class="nc" id="L628">      }</span>
+
+      @Override
+      public Runnable getContainedRunnable() {
+<span class="nc" id="L632">        return task;</span>
+      }
+    }
+
+    /**
+     * {@link Runnable} which expands the pool on construction, and will keep the pool expanded 
+     * till execution completes.  This is designed for tasks which run once.
+     */
+    protected static class PoolResizingOnCompleteionTask implements Runnable, RunnableContainer {
+      protected final Runnable task;
+      
+<span class="fc" id="L643">      public PoolResizingOnCompleteionTask(Runnable task) {</span>
+<span class="fc" id="L644">        this.task = task;</span>
+<span class="fc" id="L645">        POOL_SIZE_UPDATER.adjustPoolSize(1);</span>
+<span class="fc" id="L646">      }</span>
+
+      @Override
+      public void run() {
+        try {
+<span class="fc" id="L651">          task.run();</span>
+        } finally {
+<span class="fc" id="L653">          POOL_SIZE_UPDATER.adjustPoolSize(-1);</span>
+        }
+<span class="fc" id="L655">      }</span>
+
+      @Override
+      public Runnable getContainedRunnable() {
+<span class="nc" id="L659">        return task;</span>
+      }
+    }
+  }
+  
+  /**
+   * Implementation of {@link SingleThreadSchedulerSubPool} in order to get efficient single 
+   * threaded execution on top of the central pool.  In addition to handling possible pool size 
+   * changes, this also handles making sure the pool returns the same stats / values of the 
+   * delegate pool.
+   */
+  protected static class SingleThreadSubPool extends SingleThreadSchedulerSubPool {
+    @SuppressWarnings(&quot;unused&quot;)
+    private final Object gcReference; // object just held on to track garbage collection
+    
+    protected SingleThreadSubPool(TaskPriority tickPriority, boolean threadGuaranteed, 
+                                  String threadName, boolean replaceName) {
+<span class="fc" id="L676">      super(masterScheduler(tickPriority, threadName, replaceName), </span>
+            TaskPriority.High, LOW_PRIORITY_MAX_WAIT_IN_MS);
+
+<span class="fc bfc" id="L679" title="All 2 branches covered.">      this.gcReference = threadGuaranteed ? new PoolResizer(1) : null;</span>
+<span class="fc" id="L680">    }</span>
+
+    // SingleThreadSchedulerSubPool does not normally consider the parent pools load
+    // but queued / task counts for this pool are different, the below functions ensure that behavior
+    
+    @Override
+    public int getActiveTaskCount() {
+<span class="nc" id="L687">      return MASTER_SCHEDULER.getActiveTaskCount();</span>
+    }
+    
+    @Override
+    public int getQueuedTaskCount(TaskPriority priority) {
+<span class="nc" id="L692">      return super.getQueuedTaskCount(priority) + MASTER_SCHEDULER.getQueuedTaskCount(priority);</span>
+    }
+    
+    @Override
+    public int getWaitingForExecutionTaskCount(TaskPriority priority) {
+<span class="nc" id="L697">      return super.getWaitingForExecutionTaskCount(priority) + </span>
+<span class="nc" id="L698">               MASTER_SCHEDULER.getWaitingForExecutionTaskCount(priority);</span>
+    }
+  }
+  
+  /**
+   * Similar to {@link SingleThreadSubPool} except this implementation also adjusts the priority 
+   * of the thread while executing.
+   */
+  protected static class SinglePriorityThreadSubPool extends SingleThreadSubPool {
+    private final int threadPriority;
+    
+    protected SinglePriorityThreadSubPool(TaskPriority tickPriority, boolean threadGuaranteed,
+                                          String threadName, boolean replaceName, int threadPriority) {
+<span class="fc" id="L711">      super(tickPriority, threadGuaranteed, threadName, replaceName);</span>
+      
+<span class="fc" id="L713">      this.threadPriority = threadPriority;</span>
+<span class="fc" id="L714">    }</span>
+    
+    @Override
+    protected void executeTasks() {
+<span class="fc" id="L718">      Thread currentThread = Thread.currentThread();</span>
+<span class="fc" id="L719">      int startPriority = currentThread.getPriority();</span>
+<span class="pc bpc" id="L720" title="1 of 2 branches missed.">      if (startPriority == threadPriority) {</span>
+<span class="nc" id="L721">        super.executeTasks();</span>
+      } else {
+<span class="fc" id="L723">        currentThread.setPriority(threadPriority);</span>
+        
+<span class="fc" id="L725">        super.executeTasks();</span>
+        
+<span class="fc" id="L727">        currentThread.setPriority(startPriority);</span>
+      }
+<span class="fc" id="L729">    }</span>
+  }
+
+  /**
+   * This limiter is so that a scheduler wont use beyond it's guaranteed thread count (and the 
+   * generic threads).  If used directly it is important to be sure the specified limit is set to 
+   * be low enough that the pool wont consume beyond it's guaranteed threads + general use 
+   * available at construction.
+   * &lt;p&gt;
+   * This is necessary to be sure that when a returned scheduler requests a given qty of threads, 
+   * those resources are for sure available to them.
+   */
+  protected static class MasterSchedulerResizingLimiter extends SchedulerServiceLimiter {
+    @SuppressWarnings(&quot;unused&quot;)
+    private final Object gcReference; // object just held on to track garbage collection
+    
+    public MasterSchedulerResizingLimiter(TaskPriority priority, int guaranteedThreads, 
+                                          int maxThreads, String threadName, boolean replaceName) {
+<span class="fc bfc" id="L747" title="All 2 branches covered.">      super(masterScheduler(priority, threadName, replaceName), </span>
+            maxThreads &lt; 1 ? Integer.MAX_VALUE : maxThreads);
+      
+<span class="pc bpc" id="L750" title="1 of 4 branches missed.">      if (maxThreads &gt; 0 &amp;&amp; guaranteedThreads &gt; maxThreads) {</span>
+<span class="nc" id="L751">        throw new IllegalArgumentException(&quot;Max threads must be &lt;= guaranteed threads&quot;);</span>
+      }
+      
+<span class="fc bfc" id="L754" title="All 2 branches covered.">      this.gcReference = guaranteedThreads &gt; 0 ? new PoolResizer(guaranteedThreads) : null;</span>
+<span class="fc" id="L755">    }</span>
+  }
+  
+  /**
+   * Similar to the extended classes {@link MasterSchedulerResizingLimiter} this class is for 
+   * ensuring that no single scheduler can completely dominate the central pool.  This class 
+   * however is for when limits are set very high, and we may need to be able to adapt to added 
+   * generic threads in the future.  This does have minor performance implications so if you don't 
+   * need to be flexible for future general use threads the {@link MasterSchedulerResizingLimiter} 
+   * is a better option.
+   */
+  protected static class DynamicGenericThreadLimiter extends MasterSchedulerResizingLimiter {
+    private final int guaranteedThreads;
+    private final int maxThreads;
+    
+    public DynamicGenericThreadLimiter(TaskPriority priority, int guaranteedThreads, 
+                                       int maxThreads, String threadName, boolean replaceName) {
+<span class="fc" id="L772">      super(priority, guaranteedThreads, maxThreads, threadName, replaceName);</span>
+      
+<span class="pc bpc" id="L774" title="1 of 2 branches missed.">      this.guaranteedThreads = guaranteedThreads &gt; 0 ? guaranteedThreads : 0;</span>
+<span class="fc" id="L775">      this.maxThreads = getMaxConcurrency();</span>
+<span class="fc" id="L776">    }</span>
+
+    @Override
+    protected boolean canSubmitTaskToPool() {
+<span class="fc" id="L780">      int allowedConcurrency = Math.min(maxThreads, guaranteedThreads + genericThreadCount);</span>
+<span class="fc bfc" id="L781" title="All 2 branches covered.">      if (allowedConcurrency != getMaxConcurrency()) {</span>
+<span class="fc" id="L782">        setMaxConcurrency(allowedConcurrency);</span>
+      }
+      
+<span class="fc" id="L785">      return super.canSubmitTaskToPool();</span>
+    }
+  }
+  
+  /**
+   * Class which adjusts the size of the master pool up once it is constructed.  And down once it 
+   * is garbage collected (as an assumption that the class which needed the resize is no longer 
+   * available).
+   * &lt;p&gt;
+   * While using the garbage collector is not normally ideal for something like this, it avoids the 
+   * need to have a shutdown action on returned pools.  In addition a delay in reducing a pool size 
+   * down is desirable to reduce potential thread churn of the central pool.
+   */
+  protected static class PoolResizer {
+    private final int amount;
+    
+<span class="fc" id="L801">    public PoolResizer(int amount) {</span>
+<span class="fc" id="L802">      this.amount = amount;</span>
+
+<span class="fc" id="L804">      POOL_SIZE_UPDATER.adjustPoolSize(amount);</span>
+<span class="fc" id="L805">    }</span>
+    
+    @Override
+    protected void finalize() {
+<span class="fc" id="L809">      POOL_SIZE_UPDATER.adjustPoolSize(-amount);</span>
+<span class="fc" id="L810">    }</span>
+  }
+  
+  /**
+   * Class for handling the mechanics for adjusting the master schedulers pool size.  This class's 
+   * primary job is sending updates to that scheduler so that the applications needs are met, but 
+   * churn is minimized.
+   */
+  protected static class PoolResizeUpdater extends ReschedulingOperation {
+    protected static final int POOL_SIZE_UPDATE_DELAY = 120_000; // delayed pool size changes reduce churn
+    
+    protected LongAdder poolSizeChange;
+
+    protected PoolResizeUpdater(SubmitterScheduler scheduler) {
+<span class="fc" id="L824">      super(scheduler, POOL_SIZE_UPDATE_DELAY);</span>
+      
+<span class="fc" id="L826">      poolSizeChange = new LongAdder();</span>
+<span class="fc" id="L827">    }</span>
+    
+    public void adjustPoolSize(int delta) {
+<span class="fc bfc" id="L830" title="All 2 branches covered.">      if (delta &gt; 0) {</span>
+        // increases we handle immediately, threads will still be lazily started
+<span class="fc" id="L832">        MASTER_SCHEDULER.adjustPoolSize(delta);</span>
+      } else {
+        // decreases are delayed since thread stops may be immediate
+<span class="fc" id="L835">        poolSizeChange.add(delta);</span>
+<span class="fc" id="L836">        signalToRun();</span>
+      }
+<span class="fc" id="L838">    }</span>
+
+    @Override
+    protected void run() {
+<span class="nc" id="L842">      int adjustment = poolSizeChange.intValue();</span>
+<span class="nc bnc" id="L843" title="All 2 branches missed.">      if (adjustment != 0) {</span>
+<span class="nc" id="L844">        poolSizeChange.add(-adjustment);</span>
+<span class="nc" id="L845">        MASTER_SCHEDULER.adjustPoolSize(adjustment);</span>
+      }
+<span class="nc" id="L847">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

@@ -1,0 +1,524 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PrioritySchedulerStatisticTracker.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">threadly$All_in_threadly_test.exec</a> &gt; <a href="index.source.html" class="el_package">org.threadly.concurrent.statistics</a> &gt; <span class="el_source">PrioritySchedulerStatisticTracker.java</span></div><h1>PrioritySchedulerStatisticTracker.java</h1><pre class="source lang-java linenums">package org.threadly.concurrent.statistics;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+
+import org.threadly.concurrent.ConfigurableThreadFactory;
+import org.threadly.concurrent.PriorityScheduler;
+import org.threadly.concurrent.TaskPriority;
+import org.threadly.concurrent.collections.ConcurrentArrayList;
+import org.threadly.concurrent.statistics.PriorityStatisticManager.TaskStatWrapper;
+import org.threadly.util.Clock;
+import org.threadly.util.Pair;
+
+/**
+ * An implementation of {@link PriorityScheduler} which tracks run and usage statistics.  This is 
+ * designed for testing and troubleshooting.  It has a little more overhead from the normal 
+ * {@link PriorityScheduler}.
+ * &lt;p&gt;
+ * It helps give insight in how long tasks are running, how well the thread pool is being 
+ * utilized, as well as execution frequency.
+ * 
+ * @since 4.5.0 (since 1.0.0 at org.threadly.concurrent)
+ */
+public class PrioritySchedulerStatisticTracker extends PriorityScheduler 
+                                               implements StatisticPriorityScheduler {
+  protected final PriorityStatisticManager statsManager;
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.  It also  defaults to all newly created 
+   * threads being daemon threads.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize) {
+<span class="fc" id="L45">    this(poolSize, DEFAULT_PRIORITY, </span>
+         DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, DEFAULT_NEW_THREADS_DAEMON);
+<span class="fc" id="L47">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, boolean useDaemonThreads) {
+<span class="fc" id="L62">    this(poolSize, DEFAULT_PRIORITY, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, useDaemonThreads);</span>
+<span class="fc" id="L63">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs) {
+<span class="fc" id="L82">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, DEFAULT_NEW_THREADS_DAEMON);</span>
+<span class="fc" id="L83">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           boolean useDaemonThreads) {
+<span class="fc" id="L104">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, useDaemonThreads, 1000);</span>
+<span class="fc" id="L105">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param threadFactory thread factory for producing new threads within executor
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           ThreadFactory threadFactory) {
+<span class="fc" id="L126">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, threadFactory, 1000);</span>
+<span class="fc" id="L127">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.  It also  defaults to all newly created 
+   * threads being daemon threads.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, int maxStatisticWindowSize) {
+<span class="fc" id="L143">    this(poolSize, DEFAULT_PRIORITY, </span>
+         DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, DEFAULT_NEW_THREADS_DAEMON, maxStatisticWindowSize);
+<span class="fc" id="L145">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, boolean useDaemonThreads, 
+                                           int maxStatisticWindowSize) {
+<span class="fc" id="L162">    this(poolSize, DEFAULT_PRIORITY, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, </span>
+         useDaemonThreads, maxStatisticWindowSize);
+<span class="fc" id="L164">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           int maxStatisticWindowSize) {
+<span class="fc" id="L185">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, </span>
+         DEFAULT_NEW_THREADS_DAEMON, maxStatisticWindowSize);
+<span class="fc" id="L187">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           boolean useDaemonThreads, int maxStatisticWindowSize) {
+<span class="fc" id="L209">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, useDaemonThreads, </span>
+         maxStatisticWindowSize, false);
+<span class="fc" id="L211">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.  
+   * &lt;p&gt;
+   * This defaults to inaccurate time.  Meaning that durations and delays may under report (but 
+   * NEVER OVER what they actually were).  This has the least performance impact.  If you want more 
+   * accurate time consider using one of the constructors that accepts a boolean for accurate time.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param threadFactory thread factory for producing new threads within executor
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           ThreadFactory threadFactory, 
+                                           int maxStatisticWindowSize) {
+<span class="fc" id="L234">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, </span>
+         threadFactory, maxStatisticWindowSize, false);
+<span class="fc" id="L236">  }</span>
+
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.  It also  defaults to all newly created 
+   * threads being daemon threads.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, 
+                                           int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L250">    this(poolSize, DEFAULT_PRIORITY, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, </span>
+         DEFAULT_NEW_THREADS_DAEMON, maxStatisticWindowSize, accurateTime);
+<span class="fc" id="L252">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This constructs a default priority of high (which makes sense for most use cases).  
+   * It also defaults low priority worker wait as 500ms.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, boolean useDaemonThreads, 
+                                           int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L266">    this(poolSize, DEFAULT_PRIORITY, DEFAULT_LOW_PRIORITY_MAX_WAIT_IN_MS, </span>
+         useDaemonThreads, maxStatisticWindowSize, accurateTime);
+<span class="fc" id="L268">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L286">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, </span>
+         DEFAULT_NEW_THREADS_DAEMON, maxStatisticWindowSize, accurateTime);
+<span class="fc" id="L288">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param useDaemonThreads {@code true} if newly created threads should be daemon
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, boolean useDaemonThreads, 
+                                           int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L307">    this(poolSize, defaultPriority, maxWaitForLowPriorityInMs, </span>
+<span class="fc" id="L308">         new ConfigurableThreadFactory(PrioritySchedulerStatisticTracker.class.getSimpleName() + &quot;-&quot;, </span>
+                                       true, useDaemonThreads, Thread.NORM_PRIORITY, null, null), 
+         maxStatisticWindowSize, accurateTime);
+<span class="fc" id="L311">  }</span>
+  
+  /**
+   * Constructs a new thread pool, though no threads will be started till it accepts it's first 
+   * request.  This provides the extra parameters to tune what tasks submitted without a priority 
+   * will be scheduled as.  As well as the maximum wait for low priority tasks.  The longer low 
+   * priority tasks wait for a worker, the less chance they will have to create a thread.  But it 
+   * also makes low priority tasks execution time less predictable.
+   * 
+   * @param poolSize Thread pool size that should be maintained
+   * @param defaultPriority priority to give tasks which do not specify it
+   * @param maxWaitForLowPriorityInMs time low priority tasks wait for a worker
+   * @param threadFactory thread factory for producing new threads within executor
+   * @param maxStatisticWindowSize maximum number of samples to keep internally
+   * @param accurateTime {@code true} to ensure that delays and durations are not under reported
+   */
+  public PrioritySchedulerStatisticTracker(int poolSize, TaskPriority defaultPriority, 
+                                           long maxWaitForLowPriorityInMs, 
+                                           ThreadFactory threadFactory, 
+                                           int maxStatisticWindowSize, boolean accurateTime) {
+<span class="fc" id="L331">    super(new StatisticWorkerPool(threadFactory, poolSize, </span>
+                                  new PriorityStatisticManager(maxStatisticWindowSize, accurateTime)), 
+          defaultPriority, maxWaitForLowPriorityInMs);
+    
+<span class="fc" id="L335">    this.statsManager = ((StatisticWorkerPool)workerPool).statsManager;</span>
+<span class="fc" id="L336">  }</span>
+  
+  @Override
+  public List&lt;Runnable&gt; shutdownNow() {
+    // we must unwrap our statistic tracker runnables
+<span class="fc" id="L341">    List&lt;Runnable&gt; wrappedRunnables = super.shutdownNow();</span>
+<span class="fc" id="L342">    List&lt;Runnable&gt; result = new ArrayList&lt;&gt;(wrappedRunnables.size());</span>
+    
+<span class="fc" id="L344">    Iterator&lt;Runnable&gt; it = wrappedRunnables.iterator();</span>
+<span class="fc bfc" id="L345" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L346">      Runnable r = it.next();</span>
+<span class="fc bfc" id="L347" title="All 2 branches covered.">      if (r instanceof TaskStatWrapper) {</span>
+<span class="fc" id="L348">        TaskStatWrapper tw = (TaskStatWrapper)r;</span>
+<span class="fc bfc" id="L349" title="All 4 branches covered.">        if (! (tw.task instanceof Future) || ! ((Future&lt;?&gt;)tw.task).isCancelled()) {</span>
+<span class="fc" id="L350">          result.add(tw.task);</span>
+        }
+<span class="fc" id="L352">      } else {</span>
+        // this typically happens in unit tests, but could happen by an extending class
+<span class="fc" id="L354">        result.add(r);</span>
+      }
+<span class="fc" id="L356">    }</span>
+    
+<span class="fc" id="L358">    return result;</span>
+  }
+  
+  /**
+   * Wraps the provided task in our statistic wrapper.  If the task is {@code null}, this will 
+   * return {@code null} so that the parent class can do error checking.
+   * 
+   * @param task Runnable to wrap
+   * @param priority Priority for runnable to execute
+   * @return Runnable which is our wrapped implementation
+   */
+  private Runnable wrap(Runnable task, TaskPriority priority) {
+<span class="fc bfc" id="L370" title="All 2 branches covered.">    if (priority == null) {</span>
+<span class="fc" id="L371">      priority = getDefaultPriority();</span>
+    }
+<span class="fc bfc" id="L373" title="All 2 branches covered.">    if (task == null) {</span>
+<span class="fc" id="L374">      return null;</span>
+    } else {
+<span class="fc" id="L376">      return new TaskStatWrapper(statsManager, priority, task);</span>
+    }
+  }
+
+  @Override
+  protected OneTimeTaskWrapper doSchedule(Runnable task, long delayInMillis, TaskPriority priority) {
+<span class="fc" id="L382">    return super.doSchedule(new TaskStatWrapper(statsManager, priority, task), </span>
+                            delayInMillis, priority);
+  }
+
+  @Override
+  public void scheduleWithFixedDelay(Runnable task, long initialDelay,
+                                     long recurringDelay, TaskPriority priority) {
+<span class="fc" id="L389">    super.scheduleWithFixedDelay(wrap(task, priority), initialDelay, recurringDelay, priority);</span>
+<span class="fc" id="L390">  }</span>
+
+  @Override
+  public void scheduleAtFixedRate(Runnable task, long initialDelay,
+                                  long period, TaskPriority priority) {
+<span class="fc" id="L395">    super.scheduleAtFixedRate(wrap(task, priority), initialDelay, period, priority);</span>
+<span class="fc" id="L396">  }</span>
+
+  @Override
+  public List&lt;Long&gt; getExecutionDelaySamples() {
+<span class="fc" id="L400">    return statsManager.getExecutionDelaySamples();</span>
+  }
+  
+  @Override
+  public List&lt;Long&gt; getExecutionDelaySamples(TaskPriority priority) {
+<span class="fc" id="L405">    return statsManager.getExecutionDelaySamples(priority);</span>
+  }
+
+  @Override
+  public double getAverageExecutionDelay() {
+<span class="nc" id="L410">    return statsManager.getAverageExecutionDelay();</span>
+  }
+
+  @Override
+  public double getAverageExecutionDelay(TaskPriority priority) {
+<span class="fc" id="L415">    return statsManager.getAverageExecutionDelay(priority);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(double... percentiles) {
+<span class="fc" id="L420">    return statsManager.getExecutionDelayPercentiles(percentiles);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDelayPercentiles(TaskPriority priority, 
+                                                        double... percentiles) {
+<span class="nc" id="L426">    return statsManager.getExecutionDelayPercentiles(priority, percentiles);</span>
+  }
+
+  @Override
+  public List&lt;Long&gt; getExecutionDurationSamples() {
+<span class="fc" id="L431">    return statsManager.getExecutionDurationSamples();</span>
+  }
+
+  @Override
+  public List&lt;Long&gt; getExecutionDurationSamples(TaskPriority priority) {
+<span class="fc" id="L436">    return statsManager.getExecutionDurationSamples(priority);</span>
+  }
+
+  @Override
+  public double getAverageExecutionDuration() {
+<span class="fc" id="L441">    return statsManager.getAverageExecutionDuration();</span>
+  }
+
+  @Override
+  public double getAverageExecutionDuration(TaskPriority priority) {
+<span class="fc" id="L446">    return statsManager.getAverageExecutionDuration(priority);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(double... percentiles) {
+<span class="fc" id="L451">    return statsManager.getExecutionDurationPercentiles(percentiles);</span>
+  }
+
+  @Override
+  public Map&lt;Double, Long&gt; getExecutionDurationPercentiles(TaskPriority priority, 
+                                                           double... percentiles) {
+<span class="fc" id="L457">    return statsManager.getExecutionDurationPercentiles(priority, percentiles);</span>
+  }
+
+  @Override
+  public List&lt;Pair&lt;Runnable, StackTraceElement[]&gt;&gt; getLongRunningTasks(long durationLimitMillis) {
+<span class="fc" id="L462">    return statsManager.getLongRunningTasks(durationLimitMillis);</span>
+  }
+
+  @Override
+  public int getLongRunningTasksQty(long durationLimitMillis) {
+<span class="fc" id="L467">    return statsManager.getLongRunningTasksQty(durationLimitMillis);</span>
+  }
+  
+  @Override
+  public void resetCollectedStats() {
+<span class="fc" id="L472">    statsManager.resetCollectedStats();</span>
+<span class="fc" id="L473">  }</span>
+  
+  @Override
+  public long getTotalExecutionCount() {
+<span class="fc" id="L477">    return statsManager.getTotalExecutionCount();</span>
+  }
+
+  @Override
+  public long getTotalExecutionCount(TaskPriority priority) {
+<span class="fc" id="L482">    return statsManager.getTotalExecutionCount(priority);</span>
+  }
+  
+  /**
+   * An extending class of {@link WorkerPool}, allowing us to gather statistics about how workers 
+   * are used in the executor.  An example of such statistics are how long tasks are delayed from 
+   * their desired execution.  Another example is how often a worker can be reused vs how often 
+   * they have to be created.
+   * 
+   * @since 4.5.0
+   */
+  protected static class StatisticWorkerPool extends WorkerPool {
+    protected final PriorityStatisticManager statsManager;
+  
+    protected StatisticWorkerPool(ThreadFactory threadFactory, int poolSize, 
+                                  PriorityStatisticManager statsManager) {
+<span class="fc" id="L498">      super(threadFactory, poolSize);</span>
+      
+<span class="fc" id="L500">      this.statsManager = statsManager;</span>
+<span class="fc" id="L501">    }</span>
+    
+    @Override
+    public TaskWrapper workerIdle(Worker worker) {
+<span class="fc" id="L505">      TaskWrapper result = super.workerIdle(worker);</span>
+
+      // may not be a wrapper for internal tasks like shutdown
+<span class="fc bfc" id="L508" title="All 4 branches covered.">      if (result != null &amp;&amp; result.getContainedRunnable() instanceof TaskStatWrapper) {</span>
+<span class="fc" id="L509">        long taskDelay = Clock.lastKnownForwardProgressingMillis() - result.getPureRunTime();</span>
+<span class="fc" id="L510">        TaskStatWrapper statWrapper = (TaskStatWrapper)result.getContainedRunnable();</span>
+<span class="fc" id="L511">        ConcurrentArrayList&lt;Long&gt; priorityStats = </span>
+<span class="fc" id="L512">            statsManager.getExecutionDelaySamplesInternal(statWrapper.priority);</span>
+  
+<span class="fc" id="L514">        synchronized (priorityStats.getModificationLock()) {</span>
+<span class="fc" id="L515">          priorityStats.add(taskDelay);</span>
+<span class="fc" id="L516">          statsManager.trimWindow(priorityStats);</span>
+<span class="fc" id="L517">        }</span>
+      }
+      
+<span class="fc" id="L520">      return result;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

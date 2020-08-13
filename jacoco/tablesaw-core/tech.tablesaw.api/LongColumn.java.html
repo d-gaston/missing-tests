@@ -1,0 +1,532 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LongColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">LongColumn.java</span></div><h1>LongColumn.java</h1><pre class="source lang-java linenums">package tech.tablesaw.api;
+
+import com.google.common.base.Preconditions;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongArrays;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongListIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import java.nio.ByteBuffer;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Iterator;
+import java.util.stream.LongStream;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.numbers.DoubleColumnType;
+import tech.tablesaw.columns.numbers.LongColumnType;
+import tech.tablesaw.columns.numbers.NumberColumnFormatter;
+
+public class LongColumn extends NumberColumn&lt;LongColumn, Long&gt; implements CategoricalColumn&lt;Long&gt; {
+
+  /** Compares two ints, such that a sort based on this comparator would sort in descending order */
+<span class="pc" id="L24">  private final LongComparator descendingComparator = (o2, o1) -&gt; (Long.compare(o1, o2));</span>
+
+  private final LongArrayList data;
+
+  private LongColumn(String name, LongArrayList data) {
+<span class="fc" id="L29">    super(LongColumnType.instance(), name);</span>
+<span class="fc" id="L30">    setPrintFormatter(NumberColumnFormatter.ints());</span>
+<span class="fc" id="L31">    this.data = data;</span>
+<span class="fc" id="L32">  }</span>
+
+  public static LongColumn create(final String name) {
+<span class="fc" id="L35">    return new LongColumn(name, new LongArrayList());</span>
+  }
+
+  public static LongColumn create(String name, long[] arr) {
+<span class="fc" id="L39">    return new LongColumn(name, new LongArrayList(arr));</span>
+  }
+
+  public static LongColumn create(String name, int initialSize) {
+<span class="fc" id="L43">    LongColumn column = new LongColumn(name, new LongArrayList(initialSize));</span>
+<span class="fc bfc" id="L44" title="All 2 branches covered.">    for (int i = 0; i &lt; initialSize; i++) {</span>
+<span class="fc" id="L45">      column.appendMissing();</span>
+    }
+<span class="fc" id="L47">    return column;</span>
+  }
+
+  public static LongColumn create(String name, LongStream stream) {
+<span class="nc" id="L51">    LongArrayList list = new LongArrayList();</span>
+<span class="nc" id="L52">    stream.forEach(val -&gt; list.add(val));</span>
+<span class="nc" id="L53">    return new LongColumn(name, list);</span>
+  }
+
+  @Override
+  public LongColumn createCol(String name, int initialSize) {
+<span class="nc" id="L58">    return create(name, initialSize);</span>
+  }
+
+  @Override
+  public LongColumn createCol(String name) {
+<span class="fc" id="L63">    return create(name);</span>
+  }
+
+  /**
+   * Returns a new numeric column initialized with the given name and size. The values in the column
+   * are integers beginning at startsWith and continuing through size (exclusive), monotonically
+   * increasing by 1 TODO consider a generic fill function including steps or random samples from
+   * various distributions
+   */
+  public static LongColumn indexColumn(
+      final String columnName, final int size, final int startsWith) {
+<span class="nc" id="L74">    final LongColumn indexColumn = LongColumn.create(columnName, size);</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="nc" id="L76">      indexColumn.append(i + startsWith);</span>
+    }
+<span class="nc" id="L78">    return indexColumn;</span>
+  }
+
+  @Override
+  public String getString(final int row) {
+<span class="nc" id="L83">    final long value = getLong(row);</span>
+<span class="nc bnc" id="L84" title="All 2 branches missed.">    if (LongColumnType.valueIsMissing(value)) {</span>
+<span class="nc" id="L85">      return &quot;&quot;;</span>
+    }
+<span class="nc" id="L87">    return String.valueOf(getPrintFormatter().format(value));</span>
+  }
+
+  public static boolean valueIsMissing(long value) {
+<span class="nc" id="L91">    return LongColumnType.valueIsMissing(value);</span>
+  }
+
+  @Override
+  public int size() {
+<span class="fc" id="L96">    return data.size();</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="fc" id="L101">    data.clear();</span>
+<span class="fc" id="L102">  }</span>
+
+  @Override
+  public Long get(int index) {
+<span class="fc" id="L106">    return getLong(index);</span>
+  }
+
+  @Override
+  public LongColumn subset(final int[] rows) {
+<span class="nc" id="L111">    final LongColumn c = this.emptyCopy();</span>
+<span class="nc bnc" id="L112" title="All 2 branches missed.">    for (final int row : rows) {</span>
+<span class="nc" id="L113">      c.append(getLong(row));</span>
+    }
+<span class="nc" id="L115">    return c;</span>
+  }
+
+  @Override
+  public LongColumn unique() {
+<span class="fc" id="L120">    final LongSet values = new LongOpenHashSet();</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L122">      values.add(getLong(i));</span>
+    }
+<span class="fc" id="L124">    final LongColumn column = LongColumn.create(name() + &quot; Unique values&quot;);</span>
+<span class="fc bfc" id="L125" title="All 2 branches covered.">    for (long value : values) {</span>
+<span class="fc" id="L126">      column.append(value);</span>
+<span class="fc" id="L127">    }</span>
+<span class="fc" id="L128">    return column;</span>
+  }
+
+  @Override
+  public LongColumn top(int n) {
+<span class="nc" id="L133">    final LongArrayList top = new LongArrayList();</span>
+<span class="nc" id="L134">    final long[] values = data.toLongArray();</span>
+<span class="nc" id="L135">    LongArrays.parallelQuickSort(values, descendingComparator);</span>
+<span class="nc bnc" id="L136" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L137">      top.add(values[i]);</span>
+    }
+<span class="nc" id="L139">    return new LongColumn(name() + &quot;[Top &quot; + n + &quot;]&quot;, top);</span>
+  }
+
+  @Override
+  public LongColumn bottom(final int n) {
+<span class="nc" id="L144">    final LongArrayList bottom = new LongArrayList();</span>
+<span class="nc" id="L145">    final long[] values = data.toLongArray();</span>
+<span class="nc" id="L146">    LongArrays.parallelQuickSort(values);</span>
+<span class="nc bnc" id="L147" title="All 4 branches missed.">    for (int i = 0; i &lt; n &amp;&amp; i &lt; values.length; i++) {</span>
+<span class="nc" id="L148">      bottom.add(values[i]);</span>
+    }
+<span class="nc" id="L150">    return new LongColumn(name() + &quot;[Bottoms &quot; + n + &quot;]&quot;, bottom);</span>
+  }
+
+  @Override
+  public LongColumn lag(int n) {
+<span class="nc bnc" id="L155" title="All 2 branches missed.">    final int srcPos = n &gt;= 0 ? 0 : 0 - n;</span>
+<span class="nc" id="L156">    final long[] dest = new long[size()];</span>
+<span class="nc bnc" id="L157" title="All 2 branches missed.">    final int destPos = n &lt;= 0 ? 0 : n;</span>
+<span class="nc bnc" id="L158" title="All 2 branches missed.">    final int length = n &gt;= 0 ? size() - n : size() + n;</span>
+
+<span class="nc bnc" id="L160" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L161">      dest[i] = LongColumnType.missingValueIndicator();</span>
+    }
+
+<span class="nc" id="L164">    long[] array = data.toLongArray();</span>
+
+<span class="nc" id="L166">    System.arraycopy(array, srcPos, dest, destPos, length);</span>
+<span class="nc" id="L167">    return new LongColumn(name() + &quot; lag(&quot; + n + &quot;)&quot;, new LongArrayList(dest));</span>
+  }
+
+  @Override
+  public LongColumn removeMissing() {
+<span class="fc" id="L172">    LongColumn result = copy();</span>
+<span class="fc" id="L173">    result.clear();</span>
+<span class="fc" id="L174">    LongListIterator iterator = data.iterator();</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L176">      final long v = iterator.nextLong();</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">      if (!isMissingValue(v)) {</span>
+<span class="fc" id="L178">        result.append(v);</span>
+      }
+<span class="fc" id="L180">    }</span>
+<span class="fc" id="L181">    return result;</span>
+  }
+
+  public LongColumn append(long i) {
+<span class="fc" id="L185">    data.add(i);</span>
+<span class="fc" id="L186">    return this;</span>
+  }
+
+  public LongColumn append(Long val) {
+<span class="nc bnc" id="L190" title="All 2 branches missed.">    if (val == null) {</span>
+<span class="nc" id="L191">      appendMissing();</span>
+    } else {
+<span class="nc" id="L193">      append(val.longValue());</span>
+    }
+<span class="nc" id="L195">    return this;</span>
+  }
+
+  @Override
+  public LongColumn emptyCopy() {
+<span class="fc" id="L200">    return (LongColumn) super.emptyCopy();</span>
+  }
+
+  @Override
+  public LongColumn emptyCopy(final int rowSize) {
+<span class="nc" id="L205">    return (LongColumn) super.emptyCopy(rowSize);</span>
+  }
+
+  @Override
+  public LongColumn copy() {
+<span class="fc" id="L210">    return new LongColumn(name(), data.clone());</span>
+  }
+
+  public long[] asLongArray() {
+    // TODO: Need to figure out how to handle NaN -&gt; Maybe just use a list with nulls?
+<span class="nc" id="L215">    final long[] result = new long[size()];</span>
+<span class="nc bnc" id="L216" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L217">      result[i] = getLong(i);</span>
+    }
+<span class="nc" id="L219">    return result;</span>
+  }
+
+  /**
+   * Returns a DateTimeColumn where each value is the LocalDateTime represented by the values in
+   * this column
+   *
+   * &lt;p&gt;The values in this column must be longs that represent the time in milliseconds from the
+   * epoch as in standard Java date/time calculations
+   *
+   * @param offset The ZoneOffset to use in the calculation
+   * @return A column of LocalDateTime values
+   */
+  public DateTimeColumn asDateTimes(ZoneOffset offset) {
+<span class="fc" id="L233">    DateTimeColumn column = DateTimeColumn.create(name() + &quot;: date time&quot;);</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L235">      column.append(Instant.ofEpochMilli(getLong(i)).atZone(offset).toLocalDateTime());</span>
+    }
+<span class="fc" id="L237">    return column;</span>
+  }
+
+  @Override
+  public Iterator&lt;Long&gt; iterator() {
+<span class="nc" id="L242">    return data.iterator();</span>
+  }
+
+  @Override
+  public Long[] asObjectArray() {
+<span class="fc" id="L247">    final Long[] output = new Long[size()];</span>
+<span class="fc bfc" id="L248" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="pc bpc" id="L249" title="1 of 2 branches missed.">      if (!isMissing(i)) {</span>
+<span class="fc" id="L250">        output[i] = getLong(i);</span>
+      } else {
+<span class="nc" id="L252">        output[i] = null;</span>
+      }
+    }
+<span class="fc" id="L255">    return output;</span>
+  }
+
+  @Override
+  public int compare(Long o1, Long o2) {
+<span class="nc" id="L260">    return Long.compare(o1, o2);</span>
+  }
+
+  @Override
+  public LongColumn set(int i, Long val) {
+<span class="nc" id="L265">    return set(i, (long) val);</span>
+  }
+
+  public LongColumn set(int i, long val) {
+<span class="fc" id="L269">    data.set(i, val);</span>
+<span class="fc" id="L270">    return this;</span>
+  }
+
+  @Override
+  public LongColumn append(final Column&lt;Long&gt; column) {
+<span class="pc bpc" id="L275" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L276">    final LongColumn numberColumn = (LongColumn) column;</span>
+<span class="fc" id="L277">    final int size = numberColumn.size();</span>
+<span class="fc bfc" id="L278" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L279">      append(numberColumn.getLong(i));</span>
+    }
+<span class="fc" id="L281">    return this;</span>
+  }
+
+  @Override
+  public LongColumn append(Column&lt;Long&gt; column, int row) {
+<span class="pc bpc" id="L286" title="1 of 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L287">    return append(((LongColumn) column).getLong(row));</span>
+  }
+
+  @Override
+  public LongColumn set(int row, Column&lt;Long&gt; column, int sourceRow) {
+<span class="nc bnc" id="L292" title="All 2 branches missed.">    Preconditions.checkArgument(column.type() == this.type());</span>
+<span class="nc" id="L293">    return set(row, ((LongColumn) column).getLong(sourceRow));</span>
+  }
+
+  @Override
+  public LongColumn appendMissing() {
+<span class="fc" id="L298">    return append(LongColumnType.missingValueIndicator());</span>
+  }
+
+  @Override
+  public byte[] asBytes(int rowNumber) {
+<span class="nc" id="L303">    return ByteBuffer.allocate(LongColumnType.instance().byteSize())</span>
+<span class="nc" id="L304">        .putLong(getLong(rowNumber))</span>
+<span class="nc" id="L305">        .array();</span>
+  }
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L310">    LongSet uniqueElements = new LongOpenHashSet();</span>
+<span class="fc bfc" id="L311" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L312">      uniqueElements.add(getLong(i));</span>
+    }
+<span class="fc" id="L314">    return uniqueElements.size();</span>
+  }
+
+  /**
+   * Returns the value at the given index. The actual value is returned if the ColumnType is
+   * INTEGER. Otherwise the value is rounded as described below.
+   *
+   * &lt;p&gt;Returns the closest {@code int} to the argument, with ties rounding to positive infinity.
+   *
+   * &lt;p&gt;Special cases:
+   *
+   * &lt;p&gt;Special cases:
+   *
+   * &lt;ul&gt;
+   *   &lt;li&gt;If the argument is NaN, the result is 0.
+   *   &lt;li&gt;If the argument is positive infinity or any value greater than or equal to the value of
+   *       {@code Integer.MAX_VALUE}, an error will be thrown
+   * &lt;/ul&gt;
+   *
+   * @param row the index of the value to be rounded to an integer.
+   * @return the value of the argument rounded to the nearest {@code int} value.
+   * @throws ClassCastException if the absolute value of the value to be rounded is too large to be
+   *     cast to an int
+   */
+  public long getLong(int row) {
+<span class="fc" id="L339">    return data.getLong(row);</span>
+  }
+
+  @Override
+  public double getDouble(int row) {
+<span class="fc" id="L344">    long value = data.getLong(row);</span>
+<span class="pc bpc" id="L345" title="1 of 2 branches missed.">    if (isMissingValue(value)) {</span>
+<span class="nc" id="L346">      return DoubleColumnType.missingValueIndicator();</span>
+    }
+<span class="fc" id="L348">    return value;</span>
+  }
+
+  public boolean isMissingValue(long value) {
+<span class="fc" id="L352">    return LongColumnType.valueIsMissing(value);</span>
+  }
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="fc" id="L357">    return isMissingValue(getLong(rowNumber));</span>
+  }
+
+  @Override
+  public Column&lt;Long&gt; setMissing(int i) {
+<span class="nc" id="L362">    return set(i, LongColumnType.missingValueIndicator());</span>
+  }
+
+  @Override
+  public void sortAscending() {
+<span class="nc" id="L367">    LongArrays.parallelQuickSort(data.elements());</span>
+<span class="nc" id="L368">  }</span>
+
+  @Override
+  public void sortDescending() {
+<span class="nc" id="L372">    LongArrays.parallelQuickSort(data.elements(), descendingComparator);</span>
+<span class="nc" id="L373">  }</span>
+
+  @Override
+  public LongColumn appendObj(Object obj) {
+<span class="pc bpc" id="L377" title="1 of 2 branches missed.">    if (obj == null) {</span>
+<span class="nc" id="L378">      return appendMissing();</span>
+    }
+<span class="pc bpc" id="L380" title="1 of 2 branches missed.">    if (obj instanceof Long) {</span>
+<span class="fc" id="L381">      return append((long) obj);</span>
+    }
+<span class="nc" id="L383">    throw new IllegalArgumentException(&quot;Could not append &quot; + obj.getClass());</span>
+  }
+
+  @Override
+  public LongColumn appendCell(final String value) {
+    try {
+<span class="nc" id="L389">      return append(LongColumnType.DEFAULT_PARSER.parseLong(value));</span>
+<span class="nc" id="L390">    } catch (final NumberFormatException e) {</span>
+<span class="nc" id="L391">      throw new NumberFormatException(</span>
+<span class="nc" id="L392">          &quot;Error adding value to column &quot; + name() + &quot;: &quot; + e.getMessage());</span>
+    }
+  }
+
+  @Override
+  public LongColumn appendCell(final String value, AbstractColumnParser&lt;?&gt; parser) {
+    try {
+<span class="fc" id="L399">      return append(parser.parseLong(value));</span>
+<span class="nc" id="L400">    } catch (final NumberFormatException e) {</span>
+<span class="nc" id="L401">      throw new NumberFormatException(</span>
+<span class="nc" id="L402">          &quot;Error adding value to column &quot; + name() + &quot;: &quot; + e.getMessage());</span>
+    }
+  }
+
+  @Override
+  public String getUnformattedString(final int row) {
+<span class="nc" id="L408">    final long value = getLong(row);</span>
+<span class="nc bnc" id="L409" title="All 2 branches missed.">    if (LongColumnType.valueIsMissing(value)) {</span>
+<span class="nc" id="L410">      return &quot;&quot;;</span>
+    }
+<span class="nc" id="L412">    return String.valueOf(value);</span>
+  }
+
+  @Override
+  public Table countByCategory() {
+<span class="nc" id="L417">    return null;</span>
+  }
+
+  /**
+   * Returns a new IntColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;A narrowing conversion of a signed integer to an integral type T simply discards all but the
+   * n lowest order bits, where n is the number of bits used to represent type T. In addition to a
+   * possible loss of information about the magnitude of the numeric value, this may cause the sign
+   * of the resulting value to differ from the sign of the input value.
+   *
+   * &lt;p&gt;In other words, if the element being converted is larger (or smaller) than Integer.MAX_VALUE
+   * (or Integer.MIN_VALUE) you will not get a conventionally good conversion.
+   *
+   * &lt;p&gt;Despite the fact that overflow, underflow, or other loss of information may occur, a
+   * narrowing primitive conversion never results in a run-time exception.
+   *
+   * &lt;p&gt;A missing value in the receiver is converted to a missing value in the result
+   */
+  @Override
+  public IntColumn asIntColumn() {
+<span class="nc" id="L438">    IntColumn result = IntColumn.create(name());</span>
+<span class="nc bnc" id="L439" title="All 2 branches missed.">    for (long d : data) {</span>
+<span class="nc bnc" id="L440" title="All 2 branches missed.">      if (LongColumnType.valueIsMissing(d)) {</span>
+<span class="nc" id="L441">        result.appendMissing();</span>
+      } else {
+<span class="nc" id="L443">        result.append((int) d);</span>
+      }
+<span class="nc" id="L445">    }</span>
+<span class="nc" id="L446">    return result;</span>
+  }
+
+  /**
+   * Returns a new ShortColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;A narrowing conversion of a signed long to an integral type T simply discards all but the n
+   * lowest order bits, where n is the number of bits used to represent type T. In addition to a
+   * possible loss of information about the magnitude of the numeric value, this may cause the sign
+   * of the resulting value to differ from the sign of the input value.
+   *
+   * &lt;p&gt;In other words, if the element being converted is larger (or smaller) than Short.MAX_VALUE
+   * (or Short.MIN_VALUE) you will not get a conventionally good conversion.
+   *
+   * &lt;p&gt;Despite the fact that overflow, underflow, or other loss of information may occur, a
+   * narrowing primitive conversion never results in a run-time exception.
+   *
+   * &lt;p&gt;A missing value in the receiver is converted to a missing value in the result
+   */
+  @Override
+  public ShortColumn asShortColumn() {
+<span class="nc" id="L467">    ShortColumn result = ShortColumn.create(name());</span>
+<span class="nc bnc" id="L468" title="All 2 branches missed.">    for (long d : data) {</span>
+<span class="nc bnc" id="L469" title="All 2 branches missed.">      if (LongColumnType.valueIsMissing(d)) {</span>
+<span class="nc" id="L470">        result.appendMissing();</span>
+      } else {
+<span class="nc" id="L472">        result.append((short) d);</span>
+      }
+<span class="nc" id="L474">    }</span>
+<span class="nc" id="L475">    return result;</span>
+  }
+
+  /**
+   * Returns a new FloatColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;A widening primitive conversion from a long to a float does not lose information about the
+   * overall magnitude of a numeric value. It may, however, result in loss of precision - that is,
+   * the result may lose some of the least significant bits of the value. In this case, the
+   * resulting floating-point value will be a correctly rounded version of the integer value, using
+   * IEEE 754 round-to-nearest mode.
+   *
+   * &lt;p&gt;Despite the fact that a loss of precision may occur, a widening primitive conversion never
+   * results in a run-time exception.
+   *
+   * &lt;p&gt;A missing value in the receiver is converted to a missing value in the result
+   */
+  @Override
+  public FloatColumn asFloatColumn() {
+<span class="nc" id="L494">    FloatColumn result = FloatColumn.create(name());</span>
+<span class="nc bnc" id="L495" title="All 2 branches missed.">    for (long d : data) {</span>
+<span class="nc bnc" id="L496" title="All 2 branches missed.">      if (LongColumnType.valueIsMissing(d)) {</span>
+<span class="nc" id="L497">        result.appendMissing();</span>
+      } else {
+<span class="nc" id="L499">        result.append(d);</span>
+      }
+<span class="nc" id="L501">    }</span>
+<span class="nc" id="L502">    return result;</span>
+  }
+
+  /**
+   * Returns a new DoubleColumn containing a value for each value in this column
+   *
+   * &lt;p&gt;A widening primitive conversion from a long to a double does not lose information about the
+   * overall magnitude of a numeric value. It may, however, result in loss of precision - that is,
+   * the result may lose some of the least significant bits of the value. In this case, the
+   * resulting floating-point value will be a correctly rounded version of the integer value, using
+   * IEEE 754 round-to-nearest mode.
+   *
+   * &lt;p&gt;Despite the fact that a loss of precision may occur, a widening primitive conversion never
+   * results in a run-time exception.
+   *
+   * &lt;p&gt;A missing value in the receiver is converted to a missing value in the result
+   */
+  @Override
+  public DoubleColumn asDoubleColumn() {
+<span class="nc" id="L521">    DoubleColumn result = DoubleColumn.create(name());</span>
+<span class="nc bnc" id="L522" title="All 2 branches missed.">    for (long d : data) {</span>
+<span class="nc bnc" id="L523" title="All 2 branches missed.">      if (LongColumnType.valueIsMissing(d)) {</span>
+<span class="nc" id="L524">        result.appendMissing();</span>
+      } else {
+<span class="nc" id="L526">        result.append(d);</span>
+      }
+<span class="nc" id="L528">    }</span>
+<span class="nc" id="L529">    return result;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

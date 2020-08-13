@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RealDistributionAbstractTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.distribution</a> &gt; <span class="el_source">RealDistributionAbstractTest.java</span></div><h1>RealDistributionAbstractTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.distribution;
+
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+
+import org.apache.commons.statistics.distribution.ContinuousDistribution;
+import org.apache.commons.math4.TestUtils;
+import org.apache.commons.math4.analysis.UnivariateFunction;
+import org.apache.commons.math4.analysis.integration.BaseAbstractUnivariateIntegrator;
+import org.apache.commons.math4.analysis.integration.IterativeLegendreGaussIntegrator;
+import org.apache.commons.math4.distribution.RealDistribution;
+import org.apache.commons.math4.exception.MathIllegalArgumentException;
+import org.apache.commons.math4.exception.NumberIsTooLargeException;
+import org.apache.commons.rng.simple.RandomSource;
+import org.apache.commons.math4.util.FastMath;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+/**
+ * Abstract base class for {@link RealDistribution} tests.
+ * &lt;p&gt;
+ * To create a concrete test class for a continuous distribution
+ * implementation, first implement makeDistribution() to return a distribution
+ * instance to use in tests. Then implement each of the test data generation
+ * methods below.  In each case, the test points and test values arrays
+ * returned represent parallel arrays of inputs and expected values for the
+ * distribution returned by makeDistribution().  Default implementations
+ * are provided for the makeInverseXxx methods that just invert the mapping
+ * defined by the arrays returned by the makeCumulativeXxx methods.
+ * &lt;p&gt;
+ * makeCumulativeTestPoints() -- arguments used to test cumulative probabilities
+ * makeCumulativeTestValues() -- expected cumulative probabilities
+ * makeDensityTestValues() -- expected density values at cumulativeTestPoints
+ * makeInverseCumulativeTestPoints() -- arguments used to test inverse cdf
+ * makeInverseCumulativeTestValues() -- expected inverse cdf values
+ * &lt;p&gt;
+ * To implement additional test cases with different distribution instances and
+ * test data, use the setXxx methods for the instance data in test cases and
+ * call the verifyXxx methods to verify results.
+ * &lt;p&gt;
+ * Error tolerance can be overridden by implementing getTolerance().
+ * &lt;p&gt;
+ * Test data should be validated against reference tables or other packages
+ * where possible, and the source of the reference data and/or validation
+ * should be documented in the test cases.  A framework for validating
+ * distribution data against R is included in the /src/test/R source tree.
+ * &lt;p&gt;
+ * See {@link NormalDistributionTest} and {@link ChiSquaredDistributionTest}
+ * for examples.
+ *
+ */
+<span class="fc" id="L76">public abstract class RealDistributionAbstractTest {</span>
+
+//-------------------- Private test instance data -------------------------
+    /**  Distribution instance used to perform tests */
+    private RealDistribution distribution;
+
+    /** Tolerance used in comparing expected and returned values */
+<span class="fc" id="L83">    private double tolerance = 1E-4;</span>
+
+    /** Arguments used to test cumulative probability density calculations */
+    private double[] cumulativeTestPoints;
+
+    /** Values used to test cumulative probability density calculations */
+    private double[] cumulativeTestValues;
+
+    /** Arguments used to test inverse cumulative probability density calculations */
+    private double[] inverseCumulativeTestPoints;
+
+    /** Values used to test inverse cumulative probability density calculations */
+    private double[] inverseCumulativeTestValues;
+
+    /** Values used to test density calculations */
+    private double[] densityTestValues;
+
+    /** Values used to test logarithmic density calculations */
+    private double[] logDensityTestValues;
+
+    //-------------------- Abstract methods -----------------------------------
+
+    /** Creates the default continuous distribution instance to use in tests. */
+    public abstract RealDistribution makeDistribution();
+
+    /** Creates the default cumulative probability test input values */
+    public abstract double[] makeCumulativeTestPoints();
+
+    /** Creates the default cumulative probability test expected values */
+    public abstract double[] makeCumulativeTestValues();
+
+    /** Creates the default density test expected values */
+    public abstract double[] makeDensityTestValues();
+
+    /** Creates the default logarithmic density test expected values.
+     * The default implementation simply computes the logarithm
+     * of each value returned by {@link #makeDensityTestValues()}.*/
+    public double[] makeLogDensityTestValues() {
+<span class="fc" id="L121">        final double[] densityTestValues = makeDensityTestValues();</span>
+<span class="fc" id="L122">        final double[] logDensityTestValues = new double[densityTestValues.length];</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">        for (int i = 0; i &lt; densityTestValues.length; i++) {</span>
+<span class="fc" id="L124">            logDensityTestValues[i] = FastMath.log(densityTestValues[i]);</span>
+        }
+<span class="fc" id="L126">        return logDensityTestValues;</span>
+    }
+
+    //---- Default implementations of inverse test data generation methods ----
+
+    /** Creates the default inverse cumulative probability test input values */
+    public double[] makeInverseCumulativeTestPoints() {
+<span class="fc" id="L133">        return makeCumulativeTestValues();</span>
+    }
+
+    /** Creates the default inverse cumulative probability density test expected values */
+    public double[] makeInverseCumulativeTestValues() {
+<span class="fc" id="L138">        return makeCumulativeTestPoints();</span>
+    }
+
+    //-------------------- Setup / tear down ----------------------------------
+
+    /**
+     * Setup sets all test instance data to default values
+     */
+    @Before
+    public void setUp() {
+<span class="fc" id="L148">        distribution = makeDistribution();</span>
+<span class="fc" id="L149">        cumulativeTestPoints = makeCumulativeTestPoints();</span>
+<span class="fc" id="L150">        cumulativeTestValues = makeCumulativeTestValues();</span>
+<span class="fc" id="L151">        inverseCumulativeTestPoints = makeInverseCumulativeTestPoints();</span>
+<span class="fc" id="L152">        inverseCumulativeTestValues = makeInverseCumulativeTestValues();</span>
+<span class="fc" id="L153">        densityTestValues = makeDensityTestValues();</span>
+<span class="fc" id="L154">        logDensityTestValues = makeLogDensityTestValues();</span>
+<span class="fc" id="L155">    }</span>
+
+    /**
+     * Cleans up test instance data
+     */
+    @After
+    public void tearDown() {
+<span class="fc" id="L162">        distribution = null;</span>
+<span class="fc" id="L163">        cumulativeTestPoints = null;</span>
+<span class="fc" id="L164">        cumulativeTestValues = null;</span>
+<span class="fc" id="L165">        inverseCumulativeTestPoints = null;</span>
+<span class="fc" id="L166">        inverseCumulativeTestValues = null;</span>
+<span class="fc" id="L167">        densityTestValues = null;</span>
+<span class="fc" id="L168">        logDensityTestValues = null;</span>
+<span class="fc" id="L169">    }</span>
+
+    //-------------------- Verification methods -------------------------------
+
+    /**
+     * Verifies that cumulative probability density calculations match expected values
+     * using current test instance data
+     */
+    protected void verifyCumulativeProbabilities() {
+        // verify cumulativeProbability(double)
+<span class="fc bfc" id="L179" title="All 2 branches covered.">        for (int i = 0; i &lt; cumulativeTestPoints.length; i++) {</span>
+<span class="fc" id="L180">            TestUtils.assertEquals(&quot;Incorrect cumulative probability value returned for &quot;</span>
+                + cumulativeTestPoints[i], cumulativeTestValues[i],
+<span class="fc" id="L182">                distribution.cumulativeProbability(cumulativeTestPoints[i]),</span>
+<span class="fc" id="L183">                getTolerance());</span>
+        }
+        // verify probability(double, double)
+<span class="fc bfc" id="L186" title="All 2 branches covered.">        for (int i = 0; i &lt; cumulativeTestPoints.length; i++) {</span>
+<span class="fc bfc" id="L187" title="All 2 branches covered.">            for (int j = 0; j &lt; cumulativeTestPoints.length; j++) {</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">                if (cumulativeTestPoints[i] &lt;= cumulativeTestPoints[j]) {</span>
+<span class="fc" id="L189">                    TestUtils.assertEquals(cumulativeTestValues[j] - cumulativeTestValues[i],</span>
+<span class="fc" id="L190">                        distribution.probability(cumulativeTestPoints[i], cumulativeTestPoints[j]),</span>
+<span class="fc" id="L191">                        getTolerance());</span>
+                } else {
+                    try {
+<span class="nc" id="L194">                        distribution.probability(cumulativeTestPoints[i], cumulativeTestPoints[j]);</span>
+<span class="fc" id="L195">                    } catch (NumberIsTooLargeException e) {</span>
+<span class="fc" id="L196">                        continue;</span>
+<span class="nc" id="L197">                    }</span>
+<span class="nc" id="L198">                    Assert.fail(&quot;distribution.probability(double, double) should have thrown an exception that second argument is too large&quot;);</span>
+                }
+            }
+        }
+<span class="fc" id="L202">    }</span>
+
+    /**
+     * Verifies that inverse cumulative probability density calculations match expected values
+     * using current test instance data
+     */
+    protected void verifyInverseCumulativeProbabilities() {
+<span class="fc bfc" id="L209" title="All 2 branches covered.">        for (int i = 0; i &lt; inverseCumulativeTestPoints.length; i++) {</span>
+<span class="fc" id="L210">            TestUtils.assertEquals(&quot;Incorrect inverse cumulative probability value returned for &quot;</span>
+                + inverseCumulativeTestPoints[i], inverseCumulativeTestValues[i],
+<span class="fc" id="L212">                 distribution.inverseCumulativeProbability(inverseCumulativeTestPoints[i]),</span>
+<span class="fc" id="L213">                 getTolerance());</span>
+        }
+<span class="fc" id="L215">    }</span>
+
+    /**
+     * Verifies that density calculations match expected values
+     */
+    protected void verifyDensities() {
+<span class="fc bfc" id="L221" title="All 2 branches covered.">        for (int i = 0; i &lt; cumulativeTestPoints.length; i++) {</span>
+<span class="fc" id="L222">            TestUtils.assertEquals(&quot;Incorrect probability density value returned for &quot;</span>
+                + cumulativeTestPoints[i], densityTestValues[i],
+<span class="fc" id="L224">                 distribution.density(cumulativeTestPoints[i]),</span>
+<span class="fc" id="L225">                 getTolerance());</span>
+        }
+<span class="fc" id="L227">    }</span>
+
+    /**
+     * Verifies that logarithmic density calculations match expected values
+     */
+    protected void verifyLogDensities() {
+<span class="fc bfc" id="L233" title="All 2 branches covered.">        for (int i = 0; i &lt; cumulativeTestPoints.length; i++) {</span>
+<span class="fc" id="L234">            TestUtils.assertEquals(&quot;Incorrect probability density value returned for &quot;</span>
+                    + cumulativeTestPoints[i], logDensityTestValues[i],
+<span class="fc" id="L236">                    distribution.logDensity(cumulativeTestPoints[i]),</span>
+<span class="fc" id="L237">                    getTolerance());</span>
+        }
+<span class="fc" id="L239">    }</span>
+
+    //------------------------ Default test cases -----------------------------
+
+    /**
+     * Verifies that cumulative probability density calculations match expected values
+     * using default test instance data
+     */
+    @Test
+    public void testCumulativeProbabilities() {
+<span class="fc" id="L249">        verifyCumulativeProbabilities();</span>
+<span class="fc" id="L250">    }</span>
+
+    /**
+     * Verifies that inverse cumulative probability density calculations match expected values
+     * using default test instance data
+     */
+    @Test
+    public void testInverseCumulativeProbabilities() {
+<span class="fc" id="L258">        verifyInverseCumulativeProbabilities();</span>
+<span class="fc" id="L259">    }</span>
+
+    /**
+     * Verifies that density calculations return expected values
+     * for default test instance data
+     */
+    @Test
+    public void testDensities() {
+<span class="fc" id="L267">        verifyDensities();</span>
+<span class="fc" id="L268">    }</span>
+
+    /**
+     * Verifies that logarithmic density calculations return expected values
+     * for default test instance data
+     */
+    @Test
+    public void testLogDensities() {
+<span class="fc" id="L276">        verifyLogDensities();</span>
+<span class="fc" id="L277">    }</span>
+
+    /**
+     * Verifies that probability computations are consistent
+     */
+    @Test
+    public void testConsistency() {
+<span class="fc bfc" id="L284" title="All 2 branches covered.">        for (int i=1; i &lt; cumulativeTestPoints.length; i++) {</span>
+
+            // check that cdf(x, x) = 0
+<span class="fc" id="L287">            TestUtils.assertEquals(0d,</span>
+               distribution.probability
+<span class="fc" id="L289">                 (cumulativeTestPoints[i], cumulativeTestPoints[i]), tolerance);</span>
+
+            // check that P(a &lt; X &lt;= b) = P(X &lt;= b) - P(X &lt;= a)
+<span class="fc" id="L292">            double upper = FastMath.max(cumulativeTestPoints[i], cumulativeTestPoints[i -1]);</span>
+<span class="fc" id="L293">            double lower = FastMath.min(cumulativeTestPoints[i], cumulativeTestPoints[i -1]);</span>
+<span class="fc" id="L294">            double diff = distribution.cumulativeProbability(upper) -</span>
+<span class="fc" id="L295">                distribution.cumulativeProbability(lower);</span>
+<span class="fc" id="L296">            double direct = distribution.probability(lower, upper);</span>
+<span class="fc" id="L297">            TestUtils.assertEquals(&quot;Inconsistent probability for (&quot;</span>
+                    + lower + &quot;,&quot; + upper + &quot;)&quot;, diff, direct, tolerance);
+        }
+<span class="fc" id="L300">    }</span>
+
+    /**
+     * Verifies that illegal arguments are correctly handled
+     */
+    @Test
+    public void testIllegalArguments() {
+        try {
+<span class="nc" id="L308">            distribution.probability(1, 0);</span>
+<span class="nc" id="L309">            Assert.fail(&quot;Expecting MathIllegalArgumentException for bad cumulativeProbability interval&quot;);</span>
+<span class="fc" id="L310">        } catch (MathIllegalArgumentException ex) {</span>
+            // expected
+<span class="nc" id="L312">        }</span>
+        try {
+<span class="nc" id="L314">            distribution.inverseCumulativeProbability(-1);</span>
+<span class="nc" id="L315">            Assert.fail(&quot;Expecting MathIllegalArgumentException for p = -1&quot;);</span>
+<span class="fc" id="L316">        } catch (MathIllegalArgumentException ex) {</span>
+            // expected
+<span class="nc" id="L318">        }</span>
+        try {
+<span class="nc" id="L320">            distribution.inverseCumulativeProbability(2);</span>
+<span class="nc" id="L321">            Assert.fail(&quot;Expecting MathIllegalArgumentException for p = 2&quot;);</span>
+<span class="fc" id="L322">        } catch (MathIllegalArgumentException ex) {</span>
+            // expected
+<span class="nc" id="L324">        }</span>
+<span class="fc" id="L325">    }</span>
+
+    /**
+     * Test sampling
+     */
+    @Test
+    public void testSampler() {
+<span class="fc" id="L332">        final int sampleSize = 1000;</span>
+<span class="fc" id="L333">        final ContinuousDistribution.Sampler sampler =</span>
+<span class="fc" id="L334">            distribution.createSampler(RandomSource.create(RandomSource.WELL_19937_C, 123456789L));</span>
+<span class="fc" id="L335">        final double[] sample = AbstractRealDistribution.sample(sampleSize, sampler);</span>
+<span class="fc" id="L336">        final double[] quartiles = TestUtils.getDistributionQuartiles(distribution);</span>
+<span class="fc" id="L337">        final double[] expected = {250, 250, 250, 250};</span>
+<span class="fc" id="L338">        final long[] counts = new long[4];</span>
+
+<span class="fc bfc" id="L340" title="All 2 branches covered.">        for (int i = 0; i &lt; sampleSize; i++) {</span>
+<span class="fc" id="L341">            TestUtils.updateCounts(sample[i], counts, quartiles);</span>
+        }
+<span class="fc" id="L343">        TestUtils.assertChiSquareAccept(expected, counts, 0.001);</span>
+<span class="fc" id="L344">    }</span>
+
+    /**
+     * Verify that density integrals match the distribution.
+     * The (filtered, sorted) cumulativeTestPoints array is used to source
+     * integration limits. The integral of the density (estimated using a
+     * Legendre-Gauss integrator) is compared with the cdf over the same
+     * interval. Test points outside of the domain of the density function
+     * are discarded.
+     */
+    @Test
+    public void testDensityIntegrals() {
+<span class="nc" id="L356">        final double tol = 1.0e-9;</span>
+<span class="nc" id="L357">        final BaseAbstractUnivariateIntegrator integrator =</span>
+            new IterativeLegendreGaussIntegrator(5, 1.0e-12, 1.0e-10);
+<span class="nc" id="L359">        final UnivariateFunction d = new UnivariateFunction() {</span>
+            @Override
+            public double value(double x) {
+<span class="nc" id="L362">                return distribution.density(x);</span>
+            }
+        };
+<span class="nc" id="L365">        final ArrayList&lt;Double&gt; integrationTestPoints = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L366" title="All 2 branches missed.">        for (int i = 0; i &lt; cumulativeTestPoints.length; i++) {</span>
+<span class="nc bnc" id="L367" title="All 6 branches missed.">            if (Double.isNaN(cumulativeTestValues[i]) ||</span>
+                    cumulativeTestValues[i] &lt; 1.0e-5 ||
+                    cumulativeTestValues[i] &gt; 1 - 1.0e-5) {
+<span class="nc" id="L370">                continue; // exclude integrals outside domain.</span>
+            }
+<span class="nc" id="L372">            integrationTestPoints.add(cumulativeTestPoints[i]);</span>
+        }
+<span class="nc" id="L374">        Collections.sort(integrationTestPoints);</span>
+<span class="nc bnc" id="L375" title="All 2 branches missed.">        for (int i = 1; i &lt; integrationTestPoints.size(); i++) {</span>
+<span class="nc" id="L376">            Assert.assertEquals(</span>
+<span class="nc" id="L377">                    distribution.probability(</span>
+<span class="nc" id="L378">                            integrationTestPoints.get(0), integrationTestPoints.get(i)),</span>
+<span class="nc" id="L379">                            integrator.integrate(</span>
+                                    1000000, // Triangle integrals are very slow to converge
+<span class="nc" id="L381">                                    d, integrationTestPoints.get(0),</span>
+<span class="nc" id="L382">                                    integrationTestPoints.get(i)), tol);</span>
+        }
+<span class="nc" id="L384">    }</span>
+
+    @Test
+    public void testDistributionClone()
+        throws IOException,
+               ClassNotFoundException {
+        // Construct a distribution and initialize its internal random
+        // generator, using a fixed seed for deterministic results.
+<span class="fc" id="L392">        final long seed = 123;</span>
+<span class="fc" id="L393">        RandomSource source = RandomSource.WELL_512_A;</span>
+<span class="fc" id="L394">        ContinuousDistribution.Sampler origSampler = distribution.createSampler(RandomSource.create(source, seed));</span>
+
+        // Clone the distribution.
+<span class="fc" id="L397">        final RealDistribution cloned = deepClone();</span>
+<span class="fc" id="L398">        ContinuousDistribution.Sampler clonedSampler = cloned.createSampler(RandomSource.create(source, seed));</span>
+
+        // Make sure they still produce the same samples.
+<span class="fc" id="L401">        Assert.assertEquals(origSampler.sample(),</span>
+<span class="fc" id="L402">                            clonedSampler.sample(),</span>
+                            0d);
+<span class="fc" id="L404">    }</span>
+
+    //------------------ Getters / Setters for test instance data -----------
+    /**
+     * @return Returns the cumulativeTestPoints.
+     */
+    protected double[] getCumulativeTestPoints() {
+<span class="fc" id="L411">        return cumulativeTestPoints;</span>
+    }
+
+    /**
+     * @param cumulativeTestPoints The cumulativeTestPoints to set.
+     */
+    protected void setCumulativeTestPoints(double[] cumulativeTestPoints) {
+<span class="nc" id="L418">        this.cumulativeTestPoints = cumulativeTestPoints;</span>
+<span class="nc" id="L419">    }</span>
+
+    /**
+     * @return Returns the cumulativeTestValues.
+     */
+    protected double[] getCumulativeTestValues() {
+<span class="nc" id="L425">        return cumulativeTestValues;</span>
+    }
+
+    /**
+     * @param cumulativeTestValues The cumulativeTestValues to set.
+     */
+    protected void setCumulativeTestValues(double[] cumulativeTestValues) {
+<span class="nc" id="L432">        this.cumulativeTestValues = cumulativeTestValues;</span>
+<span class="nc" id="L433">    }</span>
+
+    protected double[] getDensityTestValues() {
+<span class="nc" id="L436">        return densityTestValues;</span>
+    }
+
+    protected void setDensityTestValues(double[] densityTestValues) {
+<span class="nc" id="L440">        this.densityTestValues = densityTestValues;</span>
+<span class="nc" id="L441">    }</span>
+
+    /**
+     * @return Returns the distribution.
+     */
+    protected RealDistribution getDistribution() {
+<span class="nc" id="L447">        return distribution;</span>
+    }
+
+    /**
+     * @param distribution The distribution to set.
+     */
+    protected void setDistribution(RealDistribution distribution) {
+<span class="nc" id="L454">        this.distribution = distribution;</span>
+<span class="nc" id="L455">    }</span>
+
+    /**
+     * @return Returns the inverseCumulativeTestPoints.
+     */
+    protected double[] getInverseCumulativeTestPoints() {
+<span class="nc" id="L461">        return inverseCumulativeTestPoints;</span>
+    }
+
+    /**
+     * @param inverseCumulativeTestPoints The inverseCumulativeTestPoints to set.
+     */
+    protected void setInverseCumulativeTestPoints(double[] inverseCumulativeTestPoints) {
+<span class="nc" id="L468">        this.inverseCumulativeTestPoints = inverseCumulativeTestPoints;</span>
+<span class="nc" id="L469">    }</span>
+
+    /**
+     * @return Returns the inverseCumulativeTestValues.
+     */
+    protected double[] getInverseCumulativeTestValues() {
+<span class="nc" id="L475">        return inverseCumulativeTestValues;</span>
+    }
+
+    /**
+     * @param inverseCumulativeTestValues The inverseCumulativeTestValues to set.
+     */
+    protected void setInverseCumulativeTestValues(double[] inverseCumulativeTestValues) {
+<span class="nc" id="L482">        this.inverseCumulativeTestValues = inverseCumulativeTestValues;</span>
+<span class="nc" id="L483">    }</span>
+
+    /**
+     * @return Returns the tolerance.
+     */
+    protected double getTolerance() {
+<span class="fc" id="L489">        return tolerance;</span>
+    }
+
+    /**
+     * @param tolerance The tolerance to set.
+     */
+    protected void setTolerance(double tolerance) {
+<span class="nc" id="L496">        this.tolerance = tolerance;</span>
+<span class="nc" id="L497">    }</span>
+
+    /**
+     * Serialization and deserialization loop of the {@link #distribution}.
+     */
+    private RealDistribution deepClone()
+        throws IOException,
+               ClassNotFoundException {
+        // Serialize to byte array.
+<span class="fc" id="L506">        final ByteArrayOutputStream bOut = new ByteArrayOutputStream();</span>
+<span class="fc" id="L507">        final ObjectOutputStream oOut = new ObjectOutputStream(bOut);</span>
+<span class="fc" id="L508">        oOut.writeObject(distribution);</span>
+<span class="fc" id="L509">        final byte[] data = bOut.toByteArray();</span>
+
+        // Deserialize from byte array.
+<span class="fc" id="L512">        final ByteArrayInputStream bIn = new ByteArrayInputStream(data);</span>
+<span class="fc" id="L513">        final ObjectInputStream oIn = new ObjectInputStream(bIn);</span>
+<span class="fc" id="L514">        final Object clone = oIn.readObject();</span>
+<span class="fc" id="L515">        oIn.close();</span>
+
+<span class="fc" id="L517">        return (RealDistribution) clone;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

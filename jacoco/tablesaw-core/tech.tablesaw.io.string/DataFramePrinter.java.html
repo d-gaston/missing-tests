@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DataFramePrinter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.io.string</a> &gt; <span class="el_source">DataFramePrinter.java</span></div><h1>DataFramePrinter.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.io.string;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.stream.IntStream;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.table.Relation;
+import tech.tablesaw.util.StringUtils;
+
+/**
+ * A class that can pretty print a DataFrame to text for visualization in a console
+ *
+ * &lt;p&gt;Based off of
+ * https://github.com/zavtech/morpheus-core/blob/master/src/main/java/com/zavtech/morpheus/reference/XDataFramePrinter.java
+ * under Apache 2 license
+ */
+public class DataFramePrinter {
+
+  private static final String TOO_SHORT_COLUMN_MARKER = &quot;?&quot;;
+
+  private final int maxRows;
+  private final OutputStream stream;
+
+  /**
+   * Constructor
+   *
+   * @param maxRows the max rows to print
+   * @param stream the print stream to write to
+   */
+<span class="fc" id="L44">  public DataFramePrinter(int maxRows, OutputStream stream) {</span>
+<span class="fc" id="L45">    this.maxRows = maxRows;</span>
+<span class="fc" id="L46">    this.stream = stream;</span>
+<span class="fc" id="L47">  }</span>
+
+  /**
+   * Returns the column widths required to print the header and data
+   *
+   * @param headers the headers to print
+   * @param data the data items to print
+   * @return the required column widths
+   */
+  private static int[] getWidths(String[] headers, String[][] data) {
+<span class="fc" id="L57">    final int[] widths = new int[headers.length];</span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">    for (int j = 0; j &lt; headers.length; j++) {</span>
+<span class="fc" id="L59">      final String header = headers[j];</span>
+<span class="pc bpc" id="L60" title="1 of 2 branches missed.">      widths[j] = Math.max(widths[j], header != null ? header.length() : 0);</span>
+    }
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    for (String[] rowValues : data) {</span>
+<span class="fc bfc" id="L63" title="All 2 branches covered.">      for (int j = 0; j &lt; rowValues.length; j++) {</span>
+<span class="fc" id="L64">        final String value = rowValues[j];</span>
+<span class="pc bpc" id="L65" title="1 of 2 branches missed.">        widths[j] = Math.max(widths[j], value != null ? value.length() : 0);</span>
+      }
+    }
+<span class="fc" id="L68">    return widths;</span>
+  }
+
+  /**
+   * Returns the header template given the widths specified
+   *
+   * @param widths the token widths
+   * @return the line format template
+   */
+  private static String getHeaderTemplate(int[] widths, String[] headers) {
+<span class="fc" id="L78">    return IntStream.range(0, widths.length)</span>
+<span class="fc" id="L79">        .mapToObj(</span>
+            i -&gt; {
+<span class="fc" id="L81">              final int width = widths[i];</span>
+<span class="fc" id="L82">              final int length = headers[i].length();</span>
+<span class="fc" id="L83">              final int leading = (width - length) / 2;</span>
+<span class="fc" id="L84">              final int trailing = width - (length + leading);</span>
+<span class="fc" id="L85">              final StringBuilder text = new StringBuilder();</span>
+<span class="fc" id="L86">              whitespace(text, leading + 1);</span>
+<span class="fc" id="L87">              text.append(&quot;%&quot;).append(i + 1).append(&quot;$s&quot;);</span>
+<span class="fc" id="L88">              whitespace(text, trailing);</span>
+<span class="fc" id="L89">              text.append(&quot;  |&quot;);</span>
+<span class="fc" id="L90">              return text.toString();</span>
+            })
+<span class="fc" id="L92">        .reduce((left, right) -&gt; left + &quot; &quot; + right)</span>
+<span class="fc" id="L93">        .orElse(&quot;&quot;);</span>
+  }
+
+  /**
+   * Returns the data template given the widths specified
+   *
+   * @param widths the token widths
+   * @return the line format template
+   */
+  private static String getDataTemplate(int[] widths) {
+<span class="fc" id="L103">    return IntStream.range(0, widths.length)</span>
+<span class="fc" id="L104">        .mapToObj(i -&gt; &quot; %&quot; + (i + 1) + &quot;$&quot; + widths[i] + &quot;s  |&quot;)</span>
+<span class="fc" id="L105">        .reduce((left, right) -&gt; left + &quot; &quot; + right)</span>
+<span class="fc" id="L106">        .orElse(&quot;&quot;);</span>
+  }
+
+  /**
+   * Returns a whitespace string of the length specified
+   *
+   * @param length the length for whitespace
+   */
+  private static void whitespace(StringBuilder text, int length) {
+<span class="fc" id="L115">    IntStream.range(0, length).forEach(i -&gt; text.append(&quot; &quot;));</span>
+<span class="fc" id="L116">  }</span>
+
+  /**
+   * Prints the specified DataFrame to the stream bound to this printer
+   *
+   * @param frame the DataFrame to print
+   */
+  public void print(Relation frame) {
+    try {
+<span class="fc" id="L125">      final String[] headers = getHeaderTokens(frame);</span>
+<span class="fc" id="L126">      final String[][] data = getDataTokens(frame);</span>
+<span class="fc" id="L127">      final int[] widths = getWidths(headers, data);</span>
+<span class="fc" id="L128">      final String dataTemplate = getDataTemplate(widths);</span>
+<span class="fc" id="L129">      final String headerTemplate = getHeaderTemplate(widths, headers);</span>
+<span class="fc" id="L130">      final int totalWidth = IntStream.of(widths).map(w -&gt; w + 5).sum() - 1;</span>
+<span class="fc" id="L131">      final int totalHeight = data.length + 1;</span>
+<span class="fc" id="L132">      int capacity = totalWidth * totalHeight;</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">      if (capacity &lt; 0) {</span>
+<span class="fc" id="L134">        capacity = 0;</span>
+      }
+<span class="fc" id="L136">      final StringBuilder text = new StringBuilder(capacity);</span>
+<span class="pc bpc" id="L137" title="1 of 2 branches missed.">      if (frame.name() != null) {</span>
+<span class="fc" id="L138">        text.append(tableName(frame, totalWidth)).append(System.lineSeparator());</span>
+      }
+<span class="fc" id="L140">      final String headerLine = String.format(headerTemplate, (Object[]) headers);</span>
+<span class="fc" id="L141">      text.append(headerLine).append(System.lineSeparator());</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">      for (int j = 0; j &lt; totalWidth; j++) {</span>
+<span class="fc" id="L143">        text.append(&quot;-&quot;);</span>
+      }
+<span class="fc bfc" id="L145" title="All 2 branches covered.">      for (String[] row : data) {</span>
+<span class="fc" id="L146">        final String dataLine = String.format(dataTemplate, (Object[]) row);</span>
+<span class="fc" id="L147">        text.append(System.lineSeparator());</span>
+<span class="fc" id="L148">        text.append(dataLine);</span>
+      }
+<span class="fc" id="L150">      final byte[] bytes = text.toString().getBytes();</span>
+<span class="fc" id="L151">      this.stream.write(bytes);</span>
+<span class="fc" id="L152">      this.stream.flush();</span>
+<span class="nc" id="L153">    } catch (IOException ex) {</span>
+<span class="nc" id="L154">      throw new IllegalStateException(&quot;Failed to print DataFrame&quot;, ex);</span>
+<span class="fc" id="L155">    }</span>
+<span class="fc" id="L156">  }</span>
+
+  private String tableName(Relation frame, int width) {
+<span class="fc bfc" id="L159" title="All 2 branches covered.">    if (frame.name().length() &gt; width) {</span>
+<span class="fc" id="L160">      return frame.name();</span>
+    }
+<span class="fc" id="L162">    int diff = width - frame.name().length();</span>
+<span class="fc" id="L163">    String result = StringUtils.repeat(&quot; &quot;, diff / 2) + frame.name();</span>
+<span class="fc" id="L164">    return result + StringUtils.repeat(&quot; &quot;, width - result.length());</span>
+  }
+
+  /**
+   * Returns the header string tokens for the frame
+   *
+   * @param frame the frame to create header tokens
+   * @return the header tokens
+   */
+  private String[] getHeaderTokens(Relation frame) {
+<span class="fc" id="L174">    final int colCount = frame.columnCount();</span>
+<span class="fc" id="L175">    final String[] header = new String[colCount];</span>
+<span class="fc" id="L176">    IntStream.range(0, colCount)</span>
+<span class="fc" id="L177">        .forEach(</span>
+            colIndex -&gt; {
+<span class="fc" id="L179">              header[colIndex] = frame.column(colIndex).name();</span>
+<span class="fc" id="L180">            });</span>
+<span class="fc" id="L181">    return header;</span>
+  }
+
+  private String getDataToken(Column&lt;?&gt; col, int i) {
+<span class="fc bfc" id="L185" title="All 2 branches covered.">    return col.size() &gt; i ? col.getString(i) : TOO_SHORT_COLUMN_MARKER;</span>
+  }
+
+  /**
+   * Returns the 2-D array of data tokens from the frame specified
+   *
+   * @param frame the DataFrame from which to create 2D array of formatted tokens
+   * @return the array of data tokens
+   */
+  private String[][] getDataTokens(Relation frame) {
+<span class="fc bfc" id="L195" title="All 2 branches covered.">    if (frame.rowCount() == 0) return new String[0][0];</span>
+<span class="fc" id="L196">    final int rowCount = Math.min(maxRows, frame.rowCount());</span>
+<span class="fc bfc" id="L197" title="All 2 branches covered.">    final boolean truncated = frame.rowCount() &gt; maxRows;</span>
+<span class="fc" id="L198">    final int colCount = frame.columnCount();</span>
+    final String[][] data;
+<span class="fc bfc" id="L200" title="All 2 branches covered.">    if (truncated) {</span>
+<span class="fc" id="L201">      data = new String[rowCount + 1][colCount];</span>
+      int i;
+<span class="fc bfc" id="L203" title="All 2 branches covered.">      for (i = 0; i &lt; Math.ceil((double) rowCount / 2); i++) {</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">        for (int j = 0; j &lt; colCount; j++) {</span>
+<span class="fc" id="L205">          Column&lt;?&gt; col = frame.column(j);</span>
+<span class="fc" id="L206">          data[i][j] = getDataToken(col, i);</span>
+        }
+      }
+<span class="fc bfc" id="L209" title="All 2 branches covered.">      for (int j = 0; j &lt; colCount; j++) {</span>
+<span class="fc" id="L210">        data[i][j] = &quot;...&quot;;</span>
+      }
+<span class="fc bfc" id="L212" title="All 2 branches covered.">      for (++i; i &lt;= rowCount; i++) {</span>
+<span class="fc bfc" id="L213" title="All 2 branches covered.">        for (int j = 0; j &lt; colCount; j++) {</span>
+<span class="fc" id="L214">          Column&lt;?&gt; col = frame.column(j);</span>
+<span class="fc" id="L215">          data[i][j] = getDataToken(col, frame.rowCount() - maxRows + i - 1);</span>
+        }
+      }
+<span class="fc" id="L218">    } else {</span>
+<span class="fc" id="L219">      data = new String[rowCount][colCount];</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">      for (int i = 0; i &lt; rowCount; i++) {</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">        for (int j = 0; j &lt; colCount; j++) {</span>
+<span class="fc" id="L222">          Column&lt;?&gt; col = frame.column(j);</span>
+<span class="fc" id="L223">          String value = getDataToken(col, i);</span>
+<span class="pc bpc" id="L224" title="1 of 2 branches missed.">          data[i][j] = value == null ? &quot;&quot; : value;</span>
+        }
+      }
+    }
+<span class="fc" id="L228">    return data;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

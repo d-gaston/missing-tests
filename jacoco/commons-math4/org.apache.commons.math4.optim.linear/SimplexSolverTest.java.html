@@ -1,0 +1,886 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SimplexSolverTest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">commons_math4$All_in_commons_math4.exec</a> &gt; <a href="index.source.html" class="el_package">org.apache.commons.math4.optim.linear</a> &gt; <span class="el_source">SimplexSolverTest.java</span></div><h1>SimplexSolverTest.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.commons.math4.optim.linear;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+import org.apache.commons.math4.exception.DimensionMismatchException;
+import org.apache.commons.math4.exception.TooManyIterationsException;
+import org.apache.commons.math4.optim.MaxIter;
+import org.apache.commons.math4.optim.PointValuePair;
+import org.apache.commons.math4.optim.linear.LinearConstraint;
+import org.apache.commons.math4.optim.linear.LinearConstraintSet;
+import org.apache.commons.math4.optim.linear.LinearObjectiveFunction;
+import org.apache.commons.math4.optim.linear.NoFeasibleSolutionException;
+import org.apache.commons.math4.optim.linear.NonNegativeConstraint;
+import org.apache.commons.math4.optim.linear.PivotSelectionRule;
+import org.apache.commons.math4.optim.linear.Relationship;
+import org.apache.commons.math4.optim.linear.SimplexSolver;
+import org.apache.commons.math4.optim.linear.SolutionCallback;
+import org.apache.commons.math4.optim.linear.UnboundedSolutionException;
+import org.apache.commons.math4.optim.nonlinear.scalar.GoalType;
+import org.apache.commons.numbers.core.Precision;
+import org.junit.Test;
+import org.junit.Assert;
+
+<span class="fc" id="L42">public class SimplexSolverTest {</span>
+<span class="fc" id="L43">    private static final MaxIter DEFAULT_MAX_ITER = new MaxIter(100);</span>
+
+    @Test
+    public void testMath842Cycle() {
+        // from http://www.math.toronto.edu/mpugh/Teaching/APM236_04/bland
+        //      maximize 10 x1 - 57 x2 - 9 x3 - 24 x4
+        //      subject to
+        //          1/2 x1 - 11/2 x2 - 5/2 x3 + 9 x4  &lt;= 0
+        //          1/2 x1 -  3/2 x2 - 1/2 x3 +   x4  &lt;= 0
+        //              x1                  &lt;= 1
+        //      x1,x2,x3,x4 &gt;= 0
+
+<span class="fc" id="L55">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 10, -57, -9, -24}, 0);</span>
+
+<span class="fc" id="L57">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L59">        constraints.add(new LinearConstraint(new double[] {0.5, -5.5, -2.5, 9}, Relationship.LEQ, 0));</span>
+<span class="fc" id="L60">        constraints.add(new LinearConstraint(new double[] {0.5, -1.5, -0.5, 1}, Relationship.LEQ, 0));</span>
+<span class="fc" id="L61">        constraints.add(new LinearConstraint(new double[] {  1,    0,    0, 0}, Relationship.LEQ, 1));</span>
+
+<span class="fc" id="L63">        double epsilon = 1e-6;</span>
+<span class="fc" id="L64">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L65">        PointValuePair solution = solver.optimize(f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE,
+                                                  new NonNegativeConstraint(true),
+                                                  PivotSelectionRule.BLAND);
+<span class="fc" id="L69">        Assert.assertEquals(1.0d, solution.getValue(), epsilon);</span>
+<span class="fc" id="L70">        Assert.assertTrue(validSolution(solution, constraints, epsilon));</span>
+<span class="fc" id="L71">    }</span>
+
+    @Test
+    public void testMath828() {
+<span class="fc" id="L75">        LinearObjectiveFunction f = new LinearObjectiveFunction(</span>
+                new double[] { 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 0.0);
+
+<span class="fc" id="L78">        ArrayList &lt;LinearConstraint&gt;constraints = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L80">        constraints.add(new LinearConstraint(new double[] {0.0, 39.0, 23.0, 96.0, 15.0, 48.0, 9.0, 21.0, 48.0, 36.0, 76.0, 19.0, 88.0, 17.0, 16.0, 36.0,}, Relationship.GEQ, 15.0));</span>
+<span class="fc" id="L81">        constraints.add(new LinearConstraint(new double[] {0.0, 59.0, 93.0, 12.0, 29.0, 78.0, 73.0, 87.0, 32.0, 70.0, 68.0, 24.0, 11.0, 26.0, 65.0, 25.0,}, Relationship.GEQ, 29.0));</span>
+<span class="fc" id="L82">        constraints.add(new LinearConstraint(new double[] {0.0, 74.0, 5.0, 82.0, 6.0, 97.0, 55.0, 44.0, 52.0, 54.0, 5.0, 93.0, 91.0, 8.0, 20.0, 97.0,}, Relationship.GEQ, 6.0));</span>
+<span class="fc" id="L83">        constraints.add(new LinearConstraint(new double[] {8.0, -3.0, -28.0, -72.0, -8.0, -31.0, -31.0, -74.0, -47.0, -59.0, -24.0, -57.0, -56.0, -16.0, -92.0, -59.0,}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L84">        constraints.add(new LinearConstraint(new double[] {25.0, -7.0, -99.0, -78.0, -25.0, -14.0, -16.0, -89.0, -39.0, -56.0, -53.0, -9.0, -18.0, -26.0, -11.0, -61.0,}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L85">        constraints.add(new LinearConstraint(new double[] {33.0, -95.0, -15.0, -4.0, -33.0, -3.0, -20.0, -96.0, -27.0, -13.0, -80.0, -24.0, -3.0, -13.0, -57.0, -76.0,}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L86">        constraints.add(new LinearConstraint(new double[] {7.0, -95.0, -39.0, -93.0, -7.0, -94.0, -94.0, -62.0, -76.0, -26.0, -53.0, -57.0, -31.0, -76.0, -53.0, -52.0,}, Relationship.GEQ, 0.0));</span>
+
+<span class="fc" id="L88">        double epsilon = 1e-6;</span>
+<span class="fc" id="L89">        PointValuePair solution = new SimplexSolver().optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                               GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L91">        Assert.assertEquals(1.0d, solution.getValue(), epsilon);</span>
+<span class="fc" id="L92">        Assert.assertTrue(validSolution(solution, constraints, epsilon));</span>
+<span class="fc" id="L93">    }</span>
+
+    @Test
+    public void testMath828Cycle() {
+<span class="fc" id="L97">        LinearObjectiveFunction f = new LinearObjectiveFunction(</span>
+                new double[] { 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 0.0);
+
+<span class="fc" id="L100">        ArrayList &lt;LinearConstraint&gt;constraints = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L102">        constraints.add(new LinearConstraint(new double[] {0.0, 16.0, 14.0, 69.0, 1.0, 85.0, 52.0, 43.0, 64.0, 97.0, 14.0, 74.0, 89.0, 28.0, 94.0, 58.0, 13.0, 22.0, 21.0, 17.0, 30.0, 25.0, 1.0, 59.0, 91.0, 78.0, 12.0, 74.0, 56.0, 3.0, 88.0,}, Relationship.GEQ, 91.0));</span>
+<span class="fc" id="L103">        constraints.add(new LinearConstraint(new double[] {0.0, 60.0, 40.0, 81.0, 71.0, 72.0, 46.0, 45.0, 38.0, 48.0, 40.0, 17.0, 33.0, 85.0, 64.0, 32.0, 84.0, 3.0, 54.0, 44.0, 71.0, 67.0, 90.0, 95.0, 54.0, 99.0, 99.0, 29.0, 52.0, 98.0, 9.0,}, Relationship.GEQ, 54.0));</span>
+<span class="fc" id="L104">        constraints.add(new LinearConstraint(new double[] {0.0, 41.0, 12.0, 86.0, 90.0, 61.0, 31.0, 41.0, 23.0, 89.0, 17.0, 74.0, 44.0, 27.0, 16.0, 47.0, 80.0, 32.0, 11.0, 56.0, 68.0, 82.0, 11.0, 62.0, 62.0, 53.0, 39.0, 16.0, 48.0, 1.0, 63.0,}, Relationship.GEQ, 62.0));</span>
+<span class="fc" id="L105">        constraints.add(new LinearConstraint(new double[] {83.0, -76.0, -94.0, -19.0, -15.0, -70.0, -72.0, -57.0, -63.0, -65.0, -22.0, -94.0, -22.0, -88.0, -86.0, -89.0, -72.0, -16.0, -80.0, -49.0, -70.0, -93.0, -95.0, -17.0, -83.0, -97.0, -31.0, -47.0, -31.0, -13.0, -23.0,}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L106">        constraints.add(new LinearConstraint(new double[] {41.0, -96.0, -41.0, -48.0, -70.0, -43.0, -43.0, -43.0, -97.0, -37.0, -85.0, -70.0, -45.0, -67.0, -87.0, -69.0, -94.0, -54.0, -54.0, -92.0, -79.0, -10.0, -35.0, -20.0, -41.0, -41.0, -65.0, -25.0, -12.0, -8.0, -46.0,}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L107">        constraints.add(new LinearConstraint(new double[] {27.0, -42.0, -65.0, -49.0, -53.0, -42.0, -17.0, -2.0, -61.0, -31.0, -76.0, -47.0, -8.0, -93.0, -86.0, -62.0, -65.0, -63.0, -22.0, -43.0, -27.0, -23.0, -32.0, -74.0, -27.0, -63.0, -47.0, -78.0, -29.0, -95.0, -73.0,}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L108">        constraints.add(new LinearConstraint(new double[] {15.0, -46.0, -41.0, -83.0, -98.0, -99.0, -21.0, -35.0, -7.0, -14.0, -80.0, -63.0, -18.0, -42.0, -5.0, -34.0, -56.0, -70.0, -16.0, -18.0, -74.0, -61.0, -47.0, -41.0, -15.0, -79.0, -18.0, -47.0, -88.0, -68.0, -55.0,}, Relationship.GEQ, 0.0));</span>
+
+<span class="fc" id="L110">        double epsilon = 1e-6;</span>
+<span class="fc" id="L111">        PointValuePair solution = new SimplexSolver().optimize(DEFAULT_MAX_ITER, f,</span>
+                                                               new LinearConstraintSet(constraints),
+                                                               GoalType.MINIMIZE, new NonNegativeConstraint(true),
+                                                               PivotSelectionRule.BLAND);
+<span class="fc" id="L115">        Assert.assertEquals(1.0d, solution.getValue(), epsilon);</span>
+<span class="fc" id="L116">        Assert.assertTrue(validSolution(solution, constraints, epsilon));</span>
+<span class="fc" id="L117">    }</span>
+
+    @Test
+    public void testMath781() {
+<span class="fc" id="L121">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 2, 6, 7 }, 0);</span>
+
+<span class="fc" id="L123">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L124">        constraints.add(new LinearConstraint(new double[] { 1, 2, 1 }, Relationship.LEQ, 2));</span>
+<span class="fc" id="L125">        constraints.add(new LinearConstraint(new double[] { -1, 1, 1 }, Relationship.LEQ, -1));</span>
+<span class="fc" id="L126">        constraints.add(new LinearConstraint(new double[] { 2, -3, 1 }, Relationship.LEQ, -1));</span>
+
+<span class="fc" id="L128">        double epsilon = 1e-6;</span>
+<span class="fc" id="L129">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L130">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+
+<span class="pc bpc" id="L133" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[0], 0.0d, epsilon) &gt; 0);</span>
+<span class="pc bpc" id="L134" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[1], 0.0d, epsilon) &gt; 0);</span>
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[2], 0.0d, epsilon) &lt; 0);</span>
+<span class="fc" id="L136">        Assert.assertEquals(2.0d, solution.getValue(), epsilon);</span>
+<span class="fc" id="L137">    }</span>
+
+    @Test
+    public void testMath713NegativeVariable() {
+<span class="fc" id="L141">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] {1.0, 1.0}, 0.0d);</span>
+<span class="fc" id="L142">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L143">        constraints.add(new LinearConstraint(new double[] {1, 0}, Relationship.EQ, 1));</span>
+
+<span class="fc" id="L145">        double epsilon = 1e-6;</span>
+<span class="fc" id="L146">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L147">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(true));
+
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[0], 0.0d, epsilon) &gt;= 0);</span>
+<span class="pc bpc" id="L151" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[1], 0.0d, epsilon) &gt;= 0);</span>
+<span class="fc" id="L152">    }</span>
+
+    @Test
+    public void testMath434NegativeVariable() {
+<span class="fc" id="L156">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] {0.0, 0.0, 1.0}, 0.0d);</span>
+<span class="fc" id="L157">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L158">        constraints.add(new LinearConstraint(new double[] {1, 1, 0}, Relationship.EQ, 5));</span>
+<span class="fc" id="L159">        constraints.add(new LinearConstraint(new double[] {0, 0, 1}, Relationship.GEQ, -10));</span>
+
+<span class="fc" id="L161">        double epsilon = 1e-6;</span>
+<span class="fc" id="L162">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L163">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(false));
+
+<span class="fc" id="L166">        Assert.assertEquals(5.0, solution.getPoint()[0] + solution.getPoint()[1], epsilon);</span>
+<span class="fc" id="L167">        Assert.assertEquals(-10.0, solution.getPoint()[2], epsilon);</span>
+<span class="fc" id="L168">        Assert.assertEquals(-10.0, solution.getValue(), epsilon);</span>
+
+<span class="fc" id="L170">    }</span>
+
+    @Test(expected = NoFeasibleSolutionException.class)
+    public void testMath434UnfeasibleSolution() {
+<span class="fc" id="L174">        double epsilon = 1e-6;</span>
+
+<span class="fc" id="L176">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] {1.0, 0.0}, 0.0);</span>
+<span class="fc" id="L177">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L178">        constraints.add(new LinearConstraint(new double[] {epsilon/2, 0.5}, Relationship.EQ, 0));</span>
+<span class="fc" id="L179">        constraints.add(new LinearConstraint(new double[] {1e-3, 0.1}, Relationship.EQ, 10));</span>
+
+<span class="fc" id="L181">        SimplexSolver solver = new SimplexSolver();</span>
+        // allowing only non-negative values, no feasible solution shall be found
+<span class="nc" id="L183">        solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                        GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="nc" id="L185">    }</span>
+
+    @Test
+    public void testMath434PivotRowSelection() {
+<span class="fc" id="L189">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] {1.0}, 0.0);</span>
+
+<span class="fc" id="L191">        double epsilon = 1e-6;</span>
+<span class="fc" id="L192">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L193">        constraints.add(new LinearConstraint(new double[] {200}, Relationship.GEQ, 1));</span>
+<span class="fc" id="L194">        constraints.add(new LinearConstraint(new double[] {100}, Relationship.GEQ, 0.499900001));</span>
+
+<span class="fc" id="L196">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L197">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(false));
+
+<span class="pc bpc" id="L200" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[0] * 200.d, 1.d, epsilon) &gt;= 0);</span>
+<span class="fc" id="L201">        Assert.assertEquals(0.0050, solution.getValue(), epsilon);</span>
+<span class="fc" id="L202">    }</span>
+
+    @Test
+    public void testMath434PivotRowSelection2() {
+<span class="fc" id="L206">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] {0.0d, 1.0d, 1.0d, 0.0d, 0.0d, 0.0d, 0.0d}, 0.0d);</span>
+
+<span class="fc" id="L208">        ArrayList&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L209">        constraints.add(new LinearConstraint(new double[] {1.0d, -0.1d, 0.0d, 0.0d, 0.0d, 0.0d, 0.0d}, Relationship.EQ, -0.1d));</span>
+<span class="fc" id="L210">        constraints.add(new LinearConstraint(new double[] {1.0d, 0.0d, 0.0d, 0.0d, 0.0d, 0.0d, 0.0d}, Relationship.GEQ, -1e-18d));</span>
+<span class="fc" id="L211">        constraints.add(new LinearConstraint(new double[] {0.0d, 1.0d, 0.0d, 0.0d, 0.0d, 0.0d, 0.0d}, Relationship.GEQ, 0.0d));</span>
+<span class="fc" id="L212">        constraints.add(new LinearConstraint(new double[] {0.0d, 0.0d, 0.0d, 1.0d, 0.0d, -0.0128588d, 1e-5d}, Relationship.EQ, 0.0d));</span>
+<span class="fc" id="L213">        constraints.add(new LinearConstraint(new double[] {0.0d, 0.0d, 0.0d, 0.0d, 1.0d, 1e-5d, -0.0128586d}, Relationship.EQ, 1e-10d));</span>
+<span class="fc" id="L214">        constraints.add(new LinearConstraint(new double[] {0.0d, 0.0d, 1.0d, -1.0d, 0.0d, 0.0d, 0.0d}, Relationship.GEQ, 0.0d));</span>
+<span class="fc" id="L215">        constraints.add(new LinearConstraint(new double[] {0.0d, 0.0d, 1.0d, 1.0d, 0.0d, 0.0d, 0.0d}, Relationship.GEQ, 0.0d));</span>
+<span class="fc" id="L216">        constraints.add(new LinearConstraint(new double[] {0.0d, 0.0d, 1.0d, 0.0d, -1.0d, 0.0d, 0.0d}, Relationship.GEQ, 0.0d));</span>
+<span class="fc" id="L217">        constraints.add(new LinearConstraint(new double[] {0.0d, 0.0d, 1.0d, 0.0d, 1.0d, 0.0d, 0.0d}, Relationship.GEQ, 0.0d));</span>
+
+<span class="fc" id="L219">        double epsilon = 1e-7;</span>
+<span class="fc" id="L220">        SimplexSolver simplex = new SimplexSolver();</span>
+<span class="fc" id="L221">        PointValuePair solution = simplex.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                   GoalType.MINIMIZE, new NonNegativeConstraint(false));
+
+<span class="pc bpc" id="L224" title="1 of 2 branches missed.">        Assert.assertTrue(Precision.compareTo(solution.getPoint()[0], -1e-18d, epsilon) &gt;= 0);</span>
+<span class="fc" id="L225">        Assert.assertEquals(1.0d, solution.getPoint()[1], epsilon);</span>
+<span class="fc" id="L226">        Assert.assertEquals(0.0d, solution.getPoint()[2], epsilon);</span>
+<span class="fc" id="L227">        Assert.assertEquals(1.0d, solution.getValue(), epsilon);</span>
+<span class="fc" id="L228">    }</span>
+
+    @Test
+    public void testMath272() {
+<span class="fc" id="L232">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 2, 2, 1 }, 0);</span>
+<span class="fc" id="L233">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L234">        constraints.add(new LinearConstraint(new double[] { 1, 1, 0 }, Relationship.GEQ,  1));</span>
+<span class="fc" id="L235">        constraints.add(new LinearConstraint(new double[] { 1, 0, 1 }, Relationship.GEQ,  1));</span>
+<span class="fc" id="L236">        constraints.add(new LinearConstraint(new double[] { 0, 1, 0 }, Relationship.GEQ,  1));</span>
+
+<span class="fc" id="L238">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L239">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(true));
+
+<span class="fc" id="L242">        Assert.assertEquals(0.0, solution.getPoint()[0], .0000001);</span>
+<span class="fc" id="L243">        Assert.assertEquals(1.0, solution.getPoint()[1], .0000001);</span>
+<span class="fc" id="L244">        Assert.assertEquals(1.0, solution.getPoint()[2], .0000001);</span>
+<span class="fc" id="L245">        Assert.assertEquals(3.0, solution.getValue(), .0000001);</span>
+<span class="fc" id="L246">    }</span>
+
+    @Test
+    public void testMath286() {
+<span class="fc" id="L250">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 0.8, 0.2, 0.7, 0.3, 0.6, 0.4 }, 0 );</span>
+<span class="fc" id="L251">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L252">        constraints.add(new LinearConstraint(new double[] { 1, 0, 1, 0, 1, 0 }, Relationship.EQ, 23.0));</span>
+<span class="fc" id="L253">        constraints.add(new LinearConstraint(new double[] { 0, 1, 0, 1, 0, 1 }, Relationship.EQ, 23.0));</span>
+<span class="fc" id="L254">        constraints.add(new LinearConstraint(new double[] { 1, 0, 0, 0, 0, 0 }, Relationship.GEQ, 10.0));</span>
+<span class="fc" id="L255">        constraints.add(new LinearConstraint(new double[] { 0, 0, 1, 0, 0, 0 }, Relationship.GEQ, 8.0));</span>
+<span class="fc" id="L256">        constraints.add(new LinearConstraint(new double[] { 0, 0, 0, 0, 1, 0 }, Relationship.GEQ, 5.0));</span>
+
+<span class="fc" id="L258">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L259">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+
+<span class="fc" id="L262">        Assert.assertEquals(25.8, solution.getValue(), .0000001);</span>
+<span class="fc" id="L263">        Assert.assertEquals(23.0, solution.getPoint()[0] + solution.getPoint()[2] + solution.getPoint()[4], 0.0000001);</span>
+<span class="fc" id="L264">        Assert.assertEquals(23.0, solution.getPoint()[1] + solution.getPoint()[3] + solution.getPoint()[5], 0.0000001);</span>
+<span class="pc bpc" id="L265" title="1 of 2 branches missed.">        Assert.assertTrue(solution.getPoint()[0] &gt;= 10.0 - 0.0000001);</span>
+<span class="pc bpc" id="L266" title="1 of 2 branches missed.">        Assert.assertTrue(solution.getPoint()[2] &gt;= 8.0 - 0.0000001);</span>
+<span class="pc bpc" id="L267" title="1 of 2 branches missed.">        Assert.assertTrue(solution.getPoint()[4] &gt;= 5.0 - 0.0000001);</span>
+<span class="fc" id="L268">    }</span>
+
+    @Test
+    public void testDegeneracy() {
+<span class="fc" id="L272">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 0.8, 0.7 }, 0 );</span>
+<span class="fc" id="L273">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L274">        constraints.add(new LinearConstraint(new double[] { 1, 1 }, Relationship.LEQ, 18.0));</span>
+<span class="fc" id="L275">        constraints.add(new LinearConstraint(new double[] { 1, 0 }, Relationship.GEQ, 10.0));</span>
+<span class="fc" id="L276">        constraints.add(new LinearConstraint(new double[] { 0, 1 }, Relationship.GEQ, 8.0));</span>
+
+<span class="fc" id="L278">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L279">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L281">        Assert.assertEquals(13.6, solution.getValue(), .0000001);</span>
+<span class="fc" id="L282">    }</span>
+
+    @Test
+    public void testMath288() {
+<span class="fc" id="L286">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 7, 3, 0, 0 }, 0 );</span>
+<span class="fc" id="L287">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L288">        constraints.add(new LinearConstraint(new double[] { 3, 0, -5, 0 }, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L289">        constraints.add(new LinearConstraint(new double[] { 2, 0, 0, -5 }, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L290">        constraints.add(new LinearConstraint(new double[] { 0, 3, 0, -5 }, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L291">        constraints.add(new LinearConstraint(new double[] { 1, 0, 0, 0 }, Relationship.LEQ, 1.0));</span>
+<span class="fc" id="L292">        constraints.add(new LinearConstraint(new double[] { 0, 1, 0, 0 }, Relationship.LEQ, 1.0));</span>
+
+<span class="fc" id="L294">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L295">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L297">        Assert.assertEquals(10.0, solution.getValue(), .0000001);</span>
+<span class="fc" id="L298">    }</span>
+
+    @Test
+    public void testMath290GEQ() {
+<span class="fc" id="L302">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 1, 5 }, 0 );</span>
+<span class="fc" id="L303">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L304">        constraints.add(new LinearConstraint(new double[] { 2, 0 }, Relationship.GEQ, -1.0));</span>
+<span class="fc" id="L305">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L306">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L308">        Assert.assertEquals(0, solution.getValue(), .0000001);</span>
+<span class="fc" id="L309">        Assert.assertEquals(0, solution.getPoint()[0], .0000001);</span>
+<span class="fc" id="L310">        Assert.assertEquals(0, solution.getPoint()[1], .0000001);</span>
+<span class="fc" id="L311">    }</span>
+
+    @Test(expected=NoFeasibleSolutionException.class)
+    public void testMath290LEQ() {
+<span class="fc" id="L315">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 1, 5 }, 0 );</span>
+<span class="fc" id="L316">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L317">        constraints.add(new LinearConstraint(new double[] { 2, 0 }, Relationship.LEQ, -1.0));</span>
+<span class="fc" id="L318">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="nc" id="L319">        solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                        GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="nc" id="L321">    }</span>
+
+    @Test
+    public void testMath293() {
+<span class="fc" id="L325">      LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 0.8, 0.2, 0.7, 0.3, 0.4, 0.6}, 0 );</span>
+<span class="fc" id="L326">      Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L327">      constraints.add(new LinearConstraint(new double[] { 1, 0, 1, 0, 1, 0 }, Relationship.EQ, 30.0));</span>
+<span class="fc" id="L328">      constraints.add(new LinearConstraint(new double[] { 0, 1, 0, 1, 0, 1 }, Relationship.EQ, 30.0));</span>
+<span class="fc" id="L329">      constraints.add(new LinearConstraint(new double[] { 0.8, 0.2, 0.0, 0.0, 0.0, 0.0 }, Relationship.GEQ, 10.0));</span>
+<span class="fc" id="L330">      constraints.add(new LinearConstraint(new double[] { 0.0, 0.0, 0.7, 0.3, 0.0, 0.0 }, Relationship.GEQ, 10.0));</span>
+<span class="fc" id="L331">      constraints.add(new LinearConstraint(new double[] { 0.0, 0.0, 0.0, 0.0, 0.4, 0.6 }, Relationship.GEQ, 10.0));</span>
+
+<span class="fc" id="L333">      SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L334">      PointValuePair solution1 = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                 GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+
+<span class="fc" id="L337">      Assert.assertEquals(15.7143, solution1.getPoint()[0], .0001);</span>
+<span class="fc" id="L338">      Assert.assertEquals(0.0, solution1.getPoint()[1], .0001);</span>
+<span class="fc" id="L339">      Assert.assertEquals(14.2857, solution1.getPoint()[2], .0001);</span>
+<span class="fc" id="L340">      Assert.assertEquals(0.0, solution1.getPoint()[3], .0001);</span>
+<span class="fc" id="L341">      Assert.assertEquals(0.0, solution1.getPoint()[4], .0001);</span>
+<span class="fc" id="L342">      Assert.assertEquals(30.0, solution1.getPoint()[5], .0001);</span>
+<span class="fc" id="L343">      Assert.assertEquals(40.57143, solution1.getValue(), .0001);</span>
+
+<span class="fc" id="L345">      double valA = 0.8 * solution1.getPoint()[0] + 0.2 * solution1.getPoint()[1];</span>
+<span class="fc" id="L346">      double valB = 0.7 * solution1.getPoint()[2] + 0.3 * solution1.getPoint()[3];</span>
+<span class="fc" id="L347">      double valC = 0.4 * solution1.getPoint()[4] + 0.6 * solution1.getPoint()[5];</span>
+
+<span class="fc" id="L349">      f = new LinearObjectiveFunction(new double[] { 0.8, 0.2, 0.7, 0.3, 0.4, 0.6}, 0 );</span>
+<span class="fc" id="L350">      constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L351">      constraints.add(new LinearConstraint(new double[] { 1, 0, 1, 0, 1, 0 }, Relationship.EQ, 30.0));</span>
+<span class="fc" id="L352">      constraints.add(new LinearConstraint(new double[] { 0, 1, 0, 1, 0, 1 }, Relationship.EQ, 30.0));</span>
+<span class="fc" id="L353">      constraints.add(new LinearConstraint(new double[] { 0.8, 0.2, 0.0, 0.0, 0.0, 0.0 }, Relationship.GEQ, valA));</span>
+<span class="fc" id="L354">      constraints.add(new LinearConstraint(new double[] { 0.0, 0.0, 0.7, 0.3, 0.0, 0.0 }, Relationship.GEQ, valB));</span>
+<span class="fc" id="L355">      constraints.add(new LinearConstraint(new double[] { 0.0, 0.0, 0.0, 0.0, 0.4, 0.6 }, Relationship.GEQ, valC));</span>
+
+<span class="fc" id="L357">      PointValuePair solution2 = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                 GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L359">      Assert.assertEquals(40.57143, solution2.getValue(), .0001);</span>
+<span class="fc" id="L360">    }</span>
+
+    @Test
+    public void testMath930() {
+<span class="fc" id="L364">        Collection&lt;LinearConstraint&gt; constraints = createMath930Constraints();</span>
+
+<span class="fc" id="L366">        double[] objFunctionCoeff = new double[33];</span>
+<span class="fc" id="L367">        objFunctionCoeff[3] = 1;</span>
+<span class="fc" id="L368">        LinearObjectiveFunction f = new LinearObjectiveFunction(objFunctionCoeff, 0);</span>
+<span class="fc" id="L369">        SimplexSolver solver = new SimplexSolver(1e-4, 10, 1e-6);</span>
+
+<span class="fc" id="L371">        PointValuePair solution = solver.optimize(new MaxIter(1000), f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L373">        Assert.assertEquals(0.3752298, solution.getValue(), 1e-4);</span>
+<span class="fc" id="L374">    }</span>
+
+    private List&lt;LinearConstraint&gt; createMath930Constraints() {
+<span class="fc" id="L377">        List&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L378">        constraints.add(new LinearConstraint(new double[] {1, -1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L379">        constraints.add(new LinearConstraint(new double[] {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L380">        constraints.add(new LinearConstraint(new double[] {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L381">        constraints.add(new LinearConstraint(new double[] {0, 1, 0, -1, 0, -1, 0, 1, 0, -1, 0, 1, 0, 1, 0, -1, 0, -1, 0, 1, 0, 1, 0, -1, 0, 1, 0, -1, 0, -1, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L382">        constraints.add(new LinearConstraint(new double[] {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.628803}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L383">        constraints.add(new LinearConstraint(new double[] {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.676993}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L384">        constraints.add(new LinearConstraint(new double[] {0, 0, 1, -1, 0, 0, -1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, 1, -1, 0, 0, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L385">        constraints.add(new LinearConstraint(new double[] {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.136677}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L386">        constraints.add(new LinearConstraint(new double[] {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.444434}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L387">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L388">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.254028}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L389">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.302218}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L390">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 1, -1, -1, 1, 0, 0, 0, 0, -1, 1, 1, -1, 0, 0, 0, 0, -1, 1, 1, -1, 0, 0, 0, 0, 1, -1, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L391">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.653981}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L392">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.690437}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L393">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0, 0, 1, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L394">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.423786}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L395">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.486717}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L396">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0, -1, 1, 0, 0, 0, 0, 0, 0, -1, 1, 0, 0, 0, 0, 0, 0, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L397">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.049232}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L398">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.304747}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L399">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L400">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.129826}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L401">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.205625}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L402">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 1, -1, -1, 1, -1, 1, 1, -1, 0, 0, 0, 0, 0, 0, 0, 0, -1, 1, 1, -1, 1, -1, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L403">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.621944}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L404">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.764385}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L405">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1, 0, -1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1, 0, 1, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L406">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.432572}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L407">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.480762}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L408">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L409">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.055983}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L410">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.11378}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L411">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L412">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.009607}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L413">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.057797}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L414">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 1, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L415">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.407308}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L416">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.452749}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L417">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L418">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.269677}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L419">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.321806}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L420">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L421">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.049232}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L422">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.06902}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L423">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L424">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L425">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.028754}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L426">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1, -1, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L427">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.484254}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L428">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.524607}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L429">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1, 0, -1, 0, 1, 0, -1, 0, 1, 0, 1, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L430">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.385492}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L431">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.430134}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L432">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L433">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.34983}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L434">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.375781}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L435">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L436">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.254028}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L437">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.281308}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L438">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, -1, 1, 0, 0, 0, 0, -1, 1, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L439">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.304995}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L440">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.345347}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L441">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0, 0, -1, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L442">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.288899}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L443">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.332212}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L444">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L445">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.14351}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L446">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.17057}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L447">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L448">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, -0.129826}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L449">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, -0.157435}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L450">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, -1, 1, -1, 1, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L451">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L452">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L453">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1, 0, -1, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L454">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, -0.141071}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L455">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, -0.232574}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L456">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, 0, 0, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L457">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, -0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L458">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, -1}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L459">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L460">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, -0.009607}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L461">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, -0.057797}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L462">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, -1, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L463">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, -0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L464">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, -1}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L465">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L466">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, -0.091644}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L467">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, -0.203531}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L468">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L469">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L470">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, -1}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L471">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L472">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, Relationship.GEQ, 0.0));</span>
+<span class="fc" id="L473">        constraints.add(new LinearConstraint(new double[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, -0.028754}, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L474">        constraints.add(new LinearConstraint(new double[] {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Relationship.EQ, 1.0));</span>
+<span class="fc" id="L475">        return constraints;</span>
+    }
+
+    @Test
+    public void testSimplexSolver() {
+<span class="fc" id="L480">        LinearObjectiveFunction f =</span>
+            new LinearObjectiveFunction(new double[] { 15, 10 }, 7);
+<span class="fc" id="L482">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L483">        constraints.add(new LinearConstraint(new double[] { 1, 0 }, Relationship.LEQ, 2));</span>
+<span class="fc" id="L484">        constraints.add(new LinearConstraint(new double[] { 0, 1 }, Relationship.LEQ, 3));</span>
+<span class="fc" id="L485">        constraints.add(new LinearConstraint(new double[] { 1, 1 }, Relationship.EQ, 4));</span>
+
+<span class="fc" id="L487">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L488">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L490">        Assert.assertEquals(2.0, solution.getPoint()[0], 0.0);</span>
+<span class="fc" id="L491">        Assert.assertEquals(2.0, solution.getPoint()[1], 0.0);</span>
+<span class="fc" id="L492">        Assert.assertEquals(57.0, solution.getValue(), 0.0);</span>
+<span class="fc" id="L493">    }</span>
+
+    @Test
+    public void testSingleVariableAndConstraint() {
+<span class="fc" id="L497">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 3 }, 0);</span>
+<span class="fc" id="L498">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L499">        constraints.add(new LinearConstraint(new double[] { 1 }, Relationship.LEQ, 10));</span>
+
+<span class="fc" id="L501">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L502">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+<span class="fc" id="L504">        Assert.assertEquals(10.0, solution.getPoint()[0], 0.0);</span>
+<span class="fc" id="L505">        Assert.assertEquals(30.0, solution.getValue(), 0.0);</span>
+<span class="fc" id="L506">    }</span>
+
+    /**
+     * With no artificial variables needed (no equals and no greater than
+     * constraints) we can go straight to Phase 2.
+     */
+    @Test
+    public void testModelWithNoArtificialVars() {
+<span class="fc" id="L514">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 15, 10 }, 0);</span>
+<span class="fc" id="L515">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L516">        constraints.add(new LinearConstraint(new double[] { 1, 0 }, Relationship.LEQ, 2));</span>
+<span class="fc" id="L517">        constraints.add(new LinearConstraint(new double[] { 0, 1 }, Relationship.LEQ, 3));</span>
+<span class="fc" id="L518">        constraints.add(new LinearConstraint(new double[] { 1, 1 }, Relationship.LEQ, 4));</span>
+
+<span class="fc" id="L520">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L521">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+<span class="fc" id="L523">        Assert.assertEquals(2.0, solution.getPoint()[0], 0.0);</span>
+<span class="fc" id="L524">        Assert.assertEquals(2.0, solution.getPoint()[1], 0.0);</span>
+<span class="fc" id="L525">        Assert.assertEquals(50.0, solution.getValue(), 0.0);</span>
+<span class="fc" id="L526">    }</span>
+
+    @Test
+    public void testMinimization() {
+<span class="fc" id="L530">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { -2, 1 }, -5);</span>
+<span class="fc" id="L531">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L532">        constraints.add(new LinearConstraint(new double[] { 1, 2 }, Relationship.LEQ, 6));</span>
+<span class="fc" id="L533">        constraints.add(new LinearConstraint(new double[] { 3, 2 }, Relationship.LEQ, 12));</span>
+<span class="fc" id="L534">        constraints.add(new LinearConstraint(new double[] { 0, 1 }, Relationship.GEQ, 0));</span>
+
+<span class="fc" id="L536">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L537">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(false));
+<span class="fc" id="L539">        Assert.assertEquals(4.0, solution.getPoint()[0], 0.0);</span>
+<span class="fc" id="L540">        Assert.assertEquals(0.0, solution.getPoint()[1], 0.0);</span>
+<span class="fc" id="L541">        Assert.assertEquals(-13.0, solution.getValue(), 0.0);</span>
+<span class="fc" id="L542">    }</span>
+
+    @Test
+    public void testSolutionWithNegativeDecisionVariable() {
+<span class="fc" id="L546">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { -2, 1 }, 0);</span>
+<span class="fc" id="L547">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L548">        constraints.add(new LinearConstraint(new double[] { 1, 1 }, Relationship.GEQ, 6));</span>
+<span class="fc" id="L549">        constraints.add(new LinearConstraint(new double[] { 1, 2 }, Relationship.LEQ, 14));</span>
+
+<span class="fc" id="L551">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L552">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+<span class="fc" id="L554">        Assert.assertEquals(-2.0, solution.getPoint()[0], 0.0);</span>
+<span class="fc" id="L555">        Assert.assertEquals(8.0, solution.getPoint()[1], 0.0);</span>
+<span class="fc" id="L556">        Assert.assertEquals(12.0, solution.getValue(), 0.0);</span>
+<span class="fc" id="L557">    }</span>
+
+    @Test(expected = NoFeasibleSolutionException.class)
+    public void testInfeasibleSolution() {
+<span class="fc" id="L561">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 15 }, 0);</span>
+<span class="fc" id="L562">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L563">        constraints.add(new LinearConstraint(new double[] { 1 }, Relationship.LEQ, 1));</span>
+<span class="fc" id="L564">        constraints.add(new LinearConstraint(new double[] { 1 }, Relationship.GEQ, 3));</span>
+
+<span class="fc" id="L566">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="nc" id="L567">        solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                        GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+<span class="nc" id="L569">    }</span>
+
+    @Test(expected = UnboundedSolutionException.class)
+    public void testUnboundedSolution() {
+<span class="fc" id="L573">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 15, 10 }, 0);</span>
+<span class="fc" id="L574">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L575">        constraints.add(new LinearConstraint(new double[] { 1, 0 }, Relationship.EQ, 2));</span>
+
+<span class="fc" id="L577">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="nc" id="L578">        solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                        GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+<span class="nc" id="L580">    }</span>
+
+    @Test
+    public void testRestrictVariablesToNonNegative() {
+<span class="fc" id="L584">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 409, 523, 70, 204, 339 }, 0);</span>
+<span class="fc" id="L585">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L586">        constraints.add(new LinearConstraint(new double[] {    43,   56, 345,  56,    5 }, Relationship.LEQ,  4567456));</span>
+<span class="fc" id="L587">        constraints.add(new LinearConstraint(new double[] {    12,   45,   7,  56,   23 }, Relationship.LEQ,    56454));</span>
+<span class="fc" id="L588">        constraints.add(new LinearConstraint(new double[] {     8,  768,   0,  34, 7456 }, Relationship.LEQ,  1923421));</span>
+<span class="fc" id="L589">        constraints.add(new LinearConstraint(new double[] { 12342, 2342,  34, 678, 2342 }, Relationship.GEQ,     4356));</span>
+<span class="fc" id="L590">        constraints.add(new LinearConstraint(new double[] {    45,  678,  76,  52,   23 }, Relationship.EQ,    456356));</span>
+
+<span class="fc" id="L592">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L593">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L595">        Assert.assertEquals(2902.92783505155, solution.getPoint()[0], .0000001);</span>
+<span class="fc" id="L596">        Assert.assertEquals(480.419243986254, solution.getPoint()[1], .0000001);</span>
+<span class="fc" id="L597">        Assert.assertEquals(0.0, solution.getPoint()[2], .0000001);</span>
+<span class="fc" id="L598">        Assert.assertEquals(0.0, solution.getPoint()[3], .0000001);</span>
+<span class="fc" id="L599">        Assert.assertEquals(0.0, solution.getPoint()[4], .0000001);</span>
+<span class="fc" id="L600">        Assert.assertEquals(1438556.7491409, solution.getValue(), .0000001);</span>
+<span class="fc" id="L601">    }</span>
+
+    @Test
+    public void testEpsilon() {
+<span class="fc" id="L605">      LinearObjectiveFunction f =</span>
+          new LinearObjectiveFunction(new double[] { 10, 5, 1 }, 0);
+<span class="fc" id="L607">      Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L608">      constraints.add(new LinearConstraint(new double[] {  9, 8, 0 }, Relationship.EQ,  17));</span>
+<span class="fc" id="L609">      constraints.add(new LinearConstraint(new double[] {  0, 7, 8 }, Relationship.LEQ,  7));</span>
+<span class="fc" id="L610">      constraints.add(new LinearConstraint(new double[] { 10, 0, 2 }, Relationship.LEQ, 10));</span>
+
+<span class="fc" id="L612">      SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L613">      PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                GoalType.MAXIMIZE, new NonNegativeConstraint(false));
+<span class="fc" id="L615">      Assert.assertEquals(1.0, solution.getPoint()[0], 0.0);</span>
+<span class="fc" id="L616">      Assert.assertEquals(1.0, solution.getPoint()[1], 0.0);</span>
+<span class="fc" id="L617">      Assert.assertEquals(0.0, solution.getPoint()[2], 0.0);</span>
+<span class="fc" id="L618">      Assert.assertEquals(15.0, solution.getValue(), 0.0);</span>
+<span class="fc" id="L619">  }</span>
+
+    @Test
+    public void testTrivialModel() {
+<span class="fc" id="L623">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 1, 1 }, 0);</span>
+<span class="fc" id="L624">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L625">        constraints.add(new LinearConstraint(new double[] { 1, 1 }, Relationship.EQ,  0));</span>
+
+<span class="fc" id="L627">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L628">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MAXIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L630">        Assert.assertEquals(0, solution.getValue(), .0000001);</span>
+<span class="fc" id="L631">    }</span>
+
+    @Test
+    public void testLargeModel() {
+<span class="fc" id="L635">        double[] objective = new double[] {</span>
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 12, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           12, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 12, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 12, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 12, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 12, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                           1, 1, 1, 1, 1, 1};
+
+<span class="fc" id="L659">        LinearObjectiveFunction f = new LinearObjectiveFunction(objective, 0);</span>
+<span class="fc" id="L660">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L661">        constraints.add(equationFromString(objective.length, &quot;x0 + x1 + x2 + x3 - x12 = 0&quot;));</span>
+<span class="fc" id="L662">        constraints.add(equationFromString(objective.length, &quot;x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 - x13 = 0&quot;));</span>
+<span class="fc" id="L663">        constraints.add(equationFromString(objective.length, &quot;x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 &gt;= 49&quot;));</span>
+<span class="fc" id="L664">        constraints.add(equationFromString(objective.length, &quot;x0 + x1 + x2 + x3 &gt;= 42&quot;));</span>
+<span class="fc" id="L665">        constraints.add(equationFromString(objective.length, &quot;x14 + x15 + x16 + x17 - x26 = 0&quot;));</span>
+<span class="fc" id="L666">        constraints.add(equationFromString(objective.length, &quot;x18 + x19 + x20 + x21 + x22 + x23 + x24 + x25 - x27 = 0&quot;));</span>
+<span class="fc" id="L667">        constraints.add(equationFromString(objective.length, &quot;x14 + x15 + x16 + x17 - x12 = 0&quot;));</span>
+<span class="fc" id="L668">        constraints.add(equationFromString(objective.length, &quot;x18 + x19 + x20 + x21 + x22 + x23 + x24 + x25 - x13 = 0&quot;));</span>
+<span class="fc" id="L669">        constraints.add(equationFromString(objective.length, &quot;x28 + x29 + x30 + x31 - x40 = 0&quot;));</span>
+<span class="fc" id="L670">        constraints.add(equationFromString(objective.length, &quot;x32 + x33 + x34 + x35 + x36 + x37 + x38 + x39 - x41 = 0&quot;));</span>
+<span class="fc" id="L671">        constraints.add(equationFromString(objective.length, &quot;x32 + x33 + x34 + x35 + x36 + x37 + x38 + x39 &gt;= 49&quot;));</span>
+<span class="fc" id="L672">        constraints.add(equationFromString(objective.length, &quot;x28 + x29 + x30 + x31 &gt;= 42&quot;));</span>
+<span class="fc" id="L673">        constraints.add(equationFromString(objective.length, &quot;x42 + x43 + x44 + x45 - x54 = 0&quot;));</span>
+<span class="fc" id="L674">        constraints.add(equationFromString(objective.length, &quot;x46 + x47 + x48 + x49 + x50 + x51 + x52 + x53 - x55 = 0&quot;));</span>
+<span class="fc" id="L675">        constraints.add(equationFromString(objective.length, &quot;x42 + x43 + x44 + x45 - x40 = 0&quot;));</span>
+<span class="fc" id="L676">        constraints.add(equationFromString(objective.length, &quot;x46 + x47 + x48 + x49 + x50 + x51 + x52 + x53 - x41 = 0&quot;));</span>
+<span class="fc" id="L677">        constraints.add(equationFromString(objective.length, &quot;x56 + x57 + x58 + x59 - x68 = 0&quot;));</span>
+<span class="fc" id="L678">        constraints.add(equationFromString(objective.length, &quot;x60 + x61 + x62 + x63 + x64 + x65 + x66 + x67 - x69 = 0&quot;));</span>
+<span class="fc" id="L679">        constraints.add(equationFromString(objective.length, &quot;x60 + x61 + x62 + x63 + x64 + x65 + x66 + x67 &gt;= 51&quot;));</span>
+<span class="fc" id="L680">        constraints.add(equationFromString(objective.length, &quot;x56 + x57 + x58 + x59 &gt;= 44&quot;));</span>
+<span class="fc" id="L681">        constraints.add(equationFromString(objective.length, &quot;x70 + x71 + x72 + x73 - x82 = 0&quot;));</span>
+<span class="fc" id="L682">        constraints.add(equationFromString(objective.length, &quot;x74 + x75 + x76 + x77 + x78 + x79 + x80 + x81 - x83 = 0&quot;));</span>
+<span class="fc" id="L683">        constraints.add(equationFromString(objective.length, &quot;x70 + x71 + x72 + x73 - x68 = 0&quot;));</span>
+<span class="fc" id="L684">        constraints.add(equationFromString(objective.length, &quot;x74 + x75 + x76 + x77 + x78 + x79 + x80 + x81 - x69 = 0&quot;));</span>
+<span class="fc" id="L685">        constraints.add(equationFromString(objective.length, &quot;x84 + x85 + x86 + x87 - x96 = 0&quot;));</span>
+<span class="fc" id="L686">        constraints.add(equationFromString(objective.length, &quot;x88 + x89 + x90 + x91 + x92 + x93 + x94 + x95 - x97 = 0&quot;));</span>
+<span class="fc" id="L687">        constraints.add(equationFromString(objective.length, &quot;x88 + x89 + x90 + x91 + x92 + x93 + x94 + x95 &gt;= 51&quot;));</span>
+<span class="fc" id="L688">        constraints.add(equationFromString(objective.length, &quot;x84 + x85 + x86 + x87 &gt;= 44&quot;));</span>
+<span class="fc" id="L689">        constraints.add(equationFromString(objective.length, &quot;x98 + x99 + x100 + x101 - x110 = 0&quot;));</span>
+<span class="fc" id="L690">        constraints.add(equationFromString(objective.length, &quot;x102 + x103 + x104 + x105 + x106 + x107 + x108 + x109 - x111 = 0&quot;));</span>
+<span class="fc" id="L691">        constraints.add(equationFromString(objective.length, &quot;x98 + x99 + x100 + x101 - x96 = 0&quot;));</span>
+<span class="fc" id="L692">        constraints.add(equationFromString(objective.length, &quot;x102 + x103 + x104 + x105 + x106 + x107 + x108 + x109 - x97 = 0&quot;));</span>
+<span class="fc" id="L693">        constraints.add(equationFromString(objective.length, &quot;x112 + x113 + x114 + x115 - x124 = 0&quot;));</span>
+<span class="fc" id="L694">        constraints.add(equationFromString(objective.length, &quot;x116 + x117 + x118 + x119 + x120 + x121 + x122 + x123 - x125 = 0&quot;));</span>
+<span class="fc" id="L695">        constraints.add(equationFromString(objective.length, &quot;x116 + x117 + x118 + x119 + x120 + x121 + x122 + x123 &gt;= 49&quot;));</span>
+<span class="fc" id="L696">        constraints.add(equationFromString(objective.length, &quot;x112 + x113 + x114 + x115 &gt;= 42&quot;));</span>
+<span class="fc" id="L697">        constraints.add(equationFromString(objective.length, &quot;x126 + x127 + x128 + x129 - x138 = 0&quot;));</span>
+<span class="fc" id="L698">        constraints.add(equationFromString(objective.length, &quot;x130 + x131 + x132 + x133 + x134 + x135 + x136 + x137 - x139 = 0&quot;));</span>
+<span class="fc" id="L699">        constraints.add(equationFromString(objective.length, &quot;x126 + x127 + x128 + x129 - x124 = 0&quot;));</span>
+<span class="fc" id="L700">        constraints.add(equationFromString(objective.length, &quot;x130 + x131 + x132 + x133 + x134 + x135 + x136 + x137 - x125 = 0&quot;));</span>
+<span class="fc" id="L701">        constraints.add(equationFromString(objective.length, &quot;x140 + x141 + x142 + x143 - x152 = 0&quot;));</span>
+<span class="fc" id="L702">        constraints.add(equationFromString(objective.length, &quot;x144 + x145 + x146 + x147 + x148 + x149 + x150 + x151 - x153 = 0&quot;));</span>
+<span class="fc" id="L703">        constraints.add(equationFromString(objective.length, &quot;x144 + x145 + x146 + x147 + x148 + x149 + x150 + x151 &gt;= 59&quot;));</span>
+<span class="fc" id="L704">        constraints.add(equationFromString(objective.length, &quot;x140 + x141 + x142 + x143 &gt;= 42&quot;));</span>
+<span class="fc" id="L705">        constraints.add(equationFromString(objective.length, &quot;x154 + x155 + x156 + x157 - x166 = 0&quot;));</span>
+<span class="fc" id="L706">        constraints.add(equationFromString(objective.length, &quot;x158 + x159 + x160 + x161 + x162 + x163 + x164 + x165 - x167 = 0&quot;));</span>
+<span class="fc" id="L707">        constraints.add(equationFromString(objective.length, &quot;x154 + x155 + x156 + x157 - x152 = 0&quot;));</span>
+<span class="fc" id="L708">        constraints.add(equationFromString(objective.length, &quot;x158 + x159 + x160 + x161 + x162 + x163 + x164 + x165 - x153 = 0&quot;));</span>
+<span class="fc" id="L709">        constraints.add(equationFromString(objective.length, &quot;x83 + x82 - x168 = 0&quot;));</span>
+<span class="fc" id="L710">        constraints.add(equationFromString(objective.length, &quot;x111 + x110 - x169 = 0&quot;));</span>
+<span class="fc" id="L711">        constraints.add(equationFromString(objective.length, &quot;x170 - x182 = 0&quot;));</span>
+<span class="fc" id="L712">        constraints.add(equationFromString(objective.length, &quot;x171 - x183 = 0&quot;));</span>
+<span class="fc" id="L713">        constraints.add(equationFromString(objective.length, &quot;x172 - x184 = 0&quot;));</span>
+<span class="fc" id="L714">        constraints.add(equationFromString(objective.length, &quot;x173 - x185 = 0&quot;));</span>
+<span class="fc" id="L715">        constraints.add(equationFromString(objective.length, &quot;x174 - x186 = 0&quot;));</span>
+<span class="fc" id="L716">        constraints.add(equationFromString(objective.length, &quot;x175 + x176 - x187 = 0&quot;));</span>
+<span class="fc" id="L717">        constraints.add(equationFromString(objective.length, &quot;x177 - x188 = 0&quot;));</span>
+<span class="fc" id="L718">        constraints.add(equationFromString(objective.length, &quot;x178 - x189 = 0&quot;));</span>
+<span class="fc" id="L719">        constraints.add(equationFromString(objective.length, &quot;x179 - x190 = 0&quot;));</span>
+<span class="fc" id="L720">        constraints.add(equationFromString(objective.length, &quot;x180 - x191 = 0&quot;));</span>
+<span class="fc" id="L721">        constraints.add(equationFromString(objective.length, &quot;x181 - x192 = 0&quot;));</span>
+<span class="fc" id="L722">        constraints.add(equationFromString(objective.length, &quot;x170 - x26 = 0&quot;));</span>
+<span class="fc" id="L723">        constraints.add(equationFromString(objective.length, &quot;x171 - x27 = 0&quot;));</span>
+<span class="fc" id="L724">        constraints.add(equationFromString(objective.length, &quot;x172 - x54 = 0&quot;));</span>
+<span class="fc" id="L725">        constraints.add(equationFromString(objective.length, &quot;x173 - x55 = 0&quot;));</span>
+<span class="fc" id="L726">        constraints.add(equationFromString(objective.length, &quot;x174 - x168 = 0&quot;));</span>
+<span class="fc" id="L727">        constraints.add(equationFromString(objective.length, &quot;x177 - x169 = 0&quot;));</span>
+<span class="fc" id="L728">        constraints.add(equationFromString(objective.length, &quot;x178 - x138 = 0&quot;));</span>
+<span class="fc" id="L729">        constraints.add(equationFromString(objective.length, &quot;x179 - x139 = 0&quot;));</span>
+<span class="fc" id="L730">        constraints.add(equationFromString(objective.length, &quot;x180 - x166 = 0&quot;));</span>
+<span class="fc" id="L731">        constraints.add(equationFromString(objective.length, &quot;x181 - x167 = 0&quot;));</span>
+<span class="fc" id="L732">        constraints.add(equationFromString(objective.length, &quot;x193 - x205 = 0&quot;));</span>
+<span class="fc" id="L733">        constraints.add(equationFromString(objective.length, &quot;x194 - x206 = 0&quot;));</span>
+<span class="fc" id="L734">        constraints.add(equationFromString(objective.length, &quot;x195 - x207 = 0&quot;));</span>
+<span class="fc" id="L735">        constraints.add(equationFromString(objective.length, &quot;x196 - x208 = 0&quot;));</span>
+<span class="fc" id="L736">        constraints.add(equationFromString(objective.length, &quot;x197 - x209 = 0&quot;));</span>
+<span class="fc" id="L737">        constraints.add(equationFromString(objective.length, &quot;x198 + x199 - x210 = 0&quot;));</span>
+<span class="fc" id="L738">        constraints.add(equationFromString(objective.length, &quot;x200 - x211 = 0&quot;));</span>
+<span class="fc" id="L739">        constraints.add(equationFromString(objective.length, &quot;x201 - x212 = 0&quot;));</span>
+<span class="fc" id="L740">        constraints.add(equationFromString(objective.length, &quot;x202 - x213 = 0&quot;));</span>
+<span class="fc" id="L741">        constraints.add(equationFromString(objective.length, &quot;x203 - x214 = 0&quot;));</span>
+<span class="fc" id="L742">        constraints.add(equationFromString(objective.length, &quot;x204 - x215 = 0&quot;));</span>
+<span class="fc" id="L743">        constraints.add(equationFromString(objective.length, &quot;x193 - x182 = 0&quot;));</span>
+<span class="fc" id="L744">        constraints.add(equationFromString(objective.length, &quot;x194 - x183 = 0&quot;));</span>
+<span class="fc" id="L745">        constraints.add(equationFromString(objective.length, &quot;x195 - x184 = 0&quot;));</span>
+<span class="fc" id="L746">        constraints.add(equationFromString(objective.length, &quot;x196 - x185 = 0&quot;));</span>
+<span class="fc" id="L747">        constraints.add(equationFromString(objective.length, &quot;x197 - x186 = 0&quot;));</span>
+<span class="fc" id="L748">        constraints.add(equationFromString(objective.length, &quot;x198 + x199 - x187 = 0&quot;));</span>
+<span class="fc" id="L749">        constraints.add(equationFromString(objective.length, &quot;x200 - x188 = 0&quot;));</span>
+<span class="fc" id="L750">        constraints.add(equationFromString(objective.length, &quot;x201 - x189 = 0&quot;));</span>
+<span class="fc" id="L751">        constraints.add(equationFromString(objective.length, &quot;x202 - x190 = 0&quot;));</span>
+<span class="fc" id="L752">        constraints.add(equationFromString(objective.length, &quot;x203 - x191 = 0&quot;));</span>
+<span class="fc" id="L753">        constraints.add(equationFromString(objective.length, &quot;x204 - x192 = 0&quot;));</span>
+
+<span class="fc" id="L755">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L756">        PointValuePair solution = solver.optimize(DEFAULT_MAX_ITER, f, new LinearConstraintSet(constraints),</span>
+                                                  GoalType.MINIMIZE, new NonNegativeConstraint(true));
+<span class="fc" id="L758">        Assert.assertEquals(7518.0, solution.getValue(), .0000001);</span>
+<span class="fc" id="L759">    }</span>
+
+    @Test
+    public void testSolutionCallback() {
+        // re-use the problem from testcase for MATH-288
+        // it normally requires 5 iterations
+
+<span class="fc" id="L766">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 7, 3, 0, 0 }, 0 );</span>
+
+<span class="fc" id="L768">        List&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L769">        constraints.add(new LinearConstraint(new double[] { 3, 0, -5, 0 }, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L770">        constraints.add(new LinearConstraint(new double[] { 2, 0, 0, -5 }, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L771">        constraints.add(new LinearConstraint(new double[] { 0, 3, 0, -5 }, Relationship.LEQ, 0.0));</span>
+<span class="fc" id="L772">        constraints.add(new LinearConstraint(new double[] { 1, 0, 0, 0 }, Relationship.LEQ, 1.0));</span>
+<span class="fc" id="L773">        constraints.add(new LinearConstraint(new double[] { 0, 1, 0, 0 }, Relationship.LEQ, 1.0));</span>
+
+<span class="fc" id="L775">        final SimplexSolver solver = new SimplexSolver();</span>
+<span class="fc" id="L776">        final SolutionCallback callback = new SolutionCallback();</span>
+
+<span class="fc" id="L778">        Assert.assertNull(callback.getSolution());</span>
+<span class="fc" id="L779">        Assert.assertFalse(callback.isSolutionOptimal());</span>
+
+        try {
+<span class="nc" id="L782">            solver.optimize(new MaxIter(3), f, new LinearConstraintSet(constraints),</span>
+                            GoalType.MAXIMIZE, new NonNegativeConstraint(true), callback);
+<span class="nc" id="L784">            Assert.fail(&quot;expected TooManyIterationsException&quot;);</span>
+<span class="fc" id="L785">        } catch (TooManyIterationsException ex) {</span>
+            // expected
+<span class="nc" id="L787">        }</span>
+
+<span class="fc" id="L789">        final PointValuePair solution = callback.getSolution();</span>
+<span class="fc" id="L790">        Assert.assertNotNull(solution);</span>
+<span class="fc" id="L791">        Assert.assertTrue(validSolution(solution, constraints, 1e-4));</span>
+<span class="fc" id="L792">        Assert.assertFalse(callback.isSolutionOptimal());</span>
+        // the solution is clearly not optimal: optimal = 10.0
+<span class="fc" id="L794">        Assert.assertEquals(7.0, solution.getValue(), 1e-4);</span>
+<span class="fc" id="L795">    }</span>
+
+    @Test(expected=DimensionMismatchException.class)
+    public void testDimensionMatch() {
+        // min 2x1 +15x2 +18x3
+        // Subject to
+        //   -x1 +2x2 -6x3  &lt;=-10
+        //         x2 +2x3  &lt;= 6
+        //   2x1      +10x3 &lt;= 19
+        //   -x1  +x2       &lt;= -2
+        // x1,x2,x3 &gt;= 0
+
+<span class="fc" id="L807">        LinearObjectiveFunction f = new LinearObjectiveFunction(new double[] { 2, 15, 18 }, 0);</span>
+<span class="fc" id="L808">        Collection&lt;LinearConstraint&gt; constraints = new ArrayList&lt;&gt;();</span>
+        // this constraint is wrong, the dimension is less than expected one
+<span class="fc" id="L810">        constraints.add(new LinearConstraint(new double[] { -1, 2 - 6 }, Relationship.LEQ, -10));</span>
+<span class="fc" id="L811">        constraints.add(new LinearConstraint(new double[] { 0, 1, 2 }, Relationship.LEQ, 6));</span>
+<span class="fc" id="L812">        constraints.add(new LinearConstraint(new double[] { 2, 0, 10 }, Relationship.LEQ, 19));</span>
+<span class="fc" id="L813">        constraints.add(new LinearConstraint(new double[] { -1, 1, 0 }, Relationship.LEQ, -2));</span>
+
+<span class="fc" id="L815">        SimplexSolver solver = new SimplexSolver();</span>
+<span class="nc" id="L816">        solver.optimize(f,</span>
+                        new LinearConstraintSet(constraints),
+                        new NonNegativeConstraint(true),
+                        PivotSelectionRule.BLAND);
+<span class="nc" id="L820">    }</span>
+
+    /**
+     * Converts a test string to a {@link LinearConstraint}.
+     * Ex: x0 + x1 + x2 + x3 - x12 = 0
+     */
+    private LinearConstraint equationFromString(int numCoefficients, String s) {
+        Relationship relationship;
+<span class="fc bfc" id="L828" title="All 2 branches covered.">        if (s.contains(&quot;&gt;=&quot;)) {</span>
+<span class="fc" id="L829">            relationship = Relationship.GEQ;</span>
+<span class="pc bpc" id="L830" title="1 of 2 branches missed.">        } else if (s.contains(&quot;&lt;=&quot;)) {</span>
+<span class="nc" id="L831">            relationship = Relationship.LEQ;</span>
+<span class="pc bpc" id="L832" title="1 of 2 branches missed.">        } else if (s.contains(&quot;=&quot;)) {</span>
+<span class="fc" id="L833">            relationship = Relationship.EQ;</span>
+        } else {
+<span class="nc" id="L835">            throw new IllegalArgumentException();</span>
+        }
+
+<span class="fc" id="L838">        String[] equationParts = s.split(&quot;[&gt;|&lt;]?=&quot;);</span>
+<span class="fc" id="L839">        double rhs = Double.parseDouble(equationParts[1].trim());</span>
+
+<span class="fc" id="L841">        double[] lhs = new double[numCoefficients];</span>
+<span class="fc" id="L842">        String left = equationParts[0].replaceAll(&quot; ?x&quot;, &quot;&quot;);</span>
+<span class="fc" id="L843">        String[] coefficients = left.split(&quot; &quot;);</span>
+<span class="fc bfc" id="L844" title="All 2 branches covered.">        for (String coefficient : coefficients) {</span>
+<span class="fc bfc" id="L845" title="All 2 branches covered.">            double value = coefficient.charAt(0) == '-' ? -1 : 1;</span>
+<span class="fc" id="L846">            int index = Integer.parseInt(coefficient.replaceFirst(&quot;[+|-]&quot;, &quot;&quot;).trim());</span>
+<span class="fc" id="L847">            lhs[index] = value;</span>
+        }
+<span class="fc" id="L849">        return new LinearConstraint(lhs, relationship, rhs);</span>
+    }
+
+    private static boolean validSolution(PointValuePair solution, List&lt;LinearConstraint&gt; constraints, double epsilon) {
+<span class="fc" id="L853">        double[] vals = solution.getPoint();</span>
+<span class="fc bfc" id="L854" title="All 2 branches covered.">        for (LinearConstraint c : constraints) {</span>
+<span class="fc" id="L855">            double[] coeffs = c.getCoefficients().toArray();</span>
+<span class="fc" id="L856">            double result = 0.0d;</span>
+<span class="fc bfc" id="L857" title="All 2 branches covered.">            for (int i = 0; i &lt; vals.length; i++) {</span>
+<span class="fc" id="L858">                result += vals[i] * coeffs[i];</span>
+            }
+
+<span class="pc bpc" id="L861" title="2 of 4 branches missed.">            switch (c.getRelationship()) {</span>
+            case EQ:
+<span class="nc bnc" id="L863" title="All 2 branches missed.">                if (!Precision.equals(result, c.getValue(), epsilon)) {</span>
+<span class="nc" id="L864">                    return false;</span>
+                }
+                break;
+
+            case GEQ:
+<span class="pc bpc" id="L869" title="1 of 2 branches missed.">                if (Precision.compareTo(result, c.getValue(), epsilon) &lt; 0) {</span>
+<span class="nc" id="L870">                    return false;</span>
+                }
+                break;
+
+            case LEQ:
+<span class="pc bpc" id="L875" title="1 of 2 branches missed.">                if (Precision.compareTo(result, c.getValue(), epsilon) &gt; 0) {</span>
+<span class="nc" id="L876">                    return false;</span>
+                }
+                break;
+            }
+<span class="fc" id="L880">        }</span>
+
+<span class="fc" id="L882">        return true;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>

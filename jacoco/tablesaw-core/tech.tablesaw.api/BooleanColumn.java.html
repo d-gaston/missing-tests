@@ -1,0 +1,768 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BooleanColumn.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tablesaw_core$All_in_tablesaw_core.exec</a> &gt; <a href="index.source.html" class="el_package">tech.tablesaw.api</a> &gt; <span class="el_source">BooleanColumn.java</span></div><h1>BooleanColumn.java</h1><pre class="source lang-java linenums">/*
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tech.tablesaw.api;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+import it.unimi.dsi.fastutil.booleans.BooleanIterable;
+import it.unimi.dsi.fastutil.booleans.BooleanIterator;
+import it.unimi.dsi.fastutil.booleans.BooleanOpenHashSet;
+import it.unimi.dsi.fastutil.booleans.BooleanSet;
+import it.unimi.dsi.fastutil.bytes.Byte2IntMap;
+import it.unimi.dsi.fastutil.bytes.Byte2IntOpenHashMap;
+import it.unimi.dsi.fastutil.bytes.ByteArrayList;
+import it.unimi.dsi.fastutil.bytes.ByteArrays;
+import it.unimi.dsi.fastutil.bytes.ByteComparator;
+import it.unimi.dsi.fastutil.bytes.ByteIterator;
+import it.unimi.dsi.fastutil.bytes.ByteListIterator;
+import it.unimi.dsi.fastutil.bytes.ByteOpenHashSet;
+import it.unimi.dsi.fastutil.bytes.ByteSet;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+import tech.tablesaw.columns.AbstractColumn;
+import tech.tablesaw.columns.AbstractColumnParser;
+import tech.tablesaw.columns.Column;
+import tech.tablesaw.columns.booleans.BooleanColumnType;
+import tech.tablesaw.columns.booleans.BooleanColumnUtils;
+import tech.tablesaw.columns.booleans.BooleanFillers;
+import tech.tablesaw.columns.booleans.BooleanFilters;
+import tech.tablesaw.columns.booleans.BooleanFormatter;
+import tech.tablesaw.columns.booleans.BooleanMapUtils;
+import tech.tablesaw.filtering.BooleanFilterSpec;
+import tech.tablesaw.filtering.predicates.BytePredicate;
+import tech.tablesaw.selection.BitmapBackedSelection;
+import tech.tablesaw.selection.Selection;
+
+/** A column in a base table that contains float values */
+public class BooleanColumn extends AbstractColumn&lt;BooleanColumn, Boolean&gt;
+    implements BooleanFilterSpec&lt;Selection&gt;,
+        BooleanMapUtils,
+        CategoricalColumn&lt;Boolean&gt;,
+        BooleanFillers&lt;BooleanColumn&gt;,
+        BooleanFilters {
+
+<span class="pc" id="L63">  private final ByteComparator descendingByteComparator = (o1, o2) -&gt; Byte.compare(o2, o1);</span>
+
+  private ByteArrayList data;
+
+<span class="fc" id="L67">  private final IntComparator comparator =</span>
+      (r1, r2) -&gt; {
+<span class="fc" id="L69">        boolean f1 = get(r1);</span>
+<span class="fc" id="L70">        boolean f2 = get(r2);</span>
+<span class="fc" id="L71">        return Boolean.compare(f1, f2);</span>
+      };
+
+<span class="fc" id="L74">  private BooleanFormatter formatter = new BooleanFormatter(&quot;true&quot;, &quot;false&quot;, &quot;&quot;);</span>
+
+  private BooleanColumn(String name, ByteArrayList values) {
+<span class="fc" id="L77">    super(BooleanColumnType.instance(), name);</span>
+<span class="fc" id="L78">    data = values;</span>
+<span class="fc" id="L79">  }</span>
+
+  public static boolean valueIsMissing(byte b) {
+<span class="fc" id="L82">    return BooleanColumnType.valueIsMissing(b);</span>
+  }
+
+  @Override
+  public boolean isMissing(int rowNumber) {
+<span class="fc" id="L87">    return valueIsMissing(getByte(rowNumber));</span>
+  }
+
+  @Override
+  public Column&lt;Boolean&gt; setMissing(int i) {
+<span class="nc" id="L92">    set(i, BooleanColumnType.missingValueIndicator());</span>
+<span class="nc" id="L93">    return this;</span>
+  }
+
+  public static BooleanColumn create(String name, Selection hits, int columnSize) {
+<span class="fc" id="L97">    BooleanColumn column = create(name, columnSize);</span>
+<span class="fc" id="L98">    checkArgument(</span>
+<span class="pc bpc" id="L99" title="1 of 2 branches missed.">        (hits.size() &lt;= columnSize),</span>
+        &quot;Cannot have more true values than total values in a boolean column&quot;);
+
+<span class="fc bfc" id="L102" title="All 2 branches covered.">    for (int hit : hits) {</span>
+<span class="fc" id="L103">      column.set(hit, true);</span>
+<span class="fc" id="L104">    }</span>
+<span class="fc" id="L105">    column.set(column.isMissing(), false);</span>
+<span class="fc" id="L106">    return column;</span>
+  }
+
+  public static BooleanColumn create(String name) {
+<span class="fc" id="L110">    return new BooleanColumn(name, new ByteArrayList(DEFAULT_ARRAY_SIZE));</span>
+  }
+
+  public static BooleanColumn create(String name, int initialSize) {
+<span class="fc" id="L114">    BooleanColumn column = new BooleanColumn(name, new ByteArrayList(initialSize));</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">    for (int i = 0; i &lt; initialSize; i++) {</span>
+<span class="fc" id="L116">      column.appendMissing();</span>
+    }
+<span class="fc" id="L118">    return column;</span>
+  }
+
+  public static BooleanColumn create(String name, boolean[] values) {
+<span class="fc" id="L122">    BooleanColumn column = create(name, values.length);</span>
+<span class="fc" id="L123">    int r = 0;</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">    for (boolean b : values) {</span>
+<span class="fc" id="L125">      column.set(r, b);</span>
+<span class="fc" id="L126">      r++;</span>
+    }
+<span class="fc" id="L128">    return column;</span>
+  }
+
+  public static BooleanColumn create(String name, List&lt;Boolean&gt; values) {
+<span class="nc" id="L132">    BooleanColumn column = create(name);</span>
+<span class="nc bnc" id="L133" title="All 2 branches missed.">    for (Boolean b : values) {</span>
+<span class="nc" id="L134">      column.append(b);</span>
+<span class="nc" id="L135">    }</span>
+<span class="nc" id="L136">    return column;</span>
+  }
+
+  public static BooleanColumn create(String name, Boolean[] arr) {
+<span class="fc" id="L140">    BooleanColumn column = create(name);</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">    for (Boolean val : arr) {</span>
+<span class="fc" id="L142">      column.append(val);</span>
+    }
+<span class="fc" id="L144">    return column;</span>
+  }
+
+  public static BooleanColumn create(String name, Stream&lt;Boolean&gt; stream) {
+<span class="nc" id="L148">    BooleanColumn column = create(name);</span>
+<span class="nc" id="L149">    stream.forEach(val -&gt; column.append(val));</span>
+<span class="nc" id="L150">    return column;</span>
+  }
+
+  public void setPrintFormatter(BooleanFormatter formatter) {
+<span class="fc" id="L154">    this.formatter = formatter;</span>
+<span class="fc" id="L155">  }</span>
+
+  public BooleanFormatter getPrintFormatter() {
+<span class="nc" id="L158">    return formatter;</span>
+  }
+
+  @Override
+  public int size() {
+<span class="fc" id="L163">    return data.size();</span>
+  }
+
+  @Override
+  public Table summary() {
+<span class="fc" id="L168">    Byte2IntMap counts = new Byte2IntOpenHashMap(3);</span>
+<span class="fc" id="L169">    counts.put(BooleanColumnType.BYTE_FALSE, 0);</span>
+<span class="fc" id="L170">    counts.put(BooleanColumnType.BYTE_TRUE, 0);</span>
+
+<span class="fc bfc" id="L172" title="All 2 branches covered.">    for (byte next : data) {</span>
+<span class="fc" id="L173">      counts.put(next, counts.get(next) + 1);</span>
+<span class="fc" id="L174">    }</span>
+
+<span class="fc" id="L176">    Table table = Table.create(name());</span>
+
+<span class="fc" id="L178">    BooleanColumn booleanColumn = create(&quot;Value&quot;);</span>
+<span class="fc" id="L179">    DoubleColumn countColumn = DoubleColumn.create(&quot;Count&quot;);</span>
+<span class="fc" id="L180">    table.addColumns(booleanColumn);</span>
+<span class="fc" id="L181">    table.addColumns(countColumn);</span>
+
+<span class="fc bfc" id="L183" title="All 2 branches covered.">    for (Map.Entry&lt;Byte, Integer&gt; entry : counts.byte2IntEntrySet()) {</span>
+<span class="fc" id="L184">      booleanColumn.append(entry.getKey());</span>
+<span class="fc" id="L185">      countColumn.append(entry.getValue());</span>
+<span class="fc" id="L186">    }</span>
+<span class="fc" id="L187">    return table;</span>
+  }
+
+  /** Returns the count of missing values in this column */
+  @Override
+  public int countMissing() {
+<span class="fc" id="L193">    int count = 0;</span>
+<span class="fc bfc" id="L194" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc bfc" id="L195" title="All 2 branches covered.">      if (valueIsMissing(getByte(i))) {</span>
+<span class="fc" id="L196">        count++;</span>
+      }
+    }
+<span class="fc" id="L199">    return count;</span>
+  }
+
+  @Override
+  public int countUnique() {
+<span class="fc" id="L204">    ByteSet count = new ByteOpenHashSet(3);</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">    for (byte next : data) {</span>
+<span class="fc" id="L206">      count.add(next);</span>
+<span class="fc" id="L207">    }</span>
+<span class="fc" id="L208">    return count.size();</span>
+  }
+
+  @Override
+  public BooleanColumn unique() {
+<span class="fc" id="L213">    ByteSet count = new ByteOpenHashSet(3);</span>
+<span class="fc bfc" id="L214" title="All 2 branches covered.">    for (byte next : data) {</span>
+<span class="fc" id="L215">      count.add(next);</span>
+<span class="fc" id="L216">    }</span>
+<span class="fc" id="L217">    ByteArrayList list = new ByteArrayList(count);</span>
+<span class="fc" id="L218">    return new BooleanColumn(name() + &quot; Unique values&quot;, list);</span>
+  }
+
+  public BooleanColumn append(boolean b) {
+<span class="fc bfc" id="L222" title="All 2 branches covered.">    if (b) {</span>
+<span class="fc" id="L223">      data.add(BooleanColumnType.BYTE_TRUE);</span>
+    } else {
+<span class="fc" id="L225">      data.add(BooleanColumnType.BYTE_FALSE);</span>
+    }
+<span class="fc" id="L227">    return this;</span>
+  }
+
+  @Override
+  public BooleanColumn append(Boolean b) {
+<span class="pc bpc" id="L232" title="1 of 2 branches missed.">    if (b == null) {</span>
+<span class="nc" id="L233">      appendMissing();</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">    } else if (b) {</span>
+<span class="fc" id="L235">      data.add(BooleanColumnType.BYTE_TRUE);</span>
+    } else {
+<span class="fc" id="L237">      data.add(BooleanColumnType.BYTE_FALSE);</span>
+    }
+<span class="fc" id="L239">    return this;</span>
+  }
+
+  @Override
+  public BooleanColumn appendObj(Object obj) {
+<span class="pc bpc" id="L244" title="1 of 2 branches missed.">    if (obj == null) {</span>
+<span class="nc" id="L245">      return appendMissing();</span>
+    }
+<span class="pc bpc" id="L247" title="1 of 2 branches missed.">    if (!(obj instanceof Boolean)) {</span>
+<span class="nc" id="L248">      throw new IllegalArgumentException(</span>
+<span class="nc" id="L249">          &quot;Cannot append &quot; + obj.getClass().getName() + &quot; to BooleanColumn&quot;);</span>
+    }
+<span class="fc" id="L251">    return append((Boolean) obj);</span>
+  }
+
+  public BooleanColumn append(byte b) {
+<span class="fc" id="L255">    data.add(b);</span>
+<span class="fc" id="L256">    return this;</span>
+  }
+
+  @Override
+  public BooleanColumn appendMissing() {
+<span class="fc" id="L261">    append(BooleanColumnType.MISSING_VALUE);</span>
+<span class="fc" id="L262">    return this;</span>
+  }
+
+  @Override
+  public String getString(int row) {
+<span class="fc" id="L267">    return formatter.format(get(row));</span>
+  }
+
+  @Override
+  public String getUnformattedString(int row) {
+<span class="fc" id="L272">    Boolean b = get(row);</span>
+<span class="pc bpc" id="L273" title="1 of 2 branches missed.">    if (b == null) {</span>
+<span class="nc" id="L274">      return &quot;&quot;;</span>
+    }
+<span class="fc" id="L276">    return String.valueOf(b);</span>
+  }
+
+  @Override
+  public BooleanColumn emptyCopy() {
+<span class="fc" id="L281">    return create(name());</span>
+  }
+
+  @Override
+  public BooleanColumn emptyCopy(int rowSize) {
+<span class="fc" id="L286">    return create(name(), rowSize);</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="nc" id="L291">    data.clear();</span>
+<span class="nc" id="L292">  }</span>
+
+  @Override
+  public BooleanColumn copy() {
+<span class="fc" id="L296">    return new BooleanColumn(name(), data.clone());</span>
+  }
+
+  @Override
+  public void sortAscending() {
+<span class="nc" id="L301">    ByteArrays.mergeSort(data.elements());</span>
+<span class="nc" id="L302">  }</span>
+
+  @Override
+  public void sortDescending() {
+<span class="nc" id="L306">    ByteArrays.mergeSort(data.elements(), descendingByteComparator);</span>
+<span class="nc" id="L307">  }</span>
+
+  @Override
+  public BooleanColumn appendCell(String object) {
+<span class="fc" id="L311">    return append(BooleanColumnType.DEFAULT_PARSER.parseByte(object));</span>
+  }
+
+  @Override
+  public BooleanColumn appendCell(String object, AbstractColumnParser&lt;?&gt; parser) {
+<span class="fc" id="L316">    return append(parser.parseByte(object));</span>
+  }
+
+  /**
+   * Returns the value in row i as a Boolean
+   *
+   * @param i the row number
+   * @return A Boolean object (may be null)
+   */
+  @Override
+  public Boolean get(int i) {
+<span class="fc" id="L327">    byte b = data.getByte(i);</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">    if (b == BooleanColumnType.BYTE_TRUE) {</span>
+<span class="fc" id="L329">      return Boolean.TRUE;</span>
+    }
+<span class="fc bfc" id="L331" title="All 2 branches covered.">    if (b == BooleanColumnType.BYTE_FALSE) {</span>
+<span class="fc" id="L332">      return Boolean.FALSE;</span>
+    }
+<span class="fc" id="L334">    return null;</span>
+  }
+
+  /**
+   * Returns the value in row i as a byte (0, 1, or Byte.MIN_VALUE representing missing data)
+   *
+   * @param i the row number
+   */
+  public byte getByte(int i) {
+<span class="fc" id="L343">    return data.getByte(i);</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="nc" id="L348">    return data.isEmpty();</span>
+  }
+
+  public int countTrue() {
+<span class="fc" id="L352">    int count = 0;</span>
+<span class="fc bfc" id="L353" title="All 2 branches covered.">    for (byte b : data) {</span>
+<span class="fc bfc" id="L354" title="All 2 branches covered.">      if (b == BooleanColumnType.BYTE_TRUE) {</span>
+<span class="fc" id="L355">        count++;</span>
+      }
+<span class="fc" id="L357">    }</span>
+<span class="fc" id="L358">    return count;</span>
+  }
+
+  public int countFalse() {
+<span class="fc" id="L362">    int count = 0;</span>
+<span class="fc bfc" id="L363" title="All 2 branches covered.">    for (byte b : data) {</span>
+<span class="fc bfc" id="L364" title="All 2 branches covered.">      if (b == BooleanColumnType.BYTE_FALSE) {</span>
+<span class="fc" id="L365">        count++;</span>
+      }
+<span class="fc" id="L367">    }</span>
+<span class="fc" id="L368">    return count;</span>
+  }
+
+  /** Returns the proportion of non-missing row elements that contain true */
+  public double proportionTrue() {
+<span class="fc" id="L373">    double n = size() - countMissing();</span>
+<span class="fc" id="L374">    double trueCount = countTrue();</span>
+<span class="fc" id="L375">    return trueCount / n;</span>
+  }
+
+  /** Returns the proportion of non-missing row elements that contain true */
+  public double proportionFalse() {
+<span class="fc" id="L380">    return 1.0 - proportionTrue();</span>
+  }
+
+  /** Returns true if the column contains any true values, and false otherwise */
+  public boolean any() {
+<span class="pc bpc" id="L385" title="1 of 2 branches missed.">    return countTrue() &gt; 0;</span>
+  }
+
+  /**
+   * Returns true if the column contains only true values, and false otherwise. If there are any
+   * missing values it returns false.
+   */
+  public boolean all() {
+<span class="fc bfc" id="L393" title="All 2 branches covered.">    return countTrue() == size();</span>
+  }
+
+  /** Returns true if the column contains no true values, and false otherwise */
+  public boolean none() {
+<span class="fc bfc" id="L398" title="All 2 branches covered.">    return countTrue() == 0;</span>
+  }
+
+  public Selection isFalse() {
+<span class="fc" id="L402">    Selection results = new BitmapBackedSelection();</span>
+<span class="fc" id="L403">    int i = 0;</span>
+<span class="fc bfc" id="L404" title="All 2 branches covered.">    for (byte next : data) {</span>
+<span class="fc bfc" id="L405" title="All 2 branches covered.">      if (next == BooleanColumnType.BYTE_FALSE) {</span>
+<span class="fc" id="L406">        results.add(i);</span>
+      }
+<span class="fc" id="L408">      i++;</span>
+<span class="fc" id="L409">    }</span>
+<span class="fc" id="L410">    return results;</span>
+  }
+
+  public Selection isTrue() {
+<span class="fc" id="L414">    Selection results = new BitmapBackedSelection();</span>
+<span class="fc" id="L415">    int i = 0;</span>
+<span class="fc bfc" id="L416" title="All 2 branches covered.">    for (byte next : data) {</span>
+<span class="fc bfc" id="L417" title="All 2 branches covered.">      if (next == BooleanColumnType.BYTE_TRUE) {</span>
+<span class="fc" id="L418">        results.add(i);</span>
+      }
+<span class="fc" id="L420">      i++;</span>
+<span class="fc" id="L421">    }</span>
+<span class="fc" id="L422">    return results;</span>
+  }
+
+  public Selection isEqualTo(BooleanColumn other) {
+<span class="nc" id="L426">    Selection results = new BitmapBackedSelection();</span>
+<span class="nc" id="L427">    int i = 0;</span>
+<span class="nc" id="L428">    ByteIterator booleanIterator = other.byteIterator();</span>
+<span class="nc bnc" id="L429" title="All 2 branches missed.">    for (byte next : data) {</span>
+<span class="nc bnc" id="L430" title="All 2 branches missed.">      if (next == booleanIterator.nextByte()) {</span>
+<span class="nc" id="L431">        results.add(i);</span>
+      }
+<span class="nc" id="L433">      i++;</span>
+<span class="nc" id="L434">    }</span>
+<span class="nc" id="L435">    return results;</span>
+  }
+
+  /** Returns a ByteArrayList containing 0 (false), 1 (true) or Byte.MIN_VALUE (missing) */
+  public ByteArrayList data() {
+<span class="nc" id="L440">    return data;</span>
+  }
+
+  public BooleanColumn set(int i, boolean b) {
+<span class="fc bfc" id="L444" title="All 2 branches covered.">    if (b) {</span>
+<span class="fc" id="L445">      data.set(i, BooleanColumnType.BYTE_TRUE);</span>
+    } else {
+<span class="fc" id="L447">      data.set(i, BooleanColumnType.BYTE_FALSE);</span>
+    }
+<span class="fc" id="L449">    return this;</span>
+  }
+
+  private void set(int i, byte b) {
+<span class="fc" id="L453">    data.set(i, b);</span>
+<span class="fc" id="L454">  }</span>
+
+  @Override
+  public BooleanColumn set(int i, Boolean val) {
+<span class="nc" id="L458">    return set(i, val.booleanValue());</span>
+  }
+
+  @Override
+  public BooleanColumn lead(int n) {
+<span class="nc" id="L463">    BooleanColumn column = lag(-n);</span>
+<span class="nc" id="L464">    column.setName(name() + &quot; lead(&quot; + n + &quot;)&quot;);</span>
+<span class="nc" id="L465">    return column;</span>
+  }
+
+  @Override
+  public BooleanColumn lag(int n) {
+<span class="nc bnc" id="L470" title="All 2 branches missed.">    int srcPos = n &gt;= 0 ? 0 : 0 - n;</span>
+<span class="nc" id="L471">    byte[] dest = new byte[size()];</span>
+<span class="nc bnc" id="L472" title="All 2 branches missed.">    int destPos = n &lt;= 0 ? 0 : n;</span>
+<span class="nc bnc" id="L473" title="All 2 branches missed.">    int length = n &gt;= 0 ? size() - n : size() + n;</span>
+
+<span class="nc bnc" id="L475" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L476">      dest[i] = BooleanColumnType.MISSING_VALUE;</span>
+    }
+
+<span class="nc" id="L479">    System.arraycopy(data.toByteArray(), srcPos, dest, destPos, length);</span>
+
+<span class="nc" id="L481">    BooleanColumn copy = emptyCopy(size());</span>
+<span class="nc" id="L482">    copy.data = new ByteArrayList(dest);</span>
+<span class="nc" id="L483">    copy.setName(name() + &quot; lag(&quot; + n + &quot;)&quot;);</span>
+<span class="nc" id="L484">    return copy;</span>
+  }
+
+  /**
+   * Conditionally update this column, replacing current values with newValue for all rows where the
+   * current value matches the selection criteria
+   */
+  public BooleanColumn set(Selection rowSelection, boolean newValue) {
+<span class="fc bfc" id="L492" title="All 2 branches covered.">    for (int row : rowSelection) {</span>
+<span class="fc" id="L493">      set(row, newValue);</span>
+<span class="fc" id="L494">    }</span>
+<span class="fc" id="L495">    return this;</span>
+  }
+
+  public double getDouble(int row) {
+<span class="fc" id="L499">    return getByte(row);</span>
+  }
+
+  public double[] asDoubleArray() {
+<span class="fc" id="L503">    double[] doubles = new double[data.size()];</span>
+<span class="fc bfc" id="L504" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L505">      doubles[i] = data.getByte(i);</span>
+    }
+<span class="fc" id="L507">    return doubles;</span>
+  }
+
+  @Override
+  public IntComparator rowComparator() {
+<span class="fc" id="L512">    return comparator;</span>
+  }
+
+  @Override
+  public BooleanColumn append(Column&lt;Boolean&gt; column) {
+<span class="pc bpc" id="L517" title="1 of 2 branches missed.">    checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L518">    BooleanColumn col = (BooleanColumn) column;</span>
+<span class="fc" id="L519">    final int size = col.size();</span>
+<span class="fc bfc" id="L520" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L521">      append(col.getByte(i));</span>
+    }
+<span class="fc" id="L523">    return this;</span>
+  }
+
+  @Override
+  public Column&lt;Boolean&gt; append(Column&lt;Boolean&gt; column, int row) {
+<span class="pc bpc" id="L528" title="1 of 2 branches missed.">    checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L529">    BooleanColumn col = (BooleanColumn) column;</span>
+<span class="fc" id="L530">    append(col.getByte(row));</span>
+<span class="fc" id="L531">    return this;</span>
+  }
+
+  @Override
+  public Column&lt;Boolean&gt; set(int row, Column&lt;Boolean&gt; column, int sourceRow) {
+<span class="pc bpc" id="L536" title="1 of 2 branches missed.">    checkArgument(column.type() == this.type());</span>
+<span class="fc" id="L537">    BooleanColumn col = (BooleanColumn) column;</span>
+<span class="fc" id="L538">    set(row, col.getByte(sourceRow));</span>
+<span class="fc" id="L539">    return this;</span>
+  }
+
+  public Selection asSelection() {
+<span class="fc" id="L543">    Selection selection = new BitmapBackedSelection();</span>
+<span class="fc bfc" id="L544" title="All 2 branches covered.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="fc" id="L545">      byte value = getByte(i);</span>
+<span class="fc bfc" id="L546" title="All 2 branches covered.">      if (value == 1) {</span>
+<span class="fc" id="L547">        selection.add(i);</span>
+      }
+    }
+<span class="fc" id="L550">    return selection;</span>
+  }
+
+  @Override
+  public Selection isMissing() {
+<span class="fc" id="L555">    return eval(BooleanColumnUtils.isMissing);</span>
+  }
+
+  @Override
+  public Selection isNotMissing() {
+<span class="fc" id="L560">    return eval(BooleanColumnUtils.isNotMissing);</span>
+  }
+
+  @Override
+  public Iterator&lt;Boolean&gt; iterator() {
+<span class="fc" id="L565">    return new BooleanColumnIterator(this.byteIterator());</span>
+  }
+
+  public ByteIterator byteIterator() {
+<span class="fc" id="L569">    return data.iterator();</span>
+  }
+
+  public BooleanSet asSet() {
+<span class="nc" id="L573">    BooleanSet set = new BooleanOpenHashSet(3);</span>
+<span class="nc" id="L574">    BooleanColumn unique = unique();</span>
+<span class="nc bnc" id="L575" title="All 2 branches missed.">    for (int i = 0; i &lt; unique.size(); i++) {</span>
+<span class="nc" id="L576">      set.add((boolean) unique.get(i));</span>
+    }
+<span class="nc" id="L578">    return set;</span>
+  }
+
+  public boolean contains(boolean aBoolean) {
+<span class="nc bnc" id="L582" title="All 2 branches missed.">    if (aBoolean) {</span>
+<span class="nc" id="L583">      return data().contains(BooleanColumnType.BYTE_TRUE);</span>
+    }
+<span class="nc" id="L585">    return data().contains(BooleanColumnType.BYTE_FALSE);</span>
+  }
+
+  @Override
+  public int byteSize() {
+<span class="nc" id="L590">    return type().byteSize();</span>
+  }
+
+  @Override
+  public byte[] asBytes(int row) {
+<span class="nc" id="L595">    byte[] result = new byte[byteSize()];</span>
+<span class="nc bnc" id="L596" title="All 2 branches missed.">    result[0] = (get(row) ? BooleanColumnType.BYTE_TRUE : BooleanColumnType.BYTE_FALSE);</span>
+<span class="nc" id="L597">    return result;</span>
+  }
+
+  @Override
+  public BooleanColumn where(Selection selection) {
+<span class="fc" id="L602">    return subset(selection.toArray());</span>
+  }
+
+  @Override
+  public BooleanColumn removeMissing() {
+<span class="fc" id="L607">    BooleanColumn noMissing = emptyCopy();</span>
+<span class="fc" id="L608">    ByteListIterator iterator = byteListIterator();</span>
+<span class="fc bfc" id="L609" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L610">      byte b = iterator.nextByte();</span>
+<span class="fc bfc" id="L611" title="All 2 branches covered.">      if (!valueIsMissing(b)) {</span>
+<span class="fc" id="L612">        noMissing.append(b);</span>
+      }
+<span class="fc" id="L614">    }</span>
+<span class="fc" id="L615">    return noMissing;</span>
+  }
+
+  public Selection eval(BytePredicate predicate) {
+<span class="fc" id="L619">    Selection selection = new BitmapBackedSelection();</span>
+<span class="fc bfc" id="L620" title="All 2 branches covered.">    for (int idx = 0; idx &lt; data.size(); idx++) {</span>
+<span class="fc" id="L621">      byte next = data.getByte(idx);</span>
+<span class="fc bfc" id="L622" title="All 2 branches covered.">      if (predicate.test(next)) {</span>
+<span class="fc" id="L623">        selection.add(idx);</span>
+      }
+    }
+<span class="fc" id="L626">    return selection;</span>
+  }
+
+  public Selection eval(Predicate&lt;Boolean&gt; predicate) {
+<span class="nc" id="L630">    Selection selection = new BitmapBackedSelection();</span>
+<span class="nc bnc" id="L631" title="All 2 branches missed.">    for (int idx = 0; idx &lt; data.size(); idx++) {</span>
+<span class="nc bnc" id="L632" title="All 2 branches missed.">      if (predicate.test(get(idx))) {</span>
+<span class="nc" id="L633">        selection.add(idx);</span>
+      }
+    }
+<span class="nc" id="L636">    return selection;</span>
+  }
+
+  public Selection eval(BiPredicate&lt;Boolean, Boolean&gt; predicate, Boolean valueToCompare) {
+<span class="nc" id="L640">    Selection selection = new BitmapBackedSelection();</span>
+<span class="nc bnc" id="L641" title="All 2 branches missed.">    for (int idx = 0; idx &lt; data.size(); idx++) {</span>
+<span class="nc bnc" id="L642" title="All 2 branches missed.">      if (predicate.test(get(idx), valueToCompare)) {</span>
+<span class="nc" id="L643">        selection.add(idx);</span>
+      }
+    }
+<span class="nc" id="L646">    return selection;</span>
+  }
+
+  /** Returns a byteListIterator, which allows iteration by byte (value) and int (index) */
+  private ByteListIterator byteListIterator() {
+<span class="fc" id="L651">    return data.iterator();</span>
+  }
+
+  public DoubleColumn asDoubleColumn() {
+<span class="nc" id="L655">    DoubleColumn numberColumn = DoubleColumn.create(this.name(), size());</span>
+<span class="nc" id="L656">    ByteArrayList data = data();</span>
+<span class="nc bnc" id="L657" title="All 2 branches missed.">    for (int i = 0; i &lt; size(); i++) {</span>
+<span class="nc" id="L658">      numberColumn.append(data.getByte(i));</span>
+    }
+<span class="nc" id="L660">    return numberColumn;</span>
+  }
+
+  @Override
+  public int compare(Boolean o1, Boolean o2) {
+<span class="nc" id="L665">    return Boolean.compare(o1, o2);</span>
+  }
+
+  @Override
+  public boolean equals(Object o) {
+<span class="fc bfc" id="L670" title="All 2 branches covered.">    if (this == o) return true;</span>
+<span class="pc bpc" id="L671" title="1 of 4 branches missed.">    if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L672">    BooleanColumn that = (BooleanColumn) o;</span>
+<span class="fc" id="L673">    return Objects.equals(data, that.data);</span>
+  }
+
+  @Override
+  public int hashCode() {
+<span class="nc" id="L678">    return Objects.hash(data);</span>
+  }
+
+  private static class BooleanColumnIterator implements Iterator&lt;Boolean&gt; {
+
+    private final ByteIterator iterator;
+
+<span class="fc" id="L685">    BooleanColumnIterator(ByteIterator iterator) {</span>
+<span class="fc" id="L686">      this.iterator = iterator;</span>
+<span class="fc" id="L687">    }</span>
+
+    /**
+     * Returns {@code true} if the iteration has more elements. (In other words, returns {@code
+     * true} if {@link #next} would return an element rather than throwing an exception.)
+     *
+     * @return {@code true} if the iteration has more elements
+     */
+    @Override
+    public boolean hasNext() {
+<span class="fc" id="L697">      return iterator.hasNext();</span>
+    }
+
+    /**
+     * Returns the next element in the iteration.
+     *
+     * @return the next element in the iteration
+     * @throws java.util.NoSuchElementException if the iteration has no more elements
+     */
+    @Override
+    public Boolean next() {
+<span class="fc" id="L708">      byte b = iterator.nextByte();</span>
+<span class="fc bfc" id="L709" title="All 2 branches covered.">      if (b == (byte) 0) {</span>
+<span class="fc" id="L710">        return false;</span>
+      }
+<span class="pc bpc" id="L712" title="1 of 2 branches missed.">      if (b == (byte) 1) {</span>
+<span class="fc" id="L713">        return true;</span>
+      }
+<span class="nc" id="L715">      return null;</span>
+    }
+  }
+
+  // fillWith methods
+
+  @Override
+  public BooleanColumn fillWith(BooleanIterator iterator) {
+<span class="nc bnc" id="L723" title="All 2 branches missed.">    for (int r = 0; r &lt; size(); r++) {</span>
+<span class="nc bnc" id="L724" title="All 2 branches missed.">      if (!iterator.hasNext()) {</span>
+<span class="nc" id="L725">        break;</span>
+      }
+<span class="nc" id="L727">      set(r, iterator.nextBoolean());</span>
+    }
+<span class="nc" id="L729">    return this;</span>
+  }
+
+  @Override
+  public BooleanColumn fillWith(BooleanIterable iterable) {
+<span class="fc" id="L734">    BooleanIterator iterator = iterable.iterator();</span>
+<span class="fc bfc" id="L735" title="All 2 branches covered.">    for (int r = 0; r &lt; size(); r++) {</span>
+<span class="fc bfc" id="L736" title="All 2 branches covered.">      if (!iterator.hasNext()) {</span>
+<span class="fc" id="L737">        iterator = iterable.iterator();</span>
+<span class="pc bpc" id="L738" title="1 of 2 branches missed.">        if (!iterator.hasNext()) {</span>
+<span class="nc" id="L739">          break;</span>
+        }
+      }
+<span class="fc" id="L742">      set(r, iterator.nextBoolean());</span>
+    }
+<span class="fc" id="L744">    return this;</span>
+  }
+
+  @Override
+  public BooleanColumn fillWith(Supplier&lt;Boolean&gt; supplier) {
+<span class="nc bnc" id="L749" title="All 2 branches missed.">    for (int r = 0; r &lt; size(); r++) {</span>
+      try {
+<span class="nc" id="L751">        set(r, supplier.get());</span>
+<span class="nc" id="L752">      } catch (Exception e) {</span>
+<span class="nc" id="L753">        break;</span>
+<span class="nc" id="L754">      }</span>
+    }
+<span class="nc" id="L756">    return this;</span>
+  }
+
+  @Override
+  public Boolean[] asObjectArray() {
+<span class="fc" id="L761">    final Boolean[] output = new Boolean[data.size()];</span>
+<span class="fc bfc" id="L762" title="All 2 branches covered.">    for (int i = 0; i &lt; data.size(); i++) {</span>
+<span class="fc" id="L763">      output[i] = get(i);</span>
+    }
+<span class="fc" id="L765">    return output;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.1.201803210924</span></div></body></html>
